@@ -79,6 +79,120 @@ def get_ns(suffix: str, user_id: str = "") -> EngineStore:
     """获取用户隔离的 store 实例"""
     return EngineStore(ENGINE_DIR / f"{suffix}.json", user_id=user_id)
 
+
+
+# ==================== ChatStore (SQLite 消息持久化) ====================
+
+class ChatStore:
+    """SQLite 消息存储，支持流式进度保存"""
+    def __init__(self, user_id: str = ""):
+        self.user_id = user_id
+        db_name = f"chat_{user_id}.db" if user_id else "chat.db"
+        self.db_path = ENGINE_DIR / db_name
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        self._progress_cache = {}  # msg_id -> latest progress (in-memory)
+
+    def _conn(self):
+        return sqlite3.connect(str(self.db_path), timeout=30)
+
+    def _init_db(self):
+        conn = self._conn()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL, msg_id TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL, content TEXT, reasoning TEXT,
+                tool_calls TEXT, model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_stream_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                msg_id TEXT UNIQUE NOT NULL, chat_id TEXT NOT NULL, model TEXT,
+                full_text TEXT DEFAULT '', reasoning_text TEXT DEFAULT '',
+                tool_calls TEXT DEFAULT '[]', usage TEXT, finished INTEGER DEFAULT 0,
+                error TEXT DEFAULT '', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_chat ON chat_messages(chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_progress_msg ON chat_stream_progress(msg_id)")
+        conn.commit()
+        conn.close()
+
+    def init_progress(self, msg_id: str, chat_id: str, model: str):
+        try:
+            conn = self._conn()
+            conn.execute("""
+                INSERT OR REPLACE INTO chat_stream_progress (msg_id, chat_id, model, finished, updated_at)
+                VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+            """, (msg_id, chat_id, model))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[ChatStore] init error: {e}")
+
+    def write_chunk(self, msg_id: str, chunk_type: str, chunk_text: str):
+        if msg_id not in self._progress_cache:
+            self._progress_cache[msg_id] = {'full_text': '', 'reasoning_text': ''}
+        cache = self._progress_cache[msg_id]
+        if chunk_type == 'content':
+            cache['full_text'] += chunk_text
+        elif chunk_type == 'reasoning':
+            cache['reasoning_text'] += chunk_text
+        # 每 20 个字符写一次 DB
+        if len(cache['full_text']) % 20 < len(chunk_text) or chunk_type == 'reasoning':
+            self._flush(msg_id, cache['full_text'], cache['reasoning_text'])
+
+    def _flush(self, msg_id: str, full_text: str, reasoning_text: str):
+        try:
+            conn = self._conn()
+            conn.execute("""
+                UPDATE chat_stream_progress SET full_text=?, reasoning_text=?, updated_at=CURRENT_TIMESTAMP
+                WHERE msg_id=?
+            """, (full_text, reasoning_text, msg_id))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[ChatStore] flush error: {e}")
+
+    def finish_stream(self, msg_id: str, full_text: str, reasoning_text: str,
+                      tool_calls: list, usage: dict, error: str = ""):
+        try:
+            conn = self._conn()
+            conn.execute("""
+                UPDATE chat_stream_progress SET
+                    full_text=?, reasoning_text=?,
+                    tool_calls=?, usage=?, finished=1, error=?, updated_at=CURRENT_TIMESTAMP
+                WHERE msg_id=?
+            """, (full_text, reasoning_text, json.dumps(tool_calls, ensure_ascii=False),
+                  json.dumps(usage or {}, ensure_ascii=False), error, msg_id))
+            conn.commit()
+            conn.close()
+            self._progress_cache.pop(msg_id, None)
+        except Exception as e:
+            print(f"[ChatStore] finish error: {e}")
+
+    def get_progress(self, msg_id: str) -> dict:
+        try:
+            conn = self._conn()
+            row = conn.execute("""
+                SELECT full_text, reasoning_text, tool_calls, usage, finished, error
+                FROM chat_stream_progress WHERE msg_id=?
+            """, (msg_id,)).fetchone()
+            conn.close()
+            if row:
+                return {'full_text': row[0] or '', 'reasoning_text': row[1] or '',
+                        'tool_calls': json.loads(row[2] or '[]'), 'usage': json.loads(row[3] or '{}'),
+                        'finished': bool(row[4]), 'error': row[5] or ''}
+            return {}
+        except:
+            return {}
+
+_chat_stores = {}
+def get_chat_store(user_id: str = "") -> ChatStore:
+    if user_id not in _chat_stores:
+        _chat_stores[user_id] = ChatStore(user_id)
+    return _chat_stores[user_id]
+
 # ==================== 心跳 ====================
 @app.get("/engine/health")
 def engine_health():
@@ -1477,6 +1591,139 @@ _heartbeat_html = """
 """
 
 # ==================== 启动 ====================
+# ==================== 流式聊天后端 (SSE) ====================
+import threading
+import queue
+
+def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id: str):
+    """在后台线程中将 OpenAI 流式响应转为 SSE，实时保存进度到 SQLite"""
+    from openai import OpenAI
+    store = get_chat_store(user_id)
+    store.init_progress(msg_id, chat_id, request_data.get('model', ''))
+    full_text = ''
+    reasoning_text = ''
+    tool_calls = []
+    usage = None
+    error = ''
+    seq = 0
+
+    def sse_event(data_str: str, event_type: str = 'chunk'):
+        return f"event: {event_type}\ndata: {data_str}\n\n"
+
+    try:
+        client = OpenAI(api_key=request_data.get('api_key', ''),
+                        base_url=request_data.get('base_url', '').strip().rstrip('/') or None)
+        model = request_data.get('model', 'deepseek-chat')
+        messages = request_data.get('messages', [])
+        tools = request_data.get('tools', None)
+        stream_params = {'model': model, 'messages': messages, 'stream': True}
+        if tools:
+            stream_params['tools'] = tools
+        if request_data.get('reasoning'):
+            stream_params['reasoning'] = request_data.get('reasoning')
+        # 发送初始事件
+        yield sse_event(json.dumps({'type': 'start', 'msg_id': msg_id}))
+
+        stream = client.chat.completions.create(**stream_params)
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            seq += 1
+
+            # 内容增量
+            content_delta = delta.content or ''
+            if content_delta:
+                full_text += content_delta
+                store.write_chunk(msg_id, 'content', content_delta)
+                yield sse_event(json.dumps({'type': 'content', 'delta': content_delta, 'seq': seq}))
+
+            # 思考增量
+            reasoning_delta = delta.reasoning_content or ''
+            if reasoning_delta:
+                reasoning_text += reasoning_delta
+                store.write_chunk(msg_id, 'reasoning', reasoning_delta)
+                yield sse_event(json.dumps({'type': 'reasoning', 'delta': reasoning_delta, 'seq': seq}))
+
+            # Tool calls
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    tc_dict = {'id': tc.id, 'type': tc.type,
+                                'function': {'name': tc.function.name,
+                                             'arguments': tc.function.arguments or ''}}
+                    tool_calls.append(tc_dict)
+                    yield sse_event(json.dumps({'type': 'tool_call', 'delta': tc_dict, 'seq': seq}))
+
+            # Usage
+            if chunk.usage:
+                usage = dict(chunk.usage)
+
+        # 流结束
+        store.finish_stream(msg_id, full_text, reasoning_text, tool_calls, usage)
+        yield sse_event(json.dumps({'type': 'done', 'full_text': full_text, 'reasoning_text': reasoning_text,
+                                     'tool_calls': tool_calls, 'usage': usage}))
+
+    except Exception as e:
+        error = str(e)
+        print(f"[stream] error: {error}")
+        store.finish_stream(msg_id, full_text, reasoning_text, tool_calls, usage, error)
+        yield sse_event(json.dumps({'type': 'error', 'error': error}))
+
+def _run_stream(request_data: dict, chat_id: str, msg_id: str, user_id: str, result_queue):
+    """后台线程运行器"""
+    try:
+        chunks = list(_stream_openai_to_sse(request_data, chat_id, msg_id, user_id))
+        result_queue.put(('ok', chunks))
+    except Exception as e:
+        result_queue.put(('error', str(e)))
+
+@app.post("/engine/chat/stream")
+async def chat_stream(request: Request, user_id: str = Query("")):
+    """
+    后端流式聊天端点:
+    - 接收消息，转发给 OpenAI，流式返回 SSE
+    - 实时将进度保存到 SQLite（刷新恢复）
+    """
+    try:
+        body = await request.json()
+    except:
+        return {"error": "invalid JSON body"}
+
+    chat_id = body.get('chat_id') or ''
+    msg_id = body.get('msg_id') or f"msg_{int(time.time()*1000)}"
+    request_data = body.get('request', {})
+
+    if not request_data.get('api_key'):
+        return {"error": "api_key required"}
+
+    # 启动后台线程执行流式请求（避免 FastAPI 线程阻塞）
+    result_queue = queue.Queue()
+    t = threading.Thread(target=_run_stream, args=(request_data, chat_id, msg_id, user_id, result_queue), daemon=True)
+    t.start()
+
+    async def event_generator():
+        # 前端通过 EventSource 接收 SSE
+        while True:
+            try:
+                status, data = result_queue.get(timeout=60)
+                if status == 'error':
+                    yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
+                    break
+                for chunk in data:
+                    yield chunk
+                    # 短暂让出，让后台线程继续生产
+                    await asyncio.sleep(0.001)
+            except queue.Empty:
+                yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"
+                break
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/engine/chat/progress/{msg_id}")
+async def chat_progress(msg_id: str, user_id: str = Query("")):
+    """查询流式进度（用于刷新恢复）"""
+    store = get_chat_store(user_id)
+    return store.get_progress(msg_id)
+
+
 if __name__ == "__main__":
     port = int(os.getenv("ENGINE_PORT", "8766"))
     print(f"[引擎] 启动 http://0.0.0.0:{port}")
