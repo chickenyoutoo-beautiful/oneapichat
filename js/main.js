@@ -4690,11 +4690,13 @@ function adjustMaxTokens(model, requestedTokens, estimated) {
 
 
 // ★ 后端 SSE 处理器：接收 SSE 流式事件，转换为 streamResponse 兼容格式
-// 用于后端流式转发模式（USE_BACKEND_SSE = true）
+// SSE 格式: "event: TYPE\ndata: JSON\n\n"
+// 解析时需要识别 "event:" 行来确定事件类型
 window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgId) {
     const reader = sseResponse.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let currentEventType = 'chunk';
     let fullText = '';
     let reasoningText = '';
     let toolCalls = [];
@@ -4723,26 +4725,34 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
         if (value) buffer += decoder.decode(value, { stream: true });
         if (done) { finished = true; }
 
-        // 处理 SSE 事件行
+        // 处理 SSE 数据：SSE 格式为 "event: TYPE\ndata: JSON\n\n"
+        // 每条消息由 "event:xxx\ndata:xxx\n\n" 组成，lines 会包含多行
         const lines = buffer.split('\n');
+        // 最后一行是可能不完整的下一条消息，保留在 buffer
         buffer = lines.pop() || '';
-        for (const line of lines) {
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+
+            // 检测 "event: TYPE" 行 - 设置当前事件类型
+            if (line.startsWith('event: ')) {
+                currentEventType = line.substring(6).trim();
+                continue;
+            }
+
+            // 检测 "data: JSON" 行 - 用当前事件类型解析
             if (!line.startsWith('data: ')) continue;
             const dataStr = line.substring(6).trim();
             if (!dataStr || dataStr === '[DONE]') continue;
+
             try {
                 const event = JSON.parse(dataStr);
-                const eventType = line.includes('event: chunk') ? 'chunk' :
-                                  line.includes('event: content') ? 'content' :
-                                  line.includes('event: done') ? 'done' :
-                                  line.includes('event: error') ? 'error' :
-                                  event.type || 'chunk';
 
-                if (event.type === 'content' || event.delta) {
+                if (currentEventType === 'content' || event.type === 'content') {
                     const delta = event.delta || event.content || '';
                     if (delta) {
                         fullText += delta;
-                        // 实时更新 DOM（复用流式渲染逻辑）
                         var currentBubble = activeBubbleMap[chatId];
                         if (currentBubble && window.marked) {
                             var mb = currentBubble.querySelector('.markdown-body');
@@ -4757,7 +4767,6 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                                 } catch(e) { mb.textContent = fullText; }
                             }
                         }
-                        // 滚动跟随
                         if (currentBubble) {
                             const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
                             if (scrollHeight - scrollTop - clientHeight < 100) {
@@ -4765,8 +4774,8 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                             }
                         }
                     }
-                } else if (event.type === 'reasoning' || event.delta_reasoning) {
-                    const rd = event.delta_reasoning || event.reasoning || '';
+                } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
+                    const rd = event.delta || event.reasoning || '';
                     if (rd) {
                         reasoningText += rd;
                         var cb = activeBubbleMap[chatId];
@@ -4783,20 +4792,29 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                             det.querySelector('.reasoning-content').textContent = reasoningText;
                         }
                     }
-                } else if (event.type === 'tool_call') {
+                } else if (currentEventType === 'tool_call' || event.type === 'tool_call') {
                     if (event.delta && event.delta.function) {
                         toolCalls.push(event.delta);
                     }
-                } else if (event.type === 'done' || eventType === 'done') {
+                } else if (currentEventType === 'done' || event.type === 'done') {
                     if (event.tool_calls) toolCalls = event.tool_calls;
                     if (event.usage) usage = event.usage;
                     finished = true;
-                } else if (event.type === 'error' || eventType === 'error') {
-                    console.error('[SSE] error event:', event.error);
+                } else if (currentEventType === 'error' || event.type === 'error') {
+                    console.error('[SSE] error:', event.error);
+                    finished = true;
+                } else if (currentEventType === 'start') {
+                    console.log('[SSE] stream started, msg_id:', event.msg_id);
                 }
-            } catch(e) { console.warn('[SSE] parse error:', e.message); }
+            } catch(e) { console.warn('[SSE] parse error:', e.message, 'line:', line.slice(0, 80)); }
         }
-        if (done) break;
+        if (done) {
+            // 处理 buffer 中剩余的不完整数据（理论上应该为空）
+            if (buffer.trim()) {
+                console.log('[SSE] done, buffer remains:', buffer.slice(0, 100));
+            }
+            break;
+        }
         await new Promise(r => setTimeout(r, 10));
     }
 
