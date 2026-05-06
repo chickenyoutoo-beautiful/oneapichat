@@ -14,12 +14,14 @@ import re
 import fcntl
 from datetime import datetime, timedelta
 from pathlib import Path
+import sqlite3
 
 sys.path.insert(0, '/tmp/pylib')
 sys.path.insert(0, '/var/www/html/oneapichat')
 
 try:
-    from fastapi import FastAPI, Query, HTTPException
+    from fastapi import FastAPI, Query, HTTPException, Request
+    from fastapi.responses import StreamingResponse
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
 except:
