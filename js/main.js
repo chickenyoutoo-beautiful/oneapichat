@@ -915,9 +915,9 @@ async function saveConfigToServer() {
         var url = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
         var saved = false;
         try {
-            var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
+            var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
             if (resp.ok) saved = true;
-        } catch(e1) { console.warn('[save] keepalive保存失败:', e1.message); }
+        } catch(e1) { console.warn('[save] 保存失败:', e1.message); }
         if (!saved) {
             try {
                 var resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
@@ -1101,8 +1101,7 @@ function saveUserDataBeforeLogout() {
         fetch(SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-            keepalive: true
+            body: JSON.stringify(config)
         }).catch(function(e) { console.warn('[logout] 配置保存失败:', e.message); });
     } catch(e) { console.warn('[logout] 配置保存错误:', e.message); }
     
