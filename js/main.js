@@ -1121,6 +1121,10 @@ const TITLE_MAX_LENGTH = 20;
 const MAX_TOKENS_SAFETY_MARGIN = 1000;
 const STREAM_DELAY = 2;
 
+// ★ 后端 SSE 流式配置（Feature Flag）
+const USE_BACKEND_SSE = false;  // 设为 true 则聊天走后端 SSE 流（流式中断保护）
+const BACKEND_SSE_URL = '/oneapichat/engine_api.php?action=chat_stream';
+
 const DEFAULT_CONFIG = {
     // 预置 oneapi API Key
     key: 'KEY_REMOVED',
@@ -4684,6 +4688,127 @@ function adjustMaxTokens(model, requestedTokens, estimated) {
     return Math.min(requestedTokens, maxAllowed, maxOutput);
 }
 
+
+// ★ 后端 SSE 处理器：接收 SSE 流式事件，转换为 streamResponse 兼容格式
+// 用于后端流式转发模式（USE_BACKEND_SSE = true）
+window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgId) {
+    const reader = sseResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+    let reasoningText = '';
+    let toolCalls = [];
+    let usage = null;
+    let finished = false;
+
+    // 定期保存到 localStorage._savedPartial（防刷新丢失）
+    if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
+    pendingMsg._streamSaveTimer = setInterval(function() {
+        if (fullText || reasoningText) {
+            try {
+                localStorage.setItem('_savedPartial', JSON.stringify({
+                    chatId: chatId, msgId: msgId,
+                    content: fullText, reasoning: reasoningText
+                }));
+            } catch(e) {}
+        }
+    }, 2000);
+
+    while (!finished) {
+        let readResult;
+        try {
+            readResult = await reader.read();
+        } catch(e) { break; }
+        const { done, value } = readResult;
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) { finished = true; }
+
+        // 处理 SSE 事件行
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const dataStr = line.substring(6).trim();
+            if (!dataStr || dataStr === '[DONE]') continue;
+            try {
+                const event = JSON.parse(dataStr);
+                const eventType = line.includes('event: chunk') ? 'chunk' :
+                                  line.includes('event: content') ? 'content' :
+                                  line.includes('event: done') ? 'done' :
+                                  line.includes('event: error') ? 'error' :
+                                  event.type || 'chunk';
+
+                if (event.type === 'content' || event.delta) {
+                    const delta = event.delta || event.content || '';
+                    if (delta) {
+                        fullText += delta;
+                        // 实时更新 DOM（复用流式渲染逻辑）
+                        var currentBubble = activeBubbleMap[chatId];
+                        if (currentBubble && window.marked) {
+                            var mb = currentBubble.querySelector('.markdown-body');
+                            if (mb) {
+                                try {
+                                    const html = _renderMarkdownWithMath(autoLinkURLs(fullText));
+                                    mb.innerHTML = html;
+                                    if (window.hljs) {
+                                        mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
+                                            try { hljs.highlightElement(b); } catch(e) {} });
+                                    }
+                                } catch(e) { mb.textContent = fullText; }
+                            }
+                        }
+                        // 滚动跟随
+                        if (currentBubble) {
+                            const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
+                            if (scrollHeight - scrollTop - clientHeight < 100) {
+                                autoScrollToBottom('streaming');
+                            }
+                        }
+                    }
+                } else if (event.type === 'reasoning' || event.delta_reasoning) {
+                    const rd = event.delta_reasoning || event.reasoning || '';
+                    if (rd) {
+                        reasoningText += rd;
+                        var cb = activeBubbleMap[chatId];
+                        if (cb) {
+                            var det = cb.querySelector('details.reasoning-details');
+                            if (!det) {
+                                det = document.createElement('details');
+                                det.className = 'reasoning-details';
+                                det.open = true;
+                                det.innerHTML = '<summary>深度思考</summary><div class="reasoning-content"></div>';
+                                var mb2 = cb.querySelector('.markdown-body');
+                                if (mb2) cb.insertBefore(det, mb2);
+                            }
+                            det.querySelector('.reasoning-content').textContent = reasoningText;
+                        }
+                    }
+                } else if (event.type === 'tool_call') {
+                    if (event.delta && event.delta.function) {
+                        toolCalls.push(event.delta);
+                    }
+                } else if (event.type === 'done' || eventType === 'done') {
+                    if (event.tool_calls) toolCalls = event.tool_calls;
+                    if (event.usage) usage = event.usage;
+                    finished = true;
+                } else if (event.type === 'error' || eventType === 'error') {
+                    console.error('[SSE] error event:', event.error);
+                }
+            } catch(e) { console.warn('[SSE] parse error:', e.message); }
+        }
+        if (done) break;
+        await new Promise(r => setTimeout(r, 10));
+    }
+
+    // 清理 timer
+    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+
+    // 清理 savedPartial
+    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+
+    return { fullText, reasoningText, usage, toolCalls };
+};
+
 async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDelay) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -6018,14 +6143,45 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             // 清理日志中的敏感信息
             if (_reqBody.messages) _reqBody.messages = _reqBody.messages.length + ' messages';
             console.log('[API-REQ]', _reqUrl, 'model:', body.model, 'stream:', !!_reqBody.stream, 'tools:', (_reqBody.tools||[]).map(function(t){return t.function?t.function.name:t.name;}), 'messages:', body.messages.length);
-            const res = await fetch(_reqUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
-                body: JSON.stringify(body),
-                signal: abortCtrl.signal
-            });
-            clearTimeout(timeoutIdVal);
-            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+            // ★ 后端 SSE 流式分支（Feature Flag 控制）
+            if (USE_BACKEND_SSE) {
+                var _msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+                clearTimeout(timeoutIdVal);
+                var _token = getAuthToken();
+                var _engineUrl = '/oneapichat/engine_api.php?action=chat_stream&auth_token=' + encodeURIComponent(_token);
+                var _streamPayload = JSON.stringify({
+                    chat_id: chatId,
+                    msg_id: _msgId,
+                    request: {
+                        api_key: getVal('apiKey'),
+                        base_url: getVal('baseUrl'),
+                        model: body.model,
+                        messages: _reqBody.messages,
+                        tools: _reqBody.tools || null,
+                        stream: true
+                    }
+                });
+                var _res = await fetch(_engineUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: _streamPayload,
+                    signal: abortCtrl.signal
+                });
+                if (!_res.ok) throw new Error(`HTTP ${_res.status}: ${await _res.text()}`);
+                var _result = await window._backendSSEHandler(_res, chatId, pendingMsg, _msgId);
+                usage = _result.usage;
+                toolCalls = _result.toolCalls || [];
+            } else {
+                const res = await fetch(_reqUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+                    body: JSON.stringify(body),
+                    signal: abortCtrl.signal
+                });
+                clearTimeout(timeoutIdVal);
+                if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+            }  // end of else branch
 
             let usage = null;
             let toolCalls = [];
