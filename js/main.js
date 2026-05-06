@@ -6058,9 +6058,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     var argStr = typeof tc.function.arguments === 'string'
                         ? tc.function.arguments
                         : JSON.stringify(tc.function.arguments || {});
-                    // ★ 修复: 确保 arguments 是合法 JSON 字符串
-                    // 清理非法控制字符
-                    argStr = argStr.replace(/[\x00-\x1f]/g, ' ');
+                    // ★ 修复: 确保 arguments 是合法 JSON 字符串（和 executeToolCallForRetry 相同的修复）
+                    var qc = (argStr.match(/"/g) || []).length;
+                    if (qc % 2 !== 0) argStr += '"';
+                    var ob = (argStr.match(/\{/g) || []).length;
+                    var cb = (argStr.match(/\}/g) || []).length;
+                    while (cb < ob) { argStr += '}'; cb++; }
+                    // 清理非法控制字符和未转义换行
+                    argStr = argStr.replace(/[\x00-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
                     // 针对 engine_agent_create 的 prompt 做特殊处理：截断过长内容
                     if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
                         try {
@@ -6071,8 +6076,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             }
                         } catch(e) {}
                     }
+                    // ★ 修复: 清理 tool_call_id（避免非法字符导致 400）
+                    var tcId = tc.id || '';
+                    // 移除所有非安全字符（只保留 ASCII 字母数字和下划线短横）
+                    tcId = tcId.replace(/[^a-zA-Z0-9_\-]/g, '');
+                    if (!tcId || tcId.length > 64) tcId = 'tc_' + Date.now();
+
                     return {
-                        id: tc.id,
+                        id: tcId,
                         type: 'function',
                         function: {
                             name: tc.function.name,
