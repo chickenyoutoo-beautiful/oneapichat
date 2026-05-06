@@ -4,34 +4,112 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>NAUJTRATS · 个人版</title>
+    <script>
+    // 暗色模式最优先初始化（必须在所有 CSS 之前执行）
+    if (localStorage.getItem('dark') === 'true') {
+        document.documentElement.classList.add('dark');
+    }
+    </script>
+    <style>:root{--bg:#ffffff}:is(html.dark){--bg:#111827}html,body{background:var(--bg)}</style>
     <link rel="icon" type="image/png" sizes="16x16" href="./src/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="./src/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="256x256" href="./src/favicon.png">
-    <!-- 主脚本 (所有逻辑都迁移至此) -->
-    <script src="./js/main.js"></script>
-    <!-- 圆润字体 & 自定义样式 -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./css/style.css">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- KaTeX 数学公式渲染 -->
+    <link rel="stylesheet" href="./lib/katex/katex.min.css">
+    <script src="./lib/katex/katex.min.js"></script>
+    <script src="./lib/katex/auto-render.min.js"></script>
+    <!-- 艺术字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 自定义样式 -->
+    <link rel="stylesheet" href="./css/tailwind-index.min.css">
+    <link rel="stylesheet" href="./css/style.css?v=15">
+    <!-- 主脚本（defer 不阻塞渲染） -->
+    <script defer src="./js/main.js?v=20260506-final"></script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
-    
+    <!-- 登录弹窗 -->
+    <div id="authOverlay" class="auth-overlay hidden">
+        <div class="auth-modal">
+            <div style="text-align:center;margin-bottom:20px;">
+                <div style="font-size:20px;font-weight:700;color:#111827;" class="dark:text-white;">NAUJTRATS</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:4px;">统一账号 · 全站通行</div>
+            </div>
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="authTabLogin" onclick="switchAuthTab('login')">登录</button>
+                <button class="auth-tab" id="authTabRegister" onclick="switchAuthTab('register')">注册</button>
+            </div>
+            <div id="authError" class="auth-error hidden"></div>
+            <div id="authLoginForm" class="auth-form" autocomplete="off">
+                <!-- Chrome 密码管理器诱饵：假的无用字段，骗过自动检测 -->
+                <input type="text" style="position:absolute;left:-9999px;top:-9999px" autocomplete="nope" name="fake_username">
+                <input type="password" style="position:absolute;left:-9999px;top:-9999px" autocomplete="new-password" name="fake_password">
+                <div class="auth-field">
+                    <label class="auth-label">用户名</label>
+                    <input type="text" id="authLoginUsername" class="auth-input" placeholder="用户名" autocomplete="nope" name="login_user">
+                </div>
+                <div class="auth-field">
+                    <label class="auth-label">密码</label>
+                    <input type="password" id="authLoginPassword" class="auth-input" placeholder="密码" autocomplete="new-password" name="login_pass" readonly onfocus="this.removeAttribute('readonly')">
+                </div>
+                <button id="authLoginBtn" class="auth-submit" onclick="performAuthLogin()">登 录</button>
+            </div>
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                ['authLoginUsername','authLoginPassword'].forEach(function(id) {
+                    document.getElementById(id)?.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') { e.preventDefault(); performAuthLogin(); }
+                    });
+                });
+                ['authRegUsername','authRegPassword','authRegConfirm'].forEach(function(id) {
+                    document.getElementById(id)?.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') { e.preventDefault(); performAuthRegister(); }
+                    });
+                });
+            });
+            </script>
+            <div id="authRegisterForm" class="auth-form hidden" autocomplete="off">
+                <!-- Chrome 密码管理器诱饵 -->
+                <input type="text" style="position:absolute;left:-9999px;top:-9999px" autocomplete="nope" name="fake_reg_username">
+                <input type="password" style="position:absolute;left:-9999px;top:-9999px" autocomplete="new-password" name="fake_reg_password">
+                <div class="auth-field">
+                    <label class="auth-label">用户名</label>
+                    <input type="text" id="authRegUsername" class="auth-input" placeholder="用户名（2-20字符）" autocomplete="nope" name="reg_user">
+                </div>
+                <div class="auth-field">
+                    <label class="auth-label">密码</label>
+                    <input type="password" id="authRegPassword" class="auth-input" placeholder="密码（至少6位）" autocomplete="new-password" name="reg_pass" readonly onfocus="this.removeAttribute('readonly')">
+                </div>
+                <div class="auth-field">
+                    <label class="auth-label">确认密码</label>
+                    <input type="password" id="authRegConfirm" class="auth-input" placeholder="确认密码" autocomplete="nope" name="reg_confirm">
+                </div>
+                <button id="authRegBtn" class="auth-submit" onclick="performAuthRegister()">注 册</button>
+            </div>
+        </div>
+    </div>
     <!-- 侧边栏遮罩（用于点击关闭） -->
     <div id="sidebarMask" class="sidebar-mask" onclick="closeAllSidebars()"></div>
     <!-- 左侧历史侧栏 (宽度258px) -->
     <div id="sidebar" class="sidebar w-[258px] bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col p-4 z-20">
         <div class="flex items-center justify-between mb-6">
             <h2 class="font-bold text-gray-400 text-xs tracking-wider">历史记录</h2>
-            <button onclick="window.toggleSidebar()" class="sidebar-collapse-btn text-gray-400 hover:text-blue-500 transition">❮</button>
+            <button onclick="window.toggleSidebar()" class="sidebar-collapse-btn text-gray-400 hover:text-blue-500 transition p-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                </svg>
+            </button>
         </div>
         <button onclick="window.createNewChat()" class="flex items-center justify-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full py-2.5 mb-4 hover:shadow-sm transition text-sm font-medium text-blue-600">
-            <span>+</span> 新建对话
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            新建对话
         </button>
         <div id="chatHistoryList" class="flex-1 overflow-y-auto space-y-2"></div>
         <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
             <h3 class="text-xs font-bold text-gray-400 uppercase">上下文压缩</h3>
             <label class="flex items-center gap-2 text-xs">
-                <input type="checkbox" id="compressToggle" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" onchange="window.saveConfig()">
+                <input type="checkbox" id="compressToggle" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" >
                 <span>启用压缩</span>
             </label>
             <div class="flex items-center gap-2 text-xs">
@@ -52,9 +130,25 @@
         <header class="p-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-800">
             <div class="flex items-center gap-4">
                 <!-- 侧边栏展开按钮，默认隐藏，由 JS 控制显示 -->
-                <button id="sidebarToggle" onclick="window.toggleSidebar()" class="header-menu-btn bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition" style="display: none;">☰</button>
+                <button id="sidebarToggle" onclick="window.toggleSidebar()" class="header-menu-btn bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition p-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+                <!-- Agent 模式开关（双功能融合按钮）-->
+                <div class="agent-split-btn" id="agentSplitBtn" title="左:Agent模式 | 右:代理聊天室">
+                    <button onclick="window.toggleAgentMode()" class="agent-split-left">
+                        <span class="agent-dot"></span>
+                        <span style="display:inline-flex;align-items:center;gap:4px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+                    </button>
+                    <div class="agent-split-divider"></div>
+                    <button onclick="window.toggleAgentPanel()" class="agent-split-right">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                        <span class="agent-notif-dot" id="agentNotifDot"></span>
+                    </button>
+                </div>
                 <div class="flex items-center gap-1">
-                    <select id="modelSelect" onchange="window.saveConfig()" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-xs outline-none cursor-pointer"></select>
+                    <select id="modelSelect"  class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-xs outline-none cursor-pointer"></select>
                     <button onclick="window.refreshModels(event)" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition" title="刷新模型列表">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -63,12 +157,20 @@
                 </div>
             </div>
             <div class="flex items-center gap-3">
+                <!-- 登录状态按钮（由JS根据登录状态替换） -->
+                <button onclick="showAuthOverlay()" id="authHeaderBtn" class="px-4 py-2 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full transition shadow-sm"></button>
                 <button onclick="window.toggleDarkMode()" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition">
                     <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path id="moonPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" class="dark:hidden"></path>
                         <path id="sunPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707" class="hidden dark:block"></path>
                     </svg>
                 </button>
+                <a href="chaoxing.html" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition" title="刷课">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </a>
                 <button onclick="window.toggleConfigPanel()" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
@@ -85,23 +187,26 @@
             </div>
             <!-- 回到底部按钮移到聊天区域内部 -->
             <div id="scrollToBottomBtn" class="scroll-to-bottom-btn" onclick="window.scrollToBottom()">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7-7-7m14-8l-7 7-7-7"></path>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7-7-7"/>
                 </svg>
             </div>
         </div>
 
         <!-- 输入区 -->
         <div class="input-area">
+            <!-- Agent 模式横幅 -->
+            <div id="agentBanner" class="agent-banner"><span style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M12 6v4m0 2v6" stroke="currentColor" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>Agent 模式已启用 · AI 具备主动工具调用、后台任务调度能力</span></div>
             <div id="filePreviewContainer" class="file-preview-container hidden"></div>
             <div class="input-wrapper">
-                <div class="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition">
-                    <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition">
-                        <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.json,.js,.py,.html,.css,.xml,.log,.sh,.bat,.conf,.ini">
+                <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition">
+                    <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition" title="上传文件或图片">
+                        <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
                         </svg>
                     </label>
+                    <!-- ★ 工具模式快速开关 -->
                     <textarea id="userInput" rows="1" class="flex-1 p-3 bg-transparent outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500" placeholder="发送消息... 或拖拽文件至此"></textarea>
                     <div class="send-stop-container">
                         <button onclick="window.sendMessage()" id="sendBtn" class="send-btn">
@@ -114,6 +219,7 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
                         </button>
+            <!-- 代理面板入口（双功能：左边Agent模式，右边代理聊天室）-->
                     </div>
                 </div>
                 <div id="dropOverlayInput" class="drop-overlay-input">
@@ -127,197 +233,471 @@
         </div>
     </div>
 
-    <!-- 右侧配置面板 (宽度258px) -->
-    <div id="configPanel" class="config-panel w-[258px] hidden-panel p-5 overflow-y-auto z-20">
-        <div class="flex items-center justify-between mb-6">
-            <h2 class="font-bold text-gray-400 text-xs tracking-wider">设置</h2>
-            <button onclick="window.toggleConfigPanel()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">✕</button>
+    <!-- 代理面板 -->
+    <!-- 🤖 代理聊天室面板 -->
+    <div id="agentPanel" class="agent-chat-panel hidden-panel z-20">
+        <!-- 头部 -->
+        <div class="agent-panel-header">
+            <div class="flex items-center gap-3">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="text-sm font-semibold text-gray-800 dark:text-gray-100" style="white-space:nowrap;">代理聊天室</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="agentPanelStatus" class="agent-panel-status">就绪</span>
+                <button onclick="window.refreshAgentPanel()" class="agent-icon-btn" title="刷新列表">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                </button>
+                <button onclick="window.closeAgentPanel()" class="agent-icon-btn" title="关闭">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
         </div>
-        <div class="space-y-5">
-            <div>
-                <label class="text-xs font-bold text-gray-400 uppercase">API Key</label>
-                <input type="password" id="apiKey" onchange="window.saveConfig()" placeholder="请输入 API Key" class="w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-xs outline-none">
-            </div>
-            <div>
-                <label class="text-xs font-bold text-gray-400 uppercase">Base URL</label>
-                <input type="text" id="baseUrl" onchange="window.saveConfig()" class="w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-xs outline-none">
-            </div>
-            <div>
-                <label class="text-xs font-bold text-gray-400 uppercase">System Prompt</label>
-                <textarea id="systemPrompt" onchange="window.saveConfig()" rows="3" class="w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-2 text-xs outline-none resize-none"></textarea>
-            </div>
-            <hr class="border-gray-200 dark:border-gray-800">
-            <div>
-                <div class="flex justify-between items-center">
-                    <label class="text-xs font-bold text-gray-400 uppercase">Temperature</label>
-                    <span id="tempValue" class="text-xs text-blue-500">0.7</span>
-                </div>
-                <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" oninput="window.updateParam('temp', this.value)" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg mt-2">
-            </div>
-            <div>
-                <div class="flex justify-between items-center">
-                    <label class="text-xs font-bold text-gray-400 uppercase">Max Tokens</label>
-                    <input type="number" id="maxTokensInput" min="256" max="65536" step="256" value="4096" onchange="window.syncTokenFromInput()" class="w-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs text-right">
-                </div>
-                <input type="range" id="maxTokens" min="256" max="65536" step="256" value="4096" oninput="window.syncTokenFromRange()" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg mt-2">
-            </div>
-            <div class="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-2xl">
-                <label class="text-xs font-medium">流式输出</label>
-                <input type="checkbox" id="streamToggle" class="rounded border-gray-300 text-blue-600" checked onchange="window.saveConfig()">
-            </div>
-            <div class="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-2xl">
-                <label class="text-xs font-medium">思考延迟(ms)</label>
-                <input type="number" id="reasoningDelay" min="1" max="100" value="25" class="w-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs text-center" onchange="window.saveConfig()">
-            </div>
-            <div class="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-2xl">
-                <label class="text-xs font-medium">正文延迟(ms)</label>
-                <input type="number" id="contentDelay" min="1" max="100" value="12" class="w-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs text-center" onchange="window.saveConfig()">
-            </div>
-            <div class="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-2xl">
-                <label class="text-xs font-medium">请求超时(秒)</label>
-                <input type="number" id="requestTimeout" min="10" max="300" value="60" class="w-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs text-center" onchange="window.saveConfig()">
-            </div>
 
-            <hr class="border-gray-200 dark:border-gray-800">
-            <div class="space-y-3">
-                <h3 class="text-xs font-bold text-gray-400 uppercase">显示设置</h3>
-                <div>
-                    <div class="flex justify-between items-center">
-                        <label class="text-xs text-gray-500">行距</label>
-                        <span id="lineHeightValue" class="text-xs text-blue-500">1.1</span>
-                    </div>
-                    <input type="range" id="lineHeight" min="1.0" max="2.5" step="0.01" value="1.1" oninput="window.updateDisplayParam('lineHeight', this.value)" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg mt-1">
-                </div>
-                <div>
-                    <div class="flex justify-between items-center">
-                        <label class="text-xs text-gray-500">段间距 (rem)</label>
-                        <span id="paragraphMarginValue" class="text-xs text-blue-500">0.10</span>
-                    </div>
-                    <input type="range" id="paragraphMargin" min="0" max="0.5" step="0.01" value="0.1" oninput="window.updateDisplayParam('paragraphMargin', this.value)" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg mt-1">
-                </div>
-                <div class="flex items-center justify-between">
-                    <label class="text-xs text-gray-500">段落前缀</label>
-                    <select id="paragraphPrefix" onchange="window.updateParagraphPrefix()" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs outline-none">
-                        <option value="none">无</option>
-                        <option value="dot">• 圆点</option>
-                        <option value="dash">- 短横</option>
-                    </select>
-                </div>
-                <div class="flex items-center justify-between">
-                    <label class="text-xs text-gray-500">Markdown GFM</label>
-                    <input type="checkbox" id="markdownGFM" class="rounded border-gray-300 text-blue-600" checked onchange="window.updateMarkdownConfig()">
-                </div>
-                <div class="flex items-center justify-between">
-                    <label class="text-xs text-gray-500">Markdown 换行</label>
-                    <input type="checkbox" id="markdownBreaks" class="rounded border-gray-300 text-blue-600" checked onchange="window.updateMarkdownConfig()">
-                </div>
+        <!-- 子代理列表 -->
+        <div class="agent-section">
+            <div class="agent-section-label">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                子代理
             </div>
+            <div id="agentSubList" class="agent-sub-list">
+                <div class="text-xs text-gray-400 p-3">加载中...</div>
+            </div>
+        </div>
 
-            <div>
-                <div class="flex items-center justify-between">
-                    <label class="text-xs font-bold text-gray-400 uppercase">自定义参数</label>
-                    <label class="flex items-center gap-1 text-xs">
-                        <input type="checkbox" id="customParamsToggle" class="rounded border-gray-300 text-blue-600" onchange="window.saveConfig()">
-                        <span>启用</span>
-                    </label>
-                </div>
-                <textarea id="customParams" onchange="window.saveConfig()" rows="2" class="w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-2 text-xs outline-none resize-none" placeholder='{"top_p": 0.9}'></textarea>
+        <!-- 子代理聊天区 -->
+        <div class="agent-section">
+            <div class="agent-section-label" id="agentChatTitle">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                选择一个子代理查看对话
             </div>
+            <div id="agentChatMessages" class="agent-chat-area"></div>
+        </div>
+
+        <!-- 主代理控制 -->
+        <div class="agent-section">
+            <div class="agent-section-label">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                主代理控制
+            </div>
+            <button onclick="window.mainAgentReply()" class="agent-action-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                触发主代理自主回复
+            </button>
+            <div id="agentReplyStatus" class="text-xs text-gray-400 mt-2 hidden"></div>
         </div>
     </div>
 
-    <!-- 内联脚本：移动端侧边栏逻辑（已修复键盘导致面板关闭的问题） -->
-    <script>
-        (function() {
-            // 移动端判断
-            function isMobile() {
-                return window.innerWidth <= 786;
-            }
+    <!-- 右侧配置面板 (宽度258px) -->
+    <!-- 右侧配置面板 -->
+    <div id="configPanel" class="config-panel w-[300px] hidden-panel p-4 overflow-y-auto overflow-x-hidden z-20">
+        <!-- 头部 -->
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="font-bold text-gray-500 text-xs tracking-wider">设置</h2>
+            <div class="flex items-center gap-2">
+                <button onclick="window.cancelConfig()" id="cancelConfigBtn" class="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition border border-gray-200 dark:border-gray-600">
+                    取消
+                </button>
+                <button onclick="window.saveConfig(true)" id="saveConfigBtn" class="px-3 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-full transition">
+                    保存
+                </button>
+            </div>
+        </div>
 
-            // 关闭所有移动端侧边栏（供遮罩调用）
-            window.closeAllSidebars = function() {
-                if (!isMobile()) return;
-                document.getElementById('sidebar').classList.remove('mobile-open');
-                document.getElementById('configPanel').classList.remove('mobile-open');
-                document.getElementById('sidebarMask').classList.remove('active');
-            };
+        <!-- 分类: 聊天模型 -->
+        <div class="config-section">
+            <div class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                聊天模型
+            </div>
+            <div class="config-field">
+                <label class="config-label">API Key</label>
+                <input type="password" id="apiKey" placeholder="输入 API Key" autocomplete="off" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">Base URL</label>
+                <input type="text" id="baseUrl" placeholder="如: https://oneapi.naujtrats.xyz/v1" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">视觉理解模型</label>
+                <input type="text" id="visionModel" placeholder="如: deepseek-chat" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">视觉理解 API 地址</label>
+                <input type="text" id="visionApiUrl" placeholder="如: https://api.minimaxi.com (留空则用通用 API)" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">视觉理解 API Key</label>
+                <input type="password" id="visionApiKey" placeholder="视觉理解专用密钥" autocomplete="off" class="config-input">
+            </div>
+        </div>
 
-            // 保存原始函数引用（如果需要可调用）
-            const origToggleSidebar = window.toggleSidebar;
-            const origToggleConfigPanel = window.toggleConfigPanel;
+        <!-- 分类: 图像生成 -->
+        <div class="config-section">
+            <div class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                图像生成
+            </div>
+            <div class="config-field">
+                <label class="config-label">API Key</label>
+                <input type="password" id="imageApiKey" placeholder="图像生成专用密钥" autocomplete="off" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">API 地址</label>
+                <input type="text" id="imageBaseUrl" placeholder="如: https://api.minimaxi.com" class="config-input">
+            </div>
+            <div class="config-field">
+                <label class="config-label">模型</label>
+                <input type="text" id="imageModel" placeholder="image-01" value="image-01" class="config-input">
+            </div>
+        </div>
 
-            // 重写左侧边栏切换
-            window.toggleSidebar = function() {
-                if (isMobile()) {
-                    const sidebar = document.getElementById('sidebar');
-                    const configPanel = document.getElementById('configPanel');
-                    const mask = document.getElementById('sidebarMask');
-                    
-                    // 如果左侧边栏正在关闭，则打开它，并关闭右侧面板
-                    if (!sidebar.classList.contains('mobile-open')) {
-                        sidebar.classList.add('mobile-open');
-                        configPanel.classList.remove('mobile-open'); // 关闭右侧
-                        mask.classList.add('active');
-                    } else {
-                        sidebar.classList.remove('mobile-open');
-                        mask.classList.remove('active');
-                    }
-                } else {
-                    // 桌面端：原有折叠逻辑
-                    const sidebar = document.getElementById('sidebar');
-                    const toggleBtn = document.getElementById('sidebarToggle');
-                    sidebar.classList.toggle('collapsed');
-                    toggleBtn.style.display = sidebar.classList.contains('collapsed') ? 'block' : 'none';
+        <!-- 分类: 生成参数 -->
+        <div class="config-section">
+            <div class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                生成参数
+            </div>
+            <div class="config-slider-field">
+                <div class="config-slider-header">
+                    <span class="config-label">Temperature</span>
+                    <span id="tempValue" class="config-value">0.7</span>
+                </div>
+                <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" oninput="window.updateParam('temp', this.value)" class="config-slider w-full">
+            </div>
+            <div class="config-slider-field">
+                <div class="config-slider-header">
+                    <span class="config-label">Max Tokens</span>
+                    <input type="number" id="maxTokensInput" min="256" max="1048576" step="256" value="4096" onchange="window.syncTokenFromInput()" class="config-number" style="width:90px;">
+                </div>
+                <input type="range" id="maxTokens" min="256" max="1048576" step="256" value="4096" oninput="window.syncTokenFromRange()" class="config-slider w-full">
+            </div>
+            <div class="config-toggle-row">
+                <span class="config-label">流式输出</span>
+                <input type="checkbox" id="streamToggle" class="config-toggle" checked >
+            </div>
+        </div>
+
+        <!-- 分类: 高级设置 (可折叠) -->
+        <details class="config-section details-section">
+            <summary class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                高级设置
+            </summary>
+            <div class="details-content">
+                <div class="config-toggle-row">
+                    <span class="config-label">🔧 工具调用模式</span>
+                    <label class="switch small"><input type="checkbox" id="searchToolCallToggle" checked><span class="slider"></span></label>
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label" style="cursor:pointer" onclick="window.toggleChaoxingMonitor()">📊 刷课进度自动汇报</span>
+                    <label class="switch small"><input type="checkbox" id="chaoxingMonitorToggle" onchange="window.toggleChaoxingMonitor()"><span class="slider"></span></label>
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">请求超时 (秒)</span>
+                    <input type="number" id="requestTimeout" min="10" max="300" value="60" class="config-number" >
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">自定义参数</span>
+                    <input type="checkbox" id="customParamsToggle" class="config-toggle" >
+                </div>
+                <textarea id="customParams" rows="2" class="config-textarea" placeholder='{"top_p": 0.9}'></textarea>
+            </div>
+        </details>
+
+        <!-- 分类: 显示设置 (可折叠) -->
+        <details class="config-section details-section">
+            <summary class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                显示设置
+            </summary>
+            <div class="details-content">
+                <div class="config-slider-field">
+                    <div class="config-slider-header">
+                        <span class="config-label">行距</span>
+                        <span id="lineHeightValue" class="config-value">1.10</span>
+                    </div>
+                    <input type="range" id="lineHeight" min="1.0" max="2.5" step="0.01" value="1.1" oninput="window.updateDisplayParam('lineHeight', this.value)" class="config-slider w-full">
+                </div>
+                <div class="config-slider-field">
+                    <div class="config-slider-header">
+                        <span class="config-label">段间距</span>
+                        <span id="paragraphMarginValue" class="config-value">0.10</span>
+                    </div>
+                    <input type="range" id="paragraphMargin" min="0" max="0.5" step="0.01" value="0.1" oninput="window.updateDisplayParam('paragraphMargin', this.value)" class="config-slider w-full">
+                </div>
+                <div class="config-slider-field">
+                    <div class="config-slider-header">
+                        <span class="config-label">字体大小</span>
+                        <span id="fontSizeValue" class="config-value">14</span>
+                    </div>
+                    <input type="range" id="fontSize" min="12" max="24" step="1" value="14" oninput="window.updateFontSize(this.value)" class="config-slider w-full">
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">Markdown GFM</span>
+                    <input type="checkbox" id="markdownGFM" class="config-toggle" checked onchange="window.updateMarkdownConfig()">
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">Markdown 换行</span>
+                    <input type="checkbox" id="markdownBreaks" class="config-toggle" checked onchange="window.updateMarkdownConfig()">
+                </div>
+            </div>
+        </details>
+
+        <!-- 分类: System Prompt -->
+        <div class="config-section">
+            <div class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                System Prompt
+            </div>
+            <textarea id="systemPrompt" rows="3" class="config-textarea" placeholder="设置默认系统提示词..."></textarea>
+        </div>
+
+        <!-- 分类: Agent 模式 (可折叠) -->
+        <details class="config-section details-section" id="agentConfigSection">
+            <summary class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                Agent 模式
+            </summary>
+            <div class="details-content">
+                <div class="config-toggle-row">
+                    <span class="config-label">启用 Agent 模式</span>
+                    <label class="switch small"><input type="checkbox" id="agentModeToggle" onchange="window.toggleAgentMode()"><span class="slider"></span></label>
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">自动决策</span>
+                    <label class="switch small"><input type="checkbox" id="agentAutoDecision" checked><span class="slider"></span></label>
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">主动建议</span>
+                    <label class="switch small"><input type="checkbox" id="agentProactive"><span class="slider"></span></label>
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">最大工具调用轮次</span>
+                    <input type="number" id="agentMaxToolRounds" min="1" max="100" value="30" class="config-number">
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">思考深度</span>
+                    <select id="agentThinkingDepth" class="config-input" style="width:auto;min-width:80px;">
+                        <option value="shallow">浅层</option>
+                        <option value="standard" selected>标准</option>
+                        <option value="deep">深度</option>
+                    </select>
+                </div>
+                <div style="margin-top:8px;">
+                    <label class="config-label" style="display:block;margin-bottom:4px;">代理系统提示词</label>
+                    <textarea id="agentSystemPrompt" rows="5" class="config-textarea" style="font-size:11px;" placeholder="Agent 模式专用系统提示词..."></textarea>
+                </div>
+
+                <!-- 引擎状态面板 -->
+                <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb;" class="dark:border-gray-700">
+                    <div class="config-section-title" style="margin-bottom:8px;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg>
+                        引擎状态
+                    </div>
+                    <div id="engineStatusDisplay">
+                        <div class="engine-status-item">
+                            <span class="engine-status-dot offline" id="engineHealthDot"></span>
+                            <span id="engineHealthText">检查中...</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:6px;">
+                        <div class="agent-config-label">活跃 Cron 任务</div>
+                        <div id="engineCronList" class="engine-status-list">
+                            <div style="font-size:11px;color:#9ca3af;padding:4px;">加载中...</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:6px;">
+                        <div class="agent-config-label">子代理列表</div>
+                        <div id="engineAgentList" class="engine-status-list">
+                            <div style="font-size:11px;color:#9ca3af;padding:4px;">加载中...</div>
+                        </div>
+                    </div>
+                    <button onclick="window.refreshEngineStatus()" class="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition border border-gray-200 dark:border-gray-600" style="margin-top:8px;width:100%;">
+                        🔄 刷新引擎状态
+                    </button>
+                </div>
+            </div>
+        </details>
+    </div>
+
+
+
+
+<script>
+// ==================== 认证逻辑 ====================
+const SERVER_API_BASE = 'https://xiaoxin.naujtrats.xyz/oneapichat';
+
+function switchAuthTab(tab) {
+    const tabLogin = document.getElementById('authTabLogin');
+    const tabRegister = document.getElementById('authTabRegister');
+    const loginForm = document.getElementById('authLoginForm');
+    const registerForm = document.getElementById('authRegisterForm');
+    if (tab === 'login') {
+        tabLogin.classList.add('active'); tabRegister.classList.remove('active');
+        loginForm.classList.remove('hidden'); registerForm.classList.add('hidden');
+    } else {
+        tabLogin.classList.remove('active'); tabRegister.classList.add('active');
+        loginForm.classList.add('hidden'); registerForm.classList.remove('hidden');
+    }
+    document.getElementById('authError').classList.add('hidden');
+}
+
+function showAuthOverlay() {
+    document.getElementById('authOverlay').classList.remove('hidden');
+}
+
+function hideAuthOverlay() {
+    document.getElementById('authOverlay').classList.add('hidden');
+}
+
+function authError(msg) {
+    const el = document.getElementById('authError');
+    if (!el) return;
+    el.textContent = msg;
+    if (msg) {
+        el.classList.remove('hidden');
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+async function performAuthLogin() {
+    const btn = document.getElementById('authLoginBtn');
+    const orig = btn.textContent.trim();
+    btn.disabled = true; btn.textContent = '登录中...';
+    authError('');
+    try {
+        const username = document.getElementById('authLoginUsername').value.trim();
+        const password = document.getElementById('authLoginPassword').value;
+        if (!username || !password) { authError('请填写用户名和密码'); btn.disabled = false; btn.textContent = orig; return; }
+        const resp = await fetch(SERVER_API_BASE + '/auth.php?action=login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        if (!resp.ok) { authError('网络错误 (HTTP ' + resp.status + ')，请检查代理设置'); btn.disabled = false; btn.textContent = orig; return; }
+        let data;
+        try { data = await resp.json(); } catch(e) {
+            authError('服务器响应格式错误，请检查网络代理或稍后重试');
+            btn.disabled = false; btn.textContent = orig; return;
+        }
+        if (data.success && data.token) {
+            // ★ 切换账号时清空全部旧数据（聊天记录+配置，彻底隔离不同账号）
+            localStorage.clear();
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('authUsername', data.username);
+            localStorage.setItem('authUserId', data.user_id);
+            localStorage.setItem('_loginSuccess', '登录成功，欢迎回来!');
+            localStorage.setItem('_skipUnloadSave', '1');
+            location.reload();
+        } else {
+            authError(data.error || '登录失败');
+        }
+    } catch(e) { authError('网络错误'); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+async function performAuthRegister() {
+    const btn = document.getElementById('authRegBtn');
+    const orig = btn.textContent.trim();
+    btn.disabled = true; btn.textContent = '注册中...';
+    authError('');
+    try {
+        const username = document.getElementById('authRegUsername').value.trim();
+        const password = document.getElementById('authRegPassword').value;
+        const confirm = document.getElementById('authRegConfirm').value;
+        if (!username || !password) { authError('请填写用户名和密码'); btn.disabled = false; btn.textContent = orig; return; }
+        if (password !== confirm) { authError('两次密码不一致'); btn.disabled = false; btn.textContent = orig; return; }
+        if (username.length < 2) { authError('用户名至少2个字符'); btn.disabled = false; btn.textContent = orig; return; }
+        if (password.length < 6) { authError('密码至少6位'); btn.disabled = false; btn.textContent = orig; return; }
+        const resp = await fetch(SERVER_API_BASE + '/auth.php?action=register', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        if (!resp.ok) { authError('网络错误 (HTTP ' + resp.status + ')，请检查代理设置'); btn.disabled = false; btn.textContent = orig; return; }
+        let data;
+        try { data = await resp.json(); } catch(e) {
+            authError('服务器响应格式错误，请检查网络代理或稍后重试');
+            btn.disabled = false; btn.textContent = orig; return;
+        }
+        if (data.success && data.token) {
+            // ★ 注册新账号时也清空全部旧数据
+            localStorage.clear();
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('authUsername', data.username);
+            localStorage.setItem('authUserId', data.user_id);
+            localStorage.setItem('_loginSuccess', '注册成功，欢迎!');
+            localStorage.setItem('_skipUnloadSave', '1');
+            location.reload();
+        } else { authError(data.error || '注册失败'); }
+    } catch(e) { authError('网络错误'); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+function updateAuthHeaderBtn() {
+    const btn = document.getElementById('authHeaderBtn');
+    const user = localStorage.getItem('authUsername');
+    if (!btn) return;
+    if (user) {
+        btn.textContent = user;
+        btn.onclick = () => { if (confirm('确定退出登录？')) { logout(); } };
+    } else {
+        btn.textContent = '登录';
+        btn.onclick = showAuthOverlay;
+    }
+}
+
+function logout() {
+    var token = localStorage.getItem('authToken');
+    
+    // ★ 先保存到服务器（在清除之前），使用 main.js 中定义的专用函数
+    if (token && typeof saveUserDataBeforeLogout === 'function') {
+        saveUserDataBeforeLogout();
+    }
+    
+    // ★ 清空全部本地数据
+    localStorage.clear();
+    
+    localStorage.setItem('_skipUnloadSave', '1');
+    
+    // 通知服务器登出（异步）
+    if (token) {
+        fetch(SERVER_API_BASE + '/auth.php?action=logout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        }).catch(function() {});
+    }
+    // 重载页面
+    location.reload();
+}
+
+// 初始化：检查登录状态
+(function() {
+    updateAuthHeaderBtn();
+    const token = localStorage.getItem('authToken');
+    if (token) {
+        fetch(SERVER_API_BASE + '/auth.php?action=verify&token=' + encodeURIComponent(token))
+            .then(r => r.json())
+            .then(data => {
+                if (!data.valid) {
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('authUsername');
+                    localStorage.removeItem('authUserId');
+                    updateAuthHeaderBtn();
                 }
-            };
+            })
+            .catch(() => {});
+    }
+})();
 
-            // 重写右侧配置面板切换
-            window.toggleConfigPanel = function() {
-                if (isMobile()) {
-                    const configPanel = document.getElementById('configPanel');
-                    const sidebar = document.getElementById('sidebar');
-                    const mask = document.getElementById('sidebarMask');
-                    
-                    if (!configPanel.classList.contains('mobile-open')) {
-                        configPanel.classList.add('mobile-open');
-                        sidebar.classList.remove('mobile-open'); // 关闭左侧
-                        mask.classList.add('active');
-                    } else {
-                        configPanel.classList.remove('mobile-open');
-                        mask.classList.remove('active');
-                    }
-                } else {
-                    // 桌面端：原有逻辑
-                    document.getElementById('configPanel').classList.toggle('hidden-panel');
-                }
-            };
-
-            // 窗口大小变化时，如果从移动端切回桌面，重置状态
-            // 修复：当键盘弹出时（keyboardActive = true），不执行关闭面板操作
-            window.addEventListener('resize', function() {
-                // 新增：键盘激活时不关闭面板
-                if (window.keyboardActive) return;
-
-                if (!isMobile()) {
-                    // 恢复桌面端默认显示（侧边栏可见，配置面板隐藏）
-                    document.getElementById('sidebar').classList.remove('mobile-open', 'collapsed');
-                    document.getElementById('configPanel').classList.remove('mobile-open', 'hidden-panel');
-                    document.getElementById('sidebarMask').classList.remove('active');
-                    // 确保桌面端侧边栏可见（移除可能干扰的类）
-                    document.getElementById('sidebar').classList.remove('collapsed');
-                    document.getElementById('configPanel').classList.add('hidden-panel');
-                    // 汉堡菜单隐藏（由桌面端原始逻辑控制，但重置一下）
-                    document.getElementById('sidebarToggle').style.display = 'none';
-                } else {
-                    // 进入移动端时，确保侧边栏隐藏，配置面板隐藏
-                    document.getElementById('sidebar').classList.remove('mobile-open', 'collapsed');
-                    document.getElementById('configPanel').classList.remove('mobile-open', 'hidden-panel');
-                    document.getElementById('sidebarMask').classList.remove('active');
-                }
-            });
-        })();
-    </script>
+// 恢复页面（bfcache/前进后退）时重新同步暗色
+window.addEventListener('pageshow', function() {
+    var shouldBeDark = localStorage.getItem('dark') === 'true';
+    var isDark = document.documentElement.classList.contains('dark');
+    if (shouldBeDark !== isDark) {
+        document.documentElement.classList.toggle('dark', shouldBeDark);
+    }
+});
+</script>
 </body>
-
 </html>
-
