@@ -243,4 +243,50 @@ switch ($action) {
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
         echo @file_get_contents($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
+
+    case 'chat_stream':
+        // POST proxy for SSE streaming to /engine/chat/stream
+        $input = file_get_contents('php://input');
+        $payload = @json_decode($input, true);
+        if (!$payload) { header('Content-Type: application/json'); echo json_encode(['error' => 'invalid JSON']); exit; }
+        $chat_id = $payload['chat_id'] ?? '';
+        $msg_id = $payload['msg_id'] ?? '';
+        $request_data = $payload['request'] ?? [];
+        $api_key = $request_data['api_key'] ?? '';
+        $base_url = rtrim($request_data['base_url'] ?? '', '/');
+        $model = $request_data['model'] ?? 'deepseek-chat';
+        $messages = $request_data['messages'] ?? [];
+        $tools = $request_data['tools'] ?? null;
+        // Forward to engine SSE endpoint
+        $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
+        // Build engine request
+        $eng_req = json_encode([
+            'chat_id' => $chat_id,
+            'msg_id' => $msg_id,
+            'request' => [
+                'api_key' => $api_key,
+                'base_url' => $base_url,
+                'model' => $model,
+                'messages' => $messages,
+                'tools' => $tools,
+                'stream' => true
+            ]
+        ]);
+        $ch = curl_init($engine_stream_url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $eng_req);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: text/event-stream']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
+            echo $data;
+            flush();
+            return strlen($data);
+        });
+        curl_setopt($ch, CURLOPT_TIMEOUT, 300);
+        curl_exec($ch);
+        $err = curl_error($ch);
+        if ($err) { header('Content-Type: text/event-stream'); echo "event: error\ndata: ".json_encode(['error' => $err])."\n\n"; }
+        curl_close($ch);
+        break;
+
 }
