@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEST</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="flex h-screen">
+    <div id="sidebar" class="w-[258px] p-4 border-r border-gray-200">
+        <div id="chatHistoryList"></div>
+    </div>
+    <div id="main" class="flex-1 flex flex-col">
+        <div id="chatBox" class="flex-1 overflow-y-auto">
+            <div id="chatMessagesContainer"></div>
+        </div>
+        <div class="input-area">
+            <div class="input-wrapper">
+                <textarea id="userInput" rows="1"></textarea>
+                <button id="sendBtn">发送</button>
+                <button id="stopBtn">停止</button>
+            </div>
+        </div>
+    </div>
+    <div id="configPanel">
+        <textarea id="customParams"></textarea>
+        <select id="paragraphPrefix"></select>
+    </div>
+    <script defer>
+        function getEl(id) { return document.getElementById(id); }
+        
+        // 直接复制大段 innerHTML
+        const target = getEl('customParams')?.closest('div');
+        if (target) {
+            const section = document.createElement('div');
+            section.id = 'searchConfigItem';
+            section.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <label>启用联网搜索</label>
+                    <label class="switch"><input type="checkbox" id="searchToggle"><span class="slider"></span></label>
+                </div>
+                <div class="mt-2 space-y-3" id="searchConfigDetails" style="display:none;">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs">AI智能判断是否需要搜索</label>
+                        <label class="switch small"><input type="checkbox" id="aiSearchJudgeToggle"><span class="slider"></span></label>
+                    </div>
+                    <div id="aiSearchJudgeDetails" style="display:none;">
+                        <div><label class="block text-xs text-gray-500 mb-1">判断模型</label><select id="aiSearchJudgeModel" class="config-input"><option value="">同主模型</option></select></div>
+                        <div><label class="block text-xs text-gray-500 mb-1">判断提示词</label><textarea id="aiSearchJudgePrompt" rows="3" class="config-input text-xs">默认提示词</textarea></div>
+                    </div>
+                </div>
+            `;
+            target.parentNode.insertBefore(section, target.nextSibling);
+            document.title = "BIG_HTML_OK";
+        } else {
+            document.title = "NO_TARGET";
+        }
+    </script>
+</body>
+</html>

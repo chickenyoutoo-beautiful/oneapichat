@@ -1,0 +1,70 @@
+<!DOCTYPE html><html lang="zh" class="">
+<head><meta charset="UTF-8"></head>
+<body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200 bg-gray-50">
+    <div class="sidebar w-[258px] bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col p-4 z-20">
+        <h2 class="font-bold text-gray-400 text-xs tracking-wider">侧栏</h2>
+        <button class="flex items-center justify-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full py-2.5 mb-4 hover:shadow-sm transition text-sm font-medium text-blue-600">新建</button>
+        <div class="flex-1 overflow-y-auto space-y-2"></div>
+        <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
+            <h3 class="text-xs font-bold text-gray-400 uppercase">压缩</h3>
+            <label class="flex items-center gap-2 text-xs"><input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"><span>启用</span></label>
+            <div class="flex items-center gap-2 text-xs"><span>阈值:</span><input type="number" class="w-16 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs outline-none"></div>
+            <div class="flex items-center gap-2 text-xs"><span>模型:</span><select class="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs outline-none"><option>默认</option></select></div>
+        </div>
+    </div>
+    <div class="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-950">
+        <header class="p-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-800">
+            <div class="flex items-center gap-4">
+                <button class="header-menu-btn bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition p-2">
+                    <svg class="w-4 h-4"></svg>
+                </button>
+                <div class="flex items-center gap-1">
+                    <select class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-xs outline-none cursor-pointer">
+                        <option>deepseek-chat</option>
+                    </select>
+                    <button class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition"></button>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="px-4 py-2 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full transition shadow-sm">登录</button>
+                <button class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition"></button>
+                <button class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition"></button>
+            </div>
+        </header>
+        <div id="chatBox" class="flex-1 overflow-y-auto">
+            <div class="chat-messages-container">
+                <div class="welcome-container"><div class="brand">Hi</div></div>
+            </div>
+        </div>
+        <div class="input-area">
+            <div class="input-wrapper">
+                <div class="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition">
+                    <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition"></label>
+                    <textarea rows="1" class="flex-1 p-3 bg-transparent outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500" placeholder="输入..."></textarea>
+                    <button class="send-btn"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class' };
+// 等 tailwind 初始化后，提取所有生成的 CSS
+setTimeout(() => {
+    let css = '';
+    document.querySelectorAll('style').forEach(s => {
+        const t = s.textContent;
+        // 跳过非 tailwind 的 style
+        if (t.includes('border-width') || t.includes('display') || t.includes('flex') || t.includes('margin') || t.includes('padding') || t.includes('background') || t.includes('color') || t.includes('width') || t.includes('height') || t.includes('font') || t.includes('text-') || t.includes('line-height') || t.includes('letter-spacing') || t.includes('transition') || t.includes('transform') || t.includes('position') || t.includes('opacity') || t.includes('cursor') || t.includes('z-index') || t.includes('overflow') || t.includes('resize') || t.includes('outline') || t.includes('visibility') || t.includes('box-shadow') || t.includes('object-fit') || t.includes('grid') || t.includes('aspect-ratio') || t.includes('contain') || t.includes('column') || t.includes('space-') || t.includes('divide-') || t.includes('ring-') || t.includes('gap') || t.includes('order') || t.includes('animation') || t.includes('keyframes') || t.includes('appearance') || t.includes('forced-color') || t.includes('content') || t.includes('list-style') || t.includes('placeholder') || t.includes('preflight') || t.includes('container') || t.includes('accessibility') || t.includes('pointer-events') || t.includes('scroll') || t.includes('user-select') || t.includes('table') || t.includes('border-collapse') || t.includes('snap-') || t.includes('touch-') || t.includes('inset') || t.includes('isolation') || t.includes('float') || t.includes('clear') || t.includes('break') || t.includes('box-sizing') || t.includes('align') || t.includes('justify') || t.includes('flex') || t.includes('grow') || t.includes('shrink') || t.includes('basis') || t.includes('overscroll') || t.includes('whitespace') || t.includes('word-break') || t.includes('hyphens') || t.includes('vertical-align') || t.includes('blur') || t.includes('brightness') || t.includes('contrast') || t.includes('grayscale') || t.includes('hue-rotate') || t.includes('invert') || t.includes('saturate') || t.includes('sepia') || t.includes('drop-shadow') || t.includes('backdrop')) {
+            css += '/* TAILWIND_START */\n' + t + '\n/* TAILWIND_END */\n';
+        }
+    });
+    // 输出到 pre 元素
+    const pre = document.createElement('pre');
+    pre.id = 'tw-css-output';
+    pre.textContent = css;
+    document.body.prepend(pre);
+}, 2000);
+</script>
+</html>

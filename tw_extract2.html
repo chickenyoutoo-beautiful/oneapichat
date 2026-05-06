@@ -1,0 +1,33 @@
+<!DOCTYPE html><html lang="zh" class="">
+<head><meta charset="UTF-8"></head>
+<body class="flex h-screen overflow-hidden text-gray-800 bg-gray-50">
+    <div class="w-64 p-4 border-r border-gray-200 bg-white"></div>
+    <div class="flex-1 p-4">
+        <button class="px-4 py-2 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-sm">按钮</button>
+        <input class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-blue-500" placeholder="输入框">
+        <div class="mt-4 flex gap-2 items-center">
+            <span class="text-sm text-gray-600">文本</span>
+            <select class="px-3 py-1 text-xs rounded-full border border-gray-200 bg-white outline-none">
+                <option>选项1</option><option>选项2</option>
+            </select>
+        </div>
+        <div class="mt-6 pt-4 border-t space-y-2">
+            <div class="flex items-center gap-2"><input type="checkbox" class="rounded border-gray-300 text-blue-600"><span class="text-xs">启用</span></div>
+            <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+        </div>
+    </div>
+</body>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class' };
+// 简单粗暴：把 HTML 中所有 <style> 标签的内容都收集
+setTimeout(() => {
+    const pre = document.createElement('pre');
+    pre.id = 'tw-css';
+    let all = '';
+    document.querySelectorAll('style').forEach(s => all += s.textContent + '\n/* --- */\n');
+    pre.textContent = all;
+    document.body.prepend(pre);
+}, 3000);
+</script>
+</html>
