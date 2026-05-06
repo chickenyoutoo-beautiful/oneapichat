@@ -2084,11 +2084,22 @@ function showToast(msg, type = 'info', dur = 3000) {
 }
 
 // 自动滚动到底部(用于AI回复等场景)
-function autoScrollToBottom() {
+function autoScrollToBottom(reason) {
     if (!$.chatBox) return;
+    // 如果用户已经主动滚动离开底部，不要强制拉回（streaming 时由外部控制）
+    // 只有明显在底部时才滚动
+    const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
+    const distFromBottom = scrollHeight - scrollTop - clientHeight;
+    // 距离底部超过一屏就不跟随了（用户在看上面的内容）
+    if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') return;
     isAutoScrolling = true;
-    $.chatBox.scrollTop = $.chatBox.scrollHeight;
-    setTimeout(() => { isAutoScrolling = false; }, 200);
+    // 大幅滚动用 smooth，正常小增长用 instant（避免抖动）
+    if (distFromBottom > 200) {
+        $.chatBox.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
+    } else {
+        $.chatBox.scrollTop = $.chatBox.scrollHeight;
+    }
+    setTimeout(() => { isAutoScrolling = false; }, 300);
 }
 
 window.scrollToBottom = () => {
@@ -3958,8 +3969,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         row.style.transform = 'translateY(0)';
     });
 
-    // 消息创建后自动滚动
-    autoScrollToBottom();
+    // 不在这里滚动，streaming 时会自然跟随
 
     return bubble;
 }
@@ -5129,8 +5139,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     markdownBody.textContent = typeof _t !== 'undefined' ? _t : fullText;
                                 }
                                 // AI流式回复时,如果用户没有主动滚动上查,则跟随滚动
-                                if (!userScrolled) {
-                                    autoScrollToBottom();
+                                const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
+                                if (!userScrolled && scrollHeight - scrollTop - clientHeight < 100) {
+                                    autoScrollToBottom('streaming');
                                 }
                             }
                         }
@@ -7491,8 +7502,8 @@ window.loadChat = function (id) {
         $.sidebarMask?.classList.remove('active');
     }
 
-    // 加载完成后自动滚动
-    autoScrollToBottom();
+    // 加载完成后自动滚动（loadChat 模式不受距离限制）
+    autoScrollToBottom('loadChat');
 };
 
 function updateHeaderTitle() {
