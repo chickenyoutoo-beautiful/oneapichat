@@ -912,13 +912,20 @@ async function saveConfigToServer() {
             if (v !== null && v !== undefined) config[k] = v;
         });
         console.log('[save] 保存', Object.keys(config).length, '个配置项到服务器');
-        await fetch(SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-            keepalive: true
-        });
-        console.log('[save] 配置保存完成');
+        var url = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
+        var saved = false;
+        try {
+            var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
+            if (resp.ok) saved = true;
+        } catch(e1) { console.warn('[save] keepalive保存失败:', e1.message); }
+        if (!saved) {
+            try {
+                var resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+                if (resp2.ok) saved = true;
+            } catch(e2) { console.warn('[save] 重试保存也失败:', e2.message); }
+        }
+        console.log(saved ? '[save] 配置保存完成' : '[save] 配置保存失败（已重试）');
+
     } catch(e) {
         console.warn('[save] 配置保存失败:', e.message);
     }
