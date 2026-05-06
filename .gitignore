@@ -16,3 +16,5 @@ uploads/
 
 # Engine运行时数据（不需要版本控制）
 .engine/
+users/
+chat.php
