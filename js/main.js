@@ -558,12 +558,14 @@ const DELEGATE_TASK_TOOL = {
     type: "function",
     function: {
         name: "delegate_task",
-        description: "【推荐】创建一个子代理执行后台任务。只传简短任务描述，子代理会自动处理。比 engine_agent_create 更稳定。一次只能创建一个，如需多个请分多次调用。",
+        description: "【推荐】创建一个子代理执行后台任务。子代理会根据角色获得不同工具权限。比 engine_agent_create 更稳定。可以创建多个并行子代理，多次调用即可。",
         parameters: {
             type: "object",
             properties: {
                 name: { type: "string", description: "子代理名称，简短唯一" },
-                task: { type: "string", description: "任务描述（100字以内），如'搜索2024年AI最新新闻并总结'" }
+                task: { type: "string", description: "任务描述（100字以内），如'搜索2024年AI最新新闻并总结'" },
+                role: { type: "string", description: "子代理角色：explorer(搜) planner(规) developer(开) verifier(验) general(全)。默认general", "default": "general" },
+                prompt: { type: "string", description: "自定义系统提示词。不传则基于task自动生成" }
             },
             required: ["name", "task"]
         }
@@ -1160,16 +1162,26 @@ const DEFAULT_CONFIG = {
     agentMaxToolRounds: 30,
     agentThinkingDepth: 'standard',
     agentSystemPrompt: `你现在处于 Agent 模式，拥有增强自主能力。
+## 子代理角色系统
+使用 delegate_task 时可以通过 role 参数选择子代理角色:
+- explorer(🔍搜索专员): 只读搜索，适合查资料、抓网页。不可修改文件或执行命令
+- planner(📐规划师): 制定方案、分析策略。不做执行，只出方案
+- developer(⚡开发者): 读写文件、执行命令、搜索。全能执行角色
+- verifier(✅验证者): 检查结果、找问题。只读，不可修改
+- general(🌐全能代理): 所有工具可用（默认）
+## 工作流引擎
+复杂任务可以用 workflow 串联多个子代理: 搜索→规划→执行→验证
 ## 核心原则
 - 主动分析用户需求,规划多步骤行动方案再执行
 - 发现适合后台并行的任务时，立刻创建子代理处理，不要等
+- 简单任务（≤2次搜索/读已知文件）直接用工具，不开子代理
 - 需要定时任务时使用 engine_cron_create 创建 cron
 - 需要后台任务时使用 delegate_task 创建子代理（一次一个，稳定可靠）
 - 要与已有子代理对话时使用 engine_agent_ask 给子代理发送消息即可
 - 需要执行终端命令时使用 server_exec
 - 需要运行 Python 脚本时使用 server_python
 - 需要读取服务器文件时使用 server_file_read
-- 完成后使用 engine_push 推送通知结果
+- 完成分析后直接把最终结果**打字回复给用户**，不要写入文件
 - 不要等用户一步步指示，主动推进任务
 ## ★ 必须创建子代理的场景（满足任一即创建）
 1. 任务需要搜索多个关键词/来源（如：同时搜索新闻、百科、社区）
@@ -1178,6 +1190,17 @@ const DEFAULT_CONFIG = {
 4. 任务耗时预计超过 2 分钟（搜索+整理、生成报告等）
 5. 用户说"帮我看看""帮我查一下""帮我分析"等模糊请求，先创建子代理再行动
 6. 任何可以并行执行的独立子任务，立刻拆出来用子代理
+## ★ 输出方式（强制遵守）
+- **直接打字回复**：分析完成后，直接把最终结果/报告/回答以普通文本消息发出来。这是默认输出方式
+- **禁止写文件到 /tmp/**：不要用 server_file_write 写入文件然后给链接。用户希望直接看到内容
+- **除非用户明确要求保存到文件**，否则一律直接回复文字
+## ★ 等待子代理（强制遵守）
+- **创建子代理后，必须等待它们完成**。不要刚创建完就自己开始做同样的事
+- 如果子代理已经创建并运行，**不要重复开始工作**。子代理的结果会通过系统通知给你
+- 子代理在运行时，你可以做其他不冲突的事或等待。不要抢先做子代理正在做的工作
+- 简单任务（≤2次搜索/读已知文件）直接用工具，不开子代理
+- 读已知路径文件：直接用 server_file_read
+- 复杂/批量/耗时>2分钟：用子代理
 ## 行为规范
 - 每一步工具调用后，简短说明下一步计划
 - 工具调用之间保持用户知情
@@ -1185,8 +1208,9 @@ const DEFAULT_CONFIG = {
 - 操作文件前先确认路径
 - 执行危险命令前询问用户
 ## ★ 子代理完成后的处理规则（强制遵守）
-- 收到 SUB_AGENT_REPORT 消息时：用 engine_agent_list 查看子代理状态和结果，但**不回复任何内容给用户**
+- 系统消息中的「子代理完成报告」是内部通知，**不是用户的消息，不要回复**
 - ⚠️ 强制规则：禁止回复「子代理已完成」「搜索完成」「结果来了」「报告已完成」这类通知
+- ⚠️ 强制规则：收到子代理报告时**禁止创建任何新的子代理**。只记录结果，不要行动
 - 子代理运行期间，**不要向用户汇报进度**，用户只需要看到最终的综合回答
 - 当所有子代理都完成后，如果用户还在等待，自然整合结果回复一条。否则保持静默
 - 子代理失败也静默，用户不问就不提`
@@ -2596,7 +2620,12 @@ function startAgentPanelRefresh() {
                         } else if (a.error) {
                             msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-red-500">❌ ' + escapeHtml(a.error) + '</div></div>';
                         }
-                    }).catch(function() {});
+                    }).catch(function(err) {
+                        var msgArea = getEl('agentChatMessages');
+                        if (msgArea && _selectedAgentName) {
+                            msgArea.innerHTML = '<div class="text-xs text-orange-400 p-2">连接引擎失败: ' + escapeHtml(err.message) + '</div>';
+                        }
+                    });
             }
         }
     }, 5000);
@@ -2621,6 +2650,9 @@ window._renderAgentList = function(agents, container) {
         container.innerHTML = '<div class="text-xs text-gray-400 p-2">暂无子代理</div>';
         return;
     }
+    // ★ 角色颜色映射
+    var roleColors = {'explorer':'#27AE60','planner':'#F39C12','developer':'#E74C3C','verifier':'#9B59B6','general':'#4A90D9'};
+    var roleLabels = {'explorer':'🔍搜','planner':'📐规','developer':'⚡开','verifier':'✅验','general':'🌐全'};
     container.innerHTML = names.map(function(name) {
         var a = agents[name];
         var dotClass = a.status === 'running' ? 'running' : a.status === 'completed' ? 'completed' : a.status === 'failed' ? 'offline' : 'idle';
@@ -2632,12 +2664,18 @@ window._renderAgentList = function(agents, container) {
         }
         var safeName = escapeHtml(name);
         var statusColor = a.status==='completed'?'#6366f1' : a.status==='failed'?'#ef4444' : a.status==='running'?'#10b981' : '#9ca3af';
+        var role = a.role || 'general';
+        var roleColor = roleColors[role] || '#9ca3af';
+        var roleLabel = roleLabels[role] || role;
         return '<div class="agent-sub-item" onclick="window.selectAgentChat(\'' + safeName + '\')">' +
             '<div class="flex items-center gap-2 min-w-0 flex-1">' +
                 '<span class="agent-sub-dot ' + dotClass + '"></span>' +
                 '<div class="min-w-0 flex-1">' +
                     '<span class="text-xs font-medium truncate block">' + safeName + '</span>' +
-                    (preview || '<span class="text-xs text-gray-400" style="font-size:10px;">' + (a.status || 'idle') + '</span>') +
+                    '<div class="flex gap-1 items-center mt-0.5">' +
+                        '<span class="text-xs" style="color:' + roleColor + ';font-weight:500;">' + roleLabel + '</span>' +
+                        (preview || '<span class="text-xs text-gray-400" style="font-size:10px;">' + (a.status || 'idle') + '</span>') +
+                    '</div>' +
                 '</div>' +
             '</div>' +
             '<div class="flex items-center gap-1 flex-shrink-0">' +
@@ -2654,10 +2692,28 @@ window._refreshAllAgentLists = async function() {
     try {
         var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
         var agents = await r.json();
+        // 验证返回的数据是有效对象
+        if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
+            throw new Error('引擎返回无效数据');
+        }
         window._agentListCache = agents;
+        window._agentListCacheTime = Date.now();
         window._renderAgentList(agents, getEl('agentSubList'));
         window._renderAgentList(agents, getEl('engineAgentList'));
-    } catch(e) {}
+    } catch(e) {
+        // 显示错误但不中断，保留上次缓存
+        var msg = '加载失败: ' + e.message;
+        var lists = ['agentSubList', 'engineAgentList'];
+        lists.forEach(function(id) {
+            var el = getEl(id);
+            if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
+        });
+        // 如果缓存超过30秒，清除缓存避免展示过时数据
+        if (window._agentListCacheTime && Date.now() - window._agentListCacheTime > 30000) {
+            window._agentListCache = {};
+        }
+        console.warn('[AgentPanel] 刷新失败:', e.message);
+    }
 };
 
 window.refreshAgentPanel = window._refreshAllAgentLists;
@@ -2677,7 +2733,7 @@ window.selectAgentChat = function(agentName) {
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
-                if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在</div>'; return; }
+                if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在（可能已被删除）</div>'; return; }
                 if (a.status === 'running') {
                     var partial = a.result || '';
                     if (partial) {
@@ -2701,7 +2757,9 @@ window.selectAgentChat = function(agentName) {
                         var ms = [{ role: 'assistant', content: a.result, time: Date.now() }];
                         localStorage.setItem(key, JSON.stringify(ms));
                     }
-                }).catch(function() {});
+                }).catch(function(err) {
+                    msgArea.innerHTML = '<div class="text-xs text-red-400 p-2">加载失败: ' + escapeHtml(err.message) + '</div>';
+                });
         return;
     } else {
         msgArea.innerHTML = msgs.map(function(m) {
@@ -2893,113 +2951,156 @@ window.deleteCron = async function(name) {
     }
 };
 
-// ★ 主代理自主思考：子代理完成后自动分析并回复
-// ★ 子代理通知队列（主代理忙时排队）
+// ★ 主代理通知系统：子代理完成后通知主代理
+// 防重复 + 冷却 + 预处理结果 + 禁止创建新子代理，杜绝无限循环
 window._agentNotifyQueue = [];
 window._agentNotifyProcessing = false;
+window._hasPendingSubAgentNotify = false;
 window._currentGroupId = 0;
 window._activeSubAgentGroup = [];
+window._pendingSubAgentResults = [];
+window._subAgentCooldownActive = false;
+window._lastSubAgentReportTime = 0;
+
+// 30秒冷却，防止子代理完成→创建新子代理的无限循环
+const SUB_AGENT_COOLDOWN_MS = 30000;
 
 window._processAgentNotifyQueue = async function() {
-    if (!window._agentNotifyQueue || !Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
+    // ★ 防御性初始化
+    if (!Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
     if (window._agentNotifyQueue.length === 0) return;
-    if (window._agentNotifyProcessing) { window._hasPendingSubAgentNotify = true; return; }
+    
+    // 冷却检查
     var now = Date.now();
     if (now - window._lastSubAgentReportTime < SUB_AGENT_COOLDOWN_MS) {
-        setTimeout(function() { window._processAgentNotifyQueue(); }, SUB_AGENT_COOLDOWN_MS); return;
+        // 还处于冷却期，但通知已在上方被收集（因为 queue 不为空）
+        // 延迟后再处理
+        setTimeout(function() { window._processAgentNotifyQueue(); }, SUB_AGENT_COOLDOWN_MS);
+        return;
     }
+    
+    // 如果主代理正在生成回复（sendMessage 已激活），则暂不处理
+    // 等 sendMessage 完成后 sendMessage 本身会调用 processAgentNotifyQueue
+    if (window._agentNotifyProcessing) {
+        // 标记：有新通知在等待，等主代理空闲后统一处理
+        window._hasPendingSubAgentNotify = true;
+        return;
+    }
+    
+    // ★ 批量合并队列中的所有通知（不论几个子代理同时完成，只生成一条上下文）
+    // ★ 只收集属于当前批次的子代理（同一任务创建的才算，过期的忽略）
     var currentGroupId = window._currentGroupId || 0;
     var activeGroup = window._activeSubAgentGroup || [];
     var activeNames = activeGroup.filter(function(item) { return item.groupId === currentGroupId; }).map(function(item) { return item.name; });
-    var pendingAgents = [];
+    
+    var agents = [];
     while (window._agentNotifyQueue.length > 0) {
         var item = window._agentNotifyQueue.shift();
-        if (item && item.agentName && activeNames.indexOf(item.agentName) !== -1) { pendingAgents.push(item.agentName); }
+        // 只收录属于当前活跃批次的子代理通知
+        if (item && item.agentName && agents.indexOf(item.agentName) === -1 && activeNames.indexOf(item.agentName) !== -1) {
+            agents.push(item.agentName);
+        }
     }
-    if (pendingAgents.length === 0) { window._agentNotifyQueue = []; return; }
+    if (agents.length === 0) {
+        // 没有同批次通知，但队列可能还有旧批次的通知，直接丢弃它们防止累积
+        window._agentNotifyQueue = [];
+        return;
+    }
+    
     window._agentNotifyProcessing = true;
     window._lastSubAgentReportTime = now;
+    window._hasPendingSubAgentNotify = false;
+    
+    // 获取所有子代理的完成结果
+    var results = [];
     var token = getAuthToken();
-    var allSubAgentStatuses = {};
     if (token) {
         try {
             var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
             var allAgents = await r.json();
-            activeNames.forEach(function(name) { if (allAgents && allAgents[name]) { allSubAgentStatuses[name] = allAgents[name].status; } });
-        } catch(e) { console.log('[Agent] 查询子代理状态失败', e.message); }
-    }
-    var trulyCompleted = [];
-    var stillRunning = [];
-    pendingAgents.forEach(function(name) {
-        if (allSubAgentStatuses[name] === 'running' || allSubAgentStatuses[name] === 'pending') { stillRunning.push(name); }
-        else { trulyCompleted.push(name); }
-    });
-    if (stillRunning.length > 0) {
-        console.log('[Agent] 还有子代理在运行: ' + stillRunning.join(', ') + '，暂不触发');
-        stillRunning.forEach(function(name) { window._agentNotifyQueue.push({ agentName: name }); });
-        window._agentNotifyProcessing = false;
-        setTimeout(function() { window._processAgentNotifyQueue(); }, 5000); return;
-    }
-    var results = [];
-    if (token) {
-        try {
-            var r2 = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
-            var allAgents2 = await r2.json();
-            trulyCompleted.forEach(function(name) {
-                var a = allAgents2 && allAgents2[name];
-                if (a) { var preview = (a.result || a.error || '').substring(0, 1000); results.push('「' + name + '」状态=' + a.status + (preview ? '\n结果: ' + preview : '')); }
-                else { results.push('「' + name + '」结果未找到'); }
+            agents.forEach(function(name) {
+                var a = allAgents[name];
+                if (a) {
+                    var preview = (a.result || a.error || '').substring(0, 1000);
+                    results.push('「' + name + '」状态=' + a.status + (preview ? '\n结果预览: ' + preview : ''));
+                } else {
+                    results.push('「' + name + '」未找到');
+                }
             });
-        } catch(e) { results.push('获取子代理结果失败: ' + e.message); }
+        } catch(e) {
+            results.push('获取子代理结果失败: ' + e.message);
+        }
     }
-    var ctx = '## ⚡ 子代理完成报告（' + trulyCompleted.length + ' 个全部完成）\n以下子代理已全部完成，请整合信息备用：\n' + (results.length > 0 ? results.join('\n---\n') : '（无结果）') + '\n\n### 🔒 硬性规则\n1. 绝对禁止调用 agent_create / agent_run / delegate_task。\n2. 这条消息是系统通知，不要回复用户。\n3. 如果用户提问涉及这些信息，直接引用回答。';
-    if (typeof window.sendMessage === 'function') { window.__internalAgentContext = ctx; window.sendMessage(true, ''); }
+    
+    var agentCount = agents.length;
+    var summaryLine = agentCount === 1 ? '1 个子代理已完成' : agentCount + ' 个子代理已完成';
+    
+    // ★ 核心：合并后的上下文，一次注入
+    var ctx = '## ⚡ 子代理完成报告（' + summaryLine + '）\n' +
+        '以下子代理已完成，请整合这些信息备用：\n' + results.join('\n---\n') + '\n\n' +
+        '### 🔒 硬性规则\n' +
+        '1. 绝对禁止调用 agent_create / agent_run / delegate_task 等任何创建子代理的工具。\n' +
+        '2. 这条消息是系统通知，不需要回复用户，只需要静默记录结果。\n' +
+        '3. 如用户提问涉及这些子代理的结果，可以直接引用回答，无需重复调用子代理。';
+    
+    if (typeof window.sendMessage === 'function') {
+        window.__internalAgentContext = ctx;
+        window.sendMessage(true, '');  // 传空字符串，主代理识别后静默处理
+    }
+    
+    // 解锁（等 sendMessage 完全结束后再解锁）
+    setTimeout(function() {
+        window._agentNotifyProcessing = false;
+        // 如果期间有新通知进来，继续处理
+        if (window._hasPendingSubAgentNotify || (Array.isArray(window._agentNotifyQueue) && window._agentNotifyQueue.length > 0)) {
+            window._hasPendingSubAgentNotify = false;
+            setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
+        }
+    }, 8000);
 };
 
 window.triggerAgentAutoReplyForSubAgent = function(agentName) {
     if (!agentName) return;
-    if (!window._agentNotifyQueue || !Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
+    if (!Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
+    
+    // 冷却期内收到通知，直接合并到队列但不触发新请求
     var now = Date.now();
     if (now - window._lastSubAgentReportTime < SUB_AGENT_COOLDOWN_MS) {
+        // 如果队列中没有这个代理，加入队列
         var exists = window._agentNotifyQueue.some(function(item) { return item.agentName === agentName; });
-        if (!exists) { window._agentNotifyQueue.push({ agentName: agentName }); } return;
+        if (!exists) {
+            window._agentNotifyQueue.push({ agentName: agentName });
+        }
+        return;
     }
-    if (window._pendingSubAgentResults && window._pendingSubAgentResults.indexOf(agentName) !== -1) return;
-    if (window._pendingSubAgentResults) window._pendingSubAgentResults.push(agentName);
-    var exists = window._agentNotifyQueue.some(function(item) { return item.agentName === agentName; });
-    if (!exists) { window._agentNotifyQueue.push({ agentName: agentName }); }
-    if (typeof window._processAgentNotifyQueue === 'function') { window._processAgentNotifyQueue(); }
-};
-
-window.triggerAgentAutoReply = function(summary, chatId) {
-    if (!summary) return;
-    chatId = chatId || currentChatId;
+    
+    // 记录待处理的子代理结果，避免重复触发
+    if (!Array.isArray(window._pendingSubAgentResults)) { window._pendingSubAgentResults = []; }
+    if (window._pendingSubAgentResults.indexOf(agentName) !== -1) {
+        return;
+    }
+    window._pendingSubAgentResults.push(agentName);
+    
+    // 如果主代理正在生成，排队
+    var chatId = currentChatId;
     if (!chatId || !chats[chatId]) {
         createNewChat();
         chatId = currentChatId;
         if (!chatId) return;
     }
     
-    // 让模型主动检查子代理状态并汇报
-    var ctx = 'SUB_AGENT_REPORT: 子代理刚完成任务。请用 engine_agent_list 查看所有子代理状态，然后综合当前聊天记录进行处理。如果已有相关回答，保持静默或简要补充。不需要回复「子代理已完成」之类的通知。';
-    console.log('[AgentAutoReply] 触发主代理汇报子代理结果');
-    
     if (isTypingMap[chatId]) {
-        window._agentNotifyQueue.push({ chatId: chatId, contextMsg: ctx });
-        console.log('[AgentAutoReply] 主代理忙，排队，当前队列:', window._agentNotifyQueue.length);
+        window._agentNotifyQueue.push({ agentName: agentName });
         return;
     }
     
-    // ★ 标记等待中，防止重复触发
-    if (window._waitingForSubAgent) {
-        console.log('[AgentAutoReply] 已经在等待子代理中，跳过');
-        return;
-    }
-    window._waitingForSubAgent = true;
-    
-    if (typeof window.sendMessage === 'function') {
-        window.sendMessage(true, ctx);
-    }
+    // 添加到队列并处理
+    window._agentNotifyQueue.push({ agentName: agentName });
+    window._processAgentNotifyQueue();
+};
+
+window.triggerAgentAutoReply = function(summary, chatId) {
+    // 旧接口，保留兼容但不再使用
 };
 
 window.deleteAgent = async function(name) {
@@ -4577,6 +4678,20 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     let usage = null;
     let placeholderCleared = false;
     let parseErrors = 0;
+    // ★ 流式内容定期保存到 localStorage（防止刷新丢失）
+    // 把 timer 挂在 pendingMsg 上，方便外部清理
+    if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
+    pendingMsg._streamSaveTimer = setInterval(function() {
+        if (pendingMsg.content || pendingMsg.reasoning) {
+            try {
+                localStorage.setItem('_savedPartial', JSON.stringify({
+                    chatId: chatId,
+                    content: pendingMsg.content || '',
+                    reasoning: pendingMsg.reasoning || ''
+                }));
+            } catch(e) {}
+        }
+    }, 2000);
     // 工具调用相关
     let toolCalls = [];
     let currentToolCall = null;
@@ -5346,18 +5461,26 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 }
 
 function handleError(e, chatId, pendingMsg, currentBubble) {
-    const hasContent = pendingMsg.content && pendingMsg.content.trim() !== '';
-    const hasReasoning = pendingMsg.reasoning && pendingMsg.reasoning.trim() !== '';
-    if (!hasContent && !hasReasoning) {
-        const idx = chats[chatId].messages.findIndex(m => m.partial);
-        if (idx !== -1) chats[chatId].messages.splice(idx, 1);
-    } else {
-        delete pendingMsg.partial;
-        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-        pendingMsg.content = pendingMsg.content || '';
-        pendingMsg.reasoning = pendingMsg.reasoning || '';
-    }
+    // ★ 清除流式保存定时器
+    if (pendingMsg && pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+    // ★ 通知模式解锁
     window._agentNotifyProcessing = false;
+    const hasContent = pendingMsg && pendingMsg.content && typeof pendingMsg.content === 'string' && pendingMsg.content.trim() !== '';
+    const hasReasoning = pendingMsg && pendingMsg.reasoning && typeof pendingMsg.reasoning === 'string' && pendingMsg.reasoning.trim() !== '';
+    if (!hasContent && !hasReasoning) {
+        const chatMessages = (chats && chats[chatId]) ? chats[chatId].messages : null;
+        if (chatMessages) {
+            const idx = chatMessages.findIndex(m => m.partial);
+            if (idx !== -1) chatMessages.splice(idx, 1);
+        }
+    } else {
+        if (pendingMsg) {
+            delete pendingMsg.partial;
+            try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+            pendingMsg.content = pendingMsg.content || '';
+            pendingMsg.reasoning = pendingMsg.reasoning || '';
+        }
+    }
     saveChats();
     if (currentChatId === chatId && currentBubble) {
         currentBubble.classList.remove('typing');
@@ -5444,11 +5567,14 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 };
 
 window.sendMessage = async function (skipUserAdd = false, userTextForRegen = null, userFilesForRegen = null) {
+    // ★ 任务批次隔离：用户消息开启新批次，内部通知复用当前批次
     if (!skipUserAdd) {
+        // 用户发起的消息 → 新任务批次开始，清空旧的子代理追踪
         window._currentGroupId = (window._currentGroupId || 0) + 1;
-        window._activeSubAgentGroup = [];
-        console.log('[Agent] 新任务批次，groupId=' + window._currentGroupId);
+        window._activeSubAgentGroup = [];  // {name, groupId} 列表
+        console.log('[Agent] 新任务批次开始，groupId=' + window._currentGroupId);
     }
+    
     if (!rateLimit.allowed()) {
         showToast('请求过于频繁', 'warning');
         return;
@@ -5574,19 +5700,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     window.__isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     let apiMessages = buildApiMessages(chatId);
     
-    // ★ 内部 Agent 上下文注入（子代理完成通知，不显示给用户）
-    if (window.__internalAgentContext) {
-        var ctx = window.__internalAgentContext;
-        delete window.__internalAgentContext;
-        // 追加到 system 消息
-        var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
-        if (sysIdx !== -1) {
-            apiMessages[sysIdx].content += '\n\n' + ctx;
-        } else {
-            apiMessages.unshift({ role: 'system', content: ctx });
-        }
-    }
-
     // 如果有临时时间戳,插入到系统消息之后
     // ★ MiniMax 合并: 时间戳合并到 system 消息,避免 extra system message
     if (temporaryTimestamp) {
@@ -5640,6 +5753,18 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 // 没有 system 消息,在最前面插入
                 apiMessages.unshift({ role: 'system', content: agentPrompt });
             }
+        }
+    }
+    
+    // ★ 内部 Agent 上下文注入（必须在 agent 提示词之后，确保覆盖创建子代理指令）
+    if (window.__internalAgentContext) {
+        var ctx = window.__internalAgentContext;
+        delete window.__internalAgentContext;
+        var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+        if (sysIdx !== -1) {
+            apiMessages[sysIdx].content += '\n\n' + ctx;
+        } else {
+            apiMessages.unshift({ role: 'system', content: ctx });
         }
     }
 
@@ -5779,6 +5904,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             Object.assign(body, customParams);
         } catch { /* 忽略 */ }
     }
+
+    // ★ Agent 模式: 如果本轮创建了子代理，禁止模型继续说话
+    var _hasCreatedSubAgent = false;
 
     // ★ Agent 模式: 思考深度处理
     if (agentModeActive) {
@@ -6142,7 +6270,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'engine_agent_create') {
                         _hasCreatedSubAgent = true;
                         var _aName = (args && args.name) ? args.name : ('agent_' + Date.now());
-                        if (window._activeSubAgentGroup && window._currentGroupId) { window._activeSubAgentGroup.push({name: _aName, groupId: window._currentGroupId}); }
+                        if (window._activeSubAgentGroup && window._currentGroupId) {
+                            window._activeSubAgentGroup.push({name: _aName, groupId: window._currentGroupId});
+                        }
                         toolResult = await engineApiHandler('agent_create', args);
                     }
                      else if (func.name === 'engine_agent_status') {
@@ -6203,21 +6333,30 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('push', args);
                     }
                      else if (func.name === 'delegate_task') {
+                        _hasCreatedSubAgent = true;
                         var taskArgs = args || {};
                         var tName = taskArgs.name || 'agent_' + Date.now();
-                        if (window._activeSubAgentGroup && window._currentGroupId) { window._activeSubAgentGroup.push({name: tName, groupId: window._currentGroupId}); }
-                        var tName = taskArgs.name || 'agent_' + Date.now();
                         var tTask = taskArgs.task || '';
-                        if (tTask) {
-                        _hasCreatedSubAgent = true;
-                            var fullPrompt = '你的任务是: ' + tTask + '。请自主使用 web_search、web_fetch 等工具完成。完成后用 engine_push 推送结果摘要给用户。';
+                        var tRole = taskArgs.role || 'general';
+                        var tPrompt = taskArgs.prompt || '';
+                        if (window._activeSubAgentGroup && window._currentGroupId) {
+                            window._activeSubAgentGroup.push({name: tName, groupId: window._currentGroupId});
+                        }
+                        var tTask = taskArgs.task || '';
+                        var tRole = taskArgs.role || 'general';
+                        var tPrompt = taskArgs.prompt || '';
+                        var fullPrompt = tPrompt || '你的任务是: ' + tTask + '。完成后用 engine_push 推送结果摘要给用户。';
+                        if (fullPrompt) {
                             if (typeof window.engineApiHandler === 'function') {
                                 var _cr = await window.engineApiHandler('agent_create', {
                                     name: tName,
-                                    prompt: fullPrompt
+                                    prompt: fullPrompt,
+                                    role: tRole
                                 });
-                                await window.engineApiHandler('agent_run', { name: tName });
-                        toolResult = { result: '✅ 已创建并启动子代理「' + tName + '」，任务: ' + (tTask || '').substring(0, 50) };
+                                await window.engineApiHandler('agent_run', {
+                                    name: tName
+                                });
+                                toolResult = { result: '✅ 已创建并启动子代理「' + tName + '」(角色:' + tRole + ')，任务: ' + (tTask || tPrompt).substring(0, 50) };
                             } else {
                                 toolResult = { error: '引擎不可用' };
                             }
@@ -6770,6 +6909,37 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
+                // ★ Agent 模式下：如果本轮创建了子代理，立即停止递归循环
+                // ★ Agent 模式下：检测是否创建了子代理
+                if (_hasCreatedSubAgent) {
+                    // ★ 防御性检查 validToolCalls 是否存在
+                    if (!validToolCalls || !Array.isArray(validToolCalls)) {
+                        console.log('[Agent] 已创建子代理，但validToolCalls不可用，直接继续');
+                    } else {
+                    // 检查本轮是否只有 delegate_task/agent_create 工具调用（没有搜索、fetch等）
+                    var onlyCreatedSubAgents = validToolCalls.every(function(tc) {
+                        return tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create');
+                    });
+                    if (onlyCreatedSubAgents) {
+                        // 本轮只创建了子代理，模型还没开始搜索/分析
+                        // 给模型一次机会继续思考：是否需要创建更多子代理，或开始实际工作
+                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个)，允许继续');
+                    } else {
+                        // 本轮既有子代理创建又有实际工作（搜索/分析）
+                        // 停止递归，等待子代理完成
+                        console.log('[Agent] 已创建子代理+执行任务，停止递归等待完成');
+                        delete pendingMsg.partial;
+                        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                        if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+                        pendingMsg.time = Date.now() - startTime;
+                        pendingMsg.usage = usage;
+                        saveChats();
+                        if (currentChatId === chatId) loadChat(chatId);
+                        return;
+                    }
+                    }
+                    }
+
                 // 重置 AbortController 和 timeout 以便下一个请求使用
                 const newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
@@ -6785,10 +6955,14 @@ window.useAlternativeVisionModel = function() {
             delete pendingMsg.partial;
             // ★ 清除保存的 partial 标记（已完成，刷新不会丢失）
             try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+            // ★ 清除流式保存定时器
+            if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
-            // ★ 清除子代理等待标记
-            window._waitingForSubAgent = false;
+            // ★ 子代理完成报告处理：触发队列中的下一个通知
+            if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0) {
+                setTimeout(function() { window._processAgentNotifyQueue(); }, 1000);
+            }
             saveChats();  // 立即保存，不用 debounce
             if (currentChatId === chatId) loadChat(chatId);
             if (currentChatId === chatId) loadChat(chatId);
@@ -8406,8 +8580,10 @@ async function engineApiHandler(action, args) {
             var currentKey = localStorage.getItem('apiKey') || '';
             var currentUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1';
             var currentModel = args.model || localStorage.getItem('model') || 'deepseek-chat';
+            var agentRole = args.role || 'general';
             var url = '/oneapichat/engine_api.php?action=agent_create&name=' + encodeURIComponent(args.name);
             url += '&prompt=' + encodeURIComponent(args.prompt || args.task || '');
+            url += '&role=' + encodeURIComponent(agentRole);
             url += '&model=' + encodeURIComponent(currentModel);
             url += '&api_key=' + encodeURIComponent(currentKey);
             url += '&base_url=' + encodeURIComponent(currentUrl);
@@ -8418,7 +8594,7 @@ async function engineApiHandler(action, args) {
                 if (d.ok) {
                     // 创建后自动运行（不等待完成，避免阻塞并行工具调用）
                     fetch('/oneapichat/engine_api.php?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix).catch(function(){});
-                    return { result: '✅ 子代理 ' + args.name + ' 已创建并启动' };
+                    return { result: '✅ 子代理 ' + args.name + ' 已创建并启动（角色:' + agentRole + '）' };
                 }
                 return { error: d.error || '创建失败' };
             } catch(e) {
