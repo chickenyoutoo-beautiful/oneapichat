@@ -268,12 +268,11 @@ details.reasoning-details summary {
     font-size: 0.9rem;
 }
 details.reasoning-details summary::before {
-    content: "▸";
-    font-size: 0.9rem;
-    display: inline-block;
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    content: "▶";
+    font-size: 0.8rem;
+    transition: transform 0.2s ease-in-out;
 }
-details.reasoning-details[open] summary::before { content: "▸"; transform: rotate(90deg); }
+details.reasoning-details[open] summary::before { content: "▼"; }
 .reasoning-content {
     margin-top: 4px;
     padding: 4px 8px;
@@ -367,14 +366,6 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     position: relative;
 }
 
-/* 确保主区域不透明 */
-header, #chatBox {
-    background: var(--bg, #ffffff);
-}
-.dark header, .dark #chatBox {
-    background: var(--bg, #111827);
-}
-
 /* ===== 发送/停止按钮 ===== */
 .send-stop-container {
     position: absolute;
@@ -385,16 +376,14 @@ header, #chatBox {
     height: 44px;
     transition: top 0.2s ease;
     z-index: 10;
-    pointer-events: none;
 }
-.send-stop-container > button { pointer-events: auto; }
 .send-btn, .stop-btn {
     position: absolute; top: 0; left: 0; width: 44px; height: 44px;
     border-radius: 50%; display: flex; align-items: center;
     justify-content: center; transition: all 0.2s; cursor: pointer;
 }
-.send-btn { background: var(--primary); color: white; pointer-events: auto; z-index: 20; }
-.stop-btn { background: var(--danger); color: white; opacity: 0; pointer-events: none; z-index: 19; }
+.send-btn { background: var(--primary); color: white; }
+.stop-btn { background: var(--danger); color: white; opacity: 0; pointer-events: none; }
 .send-btn.hidden { opacity: 0; pointer-events: none; }
 .stop-btn.visible { opacity: 1; pointer-events: auto; }
 .send-btn:hover, .stop-btn:hover { transform: scale(1.1); }
@@ -809,7 +798,7 @@ select option { background: white; color: #1f2937; }
     background: white;
     border-radius: 9999px;
     border: 1px solid #e5e7eb;
-    overflow: visible;
+    overflow: hidden;
 }
 .dark .input-wrapper {
     background: #1f2937;
@@ -844,8 +833,18 @@ select option { background: white; color: #1f2937; }
     box-shadow: none !important;
     outline: none !important;
 }
-#userInput::-webkit-scrollbar { width: 0; height: 0; }
-#userInput { scrollbar-width: none; }
+#userInput::-webkit-scrollbar { width: 8px; }
+#userInput::-webkit-scrollbar-track { background: transparent; margin: 4px 0; }
+#userInput::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.4);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+}
+#userInput::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.6); }
+.dark #userInput::-webkit-scrollbar-thumb { background-color: rgba(107, 114, 128, 0.4); }
+.dark #userInput::-webkit-scrollbar-thumb:hover { background-color: rgba(107, 114, 128, 0.6); }
 
 /* ===== 文件上传按钮 ===== */
 .input-wrapper .flex label[for="fileInput"] {
@@ -2413,518 +2412,4 @@ html:not(.dark) #userInput {
   .dark\:placeholder-gray-500::placeholder { color: #6b7280; }
   .dark\:text-gray-300 { color: #d1d5db; }
   .dark\:text-white { color: #ffffff; }
-}
-
-/* ===== Agent 模式切换按钮 ===== */
-.agent-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 12px 4px 8px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    border: 1px solid #d1d5db;
-    background: #f9fafb;
-    color: #6b7280;
-    white-space: nowrap;
-    user-select: none;
-}
-.dark .agent-toggle-btn {
-    background: #1f2937;
-    border-color: #374151;
-    color: #9ca3af;
-}
-.agent-toggle-btn:hover {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-.agent-toggle-btn.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #fff;
-}
-.dark .agent-toggle-btn.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #fff;
-}
-.agent-split-btn .agent-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.5);
-    transition: background 0.3s;
-}
-.agent-toggle-btn.active .agent-dot {
-    background: #fff;
-}
-.agent-banner {
-    display: none;
-    padding: 6px 14px;
-    margin-bottom: 6px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
-    font-size: 11px;
-    border-radius: 9999px;
-    text-align: center;
-}
-.dark .agent-banner {
-    background: #1e3a5f;
-    border-color: #2563eb;
-    color: #93c5fd;
-}
-.agent-banner.visible {
-    display: block;
-}
-.agent-toggle-btn svg {
-    flex-shrink: 0;
-}
-
-/* ===== 代理聊天室面板 ===== */
-.agent-chat-panel {
-    width: 340px;
-    flex-shrink: 0;
-    height: 100%;
-    padding: 16px;
-    overflow-y: auto;
-    border-left: 1px solid var(--border-color, #e5e7eb);
-    transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-                opacity 0.3s ease,
-                padding 0.3s ease,
-                transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-    overflow-x: hidden;
-    background: var(--bg, #ffffff);
-    z-index: 10;
-}
-.dark .agent-chat-panel {
-    background: #111827;
-    border-left-color: #374151;
-}
-.agent-chat-panel.hidden-panel {
-    width: 0 !important;
-    min-width: 0;
-    opacity: 0;
-    transform: translateX(-20px);
-    padding: 0;
-    border: none;
-    overflow: hidden;
-    pointer-events: none;
-}
-
-/* 移动端：全屏覆盖层，和配置栏一致 */
-@media (max-width: 786px) {
-    .agent-chat-panel {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        height: 100vh !important;
-        height: 100dvh !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        transform: translateX(-100%);
-        transition: transform 0.3s ease !important;
-        z-index: 1000 !important;
-        box-shadow: 2px 0 8px rgba(0,0,0,0.1);
-        overflow-y: auto;
-        opacity: 1 !important;
-        border-right: 1px solid #e5e7eb;
-        border-left: none !important;
-        border-top-right-radius: 20px;
-        border-bottom-right-radius: 20px;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-        background: var(--bg, #ffffff) !important;
-    }
-    .dark .agent-chat-panel {
-        background: #111827 !important;
-        border-right-color: #374151;
-    }
-    .agent-chat-panel.hidden-panel {
-        transform: translateX(-100%) !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: unset !important;
-        opacity: 1 !important;
-        padding: 16px !important;
-        border: none !important;
-        overflow: hidden !important;
-        pointer-events: none !important;
-    }
-    .agent-chat-panel:not(.hidden-panel) {
-        transform: translateX(0) !important;
-    }
-}
-
-.agent-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 16px;
-    margin-bottom: 16px;
-    border-bottom: 1px solid rgba(0,0,0,0.06);
-    gap: 12px;
-}
-.dark .agent-panel-header { border-color: rgba(255,255,255,0.06); }
-
-.agent-icon-btn {
-    padding: 6px;
-    border-radius: 8px;
-    color: #9ca3af;
-    transition: all 0.2s ease;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.agent-icon-btn:hover {
-    color: #6366f1;
-    background: rgba(99,102,241,0.08);
-}
-
-/* 代理状态指示器 */
-.agent-panel-status {
-    font-size: 10px;
-    font-weight: 500;
-    color: #22c55e;
-    background: rgba(34,197,94,0.1);
-    padding: 2px 10px;
-    border-radius: 999px;
-    letter-spacing: 0.02em;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    white-space: nowrap;
-}
-.dark .agent-panel-status {
-    color: #4ade80;
-    background: rgba(34,197,94,0.15);
-}
-.agent-panel-status::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    flex-shrink: 0;
-    animation: agent-status-pulse 2s infinite;
-}
-@keyframes agent-status-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-}
-
-.agent-section {
-    margin-bottom: 16px;
-    padding: 12px;
-    border-radius: 12px;
-    background: rgba(0,0,0,0.02);
-    border: 1px solid rgba(0,0,0,0.04);
-}
-.dark .agent-section {
-    background: rgba(255,255,255,0.03);
-    border-color: rgba(255,255,255,0.04);
-}
-
-.agent-section-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: #6b7280;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-bottom: 12px;
-    padding-left: 2px;
-}
-.agent-section-label svg { opacity: 0.5; flex-shrink: 0; }
-.dark .agent-section-label { color: #9ca3af; }
-
-.agent-sub-list { display: flex; flex-direction: column; gap: 2px; }
-
-.agent-sub-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    gap: 10px;
-}
-.agent-sub-item:hover {
-    background: rgba(99,102,241,0.05);
-}
-.dark .agent-sub-item:hover {
-    background: rgba(99,102,241,0.1);
-}
-
-.agent-sub-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    box-shadow: 0 0 6px rgba(0,0,0,0.15);
-}
-.agent-sub-dot.running { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.4); }
-.agent-sub-dot.completed { background: #6366f1; }
-.agent-sub-dot.failed { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.3); }
-.agent-sub-dot.idle { background: #9ca3af; }
-
-.agent-chat-area {
-    max-height: 280px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.agent-chat-bubble {
-    padding: 10px 12px;
-    border-radius: 12px;
-    font-size: 12px;
-    line-height: 1.6;
-}
-.agent-chat-bubble.role-user {
-    background: rgba(99,102,241,0.06);
-    margin-left: 8px;
-}
-.dark .agent-chat-bubble.role-user { background: rgba(99,102,241,0.12); }
-.agent-chat-bubble.role-assistant {
-    background: rgba(0,0,0,0.03);
-    margin-right: 8px;
-}
-.dark .agent-chat-bubble.role-assistant { background: rgba(255,255,255,0.04); }
-
-.agent-action-btn {
-    width: 100%;
-    padding: 9px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #fff;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    border: none;
-    border-radius: 10px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(99,102,241,0.25);
-}
-.agent-action-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(99,102,241,0.35);
-}
-.agent-action-btn:active { transform: scale(0.98); }
-
-/* ===== 代理面板打开按钮（输入区）===== */
-.chat-agent-toggle {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 7px 14px;
-    border-radius: 22px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #fff;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    border: none;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 11;
-    box-shadow: 0 2px 10px rgba(99,102,241,0.3);
-}
-.chat-agent-toggle:hover {
-    box-shadow: 0 4px 16px rgba(99,102,241,0.45);
-    transform: translateY(-1px);
-}
-.chat-agent-toggle:active { transform: scale(0.96); }
-.dark .chat-agent-toggle {
-    box-shadow: 0 2px 10px rgba(129,140,248,0.25);
-}
-/* 代理面板快速入口（分离按钮） */
-.agent-split-btn {
-    display: flex;
-    border-radius: 22px;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(99,102,241,0.3);
-}
-.agent-split-btn button {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 7px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: #fff;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-}
-.agent-split-left { border-radius: 22px 0 0 22px; }
-.agent-split-right {
-    border-radius: 0 22px 22px 0;
-    position: relative;
-}
-.agent-split-divider {
-    width: 1px;
-    background: rgba(255,255,255,0.25);
-}
-.agent-split-btn button:hover {
-    filter: brightness(1.1);
-}
-.agent-split-btn button:active { transform: scale(0.96); }
-.dark .agent-split-btn {
-    box-shadow: 0 2px 10px rgba(129,140,248,0.25);
-}
-/* Agent 模式激活：左半部分高亮 */
-.agent-split-btn.active .agent-split-left {
-    background: linear-gradient(135deg, #4f46e5, #7c3aed);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
-}
-.agent-split-btn.active .agent-dot {
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34,197,94,0.6);
-}
-
-.agent-split-right .agent-notif-dot {
-    position: absolute;
-    top: 3px;
-    right: 3px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #ef4444;
-    display: none;
-    animation: pulse-dot 2s infinite;
-    border: 1.5px solid #fff;
-}
-.dark .agent-split-right .agent-notif-dot { border-color: #1f2937; }
-.agent-split-right .agent-notif-dot.show { display: block; }
-@keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-}
-
-/* ===== Tailwind 颜色工具类补充（按钮用 ===== */
-.text-blue-600 { color: #2563eb; }
-.dark .text-blue-400 { color: #60a5fa; }
-.bg-blue-50 { background-color: #eff6ff; }
-.dark .bg-blue-900\/20 { background-color: rgba(30,58,138,0.2); }
-.hover\:bg-blue-100:hover { background-color: #dbeafe; }
-.dark .hover\:bg-blue-900\/30:hover { background-color: rgba(30,58,138,0.3); }
-
-.text-green-600 { color: #16a34a; }
-.dark .text-green-400 { color: #4ade80; }
-.bg-green-50 { background-color: #f0fdf4; }
-.dark .bg-green-900\/20 { background-color: rgba(20,83,45,0.2); }
-.hover\:bg-green-100:hover { background-color: #dcfce7; }
-.dark .hover\:bg-green-900\/30:hover { background-color: rgba(20,83,45,0.3); }
-
-.text-red-600 { color: #dc2626; }
-.dark .text-red-400 { color: #f87171; }
-.bg-red-50 { background-color: #fef2f2; }
-.dark .bg-red-900\/20 { background-color: rgba(127,29,29,0.2); }
-.hover\:bg-red-100:hover { background-color: #fee2e2; }
-.dark .hover\:bg-red-900\/30:hover { background-color: rgba(127,29,29,0.3); }
-
-.text-indigo-600 { color: #4f46e5; }
-.dark .text-indigo-400 { color: #818cf8; }
-.bg-indigo-50 { background-color: #eef2ff; }
-.dark .bg-indigo-900\/20 { background-color: rgba(49,46,129,0.2); }
-.hover\:bg-indigo-100:hover { background-color: #e0e7ff; }
-.dark .hover\:bg-indigo-900\/30:hover { background-color: rgba(49,46,129,0.3); }
-
-.flex { display: flex; }
-.items-center { align-items: center; }
-.justify-center { justify-content: center; }
-.gap-2 { gap: 0.5rem; }
-.w-full { width: 100%; }
-.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
-.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
-.font-medium { font-weight: 500; }
-.rounded-lg { border-radius: 0.5rem; }
-.transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; }
-.w-4 { width: 1rem; }
-.h-4 { height: 1rem; }
-
-/* ===== 小型开关 ===== */
-.switch.small {
-    width: 32px;
-    height: 18px;
-}
-.switch.small .slider {
-    border-radius: 18px;
-}
-.switch.small .slider:before {
-    height: 12px;
-    width: 12px;
-    left: 3px;
-    bottom: 3px;
-}
-.switch.small input:checked + .slider:before {
-    transform: translateX(14px);
-}
-/* ===== 小型开关（更小） ===== */
-.switch.small {
-    width: 28px;
-    height: 16px;
-}
-.switch.small .slider {
-    border-radius: 16px;
-}
-.switch.small .slider:before {
-    height: 10px;
-    width: 10px;
-    left: 3px;
-    bottom: 3px;
-}
-.switch.small input:checked + .slider:before {
-    transform: translateX(12px);
-}
-
-/* ===== Agent 配置面板标签 ===== */
-.agent-config-label {
-    font-size: 11px;
-    color: #6b7280;
-    margin-bottom: 4px;
-}
-.dark .agent-config-label {
-    color: #9ca3af;
-}
-
-/* ===== 引擎状态列表 ===== */
-.engine-status-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 3px 0;
-    font-size: 12px;
-    color: #374151;
-}
-.dark .engine-status-item {
-    color: #f3f4f6;
-}
-.engine-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-top: 4px;
-    flex-shrink: 0;
-}
-.engine-status-dot.online, .engine-status-dot.running { background: #10b981; }
-.engine-status-dot.offline, .engine-status-dot.stopped { background: #ef4444; }
-.engine-status-dot.completed, .engine-status-dot.idle { background: #f59e0b; }
-.engine-status-list {
-    min-height: 20px;
 }

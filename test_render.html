@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>渲染测试</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="./js/lib/marked.min.js"></script>
+<style>
+body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+.test { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
+.pass { border-color: #22c55e; background: #f0fdf4; }
+.fail { border-color: #ef4444; background: #fef2f2; }
+pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; overflow-x: auto; }
+.katex { font-size: 1.1em; }
+</style>
+</head>
+<body>
+<h1>⚡ 渲染逻辑自测</h1>
+
+<script>
+// 模拟 _protectMath / _restoreMath / _renderMarkdown
+const _mathBlocks = [];
+const _mathInlineBlocks = [];
+const _codeBlocks = [];
+
+function _protectMath(text) {
+    _mathBlocks.length = 0;
+    _mathInlineBlocks.length = 0;
+    let idx = 0, iIdx = 0, cIdx = 0;
+    text = text.replace(/```[\s\S]*?```/g, (m) => {
+        const ph = `\x00CODE${cIdx++}\x00`;
+        _codeBlocks.push(m);
+        return ph;
+    });
+    text = text.replace(/\$\$[\s\S]*?\$\$/g, (m) => {
+        const ph = `\x00MATH${idx++}\x00`;
+        _mathBlocks.push(m);
+        return ph;
+    });
+    text = text.replace(/(?<!\$)\$([^$\n\\]+?)\$(?!\$)/g, (m, inner) => {
+        const ph = `\x00INLINEMATH${iIdx++}\x00`;
+        _mathInlineBlocks.push(inner);
+        return ph;
+    });
+    return text;
+}
+
+function _restoreMath(html) {
+    _codeBlocks.forEach((c, i) => { html = html.replace(`\x00CODE${i}\x00`, c); });
+    _mathBlocks.forEach((m, i) => { html = html.replace(`\x00MATH${i}\x00`, m); });
+    _mathInlineBlocks.forEach((inner, i) => { html = html.replace(`\x00INLINEMATH${i}\x00`, `$` + inner + `$`); });
+    return html;
+}
+
+function _renderMarkdown(text) {
+    if (!window.marked) return text;
+    try {
+        return marked.parse(_protectMath(text));
+    } catch (e) { return text; }
+}
+
+// 测试用例
+const tests = [
+    {
+        name: "块级公式 $$...$$",
+        input: "这是公式 $$E = mc^2$$ 结束",
+        check: (html) => html.includes('class="katex"') || html.includes('katex')
+    },
+    {
+        name: "行内公式 $...$",
+        input: "行内 $x^2 + y^2 = z^2$ 测试",
+        check: (html) => html.includes('katex')
+    },
+    {
+        name: "多行块级公式",
+        input: "$$\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt\\pi}{2}$$",
+        check: (html) => html.includes('katex')
+    },
+    {
+        name: "代码块中的 $ 不处理",
+        input: "```\nconst x = $('selector');\n```",
+        check: (html) => !html.includes('katex') && html.includes('&lt;') // 代码块转义
+    },
+    {
+        name: "普通文本",
+        input: "Hello World 你好",
+        check: (html) => html.includes('Hello') && html.includes('你好')
+    },
+    {
+        name: "加粗 + 斜体",
+        input: "**粗体** and *斜体*",
+        check: (html) => html.includes('<strong>') && html.includes('<em>')
+    },
+    {
+        name: "嵌套: 公式在代码块后",
+        input: "```js\nconsole.log('hi')\n```\n\n然后 $$x=1$$",
+        check: (html) => html.includes('katex') && html.includes('<code>')
+    },
+    {
+        name: "marked 防注入: $ 在代码块内不应变成公式",
+        input: "```\nprice = $100\n```",
+        check: (html) => !html.includes('katex') // 代码块内的 $ 不处理
+    }
+];
+
+let passed = 0, failed = 0;
+
+tests.forEach(t => {
+    const html = _restoreMath(_renderMarkdown(t.input));
+    // 渲染 KaTeX
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    if (window.renderMathInElement) {
+        renderMathInElement(tmp, {
+            throwOnError: false,
+            delimiters: [
+                {left:'$$', right:'$$', display:true},
+                {left:'$', right:'$', display:false},
+                {left:'\\[', right:'\\]', display:true},
+                {left:'\\(', right:'\\)', display:false}
+            ],
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'table']
+        });
+    }
+    const finalHtml = tmp.innerHTML;
+    const ok = t.check(finalHtml, html);
+    const div = document.createElement('div');
+    div.className = 'test ' + (ok ? 'pass' : 'fail');
+    div.innerHTML = `<strong>${ok ? '✅' : '❌'} ${t.name}</strong><br>
+    <small>输入: <code>${t.input.replace(/</g,'&lt;').slice(0,60)}</code></small><br>
+    <small>输出: ${finalHtml.slice(0, 120).replace(/</g,'&lt;')}</small>`;
+    document.body.appendChild(div);
+    if (ok) passed++; else failed++;
+});
+
+// 汇总
+const sum = document.createElement('div');
+sum.className = 'test ' + (failed === 0 ? 'pass' : 'fail');
+sum.innerHTML = `<strong>${passed} 通过 / ${failed} 失败</strong>`;
+document.body.appendChild(sum);
+</script>
+</body>
+</html>

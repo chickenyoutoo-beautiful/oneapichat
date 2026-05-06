@@ -1,0 +1,18 @@
+# OneAPIChat 安全配置
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # 保护 .git 目录
+    RewriteRule ^\.git - [F,L]
+    # 保护备份文件
+    RewriteRule ^backup_ - [F,L]
+    # 拒绝访问 .json 聊天数据
+    RewriteRule ^chat_data/ - [F,L]
+</IfModule>
+
+# 目录列表禁用
+Options -Indexes
+
+# 限制上传目录的 PHP 执行
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>

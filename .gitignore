@@ -1,28 +1,18 @@
-# Large files
-tailwindcss
+# 备份目录
+oneapichat-backups/
+backup_*/
+# 构建产物
+dist/ build/ bin/ obj/
+*.exe *.dll *.so *.dylib *.jar *.war
+# 依赖
+node_modules/ vendor/ __pycache__/ *.pyc
+# 环境/安全
+.env .env.local .env.production
+# 聊天数据和上传文件（敏感数据）
+chat_data/
+uploads/
+# 临时和日志
+*.log /tmp/
 
-# Build outputs
-dist/
-build/
-bin/
-obj/
-*.exe
-*.dll
-*.so
-*.dylib
-*.jar
-*.war
-*.zip
-*.tar.gz
-*.tgz
-
-# Dependencies
-node_modules/
-vendor/
-__pycache__/
-*.pyc
-
-# Environment
-.env
-.env.local
-.env.production
+# Engine运行时数据（不需要版本控制）
+.engine/
