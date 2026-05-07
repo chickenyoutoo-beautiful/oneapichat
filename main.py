@@ -115,6 +115,14 @@ if __name__ == '__main__':
         # 开始遍历要学习的课程列表
         logger.info(f"课程列表过滤完毕，当前课程任务数量: {len(course_task)}")
         for course in course_task:
+            # 检查课程是否已完成，完成则跳过避免卡死
+            existing_status = tracker.conn.execute(
+                "SELECT status FROM courses WHERE id=? AND user_id=?",
+                (course['courseId'], user_id)
+            ).fetchone()
+            if existing_status and existing_status[0] == 'completed':
+                logger.info(f"课程 {course['title']} 已完成，跳过")
+                continue
             logger.info(f"开始学习课程: {course['title']}")
             tracker.start_course(course['courseId'], course['title'], course.get('teacher', ''))
             # 获取当前课程的所有章节
