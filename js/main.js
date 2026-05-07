@@ -2304,104 +2304,12 @@ const handleResize = debounce(() => {
 // ==================== 配置管理 ====================
 function createTitleModelSelector() {
     if (getEl('titleModel')) return;
-    const sidebar = getEl('sidebar');
-    const target = sidebar?.querySelector('.mt-6.pt-4');
-    if (!target) return;
-    const div = document.createElement('div');
-    div.className = 'mt-4 pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3';
-    div.innerHTML = `
-        <h3 class="text-xs font-bold text-gray-400 uppercase">标题生成</h3>
-        <div class="flex items-center gap-2 text-xs">
-            <span>标题模型:</span>
-            <select id="titleModel" class="w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-xs outline-none">
-                <option value="">默认</option>
-            </select>
-        </div>
-    `;
-    sidebar.insertBefore(div, target);
-    getEl('titleModel')?.addEventListener('change', e => localStorage.setItem('titleModel', e.target.value));
+    // 已迁移至 HTML 静态渲染
 }
 
 function createSearchConfigSection() {
     if (getEl('searchConfigItem')) return;
-    const customParamsEl = getEl('customParams');
-    const target = customParamsEl?.closest('div');
-    if (!target) return;
-    const section = document.createElement('div');
-    section.id = 'searchConfigItem';
-    section.className = 'config-item';
-    section.innerHTML = `
-        <div class="flex items-center justify-between py-3">
-            <span class="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-[5px] whitespace-nowrap">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>联网搜索
-            </span>
-            <label class="switch small"><input type="checkbox" id="searchToggle"><span class="slider"></span></label>
-        </div>
-        <div class="flex items-center justify-between py-3">
-            <span class="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-[5px] whitespace-nowrap">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>本地知识库
-            </span>
-            <label class="switch small"><input type="checkbox" id="ragToggle" checked><span class="slider"></span></label>
-        </div>
-        <div class="mt-4 pt-2 border-t border-gray-100 dark:border-gray-700" id="searchConfigDetails" style="display:none;">
-            <div class="space-y-[18px]">
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">AI 判断</span>
-                    <label class="switch small"><input type="checkbox" id="aiSearchJudgeToggle"><span class="slider"></span></label>
-                </div>
-                <div id="aiSearchJudgeDetails" style="display:none;">
-                    <select id="aiSearchJudgeModel" class="config-input text-xs w-full py-[6px]" style="font-size:11px;"><option value="">同主模型</option></select>
-                    <textarea id="aiSearchJudgePrompt" rows="2" class="config-input w-full text-xs mt-[8px]" style="font-size:11px;line-height:1.5;" placeholder="AI 判断提示词(启用 AI 判断后可见)"></textarea>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">引擎</span>
-                    <select id="searchProvider" class="config-input text-xs" style="width:auto;min-width:80px;font-size:11px;padding:4px 8px;"><option value="duckduckgo">DuckDuckGo</option><option value="brave">Brave</option><option value="google">Google</option><option value="tavily">Tavily</option></select>
-                </div>
-                <div class="flex items-center gap-[10px] py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">API Key</span>
-                    <input type="password" id="searchApiKey" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="当前引擎 Key">
-                </div>
-                <details class="text-xs py-2">
-                    <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs">各引擎 Key</summary>
-                    <div class="mt-[10px] space-y-[8px] pl-[4px]">
-                        <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Brave</span><input type="password" id="searchApiKeyBrave" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
-                        <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Google</span><input type="password" id="searchApiKeyGoogle" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
-                        <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Tavily</span><input type="password" id="searchApiKeyTavily" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
-                    </div>
-                </details>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">地区</span>
-                    <input type="text" id="searchRegion" class="config-input text-xs" style="font-size:11px;width:60px;padding:4px 8px;" placeholder="cn">
-                </div>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">类型</span>
-                    <select id="searchType" class="config-input text-xs" style="width:auto;min-width:65px;font-size:11px;padding:4px 8px;"><option value="auto">自动</option><option value="web">网页</option><option value="news">新闻</option></select>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">自动判断类型</span>
-                    <label class="switch small"><input type="checkbox" id="aiSearchTypeToggle"><span class="slider"></span></label>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">搜索提示</span>
-                    <label class="switch small"><input type="checkbox" id="searchShowPromptToggle"><span class="slider"></span></label>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                    <span class="text-xs text-gray-500 whitespace-nowrap">保存到系统</span>
-                    <label class="switch small"><input type="checkbox" id="searchAppendToSystem"><span class="slider"></span></label>
-                </div>
-                <div class="py-2">
-                    <div class="flex items-center justify-between mb-[6px]"><span class="text-xs text-gray-500 whitespace-nowrap">超时 <span id="searchTimeoutValue">30</span>s</span></div>
-                    <input type="range" id="searchTimeout" min="5" max="120" step="5" class="w-full" oninput="updateSearchParam('timeout',this.value)">
-                </div>
-                <div class="py-2">
-                    <div class="flex items-center justify-between mb-[6px]"><span class="text-xs text-gray-500 whitespace-nowrap">结果数 <span id="maxSearchResultsValue">3</span></span></div>
-                    <input type="range" id="maxSearchResults" min="1" max="10" step="1" class="w-full" oninput="updateSearchParam('results',this.value)">
-                </div>
-            </div>
-        </div>`;
-    target.parentNode.insertBefore(section, target.nextSibling);
-    loadSearchConfig();
-    bindSearchEvents();
+    // 已迁移至 HTML 静态渲染
 }
 
 function bindSearchEvents() {
