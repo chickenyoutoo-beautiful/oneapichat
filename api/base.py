@@ -215,37 +215,44 @@ class Chaoxing:
         else:
             _session = init_session(isAudio=True)
         _session.headers.update()
-        _info_url = f"https://mooc1.chaoxing.com/ananas/status/{_job['objectid']}?k={self.get_fid()}&flag=normal"
+        _fid = self.get_fid()
+        if not _fid:
+            logger.warning(f"无法获取fid，跳过视频: {_job.get('name','?')}")
+            return
+        _info_url = f"https://mooc1.chaoxing.com/ananas/status/{_job['objectid']}?k={_fid}&flag=normal"
         _video_info = _session.get(_info_url).json()
-        if _video_info["status"] == "success":
-            _dtoken = _video_info["dtoken"]
-            _duration = _video_info["duration"]
-            _crc = _video_info["crc"]
-            _key = _video_info["key"]
-            _isPassed = False
-            _isFinished = False
-            _playingTime = 0
-            logger.info(f"开始任务: {_job['name']}, 总时长: {_duration}秒")
-            while not _isFinished:
-                if _isFinished:
-                    _playingTime = _duration
-                _isPassed = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, _duration, _playingTime, _type)
-                if not _isPassed or (_isPassed and _isPassed["isPassed"]):
-                    break
-                _wait_time = get_random_seconds()
-                if _playingTime + _wait_time >= int(_duration):
-                    _wait_time = int(_duration) - _playingTime
-                    _isFinished = True
-                # 播放进度条
-                show_progress(_job['name'], _playingTime, _wait_time, _duration, _speed)
-                _playingTime += _wait_time
-            print("\r", end="", flush=True)
-            logger.info(f"任务完成: {_job['name']}")
-            if hasattr(self, '_tracker') and self._tracker:
-                kid = _job_info.get('knowledgeid', '')
-                chapter_id = f"{_course['courseId']}_{kid}"
-                self._tracker.log_video(chapter_id, _job.get('name','unknown'), int(_duration))
-                self._tracker.update_chapter(chapter_id, _course['courseId'], '', video_done=True)
+        if _video_info.get("status") != "success":
+            logger.warning(f"视频状态异常，跳过: {_job.get('name','?')} -> {_video_info}")
+            return
+        _dtoken = _video_info["dtoken"]
+        _duration = _video_info["duration"]
+        _crc = _video_info["crc"]
+        _key = _video_info["key"]
+        _isPassed = False
+        _isFinished = False
+        _playingTime = 0
+        logger.info(f"开始任务: {_job['name']}, 总时长: {_duration}秒")
+        while not _isFinished:
+            if _isFinished:
+                _playingTime = _duration
+            _isPassed = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, _duration, _playingTime, _type)
+            if not _isPassed or (_isPassed and _isPassed["isPassed"]):
+                break
+            _wait_time = get_random_seconds()
+            if _playingTime + _wait_time >= int(_duration):
+                _wait_time = int(_duration) - _playingTime
+                _isFinished = True
+            # 播放进度条
+            show_progress(_job['name'], _playingTime, _wait_time, _duration, _speed)
+            _playingTime += _wait_time
+        print("\r", end="", flush=True)
+        logger.info(f"任务完成: {_job['name']}")
+        if hasattr(self, '_tracker') and self._tracker:
+            kid = _job_info.get('knowledgeid', '')
+            chapter_id = f"{_course['courseId']}_{kid}"
+            self._tracker.log_video(chapter_id, _job.get('name','unknown'), int(_duration))
+            self._tracker.update_chapter(chapter_id, _course['courseId'], '', video_done=True)
+
 
     def study_document(self, _course, _job):
         _session = init_session()
