@@ -482,6 +482,9 @@ switch ($action) {
         // 清理任务状态
         clearTaskState($userId);
 
+        // ★ 重置该用户在 DB 里的 in_progress 课程状态（防止崩溃后课程卡在"刷课中"）
+        @shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . ' --reset-in-progress 2>/dev/null');
+
         echo json_encode(['success' => true]);
         break;
 
