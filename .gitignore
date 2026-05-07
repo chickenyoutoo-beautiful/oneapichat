@@ -13,8 +13,9 @@ chat_data/
 uploads/
 # 临时和日志
 *.log /tmp/
-
-# Engine运行时数据（不需要版本控制）
+# 备份碎片
+*.bak *.bak* *_.bak *.backup *.archbak *.broken* *broken* *ugly* *hack* *optimize*
+# Engine运行时数据
 .engine/
 users/
 chat.php
