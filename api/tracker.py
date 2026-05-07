@@ -40,6 +40,8 @@ class LearningTracker:
             ("chapters", "work_count", "INTEGER DEFAULT 0"),
             ("chapters", "work_done", "INTEGER DEFAULT 0"),
             ("chapters", "last_update", "TEXT"),
+            ("video_logs", "video_name", "TEXT"),
+            ("video_logs", "watched_at", "TEXT"),
         ]:
             try:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {dtype}")
