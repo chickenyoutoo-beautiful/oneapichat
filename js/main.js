@@ -2982,6 +2982,7 @@ window._hasPendingSubAgentNotify = false;
 window._currentGroupId = 0;
 window._activeSubAgentGroup = [];
 window._pendingSubAgentResults = [];
+window._pendingSubAgentResultsData = {};  // {agentName: {status, result, error}} 原始数据
 window._subAgentCooldownActive = false;
 window._lastSubAgentReportTime = 0;
 
@@ -3039,25 +3040,27 @@ window._processAgentNotifyQueue = async function() {
     window._lastSubAgentReportTime = now;
     window._hasPendingSubAgentNotify = false;
     
-    // 获取所有子代理的完成结果
+    // ★ 直接从通知数据中提取结果，不依赖 agent_list（通知已含 result/error）
     var results = [];
-    var token = getAuthToken();
-    if (token) {
-        try {
-            var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
-            var allAgents = await r.json();
-            agents.forEach(function(name) {
-                var a = allAgents[name];
-                if (a) {
-                    var preview = (a.result || a.error || '').substring(0, 1000);
-                    results.push('「' + name + '」状态=' + a.status + (preview ? '\n结果预览: ' + preview : ''));
-                } else {
-                    results.push('「' + name + '」未找到');
-                }
-            });
-        } catch(e) {
-            results.push('获取子代理结果失败: ' + e.message);
+    if (agents && agents.length > 0) {
+        // agents 数组来自通知队列，每个 item 是 {agentName, result, error} 的原始对象
+        // 但 processAgentNotifyQueue 没有直接访问原始通知数据
+        // 改为从 _pendingSubAgentResults 中还原（通知时已保存）
+        agents.forEach(function(name) {
+            var stored = (window._pendingSubAgentResultsData || {})[name];
+            if (stored) {
+                var preview = (stored.result || stored.error || '').substring(0, 1000);
+                results.push('「' + name + '」状态=' + (stored.status || 'completed') + (preview ? '\n结果预览: ' + preview : ''));
+            } else {
+                // 降级：用 agent_list 查询
+                results.push('「' + name + '」状态未知（尝试查询...）');
+            }
+        });
+        if (results.length === 0) {
+            results.push('所有子代理结果获取失败，请检查引擎状态');
         }
+    } else {
+        results.push('无有效子代理完成通知');
     }
     
     var agentCount = agents.length;
@@ -3081,6 +3084,26 @@ window._processAgentNotifyQueue = async function() {
             // 所有流式响应结束后，解锁并检查是否有新批次在等待
             window._agentNotifyProcessing = false;
             var nextExecId = window._pendingNotifyExecId;
+            
+            // 处理完成后，清理本次批次的数据并 mark 已处理
+            if (agents && agents.length > 0 && typeof window._pendingSubAgentResultsData === 'object') {
+                agents.forEach(function(name) {
+                    delete window._pendingSubAgentResultsData[name];
+                });
+            }
+            // 清理 _pendingSubAgentResults（只清理本次批次的）
+            if (agents && Array.isArray(window._pendingSubAgentResults)) {
+                agents.forEach(function(name) {
+                    var idx = window._pendingSubAgentResults.indexOf(name);
+                    if (idx !== -1) window._pendingSubAgentResults.splice(idx, 1);
+                });
+            }
+            // 通知引擎标记已处理
+            var token = getAuthToken();
+            if (token) {
+                fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function() {});
+            }
+            
             if (nextExecId !== null && nextExecId !== execId) {
                 window._pendingNotifyExecId = null;
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
@@ -9248,7 +9271,14 @@ window.checkAgentNotifications = function() {
             
             notifs.forEach(function(n) {
                 var agentName = n.agent || '未知代理';
-                var isSuccess = n.status === 'completed';
+                
+                // ★ 保存原始结果数据，供 processAgentNotifyQueue 直接使用
+                if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
+                window._pendingSubAgentResultsData[agentName] = {
+                    status: n.status || 'completed',
+                    result: n.result || '',
+                    error: n.error || ''
+                };
                 
                 // 保存到代理专属聊天（供面板查看）
                 var fullResult = n.result || n.error || '';
@@ -9260,8 +9290,7 @@ window.checkAgentNotifications = function() {
                     localStorage.setItem(agentKey, JSON.stringify(agentMsgs));
                 }
                 
-                // ★ 不再直接显示子代理通知，改为触发主代理自主处理
-                // ★ 只在 Agent 模式下触发主代理，非 Agent 模式保持静默
+                // 触发主代理处理（会自行管理队列）
                 if (localStorage.getItem('agentMode') === 'true') {
                     window.triggerAgentAutoReplyForSubAgent(agentName);
                 } else {
@@ -9269,9 +9298,8 @@ window.checkAgentNotifications = function() {
                 }
             });
             
-            // 标记为已处理
-            fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
-                .catch(function() {});
+            // ★ 注意：不再在这里立即 mark
+            // ★ processAgentNotifyQueue 会在处理完成后自行调用 agent_notifications_mark
         }).catch(function() {});
 };
 
