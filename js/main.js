@@ -7799,14 +7799,7 @@ function injectStyles() {
 
 // ==================== 恢复默认配置 ====================
 function createRAGEntry() {
-    if (getEl('ragConfigEntry')) return;
-    var panel = $.configPanel || getEl('configPanel');
-    if (!panel) return;
-    var div = document.createElement('div');
-    div.id = 'ragConfigEntry';
-    div.className = 'config-item mt-4 pt-4 border-t border-gray-200 dark:border-gray-800';
-    div.innerHTML = '<button onclick="var p=document.getElementById(\'ragPanel\');if(p){p.classList.toggle(\'open\');p.scrollIntoView({behavior:\'smooth\'});if(typeof loadKnowledgeList===\'function\')loadKnowledgeList();}" class="w-full px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> 知识库管理</button>';
-    panel.appendChild(div);
+    // 已迁移至 HTML 静态渲染
 }
 
 function createResetButton() {
@@ -7963,32 +7956,11 @@ function importChats() {
 
 // ★ 创建数据管理区域
 function createDataManagementSection() {
-    if (getEl('dataManagementSection')) return;
-    const panel = $.configPanel || getEl('configPanel');
-    if (!panel) return;
-    const div = document.createElement('div');
-    div.id = 'dataManagementSection';
-    div.className = 'config-item mt-4 pt-4 border-t border-gray-200 dark:border-gray-800';
-    div.innerHTML = '<h3 class="text-xs font-bold text-gray-400 uppercase mb-3">数据管理</h3>\n' +
-        '<div class="space-y-2">\n' +
-        '<button id="exportChatsBtn" class="w-full px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-center gap-2">\n' +
-        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>\n' +
-        '导出聊天记录\n' +
-        '</button>\n' +
-        '<button id="importChatsBtn" class="w-full px-3 py-2 text-sm font-medium text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center justify-center gap-2">\n' +
-        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>\n' +
-        '导入聊天记录\n' +
-        '</button>\n' +
-        '<button id="exportCurrentChatBtn" class="w-full px-3 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors flex items-center justify-center gap-2">\n' +
-        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>\n' +
-        '导出当前对话\n' +
-        '</button>\n' +
-        '</div>';
-    panel.appendChild(div);
-    getEl('exportChatsBtn').addEventListener('click', exportChats);
-    var _exportBtn = getEl('exportCurrentChatBtn');
-    if (_exportBtn) _exportBtn.addEventListener('click', exportCurrentChat);
-    getEl('importChatsBtn').addEventListener('click', importChats);
+    if (!getEl('dataManagementSection')) return;
+    // 事件绑定（HTML已静态渲染）
+    getEl('exportChatsBtn')?.addEventListener('click', exportChats);
+    getEl('exportCurrentChatBtn')?.addEventListener('click', exportCurrentChat);
+    getEl('importChatsBtn')?.addEventListener('click', importChats);
 }
 // ==================== 初始化配置 ====================
 function initializeConfig() {
