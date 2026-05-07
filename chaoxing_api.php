@@ -177,7 +177,7 @@ switch ($action) {
         if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
             $json = file_get_contents($cache_file);
         } else {
-            $cmd = "python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
+            $cmd = "cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
             exec($cmd, $output, $exit_code);
             $json = '';
             foreach (array_reverse($output) as $line) {
@@ -535,7 +535,7 @@ switch ($action) {
         $cache_file = userCoursesCachePath($userId);
         @unlink($cache_file);
 
-        $cmd = "python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
+        $cmd = "cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
         exec($cmd, $out, $code);
         $json_line = '';
         foreach (array_reverse($out) as $line) {

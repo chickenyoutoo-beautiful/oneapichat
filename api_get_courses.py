@@ -2,12 +2,13 @@
 """获取课程列表（供PHP API调用）"""
 import json, sys, os, argparse
 
-# 切换到脚本所在目录运行
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(script_dir)
-
+# 不切换目录，保持 PHP cd 到的 /tmp/AutomaticCB/ 作为工作目录
+# (/tmp/AutomaticCB/ 有 config.ini 和 cookies.txt 等运行时文件)
+script_dir = os.path.dirname(os.path.abspath(__file__))  # /var/www/html/oneapichat/
 os.environ["COLUMNS"] = "120"
+# 确保 api 模块可导入（/var/www/html/oneapichat/api/ 和 /tmp/AutomaticCB/ 都加入路径）
 sys.path.insert(0, script_dir)
+sys.path.insert(0, '/tmp/AutomaticCB')
 
 import logging
 logging.disable(logging.CRITICAL)
