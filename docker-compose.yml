@@ -1,0 +1,43 @@
+# ========== OneAPIChat docker-compose ==========
+# One-click deployment for OneAPIChat
+# Usage: docker-compose up -d
+
+services:
+  web:
+    build: .
+    container_name: oneapichat
+    restart: unless-stopped
+    ports:
+      # Public web port (HTTP only - use reverse proxy for HTTPS)
+      - "8080:8080"
+    environment:
+      # Flask/Engine settings
+      - ENGINE_PORT=8766
+      - ENGINE_HOST=0.0.0.0
+      # Optional: pre-configure admin credentials
+      # - ADMIN_TOKEN=your-admin-token
+      # Optional: enable debug mode
+      # - DEBUG=true
+    volumes:
+      # Persist user data and chat history
+      - oneapichat_users:/var/www/html/users
+      - oneapichat_chatdata:/var/www/html/chat_data
+      # Persist刷课 data and logs
+      - oneapichat_chaoxing:/tmp/AutomaticCB
+      - oneapichat_pylib:/tmp/pylib
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  oneapichat_users:
+    driver: local
+  oneapichat_chatdata:
+    driver: local
+  oneapichat_chaoxing:
+    driver: local
+  oneapichat_pylib:
+    driver: local

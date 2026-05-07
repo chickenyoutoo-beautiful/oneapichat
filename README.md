@@ -90,19 +90,53 @@ php -S localhost:8080
 
 ---
 
+## ☁️ One-Click Cloud Deployment
+
+### GitHub Actions (刷课 · 云端无人值守)
+See [刷课使用说明](#📖-刷课--automaticcb-使用说明) below.
+
+### Docker (通用 · 任何设备)
+```bash
+# 方式1: 直接运行（自动拉取最新 release）
+docker run -d -p 8080:8080 --name oneapichat \
+  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+
+# 方式2: 使用 docker-compose
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+
+### 一键脚本（Linux/macOS）
+```bash
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+```
+> 支持 Ubuntu / Debian / CentOS / macOS，自动检测 Docker 或原生部署
+
+### Raspberry Pi / NAS / Arm64 设备
+```bash
+docker run -d -p 8080:8080 --name oneapichat \
+  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+```
+> 镜像支持 `linux/arm64`，适用于树莓派、群晖、威联通等设备
+
+---
+
 ## 📁 Project Structure
 
 ```
 .
 ├── index.html          # Main chat UI
-├── main.js              # Core frontend logic
-├── style.css            # Styles
-├── engine_api.php       # PHP proxy layer
-├── engine_server.py     # Python backend (Agent/Cron/SSE)
-├── fetch.php            # Web fetch utility
-├── deploy.sh            # Cross-platform deploy script
-├── LICENSE              # GPL-3.0 License
-└── README.md            # This file
+├── main.js             # Core frontend logic
+├── style.css           # Styles
+├── engine_api.php      # PHP proxy layer
+├── engine_server.py    # Python backend (Agent/Cron/SSE)
+├── fetch.php           # Web fetch utility
+├── deploy.sh           # Cross-platform deploy script
+├── Dockerfile          # Docker image definition
+├── docker-compose.yml  # Docker Compose config
+├── nginx.conf         # Nginx config (native deploy)
+├── LICENSE             # GPL-3.0 License
+└── README.md           # This file
 ```
 
 ---
