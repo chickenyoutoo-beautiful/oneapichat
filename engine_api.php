@@ -120,11 +120,11 @@ switch ($action) {
         break;
 
     case 'agent_notifications':
-        echo @file_get_contents($engine_url . '/engine/agent/notifications?' . $userParam) ?: json_encode(['notifications' => [], 'count' => 0]);
+        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications?" . $userParam . "'") ?: json_encode(['notifications' => [], 'count' => 0]);
         break;
 
     case 'agent_notifications_mark':
-        echo @file_get_contents($engine_url . '/engine/agent/notifications/mark?' . $userParam) ?: json_encode(['ok' => false]);
+        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications/mark?" . $userParam . "'") ?: json_encode(['ok' => false]);
         break;
 
     case 'workflow_create':
