@@ -13,7 +13,7 @@ function _protectMath(text) {
     _mathStore = {};
     _mathCounter = 0;
     if (!text || typeof text !== 'string') return text || '';
-    
+
     // 块公式: $$...$$ 和 \[...\]
     text = text.replace(/\$\$([\s\S]*?)\$\$/g, function(match, formula) {
         var id = 'MATHBx' + (_mathCounter++);
@@ -25,7 +25,7 @@ function _protectMath(text) {
         _mathStore[id] = { type: 'block', formula: formula.trim() };
         return id;
     });
-    
+
     // 行内公式: $...$ 和 \(...\)
     text = text.replace(/(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)/g, function(match, formula) {
         var id = 'MATHIx' + (_mathCounter++);
@@ -37,13 +37,13 @@ function _protectMath(text) {
         _mathStore[id] = { type: 'inline', formula: formula.trim() };
         return id;
     });
-    
+
     return text;
 }
 
 function _restoreMath(html) {
     if (!html || _mathCounter === 0) return html;
-    
+
     for (const [id, info] of Object.entries(_mathStore)) {
         let rendered;
         try {
@@ -217,7 +217,7 @@ window.quickSetupOneAPIChat = function() {
     return config;
 };
 
-// ★ 获取 auth_token（兼容 deviceId fallback）
+// ★ 获取 auth_token(兼容 deviceId fallback)
 function getAuthToken() {
     return localStorage.getItem('authToken') || localStorage.getItem('deviceId') || '';
 }
@@ -257,13 +257,13 @@ const SERVER_EXEC_TOOL = {
     type: "function",
     function: {
         name: "server_exec",
-        description: "在服务器上执行终端命令。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制（5000字符），超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。",
+        description: "在服务器上执行终端命令。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制(5000字符),超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。",
         parameters: {
             type: "object",
             properties: {
                 cmd: { type: "string", description: "要执行的 shell 命令" },
-                timeout: { type: "number", description: "超时秒数（默认60，最大300）" },
-                cwd: { type: "string", description: "工作目录（可选）" }
+                timeout: { type: "number", description: "超时秒数(默认60,最大300)" },
+                cwd: { type: "string", description: "工作目录(可选)" }
             },
             required: ["cmd"]
         }
@@ -274,12 +274,12 @@ const SERVER_PYTHON_TOOL = {
     type: "function",
     function: {
         name: "server_python",
-        description: "在服务器上执行 Python 脚本。用于数据处理、文件操作、API调用、自动化任务等。脚本通过临时文件执行，超时默认30秒。",
+        description: "在服务器上执行 Python 脚本。用于数据处理、文件操作、API调用、自动化任务等。脚本通过临时文件执行,超时默认30秒。",
         parameters: {
             type: "object",
             properties: {
                 script: { type: "string", description: "Python 脚本代码" },
-                timeout: { type: "number", description: "超时秒数（默认30，最大120）" }
+                timeout: { type: "number", description: "超时秒数(默认30,最大120)" }
             },
             required: ["script"]
         }
@@ -295,7 +295,7 @@ const SERVER_FILE_READ_TOOL = {
             type: "object",
             properties: {
                 path: { type: "string", description: "文件或目录的绝对路径" },
-                max_lines: { type: "number", description: "最大行数（默认200）" }
+                max_lines: { type: "number", description: "最大行数(默认200)" }
             },
             required: ["path"]
         }
@@ -306,13 +306,13 @@ const SERVER_FILE_WRITE_TOOL = {
     type: "function",
     function: {
         name: "server_file_write",
-        description: "写入文件到服务器（仅允许 /tmp 和项目目录）。用于保存脚本输出、生成报告、创建配置等。",
+        description: "写入文件到服务器(仅允许 /tmp 和项目目录)。用于保存脚本输出、生成报告、创建配置等。",
         parameters: {
             type: "object",
             properties: {
                 path: { type: "string", description: "目标文件绝对路径" },
                 content: { type: "string", description: "要写入的内容" },
-                append: { type: "boolean", description: "是否追加（默认覆盖）" }
+                append: { type: "boolean", description: "是否追加(默认覆盖)" }
             },
             required: ["path", "content"]
         }
@@ -323,7 +323,7 @@ const SERVER_SYS_INFO_TOOL = {
     type: "function",
     function: {
         name: "server_sys_info",
-        description: "获取服务器系统信息：主机名、操作系统、CPU负载、内存使用、磁盘空间、进程数等。",
+        description: "获取服务器系统信息:主机名、操作系统、CPU负载、内存使用、磁盘空间、进程数等。",
         parameters: { type: "object", properties: {}, required: [] }
     }
 };
@@ -332,7 +332,7 @@ const SERVER_PS_TOOL = {
     type: "function",
     function: {
         name: "server_ps",
-        description: "列出服务器上的进程（按CPU使用率排序，显示前20个）。用于监控系统负载、查找运行中的服务等。",
+        description: "列出服务器上的进程(按CPU使用率排序,显示前20个)。用于监控系统负载、查找运行中的服务等。",
         parameters: { type: "object", properties: { }, required: [] }
     }
 };
@@ -341,7 +341,7 @@ const SERVER_DISK_TOOL = {
     type: "function",
     function: {
         name: "server_disk",
-        description: "查看服务器的磁盘使用情况（所有分区）。",
+        description: "查看服务器的磁盘使用情况(所有分区)。",
         parameters: { type: "object", properties: {}, required: [] }
     }
 };
@@ -350,13 +350,13 @@ const SERVER_NETWORK_TOOL = {
     type: "function",
     function: {
         name: "server_network",
-        description: "网络诊断工具。支持ping（连通性测试）、curl（HTTP请求）和port（检查端口监听情况）。用于网络故障排除和验证服务可用性。",
+        description: "网络诊断工具。支持ping(连通性测试)、curl(HTTP请求)和port(检查端口监听情况)。用于网络故障排除和验证服务可用性。",
         parameters: {
             type: "object",
             properties: {
-                target: { type: "string", description: "目标地址（域名、IP、端口号）" },
+                target: { type: "string", description: "目标地址(域名、IP、端口号)" },
                 action: { type: "string", enum: ["ping", "curl", "port"], description: "操作类型: ping(默认,ICMP连通测试), curl(HTTP请求), port(端口监听检查)" },
-                timeout: { type: "number", description: "超时秒数（默认10）" }
+                timeout: { type: "number", description: "超时秒数(默认10)" }
             },
             required: ["target"]
         }
@@ -382,7 +382,7 @@ const SERVER_DB_QUERY_TOOL = {
     type: "function",
     function: {
         name: "server_db_query",
-        description: "执行数据库查询(SQLite)。用于查询刷课记录、用户数据等。只读查询优先，写入操作谨慎使用。",
+        description: "执行数据库查询(SQLite)。用于查询刷课记录、用户数据等。只读查询优先,写入操作谨慎使用。",
         parameters: {
             type: "object",
             properties: {
@@ -397,13 +397,13 @@ const SERVER_FILE_SEARCH_TOOL = {
     type: "function",
     function: {
         name: "server_file_search",
-        description: "搜索服务器上的文件。支持通配符模式（如 *.log, config*）。默认搜索 /var/www 目录。",
+        description: "搜索服务器上的文件。支持通配符模式(如 *.log, config*)。默认搜索 /var/www 目录。",
         parameters: {
             type: "object",
             properties: {
-                pattern: { type: "string", description: "文件名匹配模式（支持 *, ? 通配符）" },
-                path: { type: "string", description: "搜索起始目录（默认 /var/www）" },
-                max_results: { type: "number", description: "返回结果数上限（默认30）" }
+                pattern: { type: "string", description: "文件名匹配模式(支持 *, ? 通配符)" },
+                path: { type: "string", description: "搜索起始目录(默认 /var/www)" },
+                max_results: { type: "number", description: "返回结果数上限(默认30)" }
             },
             required: ["pattern"]
         }
@@ -414,13 +414,13 @@ const SERVER_FILE_OP_TOOL = {
     type: "function",
     function: {
         name: "server_file_op",
-        description: "文件操作：复制(cp)、移动(mv)、删除(rm)、创建目录(mkdir)。只允许操作 /tmp 和 /var/www/html 目录。",
+        description: "文件操作:复制(cp)、移动(mv)、删除(rm)、创建目录(mkdir)。只允许操作 /tmp 和 /var/www/html 目录。",
         parameters: {
             type: "object",
             properties: {
                 action: { type: "string", enum: ["cp", "mv", "rm", "mkdir"], description: "操作类型" },
                 src: { type: "string", description: "源路径" },
-                dst: { type: "string", description: "目标路径（cp/mv需要，rm/mkdir不需要）" }
+                dst: { type: "string", description: "目标路径(cp/mv需要,rm/mkdir不需要)" }
             },
             required: ["action", "src"]
         }
@@ -437,7 +437,7 @@ const CHAOXING_TOOL_DEFINITION = {
         parameters: {
             type: "object",
             properties: {
-                course_ids: { type: "string", description: "要学习的课程ID列表，逗号分隔。如果用户没指定具体课程，请先调用chaoxing_list_courses获取课程列表让用户选择" }
+                course_ids: { type: "string", description: "要学习的课程ID列表,逗号分隔。如果用户没指定具体课程,请先调用chaoxing_list_courses获取课程列表让用户选择" }
             },
             required: ["course_ids"]
         }
@@ -448,7 +448,7 @@ const CHAOXING_LOGIN_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "chaoxing_login",
-        description: "登录超星学习通账号。在用户提供了手机号和密码后调用，验证并登录学习通。登录成功后才能使用刷课功能。",
+        description: "登录超星学习通账号。在用户提供了手机号和密码后调用,验证并登录学习通。登录成功后才能使用刷课功能。",
         parameters: {
             type: "object",
             properties: {
@@ -464,7 +464,7 @@ const CHAOXING_LIST_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "chaoxing_list_courses",
-        description: "获取超星学习通的课程列表（需要先登录）。调用后会返回所有课程的ID和名称，让用户选择要刷的课程。",
+        description: "获取超星学习通的课程列表(需要先登录)。调用后会返回所有课程的ID和名称,让用户选择要刷的课程。",
         parameters: {
             type: "object",
             properties: {},
@@ -503,7 +503,7 @@ const CHAOXING_STATS_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "chaoxing_stats",
-        description: "查询刷课进度统计，包括总课程数、已完成课程数、视频完成数、答题完成数，以及每门课的详细进度。",
+        description: "查询刷课进度统计,包括总课程数、已完成课程数、视频完成数、答题完成数,以及每门课的详细进度。",
         parameters: {
             type: "object",
             properties: {},
@@ -526,12 +526,12 @@ const ENGINE_CRON_CREATE_TOOL = {
     type: "function",
     function: {
         name: "engine_cron_create",
-        description: "创建一个后台定时任务(Cron)，定期执行命令。适合定期检查刷课进度、推送通知、数据备份等场景。",
+        description: "创建一个后台定时任务(Cron),定期执行命令。适合定期检查刷课进度、推送通知、数据备份等场景。",
         parameters: {
             type: "object",
             properties: {
                 name: { type: "string", description: "任务名称" },
-                interval: { type: "number", description: "执行间隔（秒），最小60秒" },
+                interval: { type: "number", description: "执行间隔(秒),最小60秒" },
                 action_cmd: { type: "string", description: "要执行的shell命令" }
             },
             required: ["name", "interval", "action_cmd"]
@@ -558,13 +558,13 @@ const DELEGATE_TASK_TOOL = {
     type: "function",
     function: {
         name: "delegate_task",
-        description: "【推荐】创建一个子代理执行后台任务。子代理会根据角色获得不同工具权限。比 engine_agent_create 更稳定。可以创建多个并行子代理，多次调用即可。",
+        description: "【推荐】创建一个子代理执行后台任务。子代理会根据角色获得不同工具权限。比 engine_agent_create 更稳定。可以创建多个并行子代理,多次调用即可。",
         parameters: {
             type: "object",
             properties: {
-                name: { type: "string", description: "子代理名称，简短唯一" },
-                task: { type: "string", description: "任务描述（100字以内），如'搜索2024年AI最新新闻并总结'" },
-                role: { type: "string", description: "子代理角色：explorer(搜) planner(规) developer(开) verifier(验) general(全)。默认general", "default": "general" },
+                name: { type: "string", description: "子代理名称,简短唯一" },
+                task: { type: "string", description: "任务描述(100字以内),如'搜索2024年AI最新新闻并总结'" },
+                role: { type: "string", description: "子代理角色:explorer(搜) planner(规) developer(开) verifier(验) general(全)。默认general", "default": "general" },
                 prompt: { type: "string", description: "自定义系统提示词。不传则基于task自动生成" }
             },
             required: ["name", "task"]
@@ -600,7 +600,7 @@ const ENGINE_AGENT_DELETE_TOOL = {
     type: "function",
     function: {
         name: "engine_agent_delete",
-        description: "删除一个指定的子代理（不可撤销）。删除前应向用户确认。",
+        description: "删除一个指定的子代理(不可撤销)。删除前应向用户确认。",
         parameters: {
             type: "object",
             properties: {
@@ -615,11 +615,11 @@ const ENGINE_AGENT_ASK_TOOL = {
     type: "function",
     function: {
         name: "engine_agent_ask",
-        description: "给一个已存在的子代理发送一条消息，等待它回复后返回结果。相当于跟子代理聊天。如果子代理不存在会报错。",
+        description: "给一个已存在的子代理发送一条消息,等待它回复后返回结果。相当于跟子代理聊天。如果子代理不存在会报错。",
         parameters: {
             type: "object",
             properties: {
-                name: { type: "string", description: "子代理名称（必须是已有子代理）" },
+                name: { type: "string", description: "子代理名称(必须是已有子代理)" },
                 message: { type: "string", description: "要发送给子代理的消息内容" }
             },
             required: ["name", "message"]
@@ -631,7 +631,7 @@ const ENGINE_PUSH_TOOL = {
     type: "function",
     function: {
         name: "engine_push",
-        description: "向用户推送一条通知消息，消息会通过心跳机制在下次心跳时到达前端。适合Cron任务或子代理完成后通知用户。",
+        description: "向用户推送一条通知消息,消息会通过心跳机制在下次心跳时到达前端。适合Cron任务或子代理完成后通知用户。",
         parameters: {
             type: "object",
             properties: {
@@ -684,13 +684,13 @@ const IMAGE_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "generate_image",
-        description: "【纯文生图】用于从零开始生成图片。★ 这是唯一的生图方式，不要在文本回复中伪造图片链接。适用场景:画一幅画、生成一张图片、创作插画。没有参考图片时必须用这个。",
+        description: "【纯文生图】用于从零开始生成图片。★ 这是唯一的生图方式,不要在文本回复中伪造图片链接。适用场景:画一幅画、生成一张图片、创作插画。没有参考图片时必须用这个。",
         parameters: {
             type: "object",
             properties: {
                 prompt: {
                     type: "string",
-                    description: "★ 图片提示词，必须英文，≤1500字符。超出会被截断导致效果差。简洁描述主题、风格即可，不要长篇大论。例如:'A cute cat, anime style'"
+                    description: "★ 图片提示词,必须英文,≤1500字符。超出会被截断导致效果差。简洁描述主题、风格即可,不要长篇大论。例如:'A cute cat, anime style'"
                 },
                 model: {
                     type: "string",
@@ -702,11 +702,11 @@ const IMAGE_TOOL_DEFINITION = {
                 },
                 n: {
                     type: "integer",
-                    description: "生成图片数量,1-9张。★ 用户要求多张图片时务必使用此参数一次生成，不要多次调用生成。默认1张。"
+                    description: "生成图片数量,1-9张。★ 用户要求多张图片时务必使用此参数一次生成,不要多次调用生成。默认1张。"
                 },
                 seed: {
                     type: "integer",
-                    description: "【严格规则 ⚠️】只有同时满足以下所有条件时才传入seed:\n1. n=1（只生成一张）\n2. 用户明确要求前后风格一致/一样/同款\n3. 上次也用这个seed\n\n⚠️ n>1（多张）时绝不要传seed——否则所有图片完全相同。\n⚠️ 提示词不一样时也不要传seed。\n⚠️ 通常情况下不要传seed，让系统自由发挥效果更好。"
+                    description: "【严格规则 ⚠️】只有同时满足以下所有条件时才传入seed:\n1. n=1(只生成一张)\n2. 用户明确要求前后风格一致/一样/同款\n3. 上次也用这个seed\n\n⚠️ n>1(多张)时绝不要传seed--否则所有图片完全相同。\n⚠️ 提示词不一样时也不要传seed。\n⚠️ 通常情况下不要传seed,让系统自由发挥效果更好。"
                 },
                 prompt_optimizer: {
                     type: "boolean",
@@ -745,7 +745,7 @@ const IMAGE_I2I_TOOL_DEFINITION = {
                 },
                 seed: {
                     type: "integer",
-                    description: "随机种子。★ n>1时不要传seed，否则所有图一样。"
+                    description: "随机种子。★ n>1时不要传seed,否则所有图一样。"
                 }
             },
             required: ["prompt"]
@@ -774,10 +774,10 @@ const ANALYZE_IMAGE_TOOL = {
 // ==================== 服务器图片上传 ====================
 // SERVER_API_BASE declared in index.html
 
-/** ★ 修复: 清理无效的图片URL，避免控制台报错 */
+/** ★ 修复: 清理无效的图片URL,避免控制台报错 */
 function cleanImageUrl(url) {
     if (!url) return '';
-    // 如果 URL 指向已知无法访问的域名，替换为占位图
+    // 如果 URL 指向已知无法访问的域名,替换为占位图
     const deadDomains = [
         'service-6kr3fbnm-1251723757.usw.apigw.tencentcs.com',
         'service-6kr3fbnm-1251723757',
@@ -788,7 +788,7 @@ function cleanImageUrl(url) {
     for (const domain of deadDomains) {
         if (url.includes(domain)) {
             console.warn('[cleanImageUrl] 拦截无效图片URL:', url.substring(0, 80) + '...');
-            // 返回一个空的 data URL 占位，由 onerror 处理显示提示
+            // 返回一个空的 data URL 占位,由 onerror 处理显示提示
             return 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23fef3c7%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 font-size=%2212%22 fill=%22%2392400e%22%3E图片已失效%3C/text%3E%3C/svg%3E';
         }
     }
@@ -800,7 +800,7 @@ async function uploadImageToServer(base64Data) {
         // 提取 MIME 类型和实际数据
         let mimeType = 'image/png';
         let actualData = base64Data;
-        
+
         if (base64Data.startsWith('data:')) {
             const match = base64Data.match(/^data:([^;]+);base64,(.+)$/);
             if (match) {
@@ -808,7 +808,7 @@ async function uploadImageToServer(base64Data) {
                 actualData = match[2];
             }
         }
-        
+
         const token = getAuthToken();
         const response = await fetch(SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token), {
             method: 'POST',
@@ -819,7 +819,7 @@ async function uploadImageToServer(base64Data) {
                 image: base64Data
             })
         });
-        
+
         if (response.ok) {
             const result = await response.json();
             if (result.url) {
@@ -835,21 +835,21 @@ async function uploadImageToServer(base64Data) {
 }
 
 let _lastServerBackup = 0;
-const SERVER_BACKUP_INTERVAL = 2000; // ★ 2秒即可再次备份，平板确保不丢
-let _deletedChatIds = {}; // ★ 跟踪已删除的聊天ID，合并时排除
+const SERVER_BACKUP_INTERVAL = 2000; // ★ 2秒即可再次备份,平板确保不丢
+let _deletedChatIds = {}; // ★ 跟踪已删除的聊天ID,合并时排除
 
 async function saveChatsToServer() {
     try {
         var now = Date.now();
         if (now - _lastServerBackup < SERVER_BACKUP_INTERVAL) return false;
         _lastServerBackup = now;
-        
+
         var token = localStorage.getItem('authToken');
         if (!token) return false;
         var url = SERVER_API_BASE + '/chat.php';
         url += '?auth_token=' + token;
-        
-        // ★ 合并：先读服务器已有数据，再合并本地聊天，防止多窗口覆盖
+
+        // ★ 合并:先读服务器已有数据,再合并本地聊天,防止多窗口覆盖
         var mergedChats = JSON.parse(JSON.stringify(chats));
         console.log('[save] 本地聊天数:', Object.keys(mergedChats).length);
         try {
@@ -873,13 +873,13 @@ async function saveChatsToServer() {
         } catch(e) {
             console.warn('[save] GET合并失败:', e.message);
         }
-        
+
         var response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: 'all', chats: mergedChats, title: '聊天备份' })
         });
-        
+
         if (response.ok) {
             _deletedChatIds = {}; // 清除已同步的删除标记
             return true;
@@ -891,7 +891,7 @@ async function saveChatsToServer() {
     }
 }
 
-// ★ 将完整配置保存到服务器（按用户隔离）
+// ★ 将完整配置保存到服务器(按用户隔离)
 async function saveConfigToServer() {
     var token = localStorage.getItem('authToken');
     if (!token) return;
@@ -924,7 +924,7 @@ async function saveConfigToServer() {
                 if (resp2.ok) saved = true;
             } catch(e2) { console.warn('[save] 重试保存也失败:', e2.message); }
         }
-        console.log(saved ? '[save] 配置保存完成' : '[save] 配置保存失败（已重试）');
+        console.log(saved ? '[save] 配置保存完成' : '[save] 配置保存失败(已重试)');
 
     } catch(e) {
         console.warn('[save] 配置保存失败:', e.message);
@@ -966,7 +966,7 @@ async function loadConfigFromServer() {
     console.log('[loadConfigFromServer] 开始加载');
     var token = localStorage.getItem('authToken');
     if (!token) { console.log('[loadConfigFromServer] 无token'); return; }
-    console.log('[loadConfigFromServer] token有效，请求配置');
+    console.log('[loadConfigFromServer] token有效,请求配置');
     try {
         var resp = await fetch(SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=get_config');
         console.log('[loadConfigFromServer] 响应状态:', resp.status);
@@ -980,8 +980,8 @@ async function loadConfigFromServer() {
         var keys = Object.keys(config);
         console.log('[loadConfigFromServer] 写入localStorage的键:', keys.slice(0,10).join(','));
         for (var k in config) {
-            // ★ 防止服务器配置覆盖本地暗色模式设置（避免闪色）
-            // ★ 跳过暗色模式和Agent模式（防止服务器覆盖用户本地设置）
+            // ★ 防止服务器配置覆盖本地暗色模式设置(避免闪色)
+            // ★ 跳过暗色模式和Agent模式(防止服务器覆盖用户本地设置)
             if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') localStorage.setItem(k, config[k]);
         }
         console.log('[loadConfigFromServer] 写入完成');
@@ -993,7 +993,7 @@ async function loadConfigFromServer() {
 async function loadChatsFromServer() {
     try {
         const token = localStorage.getItem('authToken');
-        // ★ 没登录且没 deviceId 时跳过同步（避免 fallback 'default' 导致 404）
+        // ★ 没登录且没 deviceId 时跳过同步(避免 fallback 'default' 导致 404)
         var deviceId = localStorage.getItem('deviceId');
         if (!token && !deviceId) return null;
         let url = SERVER_API_BASE + '/chat.php?chat_id=all';
@@ -1014,16 +1014,16 @@ async function loadChatsFromServer() {
     }
 }
 
-// ★ 登录后的数据恢复：从服务器加载当前账号的配置和聊天记录
+// ★ 登录后的数据恢复:从服务器加载当前账号的配置和聊天记录
 async function restoreUserData() {
     console.log('[restoreUserData] 开始恢复用户数据');
     var token = localStorage.getItem('authToken');
     console.log('[restoreUserData] token:', token ? token.substring(0,20)+'...' : 'null');
-    if (!token) { console.log('[restoreUserData] 无token，跳过'); return; }
-    
+    if (!token) { console.log('[restoreUserData] 无token,跳过'); return; }
+
     var uid = localStorage.getItem('authUserId') || '';
-    
-    // 0. 迁移旧聊天记录：给没有 userId 的打上当前用户标签
+
+    // 0. 迁移旧聊天记录:给没有 userId 的打上当前用户标签
     if (uid) {
         var migrated = 0;
         for (var _cid in chats) {
@@ -1037,7 +1037,7 @@ async function restoreUserData() {
             console.log('[restoreUserData] 迁移了', migrated, '个旧聊天记录');
         }
     }
-    
+
     // ★ 并行加载配置和聊天记录
     console.log('[restoreUserData] 并行加载配置和聊天记录...');
     await Promise.all([
@@ -1056,14 +1056,14 @@ async function restoreUserData() {
             } catch(e) { console.warn('[restoreUserData] 聊天加载失败:', e.message); }
         })()
     ]);
-    
+
     // ★ 配置和聊天都加载完后初始化
     console.log('[restoreUserData] 初始化配置');
     initializeConfig();
-    // ★ 如果没有任何聊天记录，自动新建一个对话
+    // ★ 如果没有任何聊天记录,自动新建一个对话
     var chatKeys = Object.keys(chats);
     if (chatKeys.length === 0) {
-        console.log('[restoreUserData] 无聊天记录，自动新建');
+        console.log('[restoreUserData] 无聊天记录,自动新建');
         createNewChat();
     } else {
         // 恢复上次打开的对话
@@ -1077,14 +1077,14 @@ async function restoreUserData() {
     console.log('[restoreUserData] 恢复完成');
 }
 
-// ★ 登出前保存：确保当前账号的配置和聊天存到服务器
+// ★ 登出前保存:确保当前账号的配置和聊天存到服务器
 function saveUserDataBeforeLogout() {
     console.log('[logout] 开始保存用户数据');
-    // 配置保存（keepalive 确保页面关闭后请求完成）
+    // 配置保存(keepalive 确保页面关闭后请求完成)
     var token = localStorage.getItem('authToken');
     if (!token) { console.log('[logout] 无token,跳过'); return; }
-    
-    // 直接构建并发送配置（同步读取localStorage，异步发送，keepalive保证送达）
+
+    // 直接构建并发送配置(同步读取localStorage,异步发送,keepalive保证送达)
     try {
         var config = {};
         for (var i = 0; i < localStorage.length; i++) {
@@ -1104,8 +1104,8 @@ function saveUserDataBeforeLogout() {
             body: JSON.stringify(config)
         }).catch(function(e) { console.warn('[logout] 配置保存失败:', e.message); });
     } catch(e) { console.warn('[logout] 配置保存错误:', e.message); }
-    
-    // 聊天保存（通过 saveChatsToServer 合并后再保存）
+
+    // 聊天保存(通过 saveChatsToServer 合并后再保存)
     if (typeof chats !== 'undefined' && chats && Object.keys(chats).length > 0) {
         try {
             console.log('[logout] 保存聊天:', Object.keys(chats).length, '个');
@@ -1121,8 +1121,8 @@ const TITLE_MAX_LENGTH = 20;
 const MAX_TOKENS_SAFETY_MARGIN = 1000;
 const STREAM_DELAY = 2;
 
-// ★ 后端 SSE 流式配置（Feature Flag）
-const USE_BACKEND_SSE = false;  // 设为 true 则聊天走后端 SSE 流（流式中断保护）
+// ★ 后端 SSE 流式配置(Feature Flag)
+const USE_BACKEND_SSE = false;  // 设为 true 则聊天走后端 SSE 流(流式中断保护)
 const BACKEND_SSE_URL = '/oneapichat/engine_api.php?action=chat_stream';
 
 const DEFAULT_CONFIG = {
@@ -1138,7 +1138,7 @@ const DEFAULT_CONFIG = {
     system: '你是一个有用的助手。\n' +
         '1. 本地知识库包含上传的文档(用rag_search工具查询)。知识库有截止日期,需要最新信息时联网搜索。\n' +
         '2. 用户给出时间上下文时以此为准理解今天等概念。\n' +
-        '3. 生成图表时用Mermaid语法：时序用graph TD/LR，折线用xychart-beta，饼图用pie，甘特用gantt。代码字符串用英文双引号。\n' +
+        '3. 生成图表时用Mermaid语法:时序用graph TD/LR,折线用xychart-beta,饼图用pie,甘特用gantt。代码字符串用英文双引号。\n' +
         '4. 【联网搜索与网页抓取】\n' +
         '   - 搜索使用 web_search 工具,结果包含标题+链接+摘要。\n' +
         '   - 如需查看搜索结果中链接的详细内容,使用 web_fetch 工具。\n' +
@@ -1146,8 +1146,8 @@ const DEFAULT_CONFIG = {
         '   - 典型流程: web_search → 分析结果 → web_fetch 深入查看 → 综合回答。\n' +
         '5. 【重要-图片生成规则】\n' +
         '   【关键规则】当用户上传了图片时:\n' +
-        '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等，调用 generate_image_i2i（已支持真正的图生图API）\n' +
-        '   - 用户没有上传图片但要求画图时，调用 generate_image（纯文生图）\n' +
+        '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
+        '   - 用户没有上传图片但要求画图时,调用 generate_image(纯文生图)\n' +
         '   - 如果用户只是问图片里有什么/描述图片内容,可以直接回答或调用 analyze_image\n' +
         '   【关键规则】当用户没有上传图片时:\n' +
         '   - 用户要求画图、生成图片时,调用 generate_image\n' +
@@ -1171,59 +1171,59 @@ const DEFAULT_CONFIG = {
     agentProactive: false,
     agentMaxToolRounds: 30,
     agentThinkingDepth: 'standard',
-    agentSystemPrompt: `你现在处于 Agent 模式，拥有增强自主能力。
+    agentSystemPrompt: `你现在处于 Agent 模式,拥有增强自主能力。
 ## 子代理角色系统
 使用 delegate_task 时可以通过 role 参数选择子代理角色:
-- explorer(🔍搜索专员): 只读搜索，适合查资料、抓网页。不可修改文件或执行命令
-- planner(📐规划师): 制定方案、分析策略。不做执行，只出方案
+- explorer(🔍搜索专员): 只读搜索,适合查资料、抓网页。不可修改文件或执行命令
+- planner(📐规划师): 制定方案、分析策略。不做执行,只出方案
 - developer(⚡开发者): 读写文件、执行命令、搜索。全能执行角色
-- verifier(✅验证者): 检查结果、找问题。只读，不可修改
-- general(🌐全能代理): 所有工具可用（默认）
+- verifier(✅验证者): 检查结果、找问题。只读,不可修改
+- general(🌐全能代理): 所有工具可用(默认)
 ## 工作流引擎
 复杂任务可以用 workflow 串联多个子代理: 搜索→规划→执行→验证
 ## 核心原则
 - 主动分析用户需求,规划多步骤行动方案再执行
-- 发现适合后台并行的任务时，立刻创建子代理处理，不要等
-- 简单任务（≤2次搜索/读已知文件）直接用工具，不开子代理
+- 发现适合后台并行的任务时,立刻创建子代理处理,不要等
+- 简单任务(≤2次搜索/读已知文件)直接用工具,不开子代理
 - 需要定时任务时使用 engine_cron_create 创建 cron
-- 需要后台任务时使用 delegate_task 创建子代理（一次一个，稳定可靠）
+- 需要后台任务时使用 delegate_task 创建子代理(一次一个,稳定可靠)
 - 要与已有子代理对话时使用 engine_agent_ask 给子代理发送消息即可
 - 需要执行终端命令时使用 server_exec
 - 需要运行 Python 脚本时使用 server_python
 - 需要读取服务器文件时使用 server_file_read
-- 完成分析后直接把最终结果**打字回复给用户**，不要写入文件
-- 不要等用户一步步指示，主动推进任务
-## ★ 必须创建子代理的场景（满足任一即创建）
-1. 任务需要搜索多个关键词/来源（如：同时搜索新闻、百科、社区）
+- 完成分析后直接把最终结果**打字回复给用户**,不要写入文件
+- 不要等用户一步步指示,主动推进任务
+## ★ 必须创建子代理的场景(满足任一即创建)
+1. 任务需要搜索多个关键词/来源(如:同时搜索新闻、百科、社区)
 2. 任务需要批量处理文件、数据、页面
 3. 任务涉及定时监控或定时汇报
-4. 任务耗时预计超过 2 分钟（搜索+整理、生成报告等）
-5. 用户说"帮我看看""帮我查一下""帮我分析"等模糊请求，先创建子代理再行动
-6. 任何可以并行执行的独立子任务，立刻拆出来用子代理
-## ★ 输出方式（强制遵守）
-- **直接打字回复**：分析完成后，直接把最终结果/报告/回答以普通文本消息发出来。这是默认输出方式
-- **禁止写文件到 /tmp/**：不要用 server_file_write 写入文件然后给链接。用户希望直接看到内容
-- **除非用户明确要求保存到文件**，否则一律直接回复文字
-## ★ 等待子代理（强制遵守）
-- **创建子代理后，必须等待它们完成**。不要刚创建完就自己开始做同样的事
-- 如果子代理已经创建并运行，**不要重复开始工作**。子代理的结果会通过系统通知给你
-- 子代理在运行时，你可以做其他不冲突的事或等待。不要抢先做子代理正在做的工作
-- 简单任务（≤2次搜索/读已知文件）直接用工具，不开子代理
-- 读已知路径文件：直接用 server_file_read
-- 复杂/批量/耗时>2分钟：用子代理
+4. 任务耗时预计超过 2 分钟(搜索+整理、生成报告等)
+5. 用户说"帮我看看""帮我查一下""帮我分析"等模糊请求,先创建子代理再行动
+6. 任何可以并行执行的独立子任务,立刻拆出来用子代理
+## ★ 输出方式(强制遵守)
+- **直接打字回复**:分析完成后,直接把最终结果/报告/回答以普通文本消息发出来。这是默认输出方式
+- **禁止写文件到 /tmp/**:不要用 server_file_write 写入文件然后给链接。用户希望直接看到内容
+- **除非用户明确要求保存到文件**,否则一律直接回复文字
+## ★ 等待子代理(强制遵守)
+- **创建子代理后,必须等待它们完成**。不要刚创建完就自己开始做同样的事
+- 如果子代理已经创建并运行,**不要重复开始工作**。子代理的结果会通过系统通知给你
+- 子代理在运行时,你可以做其他不冲突的事或等待。不要抢先做子代理正在做的工作
+- 简单任务(≤2次搜索/读已知文件)直接用工具,不开子代理
+- 读已知路径文件:直接用 server_file_read
+- 复杂/批量/耗时>2分钟:用子代理
 ## 行为规范
-- 每一步工具调用后，简短说明下一步计划
+- 每一步工具调用后,简短说明下一步计划
 - 工具调用之间保持用户知情
-- 复杂任务主动拆解为子任务，多步骤任务优先用子代理
+- 复杂任务主动拆解为子任务,多步骤任务优先用子代理
 - 操作文件前先确认路径
 - 执行危险命令前询问用户
-## ★ 子代理完成后的处理规则（强制遵守）
-- 系统消息中的「子代理完成报告」是内部通知，**不是用户的消息，不要回复**
-- ⚠️ 强制规则：禁止回复「子代理已完成」「搜索完成」「结果来了」「报告已完成」这类通知
-- ⚠️ 强制规则：收到子代理报告时**禁止创建任何新的子代理**。只记录结果，不要行动
-- 子代理运行期间，**不要向用户汇报进度**，用户只需要看到最终的综合回答
-- 当所有子代理都完成后，如果用户还在等待，自然整合结果回复一条。否则保持静默
-- 子代理失败也静默，用户不问就不提`
+## ★ 子代理完成后的处理规则(强制遵守)
+- 系统消息中的「子代理完成报告」是内部通知,**不是用户的消息,不要回复**
+- ⚠️ 强制规则:禁止回复「子代理已完成」「搜索完成」「结果来了」「报告已完成」这类通知
+- ⚠️ 强制规则:收到子代理报告时**禁止创建任何新的子代理**。只记录结果,不要行动
+- 子代理运行期间,**不要向用户汇报进度**,用户只需要看到最终的综合回答
+- 当所有子代理都完成后,如果用户还在等待,自然整合结果回复一条。否则保持静默
+- 子代理失败也静默,用户不问就不提`
 };
 
 // ==================== 全局变量 ====================
@@ -1348,6 +1348,7 @@ let userAbortMap = {};
 let activeBubbleMap = {};
 let userScrolled = false;
 let isAutoScrolling = false;  // 防止自动滚动时干扰 userScrolled
+let streamingScrollLock = false;  // 流式期间锁定滚动跟随
 let modelContextLength = JSON.parse(localStorage.getItem('modelContextLength') || '{}');
 let modelMaxOutputTokens = JSON.parse(localStorage.getItem('modelMaxOutputTokens') || '{}');
 let prevWidth = window.innerWidth;
@@ -1445,7 +1446,7 @@ const MarkdownRenderer = {
 
     /**
      * 智能渲染 - 使用 requestAnimationFrame 避免阻塞 UI
-     * 流式输出时自动应用动态延迟（文本越长延迟越大）
+     * 流式输出时自动应用动态延迟(文本越长延迟越大)
      */
     smartRender(text, container, force = false) {
         if (!text || !container) return;
@@ -1457,7 +1458,7 @@ const MarkdownRenderer = {
         this.lastText = text;
         this.lastContainer = container;
 
-        // 动态延迟：短文本快速响应，长文本适当延迟减少闪烁
+        // 动态延迟:短文本快速响应,长文本适当延迟减少闪烁
         const delay = text.length < 200 ? 50 : text.length < 1000 ? 80 : 120;
 
         this.renderTimer = setTimeout(() => {
@@ -1481,7 +1482,7 @@ const MarkdownRenderer = {
         }
 
         this._rendering = false;
-        // 如果在渲染期间有新的 pending，继续处理
+        // 如果在渲染期间有新的 pending,继续处理
         if (this._pending) {
             requestAnimationFrame(() => this._processRender());
         }
@@ -1502,7 +1503,7 @@ const MarkdownRenderer = {
     },
 
     /**
-     * 执行渲染（核心方法）
+     * 执行渲染(核心方法)
      * 标记解析 + 缓存 + 后处理
      */
     doRender(text, container) {
@@ -1531,7 +1532,7 @@ const MarkdownRenderer = {
         // 批量设置 innerHTML (一次重排)
         container.innerHTML = html;
 
-        // 后处理（代码高亮、Mermaid 等）使用微任务避免阻塞
+        // 后处理(代码高亮、Mermaid 等)使用微任务避免阻塞
         this.postRender(container);
 
         const elapsed = performance.now() - startTime;
@@ -1539,21 +1540,21 @@ const MarkdownRenderer = {
     },
 
     /**
-     * 后处理：代码高亮 + Mermaid + 图片优化
+     * 后处理:代码高亮 + Mermaid + 图片优化
      */
     postRender(container) {
         // 代码高亮
         this.highlightCode(container);
-        // Mermaid 图表（异步，不阻塞）
+        // Mermaid 图表(异步,不阻塞)
         this.renderMermaid(container);
-        // 图片优化（懒加载）
+        // 图片优化(懒加载)
         this.optimizeImages(container);
     },
 
-    /** 渲染 Mermaid 图表（支持流式实时渲染） */
+    /** 渲染 Mermaid 图表(支持流式实时渲染) */
     renderMermaid(container) {
         if (typeof mermaid === 'undefined') return;
-        
+
         // 步骤1: 将 marked 输出的 language-mermaid 代码块转换为 .mermaid div
         container.querySelectorAll('pre code[class*="language-mermaid"]').forEach(function(codeBlock) {
             if (codeBlock.closest('.mermaid')) return;
@@ -1565,14 +1566,14 @@ const MarkdownRenderer = {
             mermaidDiv.setAttribute('data-original-code', code);
             pre.parentNode.replaceChild(mermaidDiv, pre);
         });
-        
-        // 步骤2: 渲染所有尚未渲染的 .mermaid div（流式渲染时每帧重建，会自动重试）
+
+        // 步骤2: 渲染所有尚未渲染的 .mermaid div(流式渲染时每帧重建,会自动重试)
         var mermaidDivs = container.querySelectorAll('.mermaid');
         if (!mermaidDivs.length) return;
         mermaidDivs.forEach(function(div) {
             var code = div.getAttribute('data-original-code') || div.textContent;
             if (!code || div.querySelector('svg')) return;
-            // 流式渲染: 如果 mermaid 代码还在不断变化，跳过本次渲染避免闪烁
+            // 流式渲染: 如果 mermaid 代码还在不断变化,跳过本次渲染避免闪烁
             var prevCode = div.getAttribute('data-prev-code') || '';
             if (code === prevCode) return;
             div.setAttribute('data-prev-code', code);
@@ -1596,7 +1597,7 @@ const MarkdownRenderer = {
         console.warn = _warn;
     },
 
-    /** 图片优化：懒加载 + 异步解码 */
+    /** 图片优化:懒加载 + 异步解码 */
     optimizeImages(container) {
         container.querySelectorAll('img').forEach(img => {
             img.loading = 'lazy';
@@ -1604,7 +1605,7 @@ const MarkdownRenderer = {
         });
     },
 
-    /** 强制立即渲染（跳过防抖） */
+    /** 强制立即渲染(跳过防抖) */
     forceRender(text, container) {
         if (this.renderTimer) { clearTimeout(this.renderTimer); this.renderTimer = null; }
         if (this._pending) this._pending = null;
@@ -1719,7 +1720,7 @@ const getVal = id => {
     const el = getEl(id);
     if (!el) return undefined;
     const val = el.value;
-    // 输入框为空时用 DEFAULT_CONFIG 的默认值（仅非敏感配置）
+    // 输入框为空时用 DEFAULT_CONFIG 的默认值(仅非敏感配置)
     if (!val && id === 'baseUrl' && DEFAULT_CONFIG.url) return DEFAULT_CONFIG.url;
     if (!val && id === 'modelSelect' && DEFAULT_CONFIG.model) return DEFAULT_CONFIG.model;
     return val;
@@ -2090,20 +2091,28 @@ function showToast(msg, type = 'info', dur = 3000) {
 // 自动滚动到底部(用于AI回复等场景)
 function autoScrollToBottom(reason) {
     if (!$.chatBox) return;
-    // 如果用户已经主动滚动离开底部，不要强制拉回（streaming 时由外部控制）
+    // 如果用户已经主动滚动离开底部,不要强制拉回(streaming 时由外部控制)
     // 只有明显在底部时才滚动
     const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
     const distFromBottom = scrollHeight - scrollTop - clientHeight;
-    // 距离底部超过一屏就不跟随了（用户在看上面的内容）
+    // 距离底部超过一屏就不跟随了(用户在看上面的内容)
     if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') return;
     isAutoScrolling = true;
-    // 大幅滚动用 smooth，正常小增长用 instant（避免抖动）
+    // 流式期间加锁,防止短暂滚动触发 userScrolled 导致中断
+    if (reason === 'streaming') streamingScrollLock = true;
+    // 大幅滚动用 smooth,正常小增长用 instant(避免抖动)
     if (distFromBottom > 200) {
         $.chatBox.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
     } else {
         $.chatBox.scrollTop = $.chatBox.scrollHeight;
     }
-    setTimeout(() => { isAutoScrolling = false; }, 300);
+    // streaming 时不清除锁定,等待流结束统一释放
+    if (reason !== 'streaming') {
+        isAutoScrolling = false;
+        streamingScrollLock = false;
+    } else {
+        setTimeout(() => { isAutoScrolling = false; }, 300);
+    }
 }
 
 window.scrollToBottom = () => {
@@ -2342,7 +2351,7 @@ function createSearchConfigSection() {
                 </div>
                 <div id="aiSearchJudgeDetails" style="display:none;">
                     <select id="aiSearchJudgeModel" class="config-input text-xs w-full py-[6px]" style="font-size:11px;"><option value="">同主模型</option></select>
-                    <textarea id="aiSearchJudgePrompt" rows="2" class="config-input w-full text-xs mt-[8px]" style="font-size:11px;line-height:1.5;" placeholder="AI 判断提示词（启用 AI 判断后可见）"></textarea>
+                    <textarea id="aiSearchJudgePrompt" rows="2" class="config-input w-full text-xs mt-[8px]" style="font-size:11px;line-height:1.5;" placeholder="AI 判断提示词(启用 AI 判断后可见)"></textarea>
                 </div>
                 <div class="flex items-center justify-between py-2">
                     <span class="text-xs text-gray-500 whitespace-nowrap">引擎</span>
@@ -2413,7 +2422,7 @@ function bindSearchEvents() {
             el.addEventListener('change', function() { saveConfig(); });
         }
     });
-    // ★ 搜索 API Key 变更时自动保存（密码框 input 事件）
+    // ★ 搜索 API Key 变更时自动保存(密码框 input 事件)
     ['searchApiKey', 'searchApiKeyBrave', 'searchApiKeyGoogle', 'searchApiKeyTavily'].forEach(function(id) {
         var el = getEl(id);
         if (el) {
@@ -2480,7 +2489,7 @@ window.updateSearchParam = (type, val) => {
         const span = getEl('maxSearchResultsValue');
         if (span) span.innerText = val;
     }
-    // ★ 不自动保存，由"保存配置"按钮统一控制
+    // ★ 不自动保存,由"保存配置"按钮统一控制
 };
 
 function initFontSize() {
@@ -2501,7 +2510,7 @@ window.updateFontSize = function(val) {
 };
 
 
-// ★ 工具模式切换（输入框旁快捷按钮）
+// ★ 工具模式切换(输入框旁快捷按钮)
 window.toggleToolMode = function() {
     var cur = getChecked("searchToolCallToggle");
     setChecked("searchToolCallToggle", !cur);
@@ -2546,7 +2555,7 @@ window.openAgentPanel = function() {
     if (!ap) return;
 
     if (isMobile()) {
-        // 移动端：关配置面板，用遮罩
+        // 移动端:关配置面板,用遮罩
         if (cp) cp.classList.remove('mobile-open');
         ap.style.display = '';
         ap.classList.remove('hidden-panel');
@@ -2558,11 +2567,11 @@ window.openAgentPanel = function() {
         return;
     }
 
-    // 桌面端：先关配置面板
+    // 桌面端:先关配置面板
     if (cp && !cp.classList.contains('hidden-panel')) {
         cp.classList.add('hidden-panel');
     }
-    // 确保 display 可见，然后移除隐藏类
+    // 确保 display 可见,然后移除隐藏类
     ap.style.display = '';
     // 使用 requestAnimationFrame 确保布局正确
     requestAnimationFrame(function() {
@@ -2595,7 +2604,7 @@ window.closeAgentPanel = function() {
         clearInterval(_agentPanelRefreshTimer);
         _agentPanelRefreshTimer = null;
     }
-    // 过渡结束后隐藏 display（否则 CSS transition 不生效）
+    // 过渡结束后隐藏 display(否则 CSS transition 不生效)
     setTimeout(function() {
         if (ap.classList.contains('hidden-panel')) {
             ap.style.display = 'none';
@@ -2615,9 +2624,9 @@ function startAgentPanelRefresh() {
         }
         // 刷新代理列表
         window.refreshAgentPanel();
-        // 如果选中了代理，同步刷新聊天内容
+        // 如果选中了代理,同步刷新聊天内容
         if (_selectedAgentName) {
-            // 实时拉取引擎数据，不依赖 localStorage
+            // 实时拉取引擎数据,不依赖 localStorage
             var token = getAuthToken();
             if (token) {
                 fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
@@ -2722,14 +2731,14 @@ window._refreshAllAgentLists = async function() {
         window._renderAgentList(agents, getEl('agentSubList'));
         window._renderAgentList(agents, getEl('engineAgentList'));
     } catch(e) {
-        // 显示错误但不中断，保留上次缓存
+        // 显示错误但不中断,保留上次缓存
         var msg = '加载失败: ' + e.message;
         var lists = ['agentSubList', 'engineAgentList'];
         lists.forEach(function(id) {
             var el = getEl(id);
             if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
         });
-        // 如果缓存超过30秒，清除缓存避免展示过时数据
+        // 如果缓存超过30秒,清除缓存避免展示过时数据
         if (window._agentListCacheTime && Date.now() - window._agentListCacheTime > 30000) {
             window._agentListCache = {};
         }
@@ -2754,12 +2763,12 @@ window.selectAgentChat = function(agentName) {
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
-                if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在（可能已被删除）</div>'; return; }
+                if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在(可能已被删除)</div>'; return; }
                 if (a.status === 'running') {
                     var partial = a.result || '';
                     if (partial) {
                         msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                            '<div class="text-xs text-green-500 font-medium mb-1">🟡 运行中，已生成内容：</div>' +
+                            '<div class="text-xs text-green-500 font-medium mb-1">🟡 运行中,已生成内容:</div>' +
                             '<div class="text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300" style="font-size:11px;max-height:300px;overflow-y:auto;">' + escapeHtml(partial.substring(0, 2000)) + '</div>' +
                             '<div class="text-xs text-gray-400 mt-1">轮询刷新中...</div></div>';
                     } else {
@@ -2808,7 +2817,7 @@ window.mainAgentReply = function() {
                 if (statusEl) statusEl.textContent = '没有新的子代理结果';
                 return;
             }
-            // ★ 保存结果数据并通过标准流程处理（由 triggerAgentAutoReplyForSubAgent 统一管理队列和 mark）
+            // ★ 保存结果数据并通过标准流程处理(由 triggerAgentAutoReplyForSubAgent 统一管理队列和 mark)
             (data.notifications || []).forEach(function(n) {
                 if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
                 window._pendingSubAgentResultsData[n.agent] = {
@@ -2828,7 +2837,7 @@ window.mainAgentReply = function() {
 
 function updateAgentUI() {
     var isActive = localStorage.getItem('agentMode') === 'true';
-    // Header 按钮（分离按钮：左边Agent模式，右边代理聊天室）
+    // Header 按钮(分离按钮:左边Agent模式,右边代理聊天室)
     var splitBtn = getEl('agentSplitBtn');
     if (splitBtn) {
         splitBtn.classList.toggle('active', isActive);
@@ -2843,7 +2852,7 @@ function updateAgentUI() {
     if (banner) {
         banner.classList.toggle('visible', isActive);
     }
-    // ★ Agent 模式下自动启用工具调用，隐藏工具调用开关
+    // ★ Agent 模式下自动启用工具调用,隐藏工具调用开关
     var toolCallToggle = getEl('searchToolCallToggle');
     var toolCallRow = toolCallToggle ? toolCallToggle.closest('.config-toggle-row') : null;
     if (isActive) {
@@ -2873,20 +2882,20 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
     var isActive = localStorage.getItem('agentMode') === 'true';
     var proactive = localStorage.getItem('agentProactive') === 'true';  // default false
     if (!isActive || !proactive) return;
-    
+
     var bubble = activeBubbleMap[chatId];
     if (!bubble) return;
-    
+
     try {
         var recentHistory = chats[chatId].messages.slice(-4).map(function(m) {
             return (m.role === 'user' ? '用户: ' : 'AI: ') + (typeof m.content === 'string' ? m.content.substring(0, 200) : '');
         }).join('\n');
-        
+
         var suggestionPrompt = {
             role: 'user',
             content: '基于最近对话:\n' + recentHistory + '\n\n请给出2-3个简短、具体的后续行动建议(每行一个,用-开头,每个不超过50字)。只返回建议列表。'
         };
-        
+
         var model = getVal('modelSelect') || DEFAULT_CONFIG.model;
         var resp = await fetch((localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url) + '/chat/completions', {
             method: 'POST',
@@ -2905,7 +2914,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
                 max_tokens: 300
             })
         });
-        
+
         if (!resp.ok) return;
         var data = await resp.json();
         var content = data.choices?.[0]?.message?.content || '';
@@ -2914,19 +2923,19 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
         }).map(function(l) {
             return l.replace(/^[-\s\d.]+/, '').trim();
         }).filter(function(s) { return s.length > 3; }).slice(0, 3);
-        
+
         if (suggestions.length === 0) return;
-        
+
         var markdownBody = bubble.querySelector('.markdown-body');
         if (!markdownBody) return;
-        
+
         var suggestionsDiv = document.createElement('div');
         suggestionsDiv.className = 'agent-suggestions';
         var label = document.createElement('div');
         label.className = 'agent-suggestions-label';
         label.textContent = '💡 后续建议:';
         suggestionsDiv.appendChild(label);
-        
+
         suggestions.forEach(function(s) {
             var btn = document.createElement('button');
             btn.className = 'agent-suggestion-btn';
@@ -2941,7 +2950,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
             };
             suggestionsDiv.appendChild(btn);
         });
-        
+
         markdownBody.appendChild(suggestionsDiv);
     } catch(e) {
         // 静默失败,不干扰主对话
@@ -2950,7 +2959,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 
 // ★ 引擎健康检查
 window.deleteCron = async function(name) {
-    if (!confirm('确定要删除 cron 任务 "' + name + '" 吗？')) return;
+    if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
         var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
         var d = await r.json();
@@ -2965,7 +2974,7 @@ window.deleteCron = async function(name) {
 };
 
 window.deleteCron = async function(name) {
-    if (!confirm('确定要删除 cron 任务 "' + name + '" 吗？')) return;
+    if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
         var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
         var d = await r.json();
@@ -2979,8 +2988,8 @@ window.deleteCron = async function(name) {
     }
 };
 
-// ★ 主代理通知系统：子代理完成后通知主代理
-// 防重复 + 冷却 + 预处理结果 + 禁止创建新子代理，杜绝无限循环
+// ★ 主代理通知系统:子代理完成后通知主代理
+// 防重复 + 冷却 + 预处理结果 + 禁止创建新子代理,杜绝无限循环
 window._agentNotifyQueue = [];
 window._activeNotifyExecId = 0;
 window._pendingNotifyExecId = null;
@@ -2993,29 +3002,29 @@ window._pendingSubAgentResultsData = {};  // {agentName: {status, result, error}
 window._subAgentCooldownActive = false;
 window._lastSubAgentReportTime = 0;
 
-// 30秒冷却，防止子代理完成→创建新子代理的无限循环
+// 30秒冷却,防止子代理完成→创建新子代理的无限循环
 const SUB_AGENT_COOLDOWN_MS = 30000;
 
 window._processAgentNotifyQueue = async function() {
     // ★ 防御性初始化
     if (!Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
     if (window._agentNotifyQueue.length === 0) return;
-    
+
     // 冷却检查
     var now = Date.now();
     if (now - window._lastSubAgentReportTime < SUB_AGENT_COOLDOWN_MS) {
-        // 还处于冷却期，但通知已在上方被收集（因为 queue 不为空）
+        // 还处于冷却期,但通知已在上方被收集(因为 queue 不为空)
         // 延迟后再处理
         setTimeout(function() { window._processAgentNotifyQueue(); }, SUB_AGENT_COOLDOWN_MS);
         return;
     }
-    
+
     var execId = ++window._activeNotifyExecId;
 
-    // 如果主代理正在生成回复（sendMessage 已激活），则暂不处理
+    // 如果主代理正在生成回复(sendMessage 已激活),则暂不处理
     // 等 sendMessage 完成后 sendMessage 本身会调用 processAgentNotifyQueue
     if (window._agentNotifyProcessing) {
-        // 标记：有新通知在等待，等主代理空闲后统一处理
+        // 标记:有新通知在等待,等主代理空闲后统一处理
         window._hasPendingSubAgentNotify = true;
         // 记录等上一批完成后要执行的批次ID
         window._pendingNotifyExecId = execId;
@@ -3023,11 +3032,11 @@ window._processAgentNotifyQueue = async function() {
     }
     window._pendingNotifyExecId = execId;
     window._agentNotifyProcessing = true;
-    
-    // ★ 收集属于当前批次的子代理（不限 groupId，所有在 _activeSubAgentGroup 里的都算）
+
+    // ★ 收集属于当前批次的子代理(不限 groupId,所有在 _activeSubAgentGroup 里的都算)
     var activeGroup = window._activeSubAgentGroup || [];
     var activeNames = activeGroup.map(function(item) { return item.name; });
-    
+
     var agents = [];
     while (window._agentNotifyQueue.length > 0) {
         var item = window._agentNotifyQueue.shift();
@@ -3037,67 +3046,67 @@ window._processAgentNotifyQueue = async function() {
         }
     }
     if (agents.length === 0) {
-        // 没有活跃子代理的通知（可能是旧批次的），直接丢弃
+        // 没有活跃子代理的通知(可能是旧批次的),直接丢弃
         window._agentNotifyQueue = [];
         window._agentNotifyProcessing = false;
         return;
     }
-    
+
     window._lastSubAgentReportTime = now;
     window._hasPendingSubAgentNotify = false;
-    
-    // ★ 直接从通知数据中提取结果，不依赖 agent_list（通知已含 result/error）
+
+    // ★ 直接从通知数据中提取结果,不依赖 agent_list(通知已含 result/error)
     var results = [];
     if (agents && agents.length > 0) {
-        // agents 数组来自通知队列，每个 item 是 {agentName, result, error} 的原始对象
+        // agents 数组来自通知队列,每个 item 是 {agentName, result, error} 的原始对象
         // 但 processAgentNotifyQueue 没有直接访问原始通知数据
-        // 改为从 _pendingSubAgentResults 中还原（通知时已保存）
+        // 改为从 _pendingSubAgentResults 中还原(通知时已保存)
         agents.forEach(function(name) {
             var stored = (window._pendingSubAgentResultsData || {})[name];
             if (stored) {
                 var preview = (stored.result || stored.error || '').substring(0, 1000);
                 results.push('「' + name + '」状态=' + (stored.status || 'completed') + (preview ? '\n结果预览: ' + preview : ''));
             } else {
-                // 降级：用 agent_list 查询
-                results.push('「' + name + '」状态未知（尝试查询...）');
+                // 降级:用 agent_list 查询
+                results.push('「' + name + '」状态未知(尝试查询...)');
             }
         });
         if (results.length === 0) {
-            results.push('所有子代理结果获取失败，请检查引擎状态');
+            results.push('所有子代理结果获取失败,请检查引擎状态');
         }
     } else {
         results.push('无有效子代理完成通知');
     }
-    
+
     var agentCount = agents.length;
     var summaryLine = agentCount === 1 ? '1 个子代理已完成' : agentCount + ' 个子代理已完成';
-    
-    // ★ 核心：合并后的上下文，一次注入
-    var ctx = '## ⚡ 子代理完成报告（' + summaryLine + '）\n' +
-        '以下子代理已完成，请整合这些信息备用：\n' + results.join('\n---\n') + '\n\n' +
+
+    // ★ 核心:合并后的上下文,一次注入
+    var ctx = '## ⚡ 子代理完成报告(' + summaryLine + ')\n' +
+        '以下子代理已完成,请整合这些信息备用:\n' + results.join('\n---\n') + '\n\n' +
         '### 🔒 硬性规则\n' +
         '1. 绝对禁止调用 agent_create / agent_run / delegate_task 等任何创建子代理的工具。\n' +
-        '2. 这条消息是系统通知，不需要回复用户，只需要静默记录结果。\n' +
-        '3. 如用户提问涉及这些子代理的结果，可以直接引用回答，无需重复调用子代理。';
-    
+        '2. 这条消息是系统通知,不需要回复用户,只需要静默记录结果。\n' +
+        '3. 如用户提问涉及这些子代理的结果,可以直接引用回答,无需重复调用子代理。';
+
     window._pendingNotifyExecId = null;  // 清除待处理标记
 
     if (typeof window.sendMessage === 'function') {
         window.__internalAgentContext = ctx;
-        // 等待 sendMessage 彻底完成（包括流式响应全部返回）再解锁
-        // 用 .finally 而非 setTimeout，保证锁跟随 sendMessage 生命周期
+        // 等待 sendMessage 彻底完成(包括流式响应全部返回)再解锁
+        // 用 .finally 而非 setTimeout,保证锁跟随 sendMessage 生命周期
         window.sendMessage(true, '').finally(function() {
-            // 所有流式响应结束后，解锁并检查是否有新批次在等待
+            // 所有流式响应结束后,解锁并检查是否有新批次在等待
             window._agentNotifyProcessing = false;
             var nextExecId = window._pendingNotifyExecId;
-            
-            // 处理完成后，清理本次批次的数据并 mark 已处理
+
+            // 处理完成后,清理本次批次的数据并 mark 已处理
             if (agents && agents.length > 0 && typeof window._pendingSubAgentResultsData === 'object') {
                 agents.forEach(function(name) {
                     delete window._pendingSubAgentResultsData[name];
                 });
             }
-            // 清理 _pendingSubAgentResults（只清理本次批次的）
+            // 清理 _pendingSubAgentResults(只清理本次批次的)
             if (agents && Array.isArray(window._pendingSubAgentResults)) {
                 agents.forEach(function(name) {
                     var idx = window._pendingSubAgentResults.indexOf(name);
@@ -3109,7 +3118,7 @@ window._processAgentNotifyQueue = async function() {
             if (token) {
                 fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function() {});
             }
-            
+
             if (nextExecId !== null && nextExecId !== execId) {
                 window._pendingNotifyExecId = null;
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
@@ -3119,7 +3128,7 @@ window._processAgentNotifyQueue = async function() {
             }
         });
     } else {
-        // sendMessage 不可用，直接解锁
+        // sendMessage 不可用,直接解锁
         window._agentNotifyProcessing = false;
         if (window._hasPendingSubAgentNotify || (Array.isArray(window._agentNotifyQueue) && window._agentNotifyQueue.length > 0)) {
             window._hasPendingSubAgentNotify = false;
@@ -3131,49 +3140,49 @@ window._processAgentNotifyQueue = async function() {
 window.triggerAgentAutoReplyForSubAgent = function(agentName) {
     if (!agentName) return;
     if (!Array.isArray(window._agentNotifyQueue)) { window._agentNotifyQueue = []; }
-    
-    // 冷却期内收到通知，直接合并到队列但不触发新请求
+
+    // 冷却期内收到通知,直接合并到队列但不触发新请求
     var now = Date.now();
     if (now - window._lastSubAgentReportTime < SUB_AGENT_COOLDOWN_MS) {
-        // 如果队列中没有这个代理，加入队列
+        // 如果队列中没有这个代理,加入队列
         var exists = window._agentNotifyQueue.some(function(item) { return item.agentName === agentName; });
         if (!exists) {
             window._agentNotifyQueue.push({ agentName: agentName });
         }
         return;
     }
-    
-    // 记录待处理的子代理结果，避免重复触发
+
+    // 记录待处理的子代理结果,避免重复触发
     if (!Array.isArray(window._pendingSubAgentResults)) { window._pendingSubAgentResults = []; }
     if (window._pendingSubAgentResults.indexOf(agentName) !== -1) {
         return;
     }
     window._pendingSubAgentResults.push(agentName);
-    
-    // 如果主代理正在生成，排队
+
+    // 如果主代理正在生成,排队
     var chatId = currentChatId;
     if (!chatId || !chats[chatId]) {
         createNewChat();
         chatId = currentChatId;
         if (!chatId) return;
     }
-    
+
     if (isTypingMap[chatId]) {
         window._agentNotifyQueue.push({ agentName: agentName });
         return;
     }
-    
+
     // 添加到队列并处理
     window._agentNotifyQueue.push({ agentName: agentName });
     window._processAgentNotifyQueue();
 };
 
 window.triggerAgentAutoReply = function(summary, chatId) {
-    // 旧接口，保留兼容但不再使用
+    // 旧接口,保留兼容但不再使用
 };
 
 window.deleteAgent = async function(name) {
-    if (!confirm('确定要删除子代理 "' + name + '" 吗？此操作不可撤销。')) return;
+    if (!confirm('确定要删除子代理 "' + name + '" 吗?此操作不可撤销。')) return;
     try {
         var r = await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
         var d = await r.json();
@@ -3191,14 +3200,14 @@ window.refreshEngineStatus = async function() {
     var dot = getEl('engineHealthDot');
     var text = getEl('engineHealthText');
     if (!dot || !text) return;
-    
+
     dot.className = 'engine-status-dot offline';
     text.textContent = '检查中...';
-    
+
     try {
         var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(5000) });
         var data = await resp.json();
-        
+
         if (data.ok || data.status === 'ok' || data.status === 'running') {
             dot.className = 'engine-status-dot online';
             text.textContent = '🟢 引擎在线';
@@ -3210,14 +3219,14 @@ window.refreshEngineStatus = async function() {
         dot.className = 'engine-status-dot offline';
         text.textContent = '🔴 引擎离线 (' + e.message + ')';
     }
-    
+
     // 加载 cron 列表
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
             var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(5000) });
             var cronData = await cronResp.json();
-            // 引擎返回 {job_name: {...}} 格式，转换为数组
+            // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
             var runningJobs = cronJobs.filter(function(j) { return j.enabled; });
             if (runningJobs.length > 0) {
@@ -3234,8 +3243,8 @@ window.refreshEngineStatus = async function() {
             cronList.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
-    
-    // 加载子代理列表（统一使用 _renderAgentList）
+
+    // 加载子代理列表(统一使用 _renderAgentList)
     var agentList = getEl('engineAgentList');
     if (agentList && Object.keys(window._agentListCache || {}).length > 0) {
         window._renderAgentList(window._agentListCache, agentList);
@@ -3395,7 +3404,7 @@ function saveConfig(showFeedback = false) {
         configSnapshot = null;
         configPanelWasOpen = false;
     }
-    // ★ 配置变更后自动同步到服务器（按用户隔离）
+    // ★ 配置变更后自动同步到服务器(按用户隔离)
     if (localStorage.getItem('authToken')) {
         setTimeout(saveConfigToServer, 200);
     }
@@ -3432,7 +3441,7 @@ window.updateMarkdownConfig = () => {
             breaks: getChecked('markdownBreaks'),
             pedantic: false,
         });
-        // 不再使用自定义 paragraph renderer（marked v15 默认已正确处理）
+        // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理)
     }
     // 清空 Markdown 缓存使新配置生效
     if (window.MarkdownRenderer) MarkdownRenderer.clearCache();
@@ -3560,7 +3569,7 @@ function copyMessageContent(content) {
 }
 
 function autoLinkURLs(markdownText) {
-    // ★ 统一将所有裸 URL 转为可点击的 markdown 链接，不再区分图片
+    // ★ 统一将所有裸 URL 转为可点击的 markdown 链接,不再区分图片
     return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, url, after) => {
         if (/!\[.*?\]\(/.test(match) || /\[.*?\]\(/.test(match)) return match;
         try {
@@ -3580,26 +3589,26 @@ function showImageLightbox(images, startIdx) {
     // 移除已有灯箱
     var existing = document.querySelector('.img-lightbox');
     if (existing) existing.remove();
-    
+
     var idx = startIdx || 0;
     var overlay = document.createElement('div');
     overlay.className = 'img-lightbox';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;';
-    
+
     var img = document.createElement('img');
     img.style.cssText = 'max-width:90vw;max-height:80vh;object-fit:contain;border-radius:4px;';
-    
+
     var counter = document.createElement('div');
     counter.style.cssText = 'color:#fff;margin-bottom:12px;font-size:14px;';
-    
+
     var actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:12px;margin-top:12px;';
-    
+
     function updateView() {
         img.src = cleanImageUrl(images[idx]);
         counter.textContent = (idx + 1) + ' / ' + images.length;
     }
-    
+
     // 左右切换
     if (images.length > 1) {
         var prev = document.createElement('button');
@@ -3607,14 +3616,14 @@ function showImageLightbox(images, startIdx) {
         prev.style.cssText = 'position:absolute;left:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;';
         prev.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx - 1 + images.length) % images.length; updateView(); });
         overlay.appendChild(prev);
-        
+
         var next = document.createElement('button');
         next.textContent = '\u25b6';
         next.style.cssText = 'position:absolute;right:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;';
         next.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx + 1) % images.length; updateView(); });
         overlay.appendChild(next);
     }
-    
+
     // 下载按钮
     var download = document.createElement('a');
     download.textContent = '\u2b07 \u4e0b\u8f7d';
@@ -3627,23 +3636,23 @@ function showImageLightbox(images, startIdx) {
         a.click();
     });
     actions.appendChild(download);
-    
+
     // 关闭
     var close = document.createElement('button');
     close.textContent = '\u2715';
     close.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;';
     close.addEventListener('click', function() { overlay.remove(); });
     overlay.appendChild(close);
-    
+
     overlay.appendChild(counter);
     overlay.appendChild(img);
     overlay.appendChild(actions);
-    
+
     // 点击背景关闭
     overlay.addEventListener('click', function(e) {
         if (e.target === overlay) overlay.remove();
     });
-    
+
     // 键盘导航
     function keyHandler(e) {
         if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', keyHandler); }
@@ -3651,13 +3660,13 @@ function showImageLightbox(images, startIdx) {
         if (images.length > 1 && e.key === 'ArrowRight') { idx = (idx + 1) % images.length; updateView(); }
     }
     document.addEventListener('keydown', keyHandler);
-    
+
     updateView();
     document.body.appendChild(overlay);
 }
 
 function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null) {
-    // ★ 防御性清理：确保参数都是字符串且不含 [object Object]
+    // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
     const safeStr = (val) => {
         if (val === null || val === undefined) return '';
         if (typeof val !== 'string') val = String(val);
@@ -3665,7 +3674,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     };
     text = safeStr(text);
     reasoning = typeof reasoning === 'string' ? reasoning.replace(/\[object Object\]/gi, '') : '';
-    // ★ 如果已有独立显示的生成图片，去除回复文本中对应的图片链接（避免重复和点击跳转报错）
+    // ★ 如果已有独立显示的生成图片,去除回复文本中对应的图片链接(避免重复和点击跳转报错)
     var _urls = (generatedImages || []).concat(generatedImage ? [generatedImage] : []).filter(Boolean);
     if (_urls.length > 0 && text) {
         _urls.forEach(function(u) {
@@ -3673,7 +3682,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             text = text.split(u).join('');
         });
     }
-    
+
     const container = $.chatMessagesContainer;
     if (!container) return null;
 
@@ -3759,7 +3768,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         contentDiv.innerHTML = escapeHtml((typeof text === 'string' ? text.replace(/\[object Object\]/g, '') : '') || '').replace(/\n/g, '<br>');
     } else {
         let display = compressNewlines(typeof text === 'string' ? text.replace(/\[object Object\]/g, '') : '', 2);
-        // 将 Markdown 图片语法 ![]() 转为可点击链接（避免加载失效图片）
+        // 将 Markdown 图片语法 ![]() 转为可点击链接(避免加载失效图片)
         display = display.replace(/!\[(.*?)\]\((.*?)\)/g, '[图片 $1]($2)');
         if (window.marked) {
             display = autoLinkURLs(display);
@@ -3961,7 +3970,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     if (actions.children.length) wrapper.appendChild(actions);
 
-    // 底部统计（改用SVG图标）
+    // 底部统计(改用SVG图标)
     if (role === 'assistant' && (usage || time > 0)) {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
@@ -3976,7 +3985,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             if (tokens > 0) {
                 foot += ' <span class="msg-foot-sep"></span> <svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="9.5,2 4,9 7.5,9 6.5,14 12,7 8.5,7"/></svg> ' + tokens;
             }
-            // ★ 统一提取缓存命中信息，兼容多模型格式
+            // ★ 统一提取缓存命中信息,兼容多模型格式
             var cacheHit = null, cacheMiss = null;
             // DeepSeek 原生: prompt_cache_hit/miss_tokens
             if (usage.prompt_cache_hit_tokens !== undefined) {
@@ -4021,7 +4030,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         row.style.transform = 'translateY(0)';
     });
 
-    // 不在这里滚动，streaming 时会自然跟随
+    // 不在这里滚动,streaming 时会自然跟随
 
     return bubble;
 }
@@ -4031,10 +4040,10 @@ function attachCodeCopyButtons(container) {
         if (pre.querySelector('.code-actions')) return;
         var code = pre.innerText.trim();
         var isHtml = /^(<!DOCTYPE|<html|<HTML|<svg[\s>])/.test(code) || (code.indexOf('<') >= 0 && code.indexOf('>') >= 0 && (code.indexOf('style') >= 0 || code.indexOf('script') >= 0 || code.indexOf('div') >= 0 || code.indexOf('body') >= 0 || code.indexOf('h1') >= 0 || code.indexOf('p>') >= 0));
-        
+
         var actions = document.createElement('div');
         actions.className = 'code-actions';
-        
+
         if (isHtml) {
             var runBtn = document.createElement('div');
             runBtn.className = 'code-run-btn';
@@ -4047,7 +4056,7 @@ function attachCodeCopyButtons(container) {
             };
             actions.appendChild(runBtn);
         }
-        
+
         var copyBtn = document.createElement('div');
         copyBtn.className = 'code-copy-btn';
         copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -4058,13 +4067,13 @@ function attachCodeCopyButtons(container) {
             setTimeout(function() { copyBtn.style.background = ''; }, 300);
         };
         actions.appendChild(copyBtn);
-        
+
         pre.insertBefore(actions, pre.firstChild);
     });
 }
 function applySyntaxHighlighting(container) {
     if (window.hljs) {
-        // 静默 highlight.js 的安全警告（代码块中含 HTML 标签时触发，非真安全问题）
+        // 静默 highlight.js 的安全警告(代码块中含 HTML 标签时触发,非真安全问题)
         var _warn = console.warn;
         console.warn = function() {};
         container.querySelectorAll('pre code:not([class*="mermaid"])').forEach(function(block) {
@@ -4435,7 +4444,7 @@ function abortExistingRequest(chatId) {
     }
     delete isTypingMap[chatId];
     delete activeBubbleMap[chatId];
-    // ★ 主代理空闲了，处理子代理通知队列
+    // ★ 主代理空闲了,处理子代理通知队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
         setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
     }
@@ -4692,7 +4701,7 @@ function buildApiMessages(chatId) {
         if (msg.role === 'system') continue;
         if (msg.role === 'user') {
             const files = msg.files;
-            // ★ 所有带图片的用户消息都传递 image_url，确保后续追问也能看到图片
+            // ★ 所有带图片的用户消息都传递 image_url,确保后续追问也能看到图片
             var msgHasImage = files && files.length > 0 && files.some(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
             var prev = window._forceVisionFormat;
             if (msgHasImage || (i === msgs.length - 1 && currentHasImage)) {
@@ -4737,7 +4746,7 @@ function adjustMaxTokens(model, requestedTokens, estimated) {
 }
 
 
-// ★ 后端 SSE 处理器：接收 SSE 流式事件，转换为 streamResponse 兼容格式
+// ★ 后端 SSE 处理器:接收 SSE 流式事件,转换为 streamResponse 兼容格式
 // SSE 格式: "event: TYPE\ndata: JSON\n\n"
 // 解析时需要识别 "event:" 行来确定事件类型
 window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgId) {
@@ -4751,7 +4760,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
     let usage = null;
     let finished = false;
 
-    // 定期保存到 localStorage._savedPartial（防刷新丢失）
+    // 定期保存到 localStorage._savedPartial(防刷新丢失)
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (fullText || reasoningText) {
@@ -4773,10 +4782,10 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
         if (value) buffer += decoder.decode(value, { stream: true });
         if (done) { finished = true; }
 
-        // 处理 SSE 数据：SSE 格式为 "event: TYPE\ndata: JSON\n\n"
-        // 每条消息由 "event:xxx\ndata:xxx\n\n" 组成，lines 会包含多行
+        // 处理 SSE 数据:SSE 格式为 "event: TYPE\ndata: JSON\n\n"
+        // 每条消息由 "event:xxx\ndata:xxx\n\n" 组成,lines 会包含多行
         const lines = buffer.split('\n');
-        // 最后一行是可能不完整的下一条消息，保留在 buffer
+        // 最后一行是可能不完整的下一条消息,保留在 buffer
         buffer = lines.pop() || '';
 
         for (const rawLine of lines) {
@@ -4857,7 +4866,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
             } catch(e) { console.warn('[SSE] parse error:', e.message, 'line:', line.slice(0, 80)); }
         }
         if (done) {
-            // 处理 buffer 中剩余的不完整数据（理论上应该为空）
+            // 处理 buffer 中剩余的不完整数据(理论上应该为空)
             if (buffer.trim()) {
                 console.log('[SSE] done, buffer remains:', buffer.slice(0, 100));
             }
@@ -4885,8 +4894,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     let usage = null;
     let placeholderCleared = false;
     let parseErrors = 0;
-    // ★ 流式内容定期保存到 localStorage（防止刷新丢失）
-    // 把 timer 挂在 pendingMsg 上，方便外部清理
+    // ★ 流式内容定期保存到 localStorage(防止刷新丢失)
+    // 把 timer 挂在 pendingMsg 上,方便外部清理
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (pendingMsg.content || pendingMsg.reasoning) {
@@ -4931,16 +4940,16 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     try {
                         var jd = JSON.parse(ljson);
                         var dd = jd.choices?.[0]?.delta || jd.choices?.[0]?.message;
-                        // content为空但reasoning有内容时，使用reasoning作为显示内容
+                        // content为空但reasoning有内容时,使用reasoning作为显示内容
                         if (dd && dd.content && String(dd.content).trim()) {
                             fullText += dd.content;
                         } else if (dd && dd.reasoning_content && String(dd.reasoning_content).trim()) {
                             fullText += String(dd.reasoning_content);
                         }
                         if (dd && dd.reasoning_content && String(dd.reasoning_content).trim()) reasoningText += String(dd.reasoning_content);
-                        if (dd && dd.reasoning_details) { 
+                        if (dd && dd.reasoning_details) {
                             if (!pendingMsg._reasoningDetails) pendingMsg._reasoningDetails = [];
-                            for (var rdi=0;rdi<dd.reasoning_details.length;rdi++) { 
+                            for (var rdi=0;rdi<dd.reasoning_details.length;rdi++) {
                                 if (dd.reasoning_details[rdi].text) {
                                     reasoningText += dd.reasoning_details[rdi].text;
                                     pendingMsg._reasoningDetails.push({type: 'reasoning.text', text: dd.reasoning_details[rdi].text});
@@ -4967,7 +4976,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                 }
             }
             console.log('[STREAM] Done, final fullText:', fullText?.length, 'bytes');
-            // 残留buffer原始内容（前200字节）
+            // 残留buffer原始内容(前200字节)
             if (buffer && buffer.trim()) {
                 var bufPreview = buffer.substring(0, 200);
                 console.log('[BUF-HEX] buffer start:', bufPreview);
@@ -5022,7 +5031,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     }
 
                     // ★ MiniMax 兼容: 当 delta 中只有空的 role/reasoning_content 时跳过
-                    // MiniMax 返回 { role: "", reasoning_content: "" } 的空chunk，不包含有效内容
+                    // MiniMax 返回 { role: "", reasoning_content: "" } 的空chunk,不包含有效内容
                     if ((delta.content === undefined || delta.content === null) &&
                         delta.role !== undefined &&
                         (delta.role === '' || delta.role === 'assistant') &&
@@ -5214,13 +5223,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     }
 
                     const rawContent = delta.content ?? delta.text ?? delta.message?.content;
-                    // 处理各种可能的数据类型，避免对象被错误地转为 [object Object]
+                    // 处理各种可能的数据类型,避免对象被错误地转为 [object Object]
                     let textContent = null;
                     if (rawContent !== undefined && rawContent !== null) {
                         if (typeof rawContent === 'string') {
                             textContent = rawContent;
                         } else if (typeof rawContent === 'object' && rawContent !== null) {
-                            // ★ 修复: 不用 || 链式取值（空字符串 "" 是 falsy，会让 || 跳到下一项对象）
+                            // ★ 修复: 不用 || 链式取值(空字符串 "" 是 falsy,会让 || 跳到下一项对象)
                             const st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
                             const ex = st(rawContent.text) || st(rawContent.content) || st(rawContent.value);
                             if (ex !== null) {
@@ -5240,7 +5249,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     if (textContent && textContent.length > 0) {
                         fullText += textContent;
                         fullText = fullText.replace(/\[object Object\]/g, '');
-                        
+
                         // ★ 实时提取所有<think>和(think)块到思考区
                         var _t = fullText;
                         var _allThink = '';
@@ -5269,13 +5278,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                         pendingMsg.content = _t.trim() || (_allThink.trim() ? '' : fullText);
                         var _displayText = _t.trim();
-                        // ★ 如果正文为空但思考有内容，不显示原始 (think) 标签
+                        // ★ 如果正文为空但思考有内容,不显示原始 (think) 标签
                         if (!_displayText && _allThink.trim()) {
                             _displayText = '';
                         } else if (!_displayText) {
                             _displayText = '';
                         }
-                        
+
                         if (currentChatId === chatId) {
                             var currentBubble = activeBubbleMap[chatId];
                             if (currentBubble) {
@@ -5300,7 +5309,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 var markdownBody = currentBubble.querySelector('.markdown-body');
                                 if (markdownBody && window.marked) {
                                     try {
-                                        // ★ 使用已清理 (think) 标签的 _t，而非原始 fullText
+                                        // ★ 使用已清理 (think) 标签的 _t,而非原始 fullText
                                         var _renderText = typeof _t !== 'undefined' ? _t : fullText;
                                         const segments = _renderText.split('```');
                                         let html = '';
@@ -5360,13 +5369,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         // 如果是字符串,尝试解析为对象
         if (typeof currentToolCall.function.arguments === 'string') {
             let argsStr = currentToolCall.function.arguments.trim();
-            
+
             // ★ 修复: 忽略单字符/碎片(DeepSeek V4重放产物)
             if (argsStr.length <= 2 && (argsStr === '}' || argsStr === ']' || argsStr === '')) {
                 currentToolCall = null;
                 return { fullText, reasoningText, usage, toolCalls };
             }
-            
+
             // 检查是否包含[object Object]前缀
             if (argsStr.startsWith('[object Object]')) {
                 argsStr = argsStr.substring('[object Object]'.length);
@@ -5385,7 +5394,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                 var openBraces = (fixedStr.match(/\{/g) || []).length;
                 var closeBraces = (fixedStr.match(/\}/g) || []).length;
                 while (closeBraces < openBraces) { fixedStr += '}'; closeBraces++; }
-                
+
                 try {
                     currentToolCall.function.arguments = JSON.parse(fixedStr);
                 } catch (e2) {
@@ -5432,7 +5441,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             if (_det4) _det4.open = true;
         }
     }
-    // ★ 流式已经实时渲染了数学公式，不需要再次渲染
+    // ★ 流式已经实时渲染了数学公式,不需要再次渲染
     if (toolCalls.length > 0) {
     }
     // 有思考但无正文:确保气泡有内容显示(思考已在折叠框,这里只确保气泡不空)
@@ -5443,7 +5452,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     // ★ MiniMax/模型兼容: 从 content 中解析文本格式的工具调用
     // 支持三种格式: <minimax:tool_call> XML, [TOOL_CALL] 括号格式
     if (!toolCalls.length && fullText && (fullText.includes('<minimax:tool_call>') || fullText.includes('[TOOL_CALL]'))) {
-        console.log('[ToolCall] 检测到文本格式工具调用，开始解析...');
+        console.log('[ToolCall] 检测到文本格式工具调用,开始解析...');
 
         // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
         const xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
@@ -5568,7 +5577,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     // ★ MiniMax/模型兼容: 从 content 中解析文本格式的工具调用
     // 支持三种格式: <minimax:tool_call> XML, [TOOL_CALL] 括号格式
     if (!toolCalls.length && fullText && (fullText.includes('<minimax:tool_call>') || fullText.includes('[TOOL_CALL]'))) {
-        console.log('[ToolCall非流式] 检测到文本格式工具调用，开始解析...');
+        console.log('[ToolCall非流式] 检测到文本格式工具调用,开始解析...');
 
         // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
         const xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
@@ -5623,7 +5632,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     } else if (msg.reasoning) {
         reasoningText = msg.reasoning;
     }
-    // 兜底确保 reasoningText 是字符串（不再覆盖上面的提取结果）
+    // 兜底确保 reasoningText 是字符串(不再覆盖上面的提取结果)
     if (!reasoningText) {
         const rc = msg.reasoning_content ?? msg.reasoning;
         if (rc !== null && rc !== undefined) reasoningText = String(rc);
@@ -5760,7 +5769,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 
             setTimeout(async () => {
                 try {
-                    // ★ 自动重发（图片已由文本模型列表屏蔽，走 analyze_image 工具）
+                    // ★ 自动重发(图片已由文本模型列表屏蔽,走 analyze_image 工具)
                     await sendMessage(true, lastUser.text, lastUser.files);
                 } catch (e) {
                     console.error('[AutoRecovery] 重发失败:', e);
@@ -5775,14 +5784,14 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 };
 
 window.sendMessage = async function (skipUserAdd = false, userTextForRegen = null, userFilesForRegen = null) {
-    // ★ 任务批次隔离：用户消息开启新批次，内部通知复用当前批次
+    // ★ 任务批次隔离:用户消息开启新批次,内部通知复用当前批次
     if (!skipUserAdd) {
-        // 用户发起的消息 → 新任务批次开始，清空旧的子代理追踪
+        // 用户发起的消息 → 新任务批次开始,清空旧的子代理追踪
         window._currentGroupId = (window._currentGroupId || 0) + 1;
         window._activeSubAgentGroup = [];  // {name, groupId} 列表
-        console.log('[Agent] 新任务批次开始，groupId=' + window._currentGroupId);
+        console.log('[Agent] 新任务批次开始,groupId=' + window._currentGroupId);
     }
-    
+
     if (!rateLimit.allowed()) {
         showToast('请求过于频繁', 'warning');
         return;
@@ -5857,7 +5866,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
 
     if (!skipUserAdd) {
         chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
-        // ★ 用户消息发出后立即保存，确保未开新会话时数据不丢
+        // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
         if (chats[chatId].title === '新对话') {
             chats[chatId].title = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
@@ -5907,7 +5916,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // ★ 提前设置 MiniMax 标记,供 buildApiMessages 使用
     window.__isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     let apiMessages = buildApiMessages(chatId);
-    
+
     // 如果有临时时间戳,插入到系统消息之后
     // ★ MiniMax 合并: 时间戳合并到 system 消息,避免 extra system message
     if (temporaryTimestamp) {
@@ -5963,8 +5972,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             }
         }
     }
-    
-    // ★ 内部 Agent 上下文注入（必须在 agent 提示词之后，确保覆盖创建子代理指令）
+
+    // ★ 内部 Agent 上下文注入(必须在 agent 提示词之后,确保覆盖创建子代理指令)
     if (window.__internalAgentContext) {
         var ctx = window.__internalAgentContext;
         delete window.__internalAgentContext;
@@ -6034,7 +6043,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // ★ Agent 模式: 始终启用工具调用
     var agentModeActive = localStorage.getItem('agentMode') === 'true';
     var effectiveToolCall = useToolCall || currentMessageHasImages || agentModeActive;
-    
+
     // 添加工具定义(使用提前保存的当前消息图片状态)
     if (effectiveToolCall) {
         // 只对支持视觉的模型添加图生图工具,文本模型无法处理图片参数
@@ -6046,20 +6055,32 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     const imageTools = [IMAGE_TOOL_DEFINITION, ANALYZE_IMAGE_TOOL];
     if (i2iTool) imageTools.push(i2iTool);
 
-    // 构建工具列表：根据搜索开关和工具模式动态选择
+    // 构建工具列表:根据搜索开关和工具模式动态选择
     const searchOn = getChecked('searchToggle');
     const toolMode = effectiveToolCall;
     if (toolMode) {
         var tools = [];
-        if (searchOn || agentModeActive) {
+        // 只在搜索开关打开时才注册搜索类工具(非Agent模式且关闭搜索时彻底不注册)
+        if (searchOn) {
             tools.push(SEARCH_TOOL_DEFINITION);
-        if (window.RAG_ENABLED || agentModeActive) {
-            tools.push(RAG_SEARCH_TOOL_DEFINITION);
-        }
+            if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
             tools.push(WEB_FETCH_TOOL_DEFINITION);
         }
+        // Agent模式额外注册引擎工具
+        if (agentModeActive) {
+            tools.push(RAG_SEARCH_TOOL_DEFINITION);
+            tools.push(ENGINE_CRON_LIST_TOOL);
+            tools.push(ENGINE_CRON_CREATE_TOOL);
+            tools.push(ENGINE_CRON_DELETE_TOOL);
+            tools.push(DELEGATE_TASK_TOOL);
+            tools.push(ENGINE_AGENT_STATUS_TOOL);
+            tools.push(ENGINE_AGENT_LIST_TOOL);
+            tools.push(ENGINE_AGENT_DELETE_TOOL);
+            tools.push(ENGINE_PUSH_TOOL);
+            if (searchOn) tools.push(WEB_FETCH_TOOL_DEFINITION);
+        }
         tools = tools.concat(imageTools);
-        // 刷课工具（登录后可用，始终注册让AI知道可以引导用户登录）
+        // 刷课工具(登录后可用,始终注册让AI知道可以引导用户登录)
         tools.push(CHAOXING_LOGIN_TOOL_DEFINITION);
         tools.push(CHAOXING_LIST_TOOL_DEFINITION);
         tools.push(CHAOXING_TOOL_DEFINITION);
@@ -6067,7 +6088,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         tools.push(CHAOXING_STOP_TOOL_DEFINITION);
         tools.push(CHAOXING_STATS_TOOL_DEFINITION);
         // 引擎工具
-        // ★ 引擎工具（子代理/Cron等）只在 Agent 模式下可用
+        // ★ 引擎工具(子代理/Cron等)只在 Agent 模式下可用
         if (agentModeActive) {
             tools.push(ENGINE_CRON_LIST_TOOL);
             tools.push(ENGINE_CRON_CREATE_TOOL);
@@ -6078,7 +6099,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             tools.push(ENGINE_AGENT_DELETE_TOOL);
             tools.push(ENGINE_PUSH_TOOL);
         }
-        
+
                     tools.push(SERVER_EXEC_TOOL);
                     tools.push(SERVER_PYTHON_TOOL);
                     tools.push(SERVER_FILE_READ_TOOL);
@@ -6113,7 +6134,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         } catch { /* 忽略 */ }
     }
 
-    // ★ Agent 模式: 如果本轮创建了子代理，禁止模型继续说话
+    // ★ Agent 模式: 如果本轮创建了子代理,禁止模型继续说话
     var _hasCreatedSubAgent = false;
 
     // ★ Agent 模式: 思考深度处理
@@ -6153,7 +6174,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     }
 
     // 初始调用使用 abortMain,后续重试使用新的 AbortController
-    // ★ 全局工具调用参数修复：发送前确保所有 arguments 是合法 JSON
+    // ★ 全局工具调用参数修复:发送前确保所有 arguments 是合法 JSON
     function _fixAllToolCalls(msgs) {
         for (var i = 0; i < msgs.length; i++) {
             var m = msgs[i];
@@ -6171,7 +6192,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             var cb = (raw.match(/\}/g) || []).length;
                             while (cb < ob) { raw += '}'; cb++; }
                             try { JSON.parse(raw); } catch(e2) {
-                                // 彻底放弃，用空对象
+                                // 彻底放弃,用空对象
                                 raw = '{}';
                             }
                             tc.function.arguments = raw;
@@ -6181,9 +6202,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             }
         }
     }
-    // ★ 终极修复：在发送前对 body 中所有 tool_calls 的 arguments 做 parse+stringify 重编码
+    // ★ 终极修复:在发送前对 body 中所有 tool_calls 的 arguments 做 parse+stringify 重编码
     _fixAllToolCalls(body.messages);
-    // 附加：对 MiniMax 流式产生的 arguments 做深度重编码
+    // 附加:对 MiniMax 流式产生的 arguments 做深度重编码
     for (var _mi = 0; _mi < body.messages.length; _mi++) {
         var _mm = body.messages[_mi];
         if (_mm.role === 'assistant' && _mm.tool_calls) {
@@ -6206,14 +6227,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             // ★ MiniMax 直连: 自定义 URL 和 API Key
             var _reqUrl = getVal('baseUrl') + '/chat/completions';
             var _reqBody = JSON.parse(JSON.stringify(body));
-            // 统一声明，后续两个分支都会赋值
+            // 统一声明,后续两个分支都会赋值
             let usage = null;
             let toolCalls = [];
             // 清理日志中的敏感信息
             if (_reqBody.messages) _reqBody.messages = _reqBody.messages.length + ' messages';
             console.log('[API-REQ]', _reqUrl, 'model:', body.model, 'stream:', !!_reqBody.stream, 'tools:', (_reqBody.tools||[]).map(function(t){return t.function?t.function.name:t.name;}), 'messages:', body.messages.length);
 
-            // ★ 后端 SSE 流式分支（Feature Flag 控制）
+            // ★ 后端 SSE 流式分支(Feature Flag 控制)
             if (USE_BACKEND_SSE) {
                 var _msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
                 clearTimeout(timeoutIdVal);
@@ -6265,9 +6286,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         const isStreamNetErr = streamErr.name === 'TypeError' ||
                             (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
                         if (isStreamNetErr) {
-                            console.warn('[STREAM] 流式读取失败，尝试非流式降级:', streamErr.message);
-                            showToast('流式中断，切换非流式重试...', 'warning', 2000);
-                            // 重新构造非流式请求体（清除stream标记）
+                            console.warn('[STREAM] 流式读取失败,尝试非流式降级:', streamErr.message);
+                            showToast('流式中断,切换非流式重试...', 'warning', 2000);
+                            // 重新构造非流式请求体(清除stream标记)
                             var _nsBody = JSON.parse(JSON.stringify(body));
                             if (_nsBody.stream !== undefined) _nsBody.stream = false;
                             const _nsRes = await fetch(_reqUrl, {
@@ -6307,7 +6328,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     var argStr = typeof tc.function.arguments === 'string'
                         ? tc.function.arguments
                         : JSON.stringify(tc.function.arguments || {});
-                    // ★ 修复: 确保 arguments 是合法 JSON 字符串（和 executeToolCallForRetry 相同的修复）
+                    // ★ 修复: 确保 arguments 是合法 JSON 字符串(和 executeToolCallForRetry 相同的修复)
                     var qc = (argStr.match(/"/g) || []).length;
                     if (qc % 2 !== 0) argStr += '"';
                     var ob = (argStr.match(/\{/g) || []).length;
@@ -6315,7 +6336,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     while (cb < ob) { argStr += '}'; cb++; }
                     // 清理非法控制字符和未转义换行
                     argStr = argStr.replace(/[\x00-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
-                    // 针对 engine_agent_create 的 prompt 做特殊处理：截断过长内容
+                    // 针对 engine_agent_create 的 prompt 做特殊处理:截断过长内容
                     if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
                         try {
                             var parsed = JSON.parse(argStr);
@@ -6325,9 +6346,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             }
                         } catch(e) {}
                     }
-                    // ★ 修复: 清理 tool_call_id（避免非法字符导致 400）
+                    // ★ 修复: 清理 tool_call_id(避免非法字符导致 400)
                     var tcId = tc.id || '';
-                    // 移除所有非安全字符（只保留 ASCII 字母数字和下划线短横）
+                    // 移除所有非安全字符(只保留 ASCII 字母数字和下划线短横)
                     tcId = tcId.replace(/[^a-zA-Z0-9_\-]/g, '');
                     if (!tcId || tcId.length > 64) tcId = 'tc_' + Date.now();
 
@@ -6633,7 +6654,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 await window.engineApiHandler('agent_run', {
                                     name: tName
                                 });
-                                toolResult = { result: '✅ 已创建并启动子代理「' + tName + '」(角色:' + tRole + ')，任务: ' + (tTask || tPrompt).substring(0, 50) };
+                                toolResult = { result: '✅ 已创建并启动子代理「' + tName + '」(角色:' + tRole + '),任务: ' + (tTask || tPrompt).substring(0, 50) };
                             } else {
                                 toolResult = { error: '引擎不可用' };
                             }
@@ -6693,7 +6714,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         }
 
         try {
-            // ★ 安全规则: n>1（多张）时自动丢弃 seed，防止所有图一模一样
+            // ★ 安全规则: n>1(多张)时自动丢弃 seed,防止所有图一模一样
             var _safeSeed = args.seed;
             var _safeN = args.n || 1;
             if (_safeN > 1 && _safeSeed !== undefined) {
@@ -6710,7 +6731,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             });
 
             if (imageResult) {
-                // ★ 累积所有图片（支持多次调用）
+                // ★ 累积所有图片(支持多次调用)
                 if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
                 if (typeof imageResult === 'string') {
                     pendingMsg.generatedImages.push(imageResult);
@@ -6721,7 +6742,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 toolResult = { result: '\u2705 ' + (Array.isArray(imageResult) ? imageResult.length : 1) + '\u5f20\u56fe\u7247\u5df2\u751f\u6210' };
             } else {
                 toolResult = { result: '[\u56fe\u7247\u751f\u6210\u5931\u8d25]' };
-            }   
+            }
         } catch (e) {
             console.error('[generate_image error]', e.message);
             toolResult = { error: e.message };
@@ -6783,12 +6804,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                     status.textContent = '🔍 正在分析参考图片...';
                                 }
                             }
-                            
+
                             try {
-                                // 分析图片获取描述（辅助 prompt 优化）
+                                // 分析图片获取描述(辅助 prompt 优化)
                                 const description = await window.analyzeImage(image, 'Briefly describe key features: hair, eyes, clothes, pose, background. Under 200 words.');
                                 const fullPrompt = userPrompt + '. Reference: ' + description.slice(0, 500);
-                                
+
                                 if (currentChatId === chatId) {
                                     const currentBubble = activeBubbleMap[chatId];
                                     if (currentBubble) {
@@ -6801,8 +6822,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                         currentBubble.querySelector('.markdown-body')?.appendChild(placeholder);
                                     }
                                 }
-                                
-                                // ★ 调用真正的图生图 API（带参考图片）
+
+                                // ★ 调用真正的图生图 API(带参考图片)
                                 const i2iResult = await window.generateImageI2I(fullPrompt, image, {
                                     model: args.model || 'image-01',
                                     aspect_ratio: args.aspect_ratio,
@@ -6810,7 +6831,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                     n: args.n
                                 });
                                 if (i2iResult) {
-                                    // ★ 累积到 generatedImages（与 generate_image 一致）
+                                    // ★ 累积到 generatedImages(与 generate_image 一致)
                                     if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
                                     if (typeof i2iResult === 'string') {
                                         pendingMsg.generatedImages.push(i2iResult);
@@ -6895,7 +6916,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 }
 // ==================== 图像生成函数 ====================
 window.generateImage = async (prompt, options = {}) => {
-    // ★ MiniMax API 限制 prompt ≤ 1500 字符，截断避免 2013 错误
+    // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
     const MAX_PROMPT_LEN = 1400;
     if (prompt.length > MAX_PROMPT_LEN) prompt = prompt.slice(0, MAX_PROMPT_LEN);
     // 使用独立的图像生成配置
@@ -6971,7 +6992,7 @@ window.generateImage = async (prompt, options = {}) => {
             images.push(data.data.image_url);
         }
         if (images.length > 0) return images.length === 1 ? images[0] : images;
-        // 如果有错误信息，打印出来方便调试
+        // 如果有错误信息,打印出来方便调试
         if (data.code || data.msg || data.error) {
             throw new Error('API错误: ' + (data.msg || data.error || JSON.stringify(data)));
         }
@@ -6984,7 +7005,7 @@ window.generateImage = async (prompt, options = {}) => {
 
 // ==================== 图生图函数 ====================
 window.generateImageI2I = async (prompt, image, options = {}) => {
-    // ★ MiniMax API 限制 prompt ≤ 1500 字符，截断避免 2013 错误
+    // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
     const MAX_PROMPT_LEN = 1400;
     if (prompt.length > MAX_PROMPT_LEN) prompt = prompt.slice(0, MAX_PROMPT_LEN);
     let baseUrl = (localStorage.getItem('imageBaseUrl') || DEFAULT_CONFIG.imageBaseUrl || '').replace(/\/$/, '');
@@ -7043,26 +7064,26 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         }
 
         const data = await response.json();
-        
+
         // 检查 API 错误
         if (data.base_resp && data.base_resp.status_code !== 0) {
             const errMsg = data.base_resp.status_msg || 'API 错误';
             const errCode = data.base_resp.status_code;
             // 如果是模型不支持错误
             if (errMsg.includes('not support model') || errMsg.includes('image-01-live')) {
-                throw new Error('抱歉，您的账号不支持 image-01-live 模型，请联系管理员升级');
+                throw new Error('抱歉,您的账号不支持 image-01-live 模型,请联系管理员升级');
             }
             // 内容安全
             if (errCode === 1026) {
-                throw new Error('图片内容涉及敏感信息，请尝试其他描述');
+                throw new Error('图片内容涉及敏感信息,请尝试其他描述');
             }
             // 账号问题
             if (errCode === 1008) {
-                throw new Error('账号余额不足，请充值后重试');
+                throw new Error('账号余额不足,请充值后重试');
             }
             throw new Error('API 错误 (' + errCode + '): ' + errMsg);
         }
-        
+
         // MiniMax 图生图返回: data: { image_base64: ["..."] }
         let imageResult = null;
         if (data.data && data.data.image_base64 && Array.isArray(data.data.image_base64) && data.data.image_base64.length > 0) {
@@ -7078,7 +7099,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
             }).filter(Boolean);
             imageResult = images.length === 1 ? images[0] : images;
         }
-        
+
         // ★ i2i失败(failed_count>0): 自动降级为文生图重试
         if (!imageResult && data.metadata && parseInt(data.metadata.failed_count) > 0 && requestBody.subject_reference) {
             delete requestBody.subject_reference;
@@ -7095,7 +7116,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
                 }
             }
         }
-        
+
         if (imageResult) {
             // 尝试上传图片到服务器
             const serverUrl = await uploadImageToServer(imageResult);
@@ -7186,26 +7207,27 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ Agent 模式下：如果本轮创建了子代理，立即停止递归循环
-                // ★ Agent 模式下：检测是否创建了子代理
+                // ★ Agent 模式下:如果本轮创建了子代理,立即停止递归循环
+                // ★ Agent 模式下:检测是否创建了子代理
                 if (_hasCreatedSubAgent) {
                     // ★ 防御性检查 validToolCalls 是否存在
                     if (!validToolCalls || !Array.isArray(validToolCalls)) {
-                        console.log('[Agent] 已创建子代理，但validToolCalls不可用，直接继续');
+                        console.log('[Agent] 已创建子代理,但validToolCalls不可用,直接继续');
                     } else {
-                    // 检查本轮是否只有 delegate_task/agent_create 工具调用（没有搜索、fetch等）
+                    // 检查本轮是否只有 delegate_task/agent_create 工具调用(没有搜索、fetch等)
                     var onlyCreatedSubAgents = validToolCalls.every(function(tc) {
                         return tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create');
                     });
                     if (onlyCreatedSubAgents) {
-                        // 本轮只创建了子代理，模型还没开始搜索/分析
-                        // 给模型一次机会继续思考：是否需要创建更多子代理，或开始实际工作
-                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个)，允许继续');
+                        // 本轮只创建了子代理,模型还没开始搜索/分析
+                        // 给模型一次机会继续思考:是否需要创建更多子代理,或开始实际工作
+                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),允许继续');
                     } else {
-                        // 本轮既有子代理创建又有实际工作（搜索/分析）
-                        // 停止递归，等待子代理完成
-                        console.log('[Agent] 已创建子代理+执行任务，停止递归等待完成');
+                        // 本轮既有子代理创建又有实际工作(搜索/分析)
+                        // 停止递归,等待子代理完成
+                        console.log('[Agent] 已创建子代理+执行任务,停止递归等待完成');
                         delete pendingMsg.partial;
+                        streamingScrollLock = false;
                         try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                         if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                         pendingMsg.time = Date.now() - startTime;
@@ -7230,19 +7252,20 @@ window.useAlternativeVisionModel = function() {
 
             // 无工具调用,正常完成
             delete pendingMsg.partial;
-            // ★ 清除保存的 partial 标记（已完成，刷新不会丢失）
+            // ★ 流结束释放滚动锁定
+            streamingScrollLock = false;
+            // ★ 清除保存的 partial 标记(已完成,刷新不会丢失)
             try { localStorage.removeItem('_savedPartial'); } catch(e) {}
             // ★ 清除流式保存定时器
             if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
-            // ★ 子代理完成报告处理：触发队列中的下一个通知
+            saveChats();  // 立即保存,不用 debounce
+            if (currentChatId === chatId) loadChat(chatId);
+            // ★ 子代理完成报告处理:触发队列中的下一个通知
             if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0) {
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 1000);
             }
-            saveChats();  // 立即保存，不用 debounce
-            if (currentChatId === chatId) loadChat(chatId);
-            if (currentChatId === chatId) loadChat(chatId);
             const defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
             if (!skipUserAdd && chats[chatId].title === defaultTitle) {
                 autoGenerateTitle(chatId);
@@ -7417,7 +7440,7 @@ async function autoGenerateTitle(chatId) {
             temperature: 0,
             max_tokens: 500
         };
-        // 尝试关闭思考模式，多个 API 兼容
+        // 尝试关闭思考模式,多个 API 兼容
         body.extra_body = body.extra_body || {};
         body.extra_body.thinking = { type: "disabled" };
         // MiniMax 兼容
@@ -7430,9 +7453,9 @@ async function autoGenerateTitle(chatId) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         let rawTitle = data.choices[0].message.content || '';
-        // 清理 think 标签（某些模型即使禁用了 thinking 还是会输出）
+        // 清理 think 标签(某些模型即使禁用了 thinking 还是会输出)
         rawTitle = rawTitle.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-        // 清理星号包裹（MiniMax 等模型喜欢加 **粗体**）
+        // 清理星号包裹(MiniMax 等模型喜欢加 **粗体**)
         rawTitle = rawTitle.replace(/^\*+\s*|\s*\*+$/g, '').trim();
         let finalTitle = rawTitle;
         if (!finalTitle) {
@@ -7452,8 +7475,8 @@ async function autoGenerateTitle(chatId) {
         }
         finalTitle = finalTitle
             .replace(/[""''《》「」]/g, '')
-            .replace(/^(标题[:：]?\s*|我.*?[,，]\s*|根据.*?[,，]\s*|对话标题[:：]?\s*|好的?\s*[,，]?\s*)/i, '')
-            .replace(/[。，、！？!?,;；\n].*$/s, '')
+            .replace(/^(标题[::]?\s*|我.*?[,,]\s*|根据.*?[,,]\s*|对话标题[::]?\s*|好的?\s*[,,]?\s*)/i, '')
+            .replace(/[。,、!?!?,;;\n].*$/s, '')
             .trim();
         if (!finalTitle || finalTitle.length < 1 || /^(我们|只|你|输出|生成|返回|请|需要|应该)/.test(finalTitle)) {
             const firstUserMsg = msgs.find(m => m.role === 'user');
@@ -7496,25 +7519,25 @@ async function typeTitle(chatId, finalTitle, index = 0) {
 function saveChats() {
     // 优先保存到服务器(异步,不阻塞)
     setTimeout(() => saveChatsToServer(), 100);
-    
-    // ★ 本地精简保存（去掉图片base64等大体积数据）
+
+    // ★ 本地精简保存(去掉图片base64等大体积数据)
     slimSaveChats();
-    // ★ 保存当前 partial 消息到 localStorage（防止刷新丢失）
-    // ★ 只在 beforeunload 时保存（由 beforeunload handler 触发 slimSaveChats）
+    // ★ 保存当前 partial 消息到 localStorage(防止刷新丢失)
+    // ★ 只在 beforeunload 时保存(由 beforeunload handler 触发 slimSaveChats)
     // ★ 避免频繁写入导致性能问题
 }
 
-// 压缩聊天记录（现在只做浅拷贝，不删除任何图片数据）
+// 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
 function compressChatsForStorage(chatsObj) {
-    // ★ 精简副本：去掉大体积数据，只保留摘要信息给 localStorage
+    // ★ 精简副本:去掉大体积数据,只保留摘要信息给 localStorage
     const slim = {};
     const chatIds = Object.keys(chatsObj).sort((a, b) => {
         const ta = chatsObj[a].updated_at || '';
         const tb = chatsObj[b].updated_at || '';
         return tb.localeCompare(ta); // 最新的排前面
     });
-    
-    // 只保留最近 N 个聊天的完整数据，其余的只保留标题和时间
+
+    // 只保留最近 N 个聊天的完整数据,其余的只保留标题和时间
     const MAX_CHATS = 30;
     chatIds.forEach((id, idx) => {
         const chat = chatsObj[id];
@@ -7523,13 +7546,13 @@ function compressChatsForStorage(chatsObj) {
             slim[id] = JSON.parse(JSON.stringify(chat));
             if (slim[id].messages) {
                 slim[id].messages = slim[id].messages.map(function(msg) {
-                    // 移除图片 base64 数据（服务器有备份）
+                    // 移除图片 base64 数据(服务器有备份)
                     if (msg.generatedImage) delete msg.generatedImage;
                     if (msg.generatedImages) delete msg.generatedImages;
                     if (msg.files) {
                         msg.files = msg.files.map(function(f) {
                             if (f.content && (f.isImage || (f.type && f.type.startsWith('image/')))) {
-                                // ★ 用1x1透明图占位，避免浏览器把中文文本当URL请求
+                                // ★ 用1x1透明图占位,避免浏览器把中文文本当URL请求
                                 return { name: f.name, type: f.type || 'image/png', size: f.size, isImage: true, content: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' };
                             }
                             if (f.content && f.content.length > 5000) {
@@ -7563,7 +7586,7 @@ function slimSaveChats() {
         localStorage.setItem('chats', JSON.stringify(slim));
         return true;
     } catch (e) {
-        // 还是太大，只保留最近5个聊天
+        // 还是太大,只保留最近5个聊天
         try {
             const mini = {};
             const ids = Object.keys(chats).slice(-5);
@@ -7617,10 +7640,10 @@ window.deleteChat = function (e, id) {
     delete isTypingMap[id];
     delete activeBubbleMap[id];
     delete userAbortMap[id];  // 清理用户中止标记
-    _deletedChatIds[id] = true; // 标记删除，合并时排除
+    _deletedChatIds[id] = true; // 标记删除,合并时排除
     delete chats[id];
     saveChats();
-    // ★ 只检查当前用户的聊天数量，忽略其他用户的残留
+    // ★ 只检查当前用户的聊天数量,忽略其他用户的残留
     var _uid = localStorage.getItem('authUserId') || '';
     var myKeys = Object.keys(chats).filter(function(k) {
         return !_uid || !chats[k].userId || chats[k].userId === _uid;
@@ -7764,7 +7787,7 @@ window.loadChat = function (id) {
         $.sidebarMask?.classList.remove('active');
     }
 
-    // 加载完成后自动滚动（loadChat 模式不受距离限制）
+    // 加载完成后自动滚动(loadChat 模式不受距离限制)
     autoScrollToBottom('loadChat');
 };
 
@@ -7947,7 +7970,7 @@ function exportCurrentChat() {
     lines.push('导出时间: ' + new Date().toLocaleString('zh-CN'));
     lines.push('='.repeat(50));
     lines.push('');
-    
+
     var msgs = chat.messages || [];
     msgs.forEach(function(m) {
         if (m.role === 'system') return;
@@ -7970,7 +7993,7 @@ function exportCurrentChat() {
         }
         lines.push('');
     });
-    
+
     var text = lines.join('\n');
     var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     var url = URL.createObjectURL(blob);
@@ -7996,7 +8019,7 @@ function importChats() {
             try {
                 const data = JSON.parse(ev.target.result);
                 if (!data.chats || typeof data.chats !== 'object') {
-                    alert('无效的导入文件：缺少 "chats" 字段');
+                    alert('无效的导入文件:缺少 "chats" 字段');
                     return;
                 }
                                 var imported = 0;
@@ -8006,20 +8029,20 @@ function importChats() {
                         newId = 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     }
                     chats[newId] = JSON.parse(JSON.stringify(data.chats[id]));
-                    // 清除用户隔离标记，确保当前账号能看到
+                    // 清除用户隔离标记,确保当前账号能看到
                     delete chats[newId].userId;
                     if (!chats[newId].messages) chats[newId].messages = [];
                     imported++;
                 }
                 renderChatHistory();
-                alert('导入完成：新增 ' + imported + ' 个聊天');
+                alert('导入完成:新增 ' + imported + ' 个聊天');
                 console.log('[import] 导入:', imported);
                 // 保存到服务器
                 saveChats();
                 // 保存到服务器
                 saveChatsToServer();
             } catch(err) {
-                alert('导入失败：' + err.message);
+                alert('导入失败:' + err.message);
             }
         };
         reader.readAsText(file);
@@ -8108,7 +8131,7 @@ function initializeConfig() {
     setChecked('markdownBreaks', localStorage.getItem('markdownBreaks') !== 'false');
     if (window.marked) {
         marked.setOptions({ gfm: getChecked('markdownGFM'), breaks: getChecked('markdownBreaks'), pedantic: false });
-        // 不再使用自定义 paragraph renderer（marked v15 默认已正确处理，自定义 renderer 会导致 [object Object]）
+        // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理,自定义 renderer 会导致 [object Object])
     }
 
     if (localStorage.getItem('dark') === 'true') toggleDarkMode(true);
@@ -8119,7 +8142,7 @@ function initializeConfig() {
 
     createTitleModelSelector();
     createSearchConfigSection();
-    loadSearchConfig();  // ★ 确保第二次 initializeConfig（服务器同步后）也重新加载搜索配置
+    loadSearchConfig();  // ★ 确保第二次 initializeConfig(服务器同步后)也重新加载搜索配置
     initFontSize();
     if (window.initToolModeBtn) initToolModeBtn();
     createSearchToggleButton();
@@ -8146,7 +8169,7 @@ function initializeConfig() {
 
     if (!$.chatTitle) {
         if (isMobile()) {
-            // ★ 移动端：聊天标题不放入 header（避免撑爆布局），改用浮动标签放在聊天区域顶部
+            // ★ 移动端:聊天标题不放入 header(避免撑爆布局),改用浮动标签放在聊天区域顶部
             $.chatTitle = document.createElement('div');
             $.chatTitle.id = 'chatTitle';
             $.chatTitle.dataset.mobile = '1';
@@ -8218,6 +8241,7 @@ function setupEventListeners() {
     if ($.chatBox) {
         $.chatBox.addEventListener('scroll', throttle(() => {
             if (isAutoScrolling) return;  // 自动滚动时不更新 userScrolled
+            if (streamingScrollLock) return;  // 流式期间锁定滚动跟随
             const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
             const atBottom = scrollHeight - scrollTop - clientHeight < 80;
             if ($.scrollToBottomBtn) {
@@ -8271,8 +8295,8 @@ function setupEventListeners() {
         $.userInput.addEventListener('input', function () { window.autoResize(this); });
         window.addEventListener('resize', debounce(() => window.autoResize($.userInput), 100));
     }
-    
-    // ★ 配置自动保存：配置面板内任意输入框/选择框/开关变更时自动保存到 localStorage + 服务器
+
+    // ★ 配置自动保存:配置面板内任意输入框/选择框/开关变更时自动保存到 localStorage + 服务器
     var _panel = $.configPanel || getEl('configPanel');
     if (_panel) {
         _panel.querySelectorAll('input, select, textarea').forEach(function(el) {
@@ -8285,13 +8309,13 @@ function setupEventListeners() {
 }
 
 function loadInitialData() {
-    // ★ 延迟加载模型列表，不阻塞首次渲染
+    // ★ 延迟加载模型列表,不阻塞首次渲染
     setTimeout(fetchModels, 500);
     const last = localStorage.getItem('lastChatId');
     if (last && chats[last]) {
         loadChat(last);
     } else {
-        // ★ 优先复用已有的空新对话，避免登录后反复创建
+        // ★ 优先复用已有的空新对话,避免登录后反复创建
         var emptyChatId = null;
         for (var _cid in chats) {
             var _chat = chats[_cid];
@@ -8332,7 +8356,7 @@ async function loadAllResources() {
         { type: 'script', src: 'lib/mammoth.browser.min.js' },
         { type: 'script', src: 'lib/xlsx.full.min.js' },
         { type: 'style', href: 'lib/atom-one-light.min.css', id: 'hljsTheme' },
-        { type: 'script', src: 'lib/mermaid/mermaid.min.js' } // Mermaid 图表渲染（本地加载避免境外CDN慢）
+        { type: 'script', src: 'lib/mermaid/mermaid.min.js' } // Mermaid 图表渲染(本地加载避免境外CDN慢)
     ];
     try {
         await Promise.all(resources.map(r => r.type === 'script' ? loadScript(r.src) : loadStyle(r.href, r.id)));
@@ -8379,12 +8403,12 @@ function initializeApp() {
         cacheDOMElements();
         injectStyles();
         setupKeyboardDetection(); // 初始化键盘检测(支持平板和手机)
-        
-        // ★ 登录门禁：未登录则弹出登录框，token无效也弹出
+
+        // ★ 登录门禁:未登录则弹出登录框,token无效也弹出
         var token = localStorage.getItem('authToken');
         if (!token) {
-            try { 
-                if (typeof showAuthOverlay === 'function') showAuthOverlay(); 
+            try {
+                if (typeof showAuthOverlay === 'function') showAuthOverlay();
             } catch(e) {}
         } else {
             // 异步验证token有效性
@@ -8401,10 +8425,10 @@ function initializeApp() {
                 } catch(e) {}
             })();
         }
-        
+
         initializeConfig();
         setupEventListeners();
-        
+
         // ★ 启动时深度清理所有历史消息中的 [object Object] 残留
         try {
             (function deepClean(obj) {
@@ -8420,11 +8444,11 @@ function initializeApp() {
             })(chats);
             localStorage.setItem('chats', JSON.stringify(chats));
         } catch(e) {}
-        
-        // ★ 从服务器恢复当前账号的配置和聊天记录（登录用户专用）
+
+        // ★ 从服务器恢复当前账号的配置和聊天记录(登录用户专用)
         await restoreUserData();
-        
-        // ★ 服务器同步后再次深度清理（防止服务器数据也有污染）
+
+        // ★ 服务器同步后再次深度清理(防止服务器数据也有污染)
         try {
             (function deepClean(obj) {
                 if (!obj || typeof obj !== 'object') return;
@@ -8448,13 +8472,13 @@ function initializeApp() {
             });
             localStorage.setItem('chats', JSON.stringify(chats));
         } catch(e) {}
-        
+
         loadInitialData();
         initRAGPanel();
         // ★ 已禁用: restoreOngoingChats 每次刷新自动重发消息
         // restoreOngoingChats();
-        
-        // ★ 周期自动保存：每30秒保存一次聊天（确保未开新会话时数据不丢）
+
+        // ★ 周期自动保存:每30秒保存一次聊天(确保未开新会话时数据不丢)
         setInterval(function() {
             if (currentChatId && chats[currentChatId] && chats[currentChatId].messages && chats[currentChatId].messages.length > 1) {
                 slimSaveChats();
@@ -8497,20 +8521,20 @@ function initializeApp() {
                 localStorage.removeItem('_skipUnloadSave');
                 return;
             }
-            // ★ 保存聊天记录（通过 saveChatsToServer 合并保存，slimSaveChats localStrorage 保底）
+            // ★ 保存聊天记录(通过 saveChatsToServer 合并保存,slimSaveChats localStrorage 保底)
             var token = localStorage.getItem('authToken');
-            // 聊天保存（通过 saveChatsToServer 合并后再保存）
+            // 聊天保存(通过 saveChatsToServer 合并后再保存)
             if (token && chats && Object.keys(chats).length > 0) {
                 try { saveChatsToServer(); } catch(e) {}
             }
-            // ★ 配置不再在 beforeunload 中保存（避免登录时 localStorage.clear 后存空值覆盖服务器数据）
-            //   配置由 saveConfigToServer() 在修改时自动保存，logout 时由 saveUserDataBeforeLogout() 保存
+            // ★ 配置不再在 beforeunload 中保存(避免登录时 localStorage.clear 后存空值覆盖服务器数据)
+            //   配置由 saveConfigToServer() 在修改时自动保存,logout 时由 saveUserDataBeforeLogout() 保存
         });
         window.addEventListener('pagehide', function() {
             slimSaveChats();
         });
-        
-        // ★ 全局拦截图片加载错误，静默处理避免控制台刷屏
+
+        // ★ 全局拦截图片加载错误,静默处理避免控制台刷屏
         document.addEventListener('error', function(e) {
             if (e.target && e.target.tagName === 'IMG') {
                 e.target.style.display = 'none';
@@ -8526,7 +8550,7 @@ function initRAGPanel() {
     if (getEl('ragPanel')) return;
     var inputArea = getEl('inputWrapper') || document.querySelector('.input-wrapper');
     if (!inputArea || !inputArea.parentNode) return;
-    
+
     var panel = document.createElement('div');
     panel.id = 'ragPanel';
     panel.className = 'rag-panel';
@@ -8549,24 +8573,24 @@ function initRAGPanel() {
         '<select id="ragEmbedModel" style="flex:1;min-width:60px;padding:1px 3px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;"></select>' +
         '<select id="ragSearchMode" style="flex:0 0 auto;padding:1px 3px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;"><option value="hybrid">混合</option><option value="embedding">语义</option><option value="tfidf">词法</option></select>' +
         '<button id="ragApplyEmbed" style="padding:2px 8px;border:1px solid #3b82f6;border-radius:4px;font-size:10px;cursor:pointer;background:#3b82f6;color:#fff;">应用</button></div>' +
-        '<div id="ragEmbedStatus" style="font-size:10px;color:#9ca3af;margin-top:2px;">未启用（纯词法检索）</div>' +
+        '<div id="ragEmbedStatus" style="font-size:10px;color:#9ca3af;margin-top:2px;">未启用(纯词法检索)</div>' +
         '</details>' +
-        '<div class="rag-helper-text">拖拽或点击上传文档，AI可搜索知识库内容</div>' +
+        '<div class="rag-helper-text">拖拽或点击上传文档,AI可搜索知识库内容</div>' +
         '</div>';
     inputArea.parentNode.insertBefore(panel, inputArea.nextSibling);
-    
+
     getEl('ragCloseBtn').addEventListener('click', function(e) { e.stopPropagation(); panel.classList.toggle('open'); });
     panel.querySelector('.rag-panel-header').addEventListener('click', function(e) {
         if (e.target.tagName === 'BUTTON') return;
         panel.classList.toggle('open');
     });
-    
+
     var ua = getEl('ragUploadArea');
     ua.addEventListener('click', function() { var f = document.createElement('input'); f.type = 'file'; f.multiple = true; f.accept = '.pdf,.txt,.md,.docx,.xlsx,.json,.html'; f.onchange = function() { enqueueUploads(f.files); }; f.click(); });
     ua.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('dragover'); });
     ua.addEventListener('dragleave', function() { this.classList.remove('dragover'); });
     ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('dragover'); enqueueUploads(e.dataTransfer.files); });
-    
+
     // 集合选择器
     var collSel = getEl('ragCollectionSelect');
     loadCollections();
@@ -8587,7 +8611,7 @@ function initRAGPanel() {
     getEl('ragDelColl').addEventListener('click', function() {
         var cur = localStorage.getItem('ragCurrentCollection') || 'default';
         if (cur === 'default') { showToast('不能删除默认知识库', 'warning'); return; }
-        if (!confirm('删除知识库「' + cur + '」？')) return;
+        if (!confirm('删除知识库「' + cur + '」?')) return;
         var uid = localStorage.getItem('authUserId') || '';
         var nsName = encodeURIComponent(uid ? uid + '_' + cur : cur);
         var _token = getAuthToken();
@@ -8597,7 +8621,7 @@ function initRAGPanel() {
     });
     getEl('ragQueryBtn').addEventListener('click', queryRAG);
     getEl('ragQueryInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') queryRAG(); });
-    
+
     loadKnowledgeList();
 
     // 嵌入配置初始化
@@ -8676,7 +8700,7 @@ function loadKnowledgeList() {
         .catch(function() { if (list) list.innerHTML = '<div class="rag-empty">无法连接</div>'; });
 }
 
-// 上传队列：一次只传一个文件，避免并发搞崩 RAG 后端
+// 上传队列:一次只传一个文件,避免并发搞崩 RAG 后端
 var _ragUploadQueue = [];
 var _ragUploadBusy = false;
 
@@ -8691,7 +8715,7 @@ function processNextUpload() {
     if (_ragUploadBusy || _ragUploadQueue.length === 0) return;
     _ragUploadBusy = true;
     var file = _ragUploadQueue.shift();
-    // 完成回调：继续下一个
+    // 完成回调:继续下一个
     uploadToRAG(file, function() {
         _ragUploadBusy = false;
         processNextUpload();
@@ -8725,14 +8749,14 @@ function uploadToRAG(file, onDone) {
     var uid = localStorage.getItem('authUserId') || '';
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var ns = uid ? uid + '_' + coll : coll;
-    
+
     var pb = getEl('ragProgressBar');
     var pf = getEl('ragProgressFill');
     var pt = getEl('ragProgressText');
     if (pb) pb.style.display = 'block';
     if (pf) pf.style.width = '0%';
     if (pt) pt.textContent = '上传中: ' + file.name;
-    
+
     var _token = getAuthToken();
     var xhr = new XMLHttpRequest();
     xhr.open('POST', RAG_API + '?action=upload&collection=' + encodeURIComponent(ns) + '&mode=tfidf&auth_token=' + encodeURIComponent(_token), true);
@@ -8756,13 +8780,13 @@ function uploadToRAG(file, onDone) {
                 showToast('导入失败: 服务器返回异常', 'error');
             }
         } catch(e) {
-            showToast('导入失败: 服务器无响应，请重试', 'error');
+            showToast('导入失败: 服务器无响应,请重试', 'error');
             console.error('[RAG] upload error:', e.message, 'response:', xhr.responseText);
         }
         doneFn();
     };
     xhr.onerror = function() { if (pb) pb.style.display = 'none'; showToast('网络错误', 'error'); doneFn(); };
-    xhr.ontimeout = function() { if (pb) pb.style.display = 'none'; showToast('上传超时，请重试', 'error'); doneFn(); };
+    xhr.ontimeout = function() { if (pb) pb.style.display = 'none'; showToast('上传超时,请重试', 'error'); doneFn(); };
     xhr.timeout = 120000;
     xhr.send(formData);
 }
@@ -8774,7 +8798,7 @@ async function chaoxingToolHandler(action, ids, username, password) {
             var r = await fetch('/oneapichat/chaoxing_api.php?action=login&username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password));
             var d = await r.json();
             if (d.success) return { result: '登录成功: ' + d.username };
-            return { error: d.error || '登录失败，请检查账号密码' };
+            return { error: d.error || '登录失败,请检查账号密码' };
         }
         if (action === 'courses') {
             var r = await fetch('/oneapichat/chaoxing_api.php?action=courses');
@@ -8871,9 +8895,9 @@ async function engineApiHandler(action, args) {
                 var r = await fetch(url);
                 var d = await r.json();
                 if (d.ok) {
-                    // 创建后自动运行（不等待完成，避免阻塞并行工具调用）
+                    // 创建后自动运行(不等待完成,避免阻塞并行工具调用)
                     fetch('/oneapichat/engine_api.php?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix).catch(function(){});
-                    return { result: '✅ 子代理 ' + args.name + ' 已创建并启动（角色:' + agentRole + '）' };
+                    return { result: '✅ 子代理 ' + args.name + ' 已创建并启动(角色:' + agentRole + ')' };
                 }
                 return { error: d.error || '创建失败' };
             } catch(e) {
@@ -8913,7 +8937,7 @@ async function engineApiHandler(action, args) {
             var sr = await fetch('/oneapichat/engine_api.php?action=agent_status&name=' + encodeURIComponent(name) + authSuffix);
             var sd = await sr.json();
             if (!sd.name) return { error: '子代理 ' + name + ' 不存在' };
-            // 运行子代理（直接触发一次）
+            // 运行子代理(直接触发一次)
             await fetch('/oneapichat/engine_api.php?action=agent_run&name=' + encodeURIComponent(name) + '&message=' + encodeURIComponent(message) + '&from_ask=1' + authSuffix);
             // 等待完成
             var waitStart = Date.now();
@@ -9011,7 +9035,7 @@ async function engineApiHandler(action, args) {
         if (action === 'push') {
             var r = await fetch('/oneapichat/engine_api.php?action=push&msg=' + encodeURIComponent(args.msg) + authSuffix);
             var d = await r.json();
-            if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送，将在下次心跳时送达' }; }
+            if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
         }
         return { error: '未知操作: ' + action };
@@ -9072,8 +9096,8 @@ function loadEmbedConfig() {
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var uid = localStorage.getItem('authUserId') || '';
     var ns = uid ? encodeURIComponent(uid + '_' + coll) : encodeURIComponent(coll);
-    
-    // 先获取本地模型列表，更新下拉框
+
+    // 先获取本地模型列表,更新下拉框
     var _token = getAuthToken();
     fetch(RAG_API + '?action=list_models&auth_token=' + encodeURIComponent(_token))
         .then(function(r) { return r.json(); })
@@ -9082,10 +9106,10 @@ function loadEmbedConfig() {
             if (!sm) return;
             // 保留当前选中值
             var curVal = sm.value;
-            // 构建选项：API模型 + 本地模型
-            var html = '<option value="">TF-IDF（纯词法）</option>';
-            html += '<option value="text-embedding-3-small">text-embedding-3-small（OpenAI）</option>';
-            html += '<option value="text-embedding-3-large">text-embedding-3-large（OpenAI）</option>';
+            // 构建选项:API模型 + 本地模型
+            var html = '<option value="">TF-IDF(纯词法)</option>';
+            html += '<option value="text-embedding-3-small">text-embedding-3-small(OpenAI)</option>';
+            html += '<option value="text-embedding-3-large">text-embedding-3-large(OpenAI)</option>';
             if (data && data.models) {
                 data.models.forEach(function(m) {
                     if (m.model.includes('zh') || m.model.includes('jina')) {
@@ -9096,7 +9120,7 @@ function loadEmbedConfig() {
             sm.innerHTML = html;
             if (curVal) sm.value = curVal;
         }).catch(function() {});
-    
+
     // 加载当前配置
     var _token = getAuthToken();
     fetch(RAG_API + '?action=embed_config&collection=' + ns + '&auth_token=' + encodeURIComponent(_token))
@@ -9113,7 +9137,7 @@ function loadEmbedConfig() {
                     var modeLabel = {hybrid:'混合模式',embedding:'语义搜索',tfidf:'纯词法'}[d.mode] || d.mode;
                     st.innerHTML = '嵌入: ' + d.embed_model + ' (' + modeLabel + ')';
                 } else {
-                    st.innerHTML = '嵌入: 未启用（纯TF-IDF词法检索）';
+                    st.innerHTML = '嵌入: 未启用(纯TF-IDF词法检索)';
                 }
             }
         }).catch(function() {});
@@ -9166,7 +9190,7 @@ function checkChaoxingProgress() {
             var now_videos = d.videos_done || 0;
             var now_completed = d.completed || 0;
 
-            // 首次运行，建立基线
+            // 首次运行,建立基线
             if (CHAOXING_LAST_WORKS === null) {
                 CHAOXING_LAST_WORKS = now_works;
                 CHAOXING_LAST_VIDEOS = now_videos;
@@ -9183,7 +9207,7 @@ function checkChaoxingProgress() {
                 if (diff_works > 0) msg += ' 答题+' + diff_works;
                 if (diff_videos > 0) msg += ' 视频+' + diff_videos;
                 if (diff_courses > 0) msg += ' 课程+' + diff_courses;
-                msg += '（答题' + now_works + ' 视频' + now_videos + ' 完成' + now_completed + '课）';
+                msg += '(答题' + now_works + ' 视频' + now_videos + ' 完成' + now_completed + '课)';
 
                 CHAOXING_LAST_WORKS = now_works;
                 CHAOXING_LAST_VIDEOS = now_videos;
@@ -9232,12 +9256,12 @@ window.stopAgentNotificationPolling = function() {
 window.checkAgentNotifications = function() {
     var token = getAuthToken();
     if (!token) {
-        // 还没登录，延迟重试
+        // 还没登录,延迟重试
         setTimeout(window.checkAgentNotifications, 3000);
         return;
     }
-    
-    // 先获取引擎心跳（cron通知等）
+
+    // 先获取引擎心跳(cron通知等)
     fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(8000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -9259,34 +9283,34 @@ window.checkAgentNotifications = function() {
                 });
             }
         }).catch(function() {});
-    
-    // ★ 同时获取子代理完成通知（新功能）
+
+    // ★ 同时获取子代理完成通知(新功能)
     fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(8000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) return;
             var notifs = data.notifications || [];
             console.log('[AgentNotify] 收到', data.count, '条未处理通知:', notifs.map(function(n) { return n.agent; }));
-            
+
             // 红点提示
             var dot = getEl('agentNotifDot');
             if (dot) {
                 if (data.count > 0) dot.classList.add('show');
                 else dot.classList.remove('show');
             }
-            
+
             notifs.forEach(function(n) {
                 var agentName = n.agent || '未知代理';
-                
-                // ★ 保存原始结果数据，供 processAgentNotifyQueue 直接使用
+
+                // ★ 保存原始结果数据,供 processAgentNotifyQueue 直接使用
                 if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
                 window._pendingSubAgentResultsData[agentName] = {
                     status: n.status || 'completed',
                     result: n.result || '',
                     error: n.error || ''
                 };
-                
-                // 保存到代理专属聊天（供面板查看）
+
+                // 保存到代理专属聊天(供面板查看)
                 var fullResult = n.result || n.error || '';
                 if (fullResult) {
                     var agentKey = 'agent_chat_' + agentName;
@@ -9295,29 +9319,29 @@ window.checkAgentNotifications = function() {
                     if (agentMsgs.length > 50) agentMsgs = agentMsgs.slice(-50);
                     localStorage.setItem(agentKey, JSON.stringify(agentMsgs));
                 }
-                
-                // 触发主代理处理（会自行管理队列）
+
+                // 触发主代理处理(会自行管理队列)
                 if (localStorage.getItem('agentMode') === 'true') {
                     window.triggerAgentAutoReplyForSubAgent(agentName);
                 } else {
-                    console.log('[AgentNotify] 非 Agent 模式，静默处理子代理', agentName);
+                    console.log('[AgentNotify] 非 Agent 模式,静默处理子代理', agentName);
                 }
             });
-            
-            // ★ 注意：不再在这里立即 mark
+
+            // ★ 注意:不再在这里立即 mark
             // ★ processAgentNotifyQueue 会在处理完成后自行调用 agent_notifications_mark
         }).catch(function() {});
 };
 
 window.showAgentNotification = function(type, message) {
-    // ★ 静默模式：不显示弹窗，仅刷新代理面板状态
+    // ★ 静默模式:不显示弹窗,仅刷新代理面板状态
     window.refreshAgentPanel();
     window.refreshEngineStatus();
 };
 
 window.appendAgentSystemMessage = function(text, source) {
     if (!text) return;
-    // ★ 如果没有活跃对话，自动创建一个
+    // ★ 如果没有活跃对话,自动创建一个
     if (!currentChatId) {
         createNewChat();
         if (!currentChatId) return;
