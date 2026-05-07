@@ -2799,21 +2799,28 @@ window.mainAgentReply = function() {
         statusEl.classList.remove('hidden');
         statusEl.textContent = '正在触发主代理思考...';
     }
-    // 收集所有子代理的最新结果
     var token = getAuthToken();
+    if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
     fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data.count === 0) {
+            if (!data || data.count === 0) {
                 if (statusEl) statusEl.textContent = '没有新的子代理结果';
                 return;
             }
-            var summary = data.notifications.map(function(n) {
-                return '「' + n.agent + '」' + (n.status === 'completed' ? '完成' : '失败') + ': ' + (n.result || n.error || '').substring(0, 120);
-            }).join('\n');
-            // 标记已处理
-            fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token);
-            if (statusEl) statusEl.textContent = '✅ ' + data.count + ' 条新结果(已在聊天框中)';
+            // ★ 保存结果数据并通过标准流程处理（由 triggerAgentAutoReplyForSubAgent 统一管理队列和 mark）
+            (data.notifications || []).forEach(function(n) {
+                if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
+                window._pendingSubAgentResultsData[n.agent] = {
+                    status: n.status || 'completed',
+                    result: n.result || '',
+                    error: n.error || ''
+                };
+                if (localStorage.getItem('agentMode') === 'true') {
+                    window.triggerAgentAutoReplyForSubAgent(n.agent);
+                }
+            });
+            if (statusEl) statusEl.textContent = '✅ ' + data.count + ' 条结果已转发给主代理';
         }).catch(function() {
             if (statusEl) statusEl.textContent = '❌ 请求失败';
         });
@@ -3014,13 +3021,12 @@ window._processAgentNotifyQueue = async function() {
         window._pendingNotifyExecId = execId;
         return;
     }
+    window._pendingNotifyExecId = execId;
     window._agentNotifyProcessing = true;
     
-    // ★ 批量合并队列中的所有通知（不论几个子代理同时完成，只生成一条上下文）
-    // ★ 只收集属于当前批次的子代理（同一任务创建的才算，过期的忽略）
-    var currentGroupId = window._currentGroupId || 0;
+    // ★ 收集属于当前批次的子代理（不限 groupId，所有在 _activeSubAgentGroup 里的都算）
     var activeGroup = window._activeSubAgentGroup || [];
-    var activeNames = activeGroup.filter(function(item) { return item.groupId === currentGroupId; }).map(function(item) { return item.name; });
+    var activeNames = activeGroup.map(function(item) { return item.name; });
     
     var agents = [];
     while (window._agentNotifyQueue.length > 0) {
@@ -3031,12 +3037,12 @@ window._processAgentNotifyQueue = async function() {
         }
     }
     if (agents.length === 0) {
-        // 没有同批次通知，但队列可能还有旧批次的通知，直接丢弃它们防止累积
+        // 没有活跃子代理的通知（可能是旧批次的），直接丢弃
         window._agentNotifyQueue = [];
+        window._agentNotifyProcessing = false;
         return;
     }
     
-    window._agentNotifyProcessing = true;
     window._lastSubAgentReportTime = now;
     window._hasPendingSubAgentNotify = false;
     
