@@ -87,7 +87,7 @@ if __name__ == '__main__':
         tiku.init_tiku()    # 初始化题库
         # 实例化超星API
         user_id = os.environ.get("CHAOXING_USER_ID", username or "unknown")
-        tracker = LearningTracker(user_id=user_id)
+        tracker = LearningTracker(user_id=user_id, phone=username)  # phone 用于跨账号共享数据
         chaoxing = Chaoxing(account=account,tiku=tiku,tracker=tracker)
         # 检查当前登录状态，并检查账号密码
         _login_state = chaoxing.login()

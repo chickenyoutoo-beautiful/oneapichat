@@ -8796,15 +8796,17 @@ function uploadToRAG(file, onDone) {
 
 // ==================== 刷课工具处理器 ====================
 async function chaoxingToolHandler(action, ids, username, password) {
+    var token = localStorage.getItem('authToken') || '';
+    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
     try {
         if (action === 'login') {
-            var r = await fetch('/oneapichat/chaoxing_api.php?action=login&username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password));
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=login&username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password) + authSuffix, { method: 'POST' });
             var d = await r.json();
             if (d.success) return { result: '登录成功: ' + d.username };
             return { error: d.error || '登录失败,请检查账号密码' };
         }
         if (action === 'courses') {
-            var r = await fetch('/oneapichat/chaoxing_api.php?action=courses');
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=courses' + authSuffix);
             var d = await r.json();
             if (d.courses) {
                 return { result: '课程列表:\n' + d.courses.map(function(c) { return c.courseId + ': ' + c.title; }).join('\n') };
@@ -8812,24 +8814,24 @@ async function chaoxingToolHandler(action, ids, username, password) {
             return { error: d.error || '获取失败' };
         }
         if (action === 'start' && ids) {
-            var r = await fetch('/oneapichat/chaoxing_api.php?action=start&ids=' + encodeURIComponent(ids));
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=start&ids=' + encodeURIComponent(ids) + authSuffix);
             var d = await r.json();
             if (d.success) return { result: '刷课任务已启动 (PID: ' + d.pid + ')' };
             return { error: d.error || '启动失败' };
         }
         if (action === 'status') {
-            var r = await fetch('/oneapichat/chaoxing_api.php?action=status');
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=status' + authSuffix);
             var d = await r.json();
             var logPreview = d.log ? d.log.slice(-2000) : '(无日志)';
             if (d.running) return { result: '刷课任务运行中\n\n' + logPreview };
             else return { result: '刷课任务未运行\n\n最后日志:\n' + logPreview };
         }
         if (action === 'stop') {
-            await fetch('/oneapichat/chaoxing_api.php?action=stop');
+            await fetch('/oneapichat/chaoxing_api.php?action=stop' + authSuffix, { method: 'POST' });
             return { result: '刷课任务已停止' };
         }
         if (action === 'stats') {
-            var r = await fetch('/oneapichat/chaoxing_api.php?action=stats&auth_token=' + getAuthToken());
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=stats' + authSuffix);
             var d = await r.json();
             if (d.total_courses !== undefined) {
                 var msg = '📊 刷课进度统计\n';

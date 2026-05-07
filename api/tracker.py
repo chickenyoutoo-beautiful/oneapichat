@@ -6,8 +6,10 @@ from pathlib import Path
 class LearningTracker:
     DB_PATH = Path(__file__).parent / "learning_records.db"
 
-    def __init__(self, user_id=None):
-        self.user_id = user_id
+    def __init__(self, user_id=None, phone=None):
+        # 优先用 phone（学习通账号）作为 user_id，实现跨聊天账号共享数据
+        self.user_id = phone if phone else user_id
+        self.phone = phone
         self.conn = sqlite3.connect(str(self.DB_PATH))
         self._init_db()
 
