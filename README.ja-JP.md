@@ -2,6 +2,12 @@
 
 **マルチモデルAIチャットプラットフォーム（Agentモード対応）**
 
+🚀 **オンライン Demo**: https://naujtrats.xyz/oneapichat
+
+---
+
+🌐 **Language / 语言 / 言語**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
+
 MiniMax、DeepSeekなど複数のモデルに接続できる自己ホスト型AIチャットプラットフォーム。Agentモードによる自律的なツール呼び出し、ウェブ検索、SSEストリーミング、多ユーザーサポートを備えています。
 
 ---
