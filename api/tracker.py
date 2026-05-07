@@ -79,15 +79,13 @@ class LearningTracker:
             if ex: self.conn.execute("UPDATE chapters SET work_count=? WHERE id=? AND user_id=?",(work_count,chapter_id,self.user_id))
             else: self.conn.execute("INSERT INTO chapters (id,user_id,course_id,title,work_count,last_update) VALUES (?,?,?,?,?,?)",(chapter_id,self.user_id,course_id,title,work_count,datetime.now().isoformat()))
         # video_done=True: 增量+1，检查是否全部完成并更新 status
-        # 条件：video_count>0 且 video_done+1 >= video_count
-        # 修复：纯视频章节（work_count=0）视频做完即完成；混合章节（work_count>0）保持running等答题
+        # 修复：video_count > 0 时才检查完成（video_count=0 的纯答题章节保持 running，等待答题）
         if video_done is True:
-            # 纯视频章节（work_count=0）：视频做完即完成；混合章节（work_count>0）：保持running等答题
-            self.conn.execute("UPDATE chapters SET video_done = video_done + 1, last_update = ?, status = CASE WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count = 0 THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
+            self.conn.execute("UPDATE chapters SET video_done = video_done + 1, last_update = ?, status = CASE WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count = 0 THEN 'completed' WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count > 0 THEN 'completed' WHEN video_count = 0 AND work_count > 0 THEN 'running' ELSE status END WHERE id=? AND user_id=?",
                 (datetime.now().isoformat(), chapter_id, self.user_id))
         elif video_done is not None:
             self.conn.execute("UPDATE chapters SET video_done=? WHERE id=? AND user_id=?",(video_done,chapter_id,self.user_id))
-        # work_done=True: 增量+1，同时检查是否全部完成并更新 status
+        # work_done=True: 增量+1，检查是否全部完成
         if work_done is True:
             self.conn.execute("UPDATE chapters SET work_done = work_done + 1, last_update = ?, status = CASE WHEN work_count > 0 AND work_done + 1 >= work_count THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
                 (datetime.now().isoformat(), chapter_id, self.user_id))

@@ -199,7 +199,15 @@ switch ($action) {
             $db_statuses = [];
             $db_videos = [];
             $db_works = [];
-            $db_json = shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . ' 2>/dev/null');
+            // 读取用户配置，提取学习通账号（手机号）作为唯一标识
+            $phone = '';
+            $phone_config_path = userConfigPath($userId);
+            if ($phone_config_path && file_exists($phone_config_path)) {
+                $ini_phone = parse_ini_file($phone_config_path, true);
+                $phone = $ini_phone['common']['username'] ?? '';
+            }
+            $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
+            $db_json = shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
             if ($db_json) {
                 $db_data = json_decode($db_json, true);
                 if ($db_data && isset($db_data['courses'])) {
@@ -483,7 +491,14 @@ switch ($action) {
         clearTaskState($userId);
 
         // ★ 重置该用户在 DB 里的 in_progress 课程状态（防止崩溃后课程卡在"刷课中"）
-        @shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . ' --reset-in-progress 2>/dev/null');
+        // 读取配置获取学习通手机号，用于精准定位账号
+        $phone = '';
+        if (file_exists($config_path)) {
+            $ini_phone = parse_ini_file($config_path, true);
+            $phone = $ini_phone['common']['username'] ?? '';
+        }
+        $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
+        @shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg --reset-in-progress 2>/dev/null");
 
         echo json_encode(['success' => true]);
         break;
