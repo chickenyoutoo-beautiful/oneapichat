@@ -332,32 +332,68 @@ switch ($action) {
             $cleaned_lines = [];
             $lastProgressLine = '';
             $lines = explode("\n", $raw);
+            $pending_traceback = []; // 跟踪当前 ERROR 行的后续 traceback 行
             foreach ($lines as $line) {
                 $line = trim($line);
                 if (!$line) continue;
                 // 行内可能包含多个 \r 分隔的进度覆盖
                 if (strpos($line, "\r") !== false) {
                     $subParts = explode("\r", $line);
+                    $hasTimestampedPart = false;
                     foreach ($subParts as $sp) {
                         $sp = trim($sp);
                         if (!$sp) continue;
+                        $isTimestamped = (strpos($sp, '2026-') === 0 || strpos($sp, '2025-') === 0);
                         if (strpos($sp, '当前任务:') === 0) {
                             $lastProgressLine = $sp;
                             if (preg_match('/\|\s*(\d+)%/', $sp, $pm)) $progress = (int)$pm[1];
-                        } elseif (strpos($sp, '2026-') === 0 || strpos($sp, '2025-') === 0) {
+                        } elseif ($isTimestamped) {
+                            $hasTimestampedPart = true;
+                            // 先把之前收集的 traceback 附加到上一条 ERROR 行
+                            if (!empty($pending_traceback)) {
+                                $lastIdx = count($cleaned_lines) - 1;
+                                if ($lastIdx >= 0) {
+                                    $cleaned_lines[$lastIdx] .= '\n' . implode('\n', $pending_traceback);
+                                }
+                                $pending_traceback = [];
+                            }
                             $cleaned_lines[] = $sp;
                         }
                     }
+                    // 收集非时间戳的子部分作为 traceback（\r 分隔的行中不属于进度的部分）
+                    if ($hasTimestampedPart && count($subParts) > 1) {
+                        foreach ($subParts as $sp) {
+                            $sp = trim($sp);
+                            if (!$sp) continue;
+                            if (strpos($sp, '2026-') !== 0 && strpos($sp, '2025-') !== 0 && strpos($sp, '当前任务:') !== 0) {
+                                $pending_traceback[] = $sp;
+                            }
+                        }
+                    }
                 } else {
+                    // 先把之前收集的 traceback 附加到上一条 ERROR 行
+                    if (!empty($pending_traceback)) {
+                        $lastIdx = count($cleaned_lines) - 1;
+                        if ($lastIdx >= 0) {
+                            $cleaned_lines[$lastIdx] .= '\n' . implode('\n', $pending_traceback);
+                        }
+                        $pending_traceback = [];
+                    }
                     if (strpos($line, '当前任务:') === 0) {
                         $lastProgressLine = $line;
                         if (preg_match('/\|\s*(\d+)%/', $line, $pm)) $progress = (int)$pm[1];
                     } elseif (strpos($line, '2026-') === 0 || strpos($line, '2025-') === 0) {
                         $cleaned_lines[] = $line;
                     } else {
-                        $cleaned_lines[] = $line;
+                        // 非时间戳行：作为下一条时间戳行的 traceback 收集
+                        $pending_traceback[] = $line;
                     }
                 }
+            }
+            // 文件末尾如果还有未发出的 traceback，附加到最后一条日志行
+            if (!empty($pending_traceback) && !empty($cleaned_lines)) {
+                $lastIdx = count($cleaned_lines) - 1;
+                $cleaned_lines[$lastIdx] .= '\n' . implode('\n', $pending_traceback);
             }
             // 最多保留最后 100 条日志行
             if (count($cleaned_lines) > 100) {
