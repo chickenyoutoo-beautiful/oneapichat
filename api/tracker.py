@@ -50,7 +50,7 @@ class LearningTracker:
 
     def start_course(self, course_id, title, teacher=''):
         if not self.user_id: return
-        self.conn.execute("INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO UPDATE SET title=excluded.title,teacher=excluded.teacher,status='in_progress',last_study_time=excluded.last_study_time",
+        self.conn.execute("INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO UPDATE SET title=excluded.title,teacher=excluded.teacher,last_study_time=excluded.last_study_time",
             (course_id, self.user_id, title, teacher, datetime.now().isoformat()))
         self.conn.commit()
 
