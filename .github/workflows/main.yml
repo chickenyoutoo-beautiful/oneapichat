@@ -28,33 +28,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 生成配置文件
-        run: |
-          python3 - << 'PYEOF'
-          import os
-          tokens = os.environ.get("CHAOXING_TIKU_TOKEN", "")
-          url = os.environ.get("CHAOXING_TIKU_URL", "")
-          model = os.environ.get("CHAOXING_TIKU_MODEL", "")
-          with open("config.ini", "w", encoding="utf-8") as f:
-              f.write(f"""[common]
-username = {os.environ.get('CHAOXING_USERNAME', '')}
-password = {os.environ.get('CHAOXING_PASSWORD', '')}
-course_list = {os.environ.get('CHAOXING_COURSE_ID', '')}
-speed = 2
-auto_next = true
-brush_mode = all
-chapter_order = sequential
-
-[tiku]
-provider = TikuYanxi,TikuAI
-submit = true
-tokens = {tokens}
-true_list = 正确,对,√,是
-false_list = 错误,错,×,否,不对,不正确
-ai_base_url = {url}
-ai_model = {model}
-""")
-          print("config.ini generated")
-          PYEOF
+        run: python generate_config.py
 
       - name: Run main.py
         run: python main.py -c config.ini
