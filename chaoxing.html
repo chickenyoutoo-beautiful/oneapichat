@@ -86,6 +86,7 @@
         .switch input:checked + .slider:before { transform: translateX(16px); }
         /* 彩色日志 */
         .log-line { display: flex; gap: 2px; padding: 2px 4px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; transition: background 0.1s; }
+        .log-line .line-msg { white-space: pre-wrap; word-break: break-all; }
         .log-line:hover { background: rgba(99,102,241,0.04); }
         .dark .log-line:hover { background: rgba(99,102,241,0.08); }
         .log-line + .log-line { border-top: 1px solid rgba(0,0,0,0.03); }
@@ -114,6 +115,9 @@
         .log-toolbar button:hover { border-color: #6366f1; color: #6366f1; }
         .log-toolbar button.active { background: #6366f1; color: #fff; border-color: #6366f1; }
         .log-line.hidden-line { display: none; }
+        .log-line.traceback-line { padding-left: 20px; background: rgba(239,68,68,0.04); border-left: 2px solid rgba(239,68,68,0.2); }
+        .dark .log-line.traceback-line { background: rgba(239,68,68,0.06); }
+        .log-line.traceback-line .line-msg { color: #9ca3af; font-size: 11px; }
         .progress-text { font-size: 11px; color: #6366f1; font-weight: 500; padding: 4px 0; }
         .log-count { font-size: 11px; color: #9ca3af; font-weight: normal; }
     </style>
@@ -812,12 +816,22 @@ if (_dd) document.documentElement.classList.add('dark');
                 var data = logLinesData[i];
                 if (!data) continue;
                 var hide = false;
-                if (errorFilterActive && data.level !== 'ERROR') hide = true;
-                line.classList.remove('highlight');
+                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行的后续（traceback）也显示
+                if (errorFilterActive) {
+                    if (data.level !== 'ERROR') {
+                        // 检查上一条是否是 ERROR
+                        var prevData = logLinesData[i - 1];
+                        if (!prevData || prevData.level !== 'ERROR') hide = true;
+                    }
+                }
+                line.classList.remove('highlight', 'traceback-line');
                 if (searchVal && !hide) {
                     var msg = data.message.toLowerCase();
                     if (msg.indexOf(searchVal) !== -1) line.classList.add('highlight');
                     else hide = true;
+                }
+                if (!hide && errorFilterActive && data.level === 'NONE') {
+                    line.classList.add('traceback-line');
                 }
                 line.classList.toggle('hidden-line', hide);
             }
@@ -834,12 +848,21 @@ if (_dd) document.documentElement.classList.add('dark');
                 var data = logLinesData[i];
                 if (!data) continue;
                 var hide = false;
-                if (errorFilterActive && data.level !== 'ERROR') hide = true;
-                line.classList.remove('highlight');
+                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行的后续（traceback）也显示
+                if (errorFilterActive) {
+                    if (data.level !== 'ERROR') {
+                        var prevData = logLinesData[i - 1];
+                        if (!prevData || prevData.level !== 'ERROR') hide = true;
+                    }
+                }
+                line.classList.remove('highlight', 'traceback-line');
                 if (searchVal && !hide) {
                     var msg = data.message.toLowerCase();
                     if (msg.indexOf(searchVal) !== -1) line.classList.add('highlight');
                     else hide = true;
+                }
+                if (!hide && errorFilterActive && data.level === 'NONE') {
+                    line.classList.add('traceback-line');
                 }
                 line.classList.toggle('hidden-line', hide);
             }
