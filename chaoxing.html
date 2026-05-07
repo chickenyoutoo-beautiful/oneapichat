@@ -1018,20 +1018,25 @@ if (_dd) document.documentElement.classList.add('dark');
                         var disabled = c.disabled ? 'disabled' : '';
                         var checked = c.checked ? 'checked' : '';
                         var statusClass = '';
+                        var isCompleted = c.db_status === 'completed';
+                        var isInProgress = c.db_status === 'in_progress';
+                        // completed课程：禁用checkbox；in_progress课程：可取消（不参与后续start）
+                        var itemDisabled = isCompleted ? 'disabled' : '';
+                        var itemChecked = isCompleted ? 'checked' : (isInProgress ? (c.checked ? 'checked' : '') : checked);
                         if (c.db_status === 'completed') {
                             badge = '<span class="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-0.5 rounded-full">已完成 ✓</span>';
                             statusClass = 'opacity-70';
                         } else if (c.db_status === 'in_progress') {
                             badge = '<span class="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">刷课中</span>';
-                            statusClass = 'opacity-70';
+                            statusClass = '';
                         } else if (c.db_status === 'not_started' && c.disabled) {
                             badge = '<span class="text-xs text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">已选</span>';
                             statusClass = 'opacity-70';
                         }
-                        var clickHandler = disabled ? '' : ' onclick="toggleCb(this)"';
-                        var cursorClass = disabled ? '' : ' cursor-pointer';
+                        var clickHandler = itemDisabled ? '' : ' onclick="toggleCb(this)"';
+                        var cursorClass = itemDisabled ? '' : ' cursor-pointer';
                         return '<div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition course-item' + cursorClass + ' ' + statusClass + '"' + clickHandler + '>' +
-                            '<input type="checkbox" class="course-cb w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" value="' + c.courseId + '" ' + checked + ' ' + disabled + '>' +
+                            '<input type="checkbox" class="course-cb w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" value="' + c.courseId + '" ' + itemChecked + ' ' + itemDisabled + '>' +
                             '<div class="flex-1 min-w-0">' +
                                 '<div class="text-sm font-medium truncate flex items-center gap-2">' + c.title + ' ' + badge + '</div>' +
                                 '<div class="text-xs text-gray-400">' + (c.teacher || '') + '</div>' +
@@ -1090,9 +1095,13 @@ if (_dd) document.documentElement.classList.add('dark');
 
         // Task（带防抖，防止快速双击）
         async function startTask() {
+            // 只发送未完成的课程；已完成的课不参与刷课
             const checked = document.querySelectorAll('.course-cb:checked');
-            if (!checked.length) { showToast('请先选择课程', 'error'); return; }
-            const ids = Array.from(checked).map(c => c.value).join(',');
+            const ids = Array.from(checked)
+                .map(c => c.closest('.course-item'))
+                .filter(el => el && !el.querySelector('[value].course-cb[disabled]'))
+                .map(el => el.querySelector('.course-cb').value)
+                .filter(v => v);
             const tabId = getTabId();
             try {
                 const r = await fetch('chaoxing_api.php?action=start&ids='+ids+'&tab_id='+encodeURIComponent(tabId)+'&auth_token=' + encodeURIComponent(_getAuthToken()));

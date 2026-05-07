@@ -50,11 +50,16 @@ class LearningTracker:
 
     def start_course(self, course_id, title, teacher=''):
         if not self.user_id: return
-        self.conn.execute("INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO UPDATE SET title=excluded.title,teacher=excluded.teacher,last_study_time=excluded.last_study_time",
+        # 不重新启动已完成的课
+        existing = self.conn.execute("SELECT status FROM courses WHERE id=? AND user_id=?", (course_id, self.user_id)).fetchone()
+        if existing and existing[0] in ('completed', 'in_progress', 'running'):
+            return
+        self.conn.execute(
+            "INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO NOTHING",
             (course_id, self.user_id, title, teacher, datetime.now().isoformat()))
         self.conn.commit()
 
-    def log_video(self, chapter_id, video_name, duration):
+def log_video(self, chapter_id, video_name, duration):
         if not self.user_id: return
         self.conn.execute("INSERT INTO video_logs (user_id,chapter_id,video_name,duration,watched_at) VALUES (?,?,?,?,?)",
             (self.user_id, chapter_id, video_name, duration, datetime.now().isoformat()))
