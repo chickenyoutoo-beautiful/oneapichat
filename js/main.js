@@ -6158,6 +6158,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             // ★ MiniMax 直连: 自定义 URL 和 API Key
             var _reqUrl = getVal('baseUrl') + '/chat/completions';
             var _reqBody = JSON.parse(JSON.stringify(body));
+            // 统一声明，后续两个分支都会赋值
+            let usage = null;
+            let toolCalls = [];
             // 清理日志中的敏感信息
             if (_reqBody.messages) _reqBody.messages = _reqBody.messages.length + ' messages';
             console.log('[API-REQ]', _reqUrl, 'model:', body.model, 'stream:', !!_reqBody.stream, 'tools:', (_reqBody.tools||[]).map(function(t){return t.function?t.function.name:t.name;}), 'messages:', body.messages.length);
@@ -6199,23 +6202,47 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 });
                 clearTimeout(timeoutIdVal);
                 if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+                const model = getVal('modelSelect') || '';
+                const isMiniMax = model.toLowerCase().includes('minimax');
+                const useStream = getChecked('streamToggle');
+
+                if (useStream) {
+                    try {
+                        const result = await streamResponse(res, chatId, pendingMsg, 25, 12);
+                        usage = result.usage;
+                        toolCalls = result.toolCalls || [];
+                    } catch (streamErr) {
+                        // ★ HTTP2/网络错误降级: 非流式重试一次
+                        const isStreamNetErr = streamErr.name === 'TypeError' ||
+                            (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
+                        if (isStreamNetErr) {
+                            console.warn('[STREAM] 流式读取失败，尝试非流式降级:', streamErr.message);
+                            showToast('流式中断，切换非流式重试...', 'warning', 2000);
+                            // 重新构造非流式请求体（清除stream标记）
+                            var _nsBody = JSON.parse(JSON.stringify(body));
+                            if (_nsBody.stream !== undefined) _nsBody.stream = false;
+                            const _nsRes = await fetch(_reqUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+                                body: JSON.stringify(_nsBody),
+                                signal: abortCtrl.signal
+                            });
+                            clearTimeout(timeoutIdVal);
+                            if (!_nsRes.ok) throw new Error(`HTTP ${_nsRes.status}: ${await _nsRes.text()}`);
+                            const _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
+                            usage = _nsResult.usage;
+                            toolCalls = _nsResult.toolCalls || [];
+                        } else {
+                            throw streamErr;
+                        }
+                    }
+                } else {
+                    const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
+                    usage = result.usage;
+                    toolCalls = result.toolCalls || [];
+                }
             }  // end of else branch
-
-            let usage = null;
-            let toolCalls = [];
-            const model = getVal('modelSelect') || '';
-            const isMiniMax = model.toLowerCase().includes('minimax');
-            const useStream = getChecked('streamToggle');
-
-            if (useStream) {
-                const result = await streamResponse(res, chatId, pendingMsg, 25, 12);
-                usage = result.usage;
-                toolCalls = result.toolCalls || [];
-            } else {
-                const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
-                usage = result.usage;
-                toolCalls = result.toolCalls || [];
-            }
 
             // 处理工具调用
             if (toolCalls.length > 0) {
@@ -7213,7 +7240,9 @@ window.useAlternativeVisionModel = function() {
             }
 
             const isUpstreamError = e.message === 'UPSTREAM_ERROR' || e.message.includes('upstream') || e.message.includes('bad response');
-            const isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError;
+            const isHTTP2Error = (e.name === 'TypeError' && (e.message.includes('fetch') || e.message.includes('Failed to') || e.message.includes('net::') || e.message.includes('ERR_')))
+                || e.message.includes('HTTP2') || e.message.includes('h2') || e.message.includes('protocol error') || e.message.includes('protocol_error');
+            const isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError || isHTTP2Error;
             if (isNetError && attempt < maxRetries) {
                 const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
                 showToast(`网络超时,${attempt + 1}/${maxRetries},${(delay/1000).toFixed(0)}s后重试...`, 'warning', 3000);

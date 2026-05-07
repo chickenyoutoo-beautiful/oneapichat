@@ -35,6 +35,38 @@ $USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
 ];
 
+// ========== 熔断器（进程内共享） ==========
+define('BREAKER_THRESHOLD', 3);
+define('BREAKER_COOLDOWN', 90); // 秒
+$GLOBAL_FAILURES = [];  // host => [count, lastFailureTimestamp]
+
+function _breakerKey($host) {
+    // 去掉 www. 前缀以减少碎片化
+    return preg_replace('/^www\./', '', strtolower($host));
+}
+
+function isBreakerOpen($host) {
+    global $GLOBAL_FAILURES;
+    $key = _breakerKey($host);
+    if (!isset($GLOBAL_FAILURES[$key])) return false;
+    list($count, $lastFailure) = $GLOBAL_FAILURES[$key];
+    if ($count >= BREAKER_THRESHOLD && (time() - $lastFailure) < BREAKER_COOLDOWN) {
+        return true;  // 熔断打开
+    }
+    if ((time() - $lastFailure) >= BREAKER_COOLDOWN) {
+        $GLOBAL_FAILURES[$key] = [0, 0];  // 冷却期满，重置
+    }
+    return false;
+}
+
+function recordFailure($host, $httpCode = 0) {
+    global $GLOBAL_FAILURES;
+    $key = _breakerKey($host);
+    if (!isset($GLOBAL_FAILURES[$key])) $GLOBAL_FAILURES[$key] = [0, 0];
+    list($count, $lastFailure) = $GLOBAL_FAILURES[$key];
+    $GLOBAL_FAILURES[$key] = [$count + 1, time()];
+}
+
 // ========== 辅助函数 ==========
 
 function isPrivateIP($host) {
@@ -147,55 +179,72 @@ function extractTextFromHTML($html, $baseUrl = '') {
 }
 
 function fetchSingleURL($url, $uaIndex = 0) {
-    global $USER_AGENTS;
+    global $USER_AGENTS, $GLOBAL_FAILURES;
+    $host = parse_url($url, PHP_URL_HOST);
+
+    // 熔断器检查
+    if (isBreakerOpen($host)) {
+        return ['error' => "Circuit breaker open (host: $host)", 'status' => 503];
+    }
+
     $ua = $USER_AGENTS[$uaIndex % count($USER_AGENTS)];
 
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'timeout' => FETCH_TIMEOUT,
-            'follow_location' => 1,
-            'max_redirects' => MAX_REDIRECTS,
-            'header' => "User-Agent: $ua\r\nAccept: text/html,application/xhtml+xml,text/plain;q=0.9\r\nAccept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\nAccept-Encoding: identity\r\nCache-Control: no-cache\r\n"
-        ],
-        'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false
-        ]
-    ]);
+    // 使用 curl（命令行方式，不依赖 php-curl 扩展）
+    $cmd = 'curl -s -L ' .
+        '--tlsv1.2 ' .
+        '--connect-timeout 5 ' .
+        '--max-time ' . FETCH_TIMEOUT . ' ' .
+        '--max-redirs ' . MAX_REDIRECTS . ' ' .
+        '-H ' . escapeshellarg("User-Agent: $ua") . ' ' .
+        '-H ' . escapeshellarg('Accept: text/html,application/xhtml+xml,text/plain;q=0.9') . ' ' .
+        '-H ' . escapeshellarg('Accept-Language: zh-CN,zh;q=0.9,en;q=0.8') . ' ' .
+        '-H ' . escapeshellarg('Accept-Encoding: identity') . ' ' .
+        '-H ' . escapeshellarg('Cache-Control: no-cache') . ' ' .
+        '-k ' .  // 跳过 SSL 验证（与原有行为一致）
+        escapeshellarg($url) . ' 2>/dev/null';
 
-    $content = @file_get_contents($url, false, $context);
-    if ($content === false) {
-        $error = error_get_last();
-        $msg = $error ? substr($error['message'] ?? 'Unknown', 0, 200) : 'Unknown error';
-        // 判断是否是403/反爬，尝试换UA重试
-        if (strpos($msg, '403') !== false && $uaIndex < count($USER_AGENTS) - 1) {
-            return fetchSingleURL($url, $uaIndex + 1);
+    $content = shell_exec($cmd);
+    $exitCode = 0;
+
+    // 提取 HTTP 状态码（通过额外请求）
+    $statusCode = 200;
+    $statusCmd = 'curl -s -o /dev/null -w "%{http_code}" -L ' .
+        '--connect-timeout 5 --max-time ' . FETCH_TIMEOUT . ' ' .
+        '-k ' .
+        escapeshellarg($url) . ' 2>/dev/null';
+    $statusStr = trim(shell_exec($statusCmd) ?? '');
+    if (is_numeric($statusStr)) $statusCode = (int)$statusStr;
+
+    // 判断错误
+    if ($content === null || $exitCode !== 0) {
+        $failures = $GLOBAL_FAILURES[_breakerKey($host)][0] ?? 0;
+        // 502/503/504 或 curl 失败 → 记录熔断 + 重试
+        if (in_array($statusCode, [502, 503, 504]) || $content === null) {
+            recordFailure($host, $statusCode);
+            // 重试一次，换 UA
+            if ($uaIndex < count($USER_AGENTS) - 1) {
+                return fetchSingleURL($url, $uaIndex + 1);
+            }
         }
-        return ['error' => $msg, 'status' => 502];
+        return ['error' => $content === null ? 'curl failed' : "HTTP $statusCode", 'status' => $statusCode ?: 502];
     }
 
     if (strlen($content) > MAX_CONTENT_SIZE) {
         $content = substr($content, 0, MAX_CONTENT_SIZE);
     }
 
-    // 检测 HTTP 状态码
-    $statusCode = 200;
-    if (isset($http_response_header)) {
-        foreach ($http_response_header as $header) {
-            if (preg_match('/^HTTP\/\d+\.?\d*\s+(\d+)/', $header, $m)) {
-                $statusCode = (int)$m[1];
-                break;
-            }
-        }
-    }
     if ($statusCode >= 400) {
+        recordFailure($host, $statusCode);
         // 403 换 UA 重试
         if ($statusCode === 403 && $uaIndex < count($USER_AGENTS) - 1) {
             return fetchSingleURL($url, $uaIndex + 1);
         }
         return ['error' => "HTTP $statusCode", 'status' => $statusCode];
     }
+
+    // 成功：清除该主机的失败计数
+    $key = _breakerKey($host);
+    if (isset($GLOBAL_FAILURES[$key])) $GLOBAL_FAILURES[$key] = [0, 0];
 
     return ['content' => $content, 'status' => $statusCode];
 }
@@ -233,81 +282,81 @@ if ($method === 'POST') {
         exit;
     }
 
-    // ★ 并行: stream_select + 逐个读取
-    $streams = [];
-    $contexts = [];
+    // ★ curl 多进程并行抓取（替代 fopen + stream_select）
+    $tmpDir = sys_get_temp_dir();
+    $pipes = [];  // index => pipe resource
+    $cmds = [];   // index => shell command string
 
     foreach ($urls as $i => $url) {
         $ua = $USER_AGENTS[$i % count($USER_AGENTS)];
-        $ctx = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'timeout' => FETCH_TIMEOUT,
-                'follow_location' => 1,
-                'max_redirects' => MAX_REDIRECTS,
-                'ignore_errors' => true,
-                'header' => "User-Agent: $ua\r\nAccept: text/html,text/plain;q=0.9\r\nAccept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\n"
-            ],
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-        ]);
-        $contexts[$i] = $ctx;
-        $streams[$i] = @fopen($url, 'rb', false, $ctx);
+        $outFile = "$tmpDir/fetch_result_$i_" . getmypid() . ".tmp";
+        $cmd = 'curl -s -L ' .
+            '--tlsv1.2 ' .
+            '--connect-timeout 5 ' .
+            '--max-time ' . FETCH_TIMEOUT . ' ' .
+            '--max-redirs ' . MAX_REDIRECTS . ' ' .
+            '-H ' . escapeshellarg("User-Agent: $ua") . ' ' .
+            '-H ' . escapeshellarg('Accept: text/html,text/plain;q=0.9') . ' ' .
+            '-H ' . escapeshellarg('Accept-Language: zh-CN,zh;q=0.9,en;q=0.8') . ' ' .
+            '-H ' . escapeshellarg('Accept-Encoding: identity') . ' ' .
+            '-k ' .
+            '-o ' . escapeshellarg($outFile) . ' ' .
+            '-w ' . escapeshellarg('%{http_code}') . ' > ' . escapeshellarg("$tmpDir/fetch_status_$i_" . getmypid() . ".tmp 2>/dev/null") .
+            ' & ' .  // 后台运行
+            'echo $!';  // 输出 PID
+        $cmds[$i] = $outFile;
+        $pid = (int)trim(shell_exec($cmd) ?? '0');
     }
 
-    // 用 stream_select 并行读取
-    $activeStreams = array_filter($streams);
-    $startTime = microtime(true);
-
-    while (!empty($activeStreams) && (microtime(true) - $startTime) < FETCH_TIMEOUT + 3) {
-        $read = array_values($activeStreams);
-        $write = null;
-        $except = null;
-
-        if (@stream_select($read, $write, $except, 0, 200000) > 0) {
-            // 这里 select 在 PHP 里对 HTTP 可能不完全有效
-            // 简化为逐个异步读取
-            break;
+    // ★ 等待所有 curl 进程完成（最多 FETCH_TIMEOUT + 2 秒）
+    $waitStart = microtime(true);
+    $allDone = false;
+    while ((microtime(true) - $waitStart) < FETCH_TIMEOUT + 2) {
+        usleep(200000); // 200ms
+        $done = true;
+        foreach ($cmds as $outFile) {
+            clearstatcache(true, $outFile);
+            // 检查是否完成（状态文件存在 = curl 已退出）
+            $statusFile = str_replace('fetch_result_', 'fetch_status_', $outFile);
+            if (!file_exists($statusFile)) { $done = false; break; }
         }
+        if ($done) { $allDone = true; break; }
     }
 
-    // 实际逐个读取（PHP stream 兼容方案）
-    foreach ($streams as $i => $stream) {
-        if (!$stream) {
-            $results[] = ['url' => $urls[$i], 'error' => 'Failed to open stream', 'content' => ''];
+    // ★ 收集结果
+    foreach ($urls as $i => $url) {
+        $outFile = $cmds[$i] ?? '';
+        $statusFile = str_replace('fetch_result_', 'fetch_status_', $outFile);
+        if (!$outFile || !file_exists($outFile)) {
+            $results[] = ['url' => $url, 'error' => 'curl failed', 'content' => ''];
+            @unlink($outFile); @unlink($statusFile);
             continue;
         }
-
-        $content = '';
-        $meta = stream_get_meta_data($stream);
-
-        // 读取内容
-        while (!feof($stream)) {
-            $chunk = @fread($stream, 32768);
-            if ($chunk === false || $chunk === '') break;
-            $content .= $chunk;
-            if (strlen($content) > MAX_CONTENT_SIZE) {
-                $content = substr($content, 0, MAX_CONTENT_SIZE);
-                break;
-            }
+        $content = @file_get_contents($outFile);
+        $httpCode = 200;
+        if (file_exists($statusFile)) {
+            $codeStr = trim(@file_get_contents($statusFile) ?? '');
+            if (is_numeric($codeStr)) $httpCode = (int)$codeStr;
+            @unlink($statusFile);
         }
-        fclose($stream);
+        @unlink($outFile);
 
-        if (empty($content)) {
-            $results[] = ['url' => $urls[$i], 'error' => 'Empty response', 'content' => ''];
+        if ($httpCode >= 400 || $content === false || strlen($content) < 10) {
+            $host = parse_url($url, PHP_URL_HOST);
+            recordFailure($host, $httpCode);
+            $results[] = ['url' => $url, 'error' => "HTTP $httpCode", 'content' => ''];
             continue;
         }
-
+        if (strlen($content) > MAX_CONTENT_SIZE) {
+            $content = substr($content, 0, MAX_CONTENT_SIZE);
+        }
         if ($raw) {
-            $results[] = ['url' => $urls[$i], 'content' => substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
-            continue;
-        }
-
-        if ($doExtract) {
+            $results[] = ['url' => $url, 'content' => substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
+        } elseif ($doExtract) {
             $extracted = extractTextFromHTML($content);
-            $extracted = substr($extracted, 0, MAX_RESULT_LENGTH);
-            $results[] = ['url' => $urls[$i], 'content' => $extracted, 'error' => ''];
+            $results[] = ['url' => $url, 'content' => substr($extracted, 0, MAX_RESULT_LENGTH), 'error' => ''];
         } else {
-            $results[] = ['url' => $urls[$i], 'content' => $raw ? $content : substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
+            $results[] = ['url' => $url, 'content' => substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
         }
     }
 
