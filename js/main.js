@@ -7799,7 +7799,7 @@ function injectStyles() {
 
 // ==================== 恢复默认配置 ====================
 function createRAGEntry() {
-    // 已迁移至 HTML 静态渲染
+    // 已迁移至 HTML 静态渲染（知识库按钮现位于数据管理区域内）
 }
 
 function createResetButton() {
