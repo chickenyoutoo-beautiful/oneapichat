@@ -75,7 +75,7 @@ class LearningTracker:
             else: self.conn.execute("INSERT INTO chapters (id,user_id,course_id,title,work_count,last_update) VALUES (?,?,?,?,?,?)",(chapter_id,self.user_id,course_id,title,work_count,datetime.now().isoformat()))
         # video_done=True: 增量+1，同时检查是否全部完成并更新 status
         if video_done is True:
-            self.conn.execute("UPDATE chapters SET video_done = video_done + 1, last_update = ?, status = CASE WHEN video_done + 1 >= video_count AND video_count > 0 THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
+            self.conn.execute("UPDATE chapters SET video_done = video_done + 1, last_update = ?, status = CASE WHEN video_done + 1 >= video_count AND video_count >= 0 THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
                 (datetime.now().isoformat(), chapter_id, self.user_id))
         elif video_done is not None:
             self.conn.execute("UPDATE chapters SET video_done=? WHERE id=? AND user_id=?",(video_done,chapter_id,self.user_id))
@@ -94,7 +94,15 @@ class LearningTracker:
         if not chapters or not chapters[0]: return
         total_videos = sum(c[2] for c in chapters if c[2])
         total_works = sum(c[3] for c in chapters if c[3])
-        completed_videos = sum(1 for c in chapters if c[4]=='completed' and c[0] and c[0]>=c[2] and c[2]>0)
-        completed_works = sum(1 for c in chapters if c[4]=='completed' and c[1] and c[1]>=c[3] and c[3]>0)
-        self.conn.execute("UPDATE courses SET total_videos=?,completed_videos=?,total_works=?,completed_works=?,last_study_time=? WHERE id=? AND user_id=?",
-            (total_videos,completed_videos,total_works,completed_works,datetime.now().isoformat(),course_id,self.user_id))
+        completed_videos = sum(1 for c in chapters if c[4]=='completed' and c[0] is not None and c[0]>=c[2] and c[2]>=0)
+        completed_works = sum(1 for c in chapters if c[4]=='completed' and c[1] is not None and c[1]>=c[3] and c[3]>=0)
+        all_chapters_completed = all(c[4]=='completed' for c in chapters)
+        # 课程完成：全部章节完成 且 计数达标（或章节数为0且全部完成）
+        course_completed = all_chapters_completed and (
+            (total_videos > 0 and completed_videos >= total_videos) or
+            (total_works > 0 and completed_works >= total_works) or
+            (total_videos == 0 and total_works == 0 and completed_videos >= len(chapters))
+        )
+        new_status = 'completed' if course_completed else 'in_progress'
+        self.conn.execute("UPDATE courses SET total_videos=?,completed_videos=?,total_works=?,completed_works=?,status=?,last_study_time=? WHERE id=? AND user_id=?",
+            (total_videos,completed_videos,total_works,completed_works,new_status,datetime.now().isoformat(),course_id,self.user_id))
