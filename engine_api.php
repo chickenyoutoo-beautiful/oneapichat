@@ -246,9 +246,16 @@ switch ($action) {
 
     case 'chat_stream':
         // POST proxy for SSE streaming to /engine/chat/stream
+        // 使用 proc_open + curl 命令行（不依赖 php-curl 扩展）
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');  // 禁用 nginx 缓冲
+        if (ob_get_level()) ob_end_clean();
+        flush();
+
         $input = file_get_contents('php://input');
         $payload = @json_decode($input, true);
-        if (!$payload) { header('Content-Type: application/json'); echo json_encode(['error' => 'invalid JSON']); exit; }
+        if (!$payload) { echo "event: error\ndata: ".json_encode(['error'=>'invalid JSON'])."\n\n"; exit; }
         $chat_id = $payload['chat_id'] ?? '';
         $msg_id = $payload['msg_id'] ?? '';
         $request_data = $payload['request'] ?? [];
@@ -257,9 +264,8 @@ switch ($action) {
         $model = $request_data['model'] ?? 'deepseek-chat';
         $messages = $request_data['messages'] ?? [];
         $tools = $request_data['tools'] ?? null;
-        // Forward to engine SSE endpoint
+
         $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
-        // Build engine request
         $eng_req = json_encode([
             'chat_id' => $chat_id,
             'msg_id' => $msg_id,
@@ -272,21 +278,44 @@ switch ($action) {
                 'stream' => true
             ]
         ]);
-        $ch = curl_init($engine_stream_url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $eng_req);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: text/event-stream']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
-            echo $data;
-            flush();
-            return strlen($data);
-        });
-        curl_setopt($ch, CURLOPT_TIMEOUT, 300);
-        curl_exec($ch);
-        $err = curl_error($ch);
-        if ($err) { header('Content-Type: text/event-stream'); echo "event: error\ndata: ".json_encode(['error' => $err])."\n\n"; }
-        curl_close($ch);
-        break;
 
+        // proc_open + curl 命令行（SSE 流式代理，不依赖 php-curl 扩展）
+        // 使用 shell 字符串形式确保 curl 正确处理 POST 数据
+        $curl_cmd = 'curl -s -N -X POST ' .
+            '-H ' . escapeshellarg('Content-Type: application/json') . ' ' .
+            '-H ' . escapeshellarg('Accept: text/event-stream') . ' ' .
+            '-H ' . escapeshellarg('Connection: close') . ' ' .
+            '--tlsv1.2 ' .
+            '--max-time 300 ' .
+            '--no-buffer ' .
+            '--data-raw ' . escapeshellarg($eng_req) . ' ' .
+            escapeshellarg($engine_stream_url) . ' 2>/dev/null';
+
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['file', '/dev/null', 'w']
+        ];
+        $proc = proc_open($curl_cmd, $descriptors, $pipes);
+        if (!$proc) {
+            echo "event: error\ndata: ".json_encode(['error'=>'proc_open failed'])."\n\n";
+            exit;
+        }
+        // stdin pipe 已通过 stderr 关闭（curl 从 --data-raw 读取）
+        if ($pipes[0]) fclose($pipes[0]);
+        // stdout 流式转发到客户端
+        if ($pipes[1]) {
+            stream_set_chunk_size($pipes[1], 65536);
+            while (!feof($pipes[1])) {
+                $chunk = @fread($pipes[1], 65536);
+                if ($chunk !== false && strlen($chunk) > 0) {
+                    echo $chunk;
+                    @flush();
+                }
+                if (feof($pipes[1])) break;
+            }
+            fclose($pipes[1]);
+        }
+        proc_close($proc);
+        exit;
 }
