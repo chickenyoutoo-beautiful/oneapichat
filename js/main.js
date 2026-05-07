@@ -8015,6 +8015,7 @@ function initializeConfig() {
 
     createTitleModelSelector();
     createSearchConfigSection();
+    bindSearchEvents(); // 静态 HTML 需手动绑定事件
     loadSearchConfig();  // ★ 确保第二次 initializeConfig(服务器同步后)也重新加载搜索配置
     initFontSize();
     if (window.initToolModeBtn) initToolModeBtn();
