@@ -101,7 +101,7 @@ php -S localhost:8080
 ├── engine_server.py     # Python backend (Agent/Cron/SSE)
 ├── fetch.php            # Web fetch utility
 ├── deploy.sh            # Cross-platform deploy script
-├── LICENSE              # MIT License
+├── LICENSE              # GPL-3.0 License
 └── README.md            # This file
 ```
 
@@ -121,13 +121,15 @@ Enable Agent mode in settings to unlock sub-agent spawning, tool calling, and cr
 
 ## 📄 License
 
-**MIT License** — Copyright (c) 2026 [chickenyoutoo-beautiful](https://github.com/chickenyoutoo-beautiful)
+**GPL-3.0 License**
 
-This project incorporates **刷课 · AutomaticCB** (学习通自动化刷课脚本), originally developed by [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing), integrated as a sub-module of this platform.
+This project is licensed under the GNU General Public License v3.0.
+
+This project incorporates **刷课 · AutomaticCB** (学习通自动化刷课脚本), which is also licensed under [GPL-3.0](https://github.com/Samueli924/chaoxing). Any derivative works that include this code must also be released under GPL-3.0.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — 学习通自动化刷课脚本
+- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — 学习通自动化刷课脚本 (GPL-3.0)
 - All open-source library contributors
