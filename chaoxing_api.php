@@ -207,7 +207,7 @@ switch ($action) {
                 $phone = $ini_phone['common']['username'] ?? '';
             }
             $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-            $db_json = shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
+            $db_json = shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
             if ($db_json) {
                 $db_data = json_decode($db_json, true);
                 if ($db_data && isset($db_data['courses'])) {
@@ -498,7 +498,7 @@ switch ($action) {
             $phone = $ini_phone['common']['username'] ?? '';
         }
         $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-        @shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg --reset-in-progress 2>/dev/null");
+        @shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg --reset-in-progress 2>/dev/null");
 
         echo json_encode(['success' => true]);
         break;
@@ -589,7 +589,14 @@ switch ($action) {
 
     case 'stats':
         $result = ['total_courses'=>0,'completed'=>0,'videos_done'=>0,'works_done'=>0];
-        $db_json = shell_exec('python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . ' 2>/dev/null');
+        $phone = '';
+        $config_path = userConfigPath($userId);
+        if ($config_path && file_exists($config_path)) {
+            $ini_phone = parse_ini_file($config_path, true);
+            $phone = $ini_phone['common']['username'] ?? '';
+        }
+        $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
+        $db_json = shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
         if ($db_json) {
             $db_data = json_decode($db_json, true);
             if ($db_data && isset($db_data['courses'])) {
