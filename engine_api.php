@@ -73,7 +73,7 @@ switch ($action) {
         break;
 
     case 'agent_list':
-        echo @file_get_contents($engine_url . '/engine/agent/list?' . $userParam) ?: '{}';
+        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/list?" . $userParam . "'") ?: '{}';
         break;
 
     case 'agent_create':
