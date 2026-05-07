@@ -6,11 +6,14 @@ db_path = '/tmp/AutomaticCB/api/learning_records.db'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--user-id', default='')
+parser.add_argument('--phone', default='')
 parser.add_argument('--reset-in-progress', action='store_true', help='重置 in_progress/running 状态为 not_started')
 parser.add_argument('--stats', action='store_true', help='统计模式：返回该用户的聚合统计（取代 stats_query.py）')
 parser.add_argument('--clear-cache', action='store_true', help='清空该用户所有课程记录（切换账号时清理旧数据）')
 args = parser.parse_args()
-user_id = args.user_id.strip()
+# ★ 账号同步：phone 作为唯一标准，优先使用 phone，user_id 仅作兼容
+_phone = args.phone.strip() if args.phone else ''
+user_id = _phone if _phone else args.user_id.strip()
 
 try:
     conn = sqlite3.connect(db_path)
