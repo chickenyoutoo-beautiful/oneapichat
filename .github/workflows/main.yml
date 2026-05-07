@@ -8,6 +8,13 @@ on:
 jobs:
   Start:
     runs-on: ubuntu-latest
+    env:
+      CHAOXING_USERNAME: ${{ secrets.CHAOXING_USERNAME }}
+      CHAOXING_PASSWORD: ${{ secrets.CHAOXING_PASSWORD }}
+      CHAOXING_COURSE_ID: ${{ secrets.CHAOXING_COURSE_ID }}
+      CHAOXING_TIKU_TOKEN: ${{ secrets.CHAOXING_TIKU_TOKEN }}
+      CHAOXING_TIKU_URL: https://oneapi.naujtrats.xyz/v1
+      CHAOXING_TIKU_MODEL: deepseek-v4-flash
     steps:
       - name: 拷贝代码
         uses: actions/checkout@v4
@@ -18,16 +25,20 @@ jobs:
           python-version: '3.11'
 
       - name: 安装依赖包
-        run: |
-          pip install -r ./requirements.txt
+        run: pip install -r requirements.txt
 
       - name: 生成配置文件
         run: |
-          cat > config.ini << 'EOF'
-[common]
-username = ${{ secrets.CHAOXING_USERNAME }}
-password = ${{ secrets.CHAOXING_PASSWORD }}
-course_list = ${{ secrets.CHAOXING_COURSE_ID }}
+          python3 - << 'PYEOF'
+          import os
+          tokens = os.environ.get("CHAOXING_TIKU_TOKEN", "")
+          url = os.environ.get("CHAOXING_TIKU_URL", "")
+          model = os.environ.get("CHAOXING_TIKU_MODEL", "")
+          with open("config.ini", "w", encoding="utf-8") as f:
+              f.write(f"""[common]
+username = {os.environ.get('CHAOXING_USERNAME', '')}
+password = {os.environ.get('CHAOXING_PASSWORD', '')}
+course_list = {os.environ.get('CHAOXING_COURSE_ID', '')}
 speed = 2
 auto_next = true
 brush_mode = all
@@ -36,13 +47,14 @@ chapter_order = sequential
 [tiku]
 provider = TikuYanxi,TikuAI
 submit = true
-tokens = ${{ secrets.CHAOXING_TIKU_TOKEN }}
+tokens = {tokens}
 true_list = 正确,对,√,是
 false_list = 错误,错,×,否,不对,不正确
-ai_base_url = https://oneapi.naujtrats.xyz/v1
-ai_model = deepseek-v4-flash
-EOF
+ai_base_url = {url}
+ai_model = {model}
+""")
+          print("config.ini generated")
+          PYEOF
 
       - name: Run main.py
-        run: |
-          python main.py -c config.ini
+        run: python main.py -c config.ini
