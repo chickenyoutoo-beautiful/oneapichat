@@ -811,17 +811,25 @@ if (_dd) document.documentElement.classList.add('dark');
         function applyFiltersStartingFrom(existingCount) {
             var searchVal = searchQuery.toLowerCase().trim();
             var lines = $('logArea').querySelectorAll('.log-line');
+            var prevWasTraceback = false; // 追踪是否处于 traceback 连续段落中
             for (var i = existingCount; i < lines.length && i < logLinesData.length; i++) {
                 var line = lines[i];
                 var data = logLinesData[i];
                 if (!data) continue;
                 var hide = false;
-                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行的后续（traceback）也显示
+                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行或 traceback 连续段落的后续也显示
                 if (errorFilterActive) {
                     if (data.level !== 'ERROR') {
-                        // 检查上一条是否是 ERROR
+                        // 检查上一条是否是 ERROR，或者是 traceback 连续段落
                         var prevData = logLinesData[i - 1];
-                        if (!prevData || prevData.level !== 'ERROR') hide = true;
+                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(data.message) ||
+                                              /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|OperationalError|ImportError):/i.test(data.message);
+                        if (!prevData || (prevData.level !== 'ERROR' && !prevWasTraceback)) {
+                            if (!isTracebackLine) hide = true;
+                        }
+                        prevWasTraceback = isTracebackLine;
+                    } else {
+                        prevWasTraceback = false; // 重置
                     }
                 }
                 line.classList.remove('highlight', 'traceback-line');
@@ -843,16 +851,24 @@ if (_dd) document.documentElement.classList.add('dark');
         function applyFiltersExisting() {
             var searchVal = searchQuery.toLowerCase().trim();
             var lines = $('logArea').querySelectorAll('.log-line');
+            var prevWasTraceback = false;
             for (var i = 0; i < lines.length && i < logLinesData.length; i++) {
                 var line = lines[i];
                 var data = logLinesData[i];
                 if (!data) continue;
                 var hide = false;
-                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行的后续（traceback）也显示
+                // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行或 traceback 连续段落的后续也显示
                 if (errorFilterActive) {
                     if (data.level !== 'ERROR') {
                         var prevData = logLinesData[i - 1];
-                        if (!prevData || prevData.level !== 'ERROR') hide = true;
+                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(data.message) ||
+                                              /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(data.message);
+                        if (!prevData || (prevData.level !== 'ERROR' && !prevWasTraceback)) {
+                            if (!isTracebackLine) hide = true;
+                        }
+                        prevWasTraceback = isTracebackLine;
+                    } else {
+                        prevWasTraceback = false;
                     }
                 }
                 line.classList.remove('highlight', 'traceback-line');
