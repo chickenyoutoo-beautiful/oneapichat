@@ -5827,6 +5827,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
 
     // 移除旧的临时消息
     chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary);
+    // ★ 发送消息时重置滚动状态,并锁定流式跟随
+    userScrolled = false;
+    streamingScrollLock = false;
     const partialIdx = chats[chatId].messages.findIndex(m => m.partial);
     if (partialIdx !== -1) chats[chatId].messages.splice(partialIdx, 1);
 
