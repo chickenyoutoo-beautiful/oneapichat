@@ -90,6 +90,34 @@ php -S localhost:8080
 
 ---
 
+## ☁️ 一键云端部署（任意设备）
+
+### Docker（通用 · 任何设备）
+```bash
+# 方式1: 直接运行（自动拉取最新 release）
+docker run -d -p 8080:8080 --name oneapichat \
+  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+
+# 方式2: 使用 docker-compose
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+
+### 一键脚本（Linux/macOS）
+```bash
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+```
+> 支持 Ubuntu / Debian / CentOS / macOS，自动检测 Docker 或原生部署
+
+### 树莓派 / NAS / Arm64 设备
+```bash
+docker run -d -p 8080:8080 --name oneapichat \
+  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+```
+> 镜像支持 `linux/arm64`，适用于树莓派、群晖、威联通等设备
+
+---
+
 ## 📁 项目结构
 
 ```
@@ -98,10 +126,13 @@ php -S localhost:8080
 ├── main.js             # 核心前端逻辑
 ├── style.css           # 样式文件
 ├── engine_api.php      # PHP 代理层
-├── engine_server.py     # Python 后端（Agent/Cron/SSE）
+├── engine_server.py    # Python 后端（Agent/Cron/SSE）
 ├── fetch.php           # 网页抓取工具
 ├── deploy.sh           # 跨平台部署脚本
-├── LICENSE             # MIT 许可证
+├── Dockerfile          # Docker 镜像定义
+├── docker-compose.yml  # Docker Compose 配置
+├── nginx.conf          # Nginx 配置（原生部署）
+├── LICENSE             # GPL-3.0 许可证
 └── README.md           # 本文件
 ```
 
@@ -119,9 +150,50 @@ php -S localhost:8080
 
 ---
 
+## 📖 刷课 · AutomaticCB 使用说明
+
+本平台集成了**学习通自动化刷课脚本**，支持通过 GitHub Actions 云端无人值守刷课。
+
+### 🚀 快速开始
+
+**第一步：Fork 本仓库**
+
+点击本仓库右上角 **Fork** 按钮，将仓库 fork 到你的 GitHub 账号下。
+
+**第二步：配置 Secrets**
+
+在 forked 仓库中依次进入 **Settings → Secrets and variables → Actions**，添加以下 secrets：
+
+| Secret Name | 说明 | 示例 |
+|------------|------|------|
+| `CHAOXING_USERNAME` | 学习通手机号 | `13800138000` |
+| `CHAOXING_PASSWORD` | 学习通密码 | `yourpassword` |
+| `CHAOXING_COURSE_ID` | 课程 ID（多个用逗号分隔） | `123456,789012` |
+| `CHAOXING_TIKU_TOKEN` | 题库 Token（可选） | 开通题库后获取 |
+
+**第三步：运行 Actions**
+
+在仓库的 **Actions** 页面，点击左侧 **刷课** workflow，再点击 **Run workflow** 按钮即可开始云端刷课。
+
+> 每次推送代码到 `main` 分支会自动触发，也支持手动 `workflow_dispatch` 立即执行。
+
+### 📋 本地刷课（Web UI）
+
+平台提供刷课 Web UI（`chaoxing.html`），支持：
+- 查看课程完成进度
+- 手动启动 / 停止刷课任务
+- 配置倍速、刷课模式
+- 题库配置
+
+访问 `https://你的域名/oneapichat/chaoxing.html` 即可使用。
+
+---
+
 ## 📄 许可证
 
-MIT License — 见 [LICENSE](./LICENSE)
+GPL-3.0 — 见 [LICENSE](./LICENSE)
+
+刷课模块基于 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) 开发，遵循相同许可证。
 
 ---
 

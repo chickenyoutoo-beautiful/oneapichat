@@ -1,0 +1,110 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.2.3)'
+        required: false
+        type: string
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=OneAPIChat
+            org.opencontainers.image.description=Multi-Model AI Chat Platform with Agent Support
+            org.opencontainers.image.licenses=GPL-3.0
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          if [ -z "$VERSION" ]; then VERSION="${{ inputs.version }}"; fi
+          NOTES="## OneAPIChat \$VERSION\n\n"
+          NOTES+="**Multi-Model AI Chat Platform with Agent Support**\n\n"
+          NOTES+="### 📦 部署方式\n\n"
+          NOTES+="#### Docker (推荐)\n\`\`\`bash\n"
+          NOTES+="docker pull ghcr.io/${{ github.repository }}:\$VERSION\n"
+          NOTES+="docker run -d -p 8080:8080 --name oneapichat \\\n"
+          NOTES+="  ghcr.io/${{ github.repository }}:\$VERSION\n"
+          NOTES+="\`\`\`\n\n"
+          NOTES+="或使用 docker-compose:\n"
+          NOTES+="\`\`\`yaml\n"
+          NOTES+="services:\n"
+          NOTES+="  web:\n"
+          NOTES+="    image: ghcr.io/${{ github.repository }}:\$VERSION\n"
+          NOTES+="    ports:\n"
+          NOTES+="      - \"8080:8080\"\n"
+          NOTES+="\`\`\`\n\n"
+          NOTES+="#### 一键脚本部署\n"
+          NOTES+="\`\`\`bash\n"
+          NOTES+="curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/\${VERSION#v}/deploy.sh | bash\n"
+          NOTES+="\`\`\`\n\n"
+          NOTES+="### 🌟 新功能\n"
+          NOTES+="见 [CHANGELOG](https://github.com/${{ github.repository }}/blob/\$VERSION/CHANGELOG.md)\n\n"
+          NOTES+="### 📋 系统要求\n"
+          NOTES+="- Docker: 20.10+ / 裸机: Ubuntu 20.04+ / Debian 11+ / CentOS 8+\n"
+          NOTES+="- PHP 8.0+ & Python 3.10+ (裸机部署)\n\n"
+          NOTES+="---\n"
+          NOTES+="🐛 问题反馈: https://github.com/${{ github.repository }}/issues\n"
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ steps.notes.outputs.notes }}
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Docker Image Digest
+        run: |
+          echo "## Image Info" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/${{ github.repository }}:${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
