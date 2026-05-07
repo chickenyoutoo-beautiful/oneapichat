@@ -7803,18 +7803,8 @@ function createRAGEntry() {
 }
 
 function createResetButton() {
-    if (getEl('resetConfigBtn')) return; // 已存在
-    const panel = $.configPanel || getEl('configPanel');
-    if (!panel) return;
-    const div = document.createElement('div');
-    div.className = 'config-item mt-4 pt-4 border-t border-gray-200 dark:border-gray-800';
-    div.innerHTML = `
-        <button id="resetConfigBtn" class="w-full px-3 py-2 text-sm font-medium text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center justify-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            恢复默认设置
-        </button>
-    `;
-    panel.appendChild(div);
+    if (!getEl('resetConfigBtn')) return;
+    // 按钮已迁移至 HTML 静态渲染，只需绑定事件
     getEl('resetConfigBtn').addEventListener('click', resetConfig);
 }
 
