@@ -2975,6 +2975,8 @@ window.deleteCron = async function(name) {
 // ★ 主代理通知系统：子代理完成后通知主代理
 // 防重复 + 冷却 + 预处理结果 + 禁止创建新子代理，杜绝无限循环
 window._agentNotifyQueue = [];
+window._activeNotifyExecId = 0;
+window._pendingNotifyExecId = null;
 window._agentNotifyProcessing = false;
 window._hasPendingSubAgentNotify = false;
 window._currentGroupId = 0;
@@ -3000,13 +3002,18 @@ window._processAgentNotifyQueue = async function() {
         return;
     }
     
+    var execId = ++window._activeNotifyExecId;
+
     // 如果主代理正在生成回复（sendMessage 已激活），则暂不处理
     // 等 sendMessage 完成后 sendMessage 本身会调用 processAgentNotifyQueue
     if (window._agentNotifyProcessing) {
         // 标记：有新通知在等待，等主代理空闲后统一处理
         window._hasPendingSubAgentNotify = true;
+        // 记录等上一批完成后要执行的批次ID
+        window._pendingNotifyExecId = execId;
         return;
     }
+    window._agentNotifyProcessing = true;
     
     // ★ 批量合并队列中的所有通知（不论几个子代理同时完成，只生成一条上下文）
     // ★ 只收集属于当前批次的子代理（同一任务创建的才算，过期的忽略）
@@ -3064,20 +3071,32 @@ window._processAgentNotifyQueue = async function() {
         '2. 这条消息是系统通知，不需要回复用户，只需要静默记录结果。\n' +
         '3. 如用户提问涉及这些子代理的结果，可以直接引用回答，无需重复调用子代理。';
     
+    window._pendingNotifyExecId = null;  // 清除待处理标记
+
     if (typeof window.sendMessage === 'function') {
         window.__internalAgentContext = ctx;
-        window.sendMessage(true, '');  // 传空字符串，主代理识别后静默处理
-    }
-    
-    // 解锁（等 sendMessage 完全结束后再解锁）
-    setTimeout(function() {
+        // 等待 sendMessage 彻底完成（包括流式响应全部返回）再解锁
+        // 用 .finally 而非 setTimeout，保证锁跟随 sendMessage 生命周期
+        window.sendMessage(true, '').finally(function() {
+            // 所有流式响应结束后，解锁并检查是否有新批次在等待
+            window._agentNotifyProcessing = false;
+            var nextExecId = window._pendingNotifyExecId;
+            if (nextExecId !== null && nextExecId !== execId) {
+                window._pendingNotifyExecId = null;
+                setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
+            } else if (window._hasPendingSubAgentNotify || (Array.isArray(window._agentNotifyQueue) && window._agentNotifyQueue.length > 0)) {
+                window._hasPendingSubAgentNotify = false;
+                setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
+            }
+        });
+    } else {
+        // sendMessage 不可用，直接解锁
         window._agentNotifyProcessing = false;
-        // 如果期间有新通知进来，继续处理
         if (window._hasPendingSubAgentNotify || (Array.isArray(window._agentNotifyQueue) && window._agentNotifyQueue.length > 0)) {
             window._hasPendingSubAgentNotify = false;
-            setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
+            setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
         }
-    }, 8000);
+    }
 };
 
 window.triggerAgentAutoReplyForSubAgent = function(agentName) {
