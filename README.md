@@ -135,10 +135,10 @@ docker run -d -p 8080:8080 --name oneapichat \
 ├── Dockerfile          # Docker image definition
 ├── docker-compose.yml  # Docker Compose config
 ├── nginx.conf         # Nginx config (native deploy)
-├── LICENSE             # AGPL-3.0 (main project, based on One-API)
-├── NOTICE              # Dual-license info
+├── LICENSE             # AGPL-3.0 (main project)
+├── NOTICE              # License details
 ├── LICENSES/
-│   └── MIT.txt         # MIT (刷课 module)
+│   └── GPL-3.0.txt     # GPL-3.0 (刷课 module)
 └── README.md           # This file
 ```
 
@@ -223,7 +223,7 @@ python main.py -u 你的手机号 -p 你的密码 -l 课程ID
 ### Dual License
 
 - **OneAPIChat (main project):** [AGPL-3.0](./LICENSE) — based on [One-API](https://github.com/songquanpeng/one-api)
-- **刷课 module (chaoxing automation):** [MIT](./LICENSES/MIT.txt)
+- **刷课 module (chaoxing automation):** [GPL-3.0](./LICENSES/GPL-3.0.txt) — from [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
 
 See [`NOTICE`](./NOTICE) for details.
 
