@@ -17,7 +17,17 @@ from bs4 import BeautifulSoup
 from bs4.element import NavigableString
 
 from api.base import init_session
-from api.answer import get_tiku_from_config
+from api.answer import Tiku as _Tiku
+
+def _get_tiku():
+    """获取 Tiku 实例（兼容独立函数调用）"""
+    try:
+        t = _Tiku()
+        t = t.get_tiku_from_config()
+        if t: t.init_tiku()
+        return t
+    except:
+        return None
 # 移除题目文本中的转义字符
 def remove_escape_chars(text: str) -> str:
     if not text: return ""
@@ -147,7 +157,7 @@ class ChaoxingExam:
 
     def __init__(self, account, tiku=None):
         self.account = account
-        self.tiku = tiku or get_tiku_from_config()
+        self.tiku = tiku or _get_tiku()
         self.session = None
 
         # 考试状态

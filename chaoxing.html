@@ -157,8 +157,8 @@ if (_dd) document.documentElement.classList.add('dark');
     <!-- Tab Bar -->
     <!-- Tab Bar: centered, smooth transitions -->
     <div class="tab-bar flex justify-center gap-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/80 sticky z-40" style="top:57px">
-        <button class="tab-btn px-8 py-3 text-sm font-medium border-b-2 transition-all duration-200 ease-in-out -mb-px" data-tab="study" style="border-color: #6366f1; color: #6366f1;" onclick="switchTab('study')">📖 学习</button>
-        <button class="tab-btn px-8 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all duration-200 ease-in-out -mb-px" data-tab="exam" onclick="switchTab('exam')">📝 考试</button>
+        <button class="tab-btn px-8 py-3 text-sm font-medium border-b-2 transition-all duration-200 ease-in-out -mb-px" data-tab="study" style="border-color: #6366f1; color: #6366f1;" onclick="switchTab('study')"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>学习</button>
+        <button class="tab-btn px-8 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all duration-200 ease-in-out -mb-px" data-tab="exam" onclick="switchTab('exam')"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>考试</button>
     </div>
 
 
@@ -371,20 +371,22 @@ if (_dd) document.documentElement.classList.add('dark');
     <!-- Exam Tab -->
     <div id="tab-exam" class="tab-content hidden">
     <main class="max-w-4xl mx-auto p-4 space-y-4">
-        <!-- 考试统计 -->
+        <!-- 考试统计：横向并列 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="p-4 grid grid-cols-3 gap-4 text-center">
-                <div>
-                    <div class="text-lg font-bold text-indigo-600 dark:text-indigo-400" id="examStatTotal">0</div>
-                    <div class="text-xs text-gray-400">待考试</div>
+            <div class="flex items-center justify-around p-4">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div class="text-right"><div class="text-lg font-bold text-indigo-600 dark:text-indigo-400" id="examStatTotal">0</div><div class="text-xs text-gray-400">待考试</div></div>
                 </div>
-                <div>
-                    <div class="text-lg font-bold text-green-600 dark:text-green-400" id="examStatCompleted">0</div>
-                    <div class="text-xs text-gray-400">已完成</div>
+                <div class="w-px h-8 bg-gray-200 dark:bg-gray-700"></div>
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div class="text-right"><div class="text-lg font-bold text-green-600 dark:text-green-400" id="examStatCompleted">0</div><div class="text-xs text-gray-400">已完成</div></div>
                 </div>
-                <div>
-                    <div class="text-lg font-bold text-amber-600 dark:text-amber-400" id="examStatSubmit">0</div>
-                    <div class="text-xs text-gray-400">已交卷</div>
+                <div class="w-px h-8 bg-gray-200 dark:bg-gray-700"></div>
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div class="text-right"><div class="text-lg font-bold text-amber-600 dark:text-amber-400" id="examStatSubmit">0</div><div class="text-xs text-gray-400">已交卷</div></div>
                 </div>
             </div>
         </section>
@@ -392,7 +394,7 @@ if (_dd) document.documentElement.classList.add('dark');
         <!-- 考试配置 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="p-4 space-y-3">
-                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">⚙️ 考试配置</h3>
+                <div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg><h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">考试配置</h3></div>
                 <label class="flex items-center gap-2 text-sm">
                     <input type="checkbox" id="examAutoSubmit" checked class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                     <span>自动提交试卷</span>
@@ -417,7 +419,7 @@ if (_dd) document.documentElement.classList.add('dark');
         <!-- 考试列表 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">📋 考试列表</h3>
+                <div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">考试列表</h3></div>
                 <span class="text-xs text-gray-400" id="examListCount">加载中...</span>
             </div>
             <div id="examList" class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -428,7 +430,7 @@ if (_dd) document.documentElement.classList.add('dark');
         <!-- 考试日志 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">📜 日志</h3>
+                <div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg><h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">日志</h3></div>
                 <button onclick="clearExamLog()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
             </div>
             <div id="examLog" class="log-area p-4 h-48 overflow-y-auto text-xs leading-relaxed">
@@ -1747,19 +1749,26 @@ function setStatus(text, cls) {
         //  Tab Switching
         // ═══════════════════════════════════════════
         function switchTab(tab) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            // Animate tab transition
+            document.querySelectorAll('.tab-content').forEach(function(el) {
+                el.style.animation = 'none';
+                el.classList.add('hidden');
+            });
             var target = document.getElementById('tab-' + tab);
-            if (target) target.classList.remove('hidden');
-            document.querySelectorAll('.tab-btn').forEach(btn => {
+            if (target) {
+                target.classList.remove('hidden');
+                target.style.animation = 'tabFadeIn 0.2s ease-out';
+            }
+            document.querySelectorAll('.tab-btn').forEach(function(btn) {
                 btn.style.borderColor = 'transparent';
                 btn.style.color = '';
-                btn.classList.remove('text-indigo-600', 'dark:text-indigo-400');
+                btn.classList.remove('active', 'text-indigo-600', 'dark:text-indigo-400');
             });
             var active = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
             if (active) {
                 active.style.borderColor = '#6366f1';
                 active.style.color = '#6366f1';
-                active.classList.add('text-indigo-600', 'dark:text-indigo-400');
+                active.classList.add('active', 'text-indigo-600', 'dark:text-indigo-400');
             }
             if (tab === 'exam') loadExamList();
         }
