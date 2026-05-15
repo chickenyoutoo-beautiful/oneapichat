@@ -1,0 +1,15 @@
+# License Notice — Dual Licensing
+
+## OneAPIChat (Main Project) — AGPL-3.0
+
+OneAPIChat is based on [One-API](https://github.com/songquanpeng/one-api)
+and is licensed under the **GNU Affero General Public License v3.0**.
+See [LICENSE](./LICENSE) for the full text.
+
+This means that if you modify this project and run it on a network server,
+you must make the source code available to users who interact with it over the network.
+
+## 刷课模块（Chaoxing Automation Module）— MIT
+
+The 刷课 module is independently licensed under the **MIT License**.
+See [LICENSES/MIT.txt](./LICENSES/MIT.txt) for details.

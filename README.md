@@ -135,7 +135,10 @@ docker run -d -p 8080:8080 --name oneapichat \
 ├── Dockerfile          # Docker image definition
 ├── docker-compose.yml  # Docker Compose config
 ├── nginx.conf         # Nginx config (native deploy)
-├── LICENSE             # GPL-3.0 License
+├── LICENSE             # AGPL-3.0 (main project, based on One-API)
+├── NOTICE              # Dual-license info
+├── LICENSES/
+│   └── MIT.txt         # MIT (刷课 module)
 └── README.md           # This file
 ```
 
@@ -212,18 +215,17 @@ python main.py -u 你的手机号 -p 你的密码 -l 课程ID
 
 - 仓库默认**公开**，Secrets 不会被泄露（GitHub 已做保护）
 - 如担心账号安全，可在仓库 Settings → **Change visibility** 中将仓库设为 **Private**
-- 禁止将本项目用于商业用途
-- 基于 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) 开发，遵循 GPL-3.0 协议
 
 ---
 
 ## 📄 License
 
-**GPL-3.0 License**
+### Dual License
 
-This project is licensed under the GNU General Public License v3.0.
+- **OneAPIChat (main project):** [AGPL-3.0](./LICENSE) — based on [One-API](https://github.com/songquanpeng/one-api)
+- **刷课 module (chaoxing automation):** [MIT](./LICENSES/MIT.txt)
 
-This project incorporates **刷课 · AutomaticCB** (学习通自动化刷课脚本), which is also licensed under [GPL-3.0](https://github.com/Samueli924/chaoxing). Any derivative works that include this code must also be released under GPL-3.0.
+See [`NOTICE`](./NOTICE) for details.
 
 ---
 
