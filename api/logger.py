@@ -1,4 +1,4 @@
-import os, sys, time as _time
+import os, sys, time as _time, tempfile
 from loguru import logger
 
 log_dir = os.path.join(tempfile.gettempdir(), 'AutomaticCB')
