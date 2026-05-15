@@ -39,18 +39,20 @@ def init_config():
     parser.add_argument("-p", "--password", type=str, default=None, help="登录密码")
     parser.add_argument("-l", "--list", type=str, default=None, help="要学习的课程ID列表")
     parser.add_argument("-s", "--speed", type=float, default=2.0, help="视频播放倍速(默认1，最大2)")
+    parser.add_argument("--exam", action="store_true", help="考试模式：自动完成课程考试")
+    parser.add_argument("--exam-no-submit", action="store_true", help="考试模式：搜题但不自动提交")
     args = parser.parse_args()
     if args.config:
         config = configparser.ConfigParser()
         config.read(args.config, encoding="utf8")
-        return (config.get("common", "username"),
+        return (args, config.get("common", "username"),
                 config.get("common", "password"),
                 str(config.get("common", "course_list")).split(",") if config.get("common", "course_list") else None,
                 int(config.get("common", "speed")),
                 config['tiku']
                 )
     else:
-        return (args.username, args.password, args.list.split(",") if args.list else None, int(args.speed) if args.speed else 1,None)
+        return (args, args.username, args.password, args.list.split(",") if args.list else None, int(args.speed) if args.speed else 1,None)
 
 class RollBackManager:
     def __init__(self) -> None:
@@ -73,7 +75,7 @@ if __name__ == '__main__':
         # 避免异常的无限回滚
         RB = RollBackManager()
         # 初始化登录信息
-        username, password, course_list, speed,tiku_config= init_config()
+        cli_args, username, password, course_list, speed, tiku_config = init_config()
         # 规范化播放速度的输入值
         speed = min(2.0, max(1.0, speed))
         if (not username) or (not password):
@@ -203,6 +205,41 @@ if __name__ == '__main__':
                         logger.trace(f"识别到阅读任务, 任务章节: {course['title']}")
                         chaoxing.strdy_read(course, job,job_info)
                 __point_index += 1
+        # ── 考试模式 ──────────────────────────────────
+        if cli_args.exam:
+            try:
+                from api.exam_auto import ChaoxingExam
+                exam_runner = ChaoxingExam(account, tiku=tiku)
+                for course in course_task:
+                    try:
+                        logger.info(f"检查课程考试: {course['title']}")
+                        exams = exam_runner.list_exams(course['courseId'], course['clazzId'], course['cpi'])
+                        if not exams:
+                            logger.info(f"  无考试安排")
+                            continue
+                        for exam_info in exams:
+                            if exam_info.get('status') in ('已完成', '已交'):
+                                logger.info(f"  考试 [{exam_info['title']}] 已完成，跳过")
+                                continue
+                            logger.info(f"  发现考试: {exam_info['title']}")
+                            auto_submit = not cli_args.exam_no_submit
+                            result = exam_runner.run(
+                                exam_id=exam_info['exam_id'],
+                                course_id=course['courseId'],
+                                class_id=course['clazzId'],
+                                cpi=course['cpi'],
+                                enc_task=exam_info.get('enc_task', 0),
+                                auto_submit=auto_submit,
+                            )
+                            if result.get('submitted'):
+                                logger.info(f"  ✅ 考试 {exam_info['title']} 已完成并交卷")
+                            else:
+                                logger.info(f"  ⚠️ 考试 {exam_info['title']} 处理结果: {result['answered']}/{result['total']} 题已答")
+                    except Exception as e:
+                        logger.warning(f"  课程考试处理异常: {e}")
+                        continue
+            except Exception as e:
+                logger.warning(f"考试模式初始化失败: {e}")
         logger.info("所有课程学习任务已完成")
     except BaseException as e:
         import traceback
