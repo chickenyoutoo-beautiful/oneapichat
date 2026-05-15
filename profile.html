@@ -241,7 +241,7 @@
     </main>
 
     <script>
-        const SERVER_API_BASE = 'https://xiaoxin.naujtrats.xyz/oneapichat';
+        const SERVER_API_BASE = '/oneapichat';
 
         function getToken() {
             return localStorage.getItem('authToken') || '';
@@ -281,7 +281,7 @@
             const token = getToken();
             if (!token) {
                 alert('未登录，即将跳转到登录页面');
-                window.location.href = 'https://xiaoxin.naujtrats.xyz/?from=chat';
+                window.location.href = '/?from=chat';
                 return;
             }
 
@@ -299,7 +299,7 @@
                     document.getElementById('newUsername').value = data.username;
                 } else {
                     alert('会话已过期，请重新登录');
-                    window.location.href = 'https://xiaoxin.naujtrats.xyz/?from=chat';
+                    window.location.href = '/?from=chat';
                 }
             } catch(err) {
                 console.error('[profile]', err);

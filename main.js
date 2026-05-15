@@ -1,13 +1,5 @@
 
 // main.js 优化版 v17.2 (实时数学公式渲染)
-// 抑制 KaTeX 字体指标警告(中文字符如①②③不影响渲染)
-(function(){
-    var _origWarn = console.warn;
-    console.warn = function() {
-        if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].indexOf('No character metrics') >= 0) return;
-        return _origWarn.apply(console, arguments);
-    };
-})();
 // ==================== 全局常量 ====================
 
 // ==================== 已知不支持工具调用的模型(硬编码,不依赖 models.js) ====================
@@ -1027,8 +1019,6 @@ async function uploadImageToServer(base64Data) {
 let _lastServerBackup = 0;
 const SERVER_BACKUP_INTERVAL = 2000; // ★ 2秒即可再次备份,平板确保不丢
 let _deletedChatIds = {}; // ★ 跟踪已删除的聊天ID,合并时排除
-// 从 localStorage 恢复(刷新后不丢失)
-try { var _savedDel = JSON.parse(localStorage.getItem('_deletedChatIds') || '{}'); _deletedChatIds = _savedDel; } catch(e) {}
 
 // ★ sendBeacon 版本: 页面关闭时可靠地保存聊天记录到服务器
 //   使用 navigator.sendBeacon,浏览器保证请求在页面关闭后继续发送
@@ -1099,7 +1089,6 @@ async function saveChatsToServer() {
 
         // ★ 合并:先读服务器已有数据,再合并本地聊天,防止多窗口覆盖
         var mergedChats = JSON.parse(JSON.stringify(chats));
-        // ★ 保留完整图片数据(不压缩,服务器备份需要完整 base64)
         console.log('[save] 本地聊天数:', Object.keys(mergedChats).length);
         try {
             var getUrl = url + '&chat_id=all';
@@ -1128,34 +1117,16 @@ async function saveChatsToServer() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: 'all', chats: mergedChats, title: '聊天备份' }),
-            keepalive: false
+            keepalive: true
         });
 
         if (response.ok) {
             _deletedChatIds = {}; // 清除已同步的删除标记
-            try { localStorage.removeItem('_deletedChatIds'); } catch(e) {}
             return true;
         }
         return false;
     } catch (e) {
         console.warn('[saveChatsToServer] 备份失败:', e.message);
-        // ★ 重试一次:进一步压缩后重发
-        try {
-            var retrySlim = {};
-            var ids = Object.keys(mergedChats || chats || {});
-            var recentIds = ids.slice(-10);
-            for (var _si2 = 0; _si2 < recentIds.length; _si2++) {
-                var _id2 = recentIds[_si2];
-                var _c2 = (mergedChats || chats)[_id2];
-                retrySlim[_id2] = { title: _c2.title || '新对话', updated_at: _c2.updated_at || '', messages: (_c2.messages || []).slice(-4) };
-            }
-            var retryResp = await fetch(url, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: 'all', chats: retrySlim, title: '聊天备份(精简)' }),
-                keepalive: false
-            });
-            if (retryResp.ok) { _deletedChatIds = {}; try { localStorage.removeItem('_deletedChatIds'); } catch(e) {} return true; }
-        } catch(e2) {}
         return false;
     }
 }
@@ -1184,12 +1155,12 @@ async function saveConfigToServer() {
         var url = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
         var saved = false;
         try {
-            var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: false });
+            var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
             if (resp.ok) saved = true;
         } catch(e1) { console.warn('[save] 保存失败:', e1.message); }
         if (!saved) {
             try {
-                var resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: false });
+                var resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
                 if (resp2.ok) saved = true;
             } catch(e2) { console.warn('[save] 重试保存也失败:', e2.message); }
         }
@@ -1242,21 +1213,23 @@ async function loadConfigFromServer() {
         console.log('[loadConfigFromServer] 响应状态:', resp.status);
         if (!resp.ok) { console.log('[loadConfigFromServer] 响应异常,跳过'); return; }
         var config = await resp.json();
-        console.log('[loadConfigFromServer] 服务器配置键数:', config ? Object.keys(config).length : 0);
+        console.log('[loadConfigFromServer] 配置数据键数:', config ? Object.keys(config).length : 0);
         if (!config || Object.keys(config).length === 0) {
             console.log('[loadConfigFromServer] 服务器无配置数据');
             return;
         }
-        // 静默写入所有键,只在出错时记录
+        var keys = Object.keys(config);
+        console.log('[loadConfigFromServer] 写入localStorage的键:', keys.slice(0,10).join(','));
         for (var k in config) {
+            // ★ 始终从服务器写入 localStorage，服务器配置是权威来源
+            // ★ 每次保存配置时都会同步到服务器，刷新时恢复完整状态
+            // ★ 跳过暗色模式和Agent/useBackendSSE(防止服务器覆盖用户本地设置)
             if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && k !== 'useBackendSSE') {
-                try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
+                localStorage.setItem(k, config[k]);
+                console.log('[loadConfigFromServer] 写入键:', k);
             }
         }
-        console.log('[loadConfigFromServer] 写入完成,共', Object.keys(config).length, '项');
-        // ★ 服务器配置写入 localStorage 后,重新填充 UI 表单(确保服务器值正确显示)
-        if (typeof initializeConfig === 'function') initializeConfig();
-        if (typeof loadSearchConfig === 'function') loadSearchConfig();
+        console.log('[loadConfigFromServer] 写入完成');
     } catch(e) {
         console.warn('[loadConfigFromServer] 失败:', e.message);
     }
@@ -1304,7 +1277,7 @@ async function restoreUserData() {
             }
         }
         if (migrated > 0) {
-            slimSaveChats();
+            localStorage.setItem('chats', JSON.stringify(chats));
             console.log('[restoreUserData] 迁移了', migrated, '个旧聊天记录');
         }
     }
@@ -1323,47 +1296,13 @@ async function restoreUserData() {
                     var merged = JSON.parse(JSON.stringify(chats));
                     var added = 0;
                     for (var _scid in serverChats) {
-                        if (_deletedChatIds && _deletedChatIds[_scid]) continue; // 跳过已删除
                         if (!merged[_scid]) {
                             merged[_scid] = serverChats[_scid];
                             added++;
-                        } else {
-                            // ★ 如果本地是压缩过的(图片丢失),用服务器的图片数据恢复
-                            var _sc = serverChats[_scid];
-                            var _mc = merged[_scid];
-                            if (_sc.messages && _mc.messages && _sc.messages.length === _mc.messages.length) {
-                                for (var _smi = 0; _smi < _sc.messages.length; _smi++) {
-                                    var _sm = _sc.messages[_smi];
-                                    var _mm = _mc.messages[_smi];
-                                    if (_sm && _mm) {
-                                        // 本地 generatedImage 丢失时用服务器的
-                                        if (_sm.generatedImage && (!_mm.generatedImage || _mm.generatedImage.indexOf('data:') !== 0)) {
-                                            _mm.generatedImage = _sm.generatedImage;
-                                        }
-                                        // 本地 generatedImages 丢失时用服务器的
-                                        if (_sm.generatedImages && _sm.generatedImages.length > 0 && (!_mm.generatedImages || _mm.generatedImages.length === 0 || _mm.generatedImages[0].indexOf('data:') !== 0)) {
-                                            _mm.generatedImages = _sm.generatedImages;
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                     chats = merged;
-                    // ★ 避免 quota exceeded:使用 slimSaveChats 写入(自动压缩+截断大图片)
-                    try { slimSaveChats(); } catch(e) {
-                        console.warn('[restoreUserData] 写入localStorage失败,尝试精简:', e.message);
-                        // 极简模式:只保留标题骨架
-                        try {
-                            var mini = {};
-                            Object.keys(chats).slice(-5).forEach(function(id) {
-                                mini[id] = { title: chats[id].title || '新对话', updated_at: chats[id].updated_at || '', messages: [] };
-                            });
-                            localStorage.setItem('chats', JSON.stringify(mini));
-                        } catch(e2) {
-                            console.error('[restoreUserData] 极简保存也失败');
-                        }
-                    }
+                    localStorage.setItem('chats', JSON.stringify(chats));
                     renderChatHistory();
                     console.log('[restoreUserData] 合并: 本地', Object.keys(chats).length - added, '个, 服务器补充', added, '个');
                 } else {
@@ -2808,11 +2747,8 @@ function toggleImageProviderFields() {
         if (hintEl) hintEl.textContent = 'MiniMax: 使用 image-01 模型,写实风格。使用独立 API Key,不影响主 API Key。';
     }
 
-    // ★ 仅在用户切换提供商时保存(页面初始化时不触发saveConfig,避免覆盖服务器配置)
-    if (window._isUserChangingProvider) {
-        saveConfig();
-        window._isUserChangingProvider = false;
-    }
+    // ★ 立即保存到 localStorage,确保 generateImageOpenRouter 读到正确值
+    saveConfig();
 }
 
 // 图片上传按钮 - 触发图片选择(仅图片,移动端友好)
@@ -3855,6 +3791,7 @@ window.isToolEnabled = function(toolKey) {
 // 设置工具启用状态
 window.setToolEnabled = function(toolKey, enabled) {
     localStorage.setItem('tool_enabled_' + toolKey, enabled ? 'true' : 'false');
+    console.log('[ToolToggle]', toolKey, '→', enabled ? '✅' : '❌');
 };
 
 // 加载工具开关配置到 UI
@@ -3885,10 +3822,6 @@ window.loadToolToggleStates = function() {
         }
         el.checked = window.isToolEnabled(key);
     });
-    // ★ 绑定事件监听
-    if (typeof bindToolToggleEvents === 'function') bindToolToggleEvents();
-    // ★ 也绑定自定义技能的监听
-    if (typeof bindCustomSkillEvents === 'function') bindCustomSkillEvents();
     window.updateToolsActiveCount();
 };
 
@@ -3924,18 +3857,13 @@ window.updateToolsActiveCount = function() {
 };
 
 // 工具开关变更监听
-function bindToolToggleEvents() {
-    var inputs = document.querySelectorAll('[data-toolkey]');
-    for (var _tti = 0; _tti < inputs.length; _tti++) {
-        inputs[_tti].onchange = function() {
-            var key = this.getAttribute('data-toolkey');
-            if (key) {
-                window.setToolEnabled(key, this.checked);
-                window.updateToolsActiveCount();
-            }
-        };
+$(document).on('change', '[data-toolkey]', function() {
+    var key = this.getAttribute('data-toolkey');
+    if (key) {
+        window.setToolEnabled(key, this.checked);
+        window.updateToolsActiveCount();
     }
-}
+});
 
 window.enableAllTools = function() {
     var inputs = document.querySelectorAll('[data-toolkey]');
@@ -4239,7 +4167,7 @@ window.clearSkillPreview = function() {
 // ==================== END 工具/技能管理 ====================
 
 function saveConfig(showFeedback = false) {
-    console.log('[saveConfig] apiKey:', (getVal('apiKey')||'') ? '✅' : '❌');
+    console.log('[saveConfig] 被触发, apiKey已设置:', (getVal('apiKey')||'') ? '✅' : '❌');
     const oldApiKey = localStorage.getItem('apiKey');
     const oldBaseUrl = localStorage.getItem('baseUrl');
     try {
@@ -4280,10 +4208,12 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('searchModel', getVal('searchModel') || '');
     localStorage.setItem('searchProvider', getVal('searchProvider') || 'duckduckgo');
     var _sak = getVal('searchApiKey') || '';
+    console.log('[saveConfig] searchApiKey 输入框值:', _sak.substring(0,8));
     localStorage.setItem('searchApiKey', encrypt(_sak));
     localStorage.setItem('searchApiKeyBrave', encrypt(getVal('searchApiKeyBrave') || ''));
     localStorage.setItem('searchApiKeyGoogle', encrypt(getVal('searchApiKeyGoogle') || ''));
     localStorage.setItem('searchApiKeyTavily', encrypt(getVal('searchApiKeyTavily') || ''));
+    console.log('[saveConfig] localStorage中 searchApiKey:', (localStorage.getItem('searchApiKey')||'').substring(0,15));
     localStorage.setItem('searchRegion', getVal('searchRegion') || '');
     localStorage.setItem('searchTimeout', getVal('searchTimeout') || '30');
     localStorage.setItem('maxSearchResults', getVal('maxSearchResults') || '3');
@@ -5570,30 +5500,6 @@ function currentMessageHasImage(chatId) {
         }
     }
     return false;
-}
-
-// ★ 缓存的结果注入: 在 buildApiMessages 后调用,将历史图片分析结果注入上下文
-function injectCachedImageAnalyses(chatId, apiMessages) {
-    try {
-        if (!chatId || !chats[chatId] || !apiMessages || !apiMessages.length) return;
-        var cache = chats[chatId].imageAnalyses;
-        if (!cache || !cache.length) return;
-        // 检查最近几条消息是否已经有图片分析上下文(避免重复注入)
-        var recentContent = apiMessages.slice(-3).map(function(m) { return m.content || ''; }).join(' ');
-        var pattern = /【图片\d+分析结果】|以下是对用户上传图片的自动分析结果|图片分析缓存/g;
-        if (pattern.test(recentContent)) return;
-        // 注入缓存
-        var analysisText = '\n\n【图片分析缓存(历史)】以下是对用户之前上传图片的描述,如需引用请直接使用,无需重新分析:\n\n' +
-            cache.map(function(a, idx) { return '【图片' + (idx + 1) + '】\n' + a; }).join('\n\n---\n\n');
-        var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
-        if (sysIdx !== -1) {
-            apiMessages[sysIdx].content += analysisText;
-        } else {
-            apiMessages.unshift({ role: 'system', content: analysisText });
-        }
-    } catch(e) {
-        console.warn('[injectCachedImageAnalyses] 失败:', e.message);
-    }
 }
 
 function buildApiMessages(chatId) {
@@ -7071,23 +6977,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 } else {
                     apiMessages.unshift({ role: 'system', content: _analysisText });
                 }
-                // ★ 缓存到 chat 中,后续追问无需重新分析
-                try {
-                    if (!chats[chatId].imageAnalyses) chats[chatId].imageAnalyses = [];
-                    for (var _cai = 0; _cai < _allImageAnalyses.length; _cai++) {
-                        var _cacheEntry = _allImageAnalyses[_cai];
-                        // 去重:检查是否已缓存过相同内容
-                        if (chats[chatId].imageAnalyses.indexOf(_cacheEntry) === -1) {
-                            chats[chatId].imageAnalyses.push(_cacheEntry);
-                        }
-                    }
-                    if (chats[chatId].imageAnalyses.length > 50) {
-                        chats[chatId].imageAnalyses = chats[chatId].imageAnalyses.slice(-30);
-                    }
-                    slimSaveChats();
-                } catch(e) {
-                    console.warn('[CacheImage] 缓存失败:', e.message);
-                }
                 if (currentBubble) {
                     var _st = currentBubble.querySelector('.search-status');
                     if (_st) _st.textContent = '✅ 图片分析完成(' + _imageFiles.length + '张)';
@@ -7108,11 +6997,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // ★ 提前设置 MiniMax 标记,供 buildApiMessages 使用
     window.__isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     let apiMessages = buildApiMessages(chatId);
-
-    // ★ 注入历史图片分析缓存,避免模型重复调用 analyze_image 工具
-    if (chats[chatId] && chats[chatId].imageAnalyses && chats[chatId].imageAnalyses.length > 0) {
-        injectCachedImageAnalyses(chatId, apiMessages);
-    }
 
     // 如果有临时时间戳,插入到系统消息之后
     // ★ MiniMax 合并: 时间戳合并到 system 消息,避免 extra system message
@@ -8321,20 +8205,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 }
                                 const analyzeResult = await window.analyzeImage(analyzeInput, focus);
                                 toolResult = { result: analyzeResult };
-                                // ★ 缓存工具调用的分析结果,后续追问无需重新分析
-                                try {
-                                    if (chatId && chats[chatId]) {
-                                        if (!chats[chatId].imageAnalyses) chats[chatId].imageAnalyses = [];
-                                        var _cacheStr = '【' + (imageFile.name || '图片' + imgIdx) + '】\n' + analyzeResult;
-                                        if (chats[chatId].imageAnalyses.indexOf(_cacheStr) === -1) {
-                                            chats[chatId].imageAnalyses.push(_cacheStr);
-                                        }
-                                        if (chats[chatId].imageAnalyses.length > 50) {
-                                            chats[chatId].imageAnalyses = chats[chatId].imageAnalyses.slice(-30);
-                                        }
-                                        slimSaveChats();
-                                    }
-                                } catch(e2) {}
                             } catch (e) {
                                 console.error('[analyze_image error]', e);
                                 const errorMsg = e?.message || e?.toString() || String(e) || '图片分析失败';
@@ -9166,16 +9036,11 @@ async function typeTitle(chatId, finalTitle, index = 0) {
 }
 
 function saveChats() {
-    // ★ 立即保存到服务器(不延迟,异步不阻塞)
-    saveChatsToServer();
+    // 优先保存到服务器(异步,不阻塞)
+    setTimeout(() => saveChatsToServer(), 100);
 
-    // ★ 本地压缩:用 requestIdleCallback 在空闲时执行,不阻塞 UI
-    var _saveSlim = function() { slimSaveChats(); };
-    if (window.requestIdleCallback) {
-        requestIdleCallback(_saveSlim, { timeout: 3000 });
-    } else {
-        setTimeout(_saveSlim, 500);
-    }
+    // ★ 本地精简保存:延迟执行,避免 JSON.stringify(base64大图)卡死主线程
+    setTimeout(function() { slimSaveChats(); }, 50);
 }
 
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
@@ -9193,8 +9058,17 @@ function compressChatsForStorage(chatsObj) {
     chatIds.forEach((id, idx) => {
         const chat = chatsObj[id];
         if (idx < MAX_CHATS) {
-            // 保留完整数据,不过滤图片(图片数据留在服务器备份中)
-            slim[id] = JSON.parse(JSON.stringify(chat));
+            // 保留完整数据(图片由服务器备份,localStorage 只留链接占位避免卡死)
+            slim[id] = JSON.parse(JSON.stringify(chat, function(_sk, _sv) {
+                // ★ 跳过大体积 base64 图片(服务器有备份)
+                if (_sk === 'generatedImage' && typeof _sv === 'string' && _sv.length > 200) {
+                    return '[图片已上传到服务器]';  // 单图
+                }
+                if (_sk === 'generatedImages' && Array.isArray(_sv)) {
+                    return ['[图片已上传到服务器]'];  // 多图: 缩短为一个占位元素
+                }
+                return _sv;
+            }));
             if (slim[id].messages) {
                 slim[id].messages = slim[id].messages.map(function(msg) {
                     // 截断超长消息内容
@@ -9304,9 +9178,17 @@ window.deleteChat = function (e, id) {
     delete userAbortMap[id];  // 清理用户中止标记
     _deletedChatIds[id] = true; // 标记删除,合并时排除
     delete chats[id];
-    try { localStorage.setItem('_deletedChatIds', JSON.stringify(_deletedChatIds)); } catch(e) {}
     
-    // ★ 保存聊天记录(自动通过 saveChatsToServer 合并时排除已删除聊天)
+    // ★ 用 DELETE API 直接删除服务端的聊天记录(可靠,无大小限制)
+    try {
+        var _token = getAuthToken();
+        if (_token) {
+            fetch(SERVER_API_BASE + '/chat.php?auth_token=' + encodeURIComponent(_token) + '&chat_id=' + encodeURIComponent(id), {
+                method: 'DELETE'
+            }).catch(function(e) { console.warn('[delete] API失败:', e.message); });
+        }
+    } catch(e) { console.warn('[delete] 删除失败:', e.message); }
+    
     saveChats();
     // ★ 只检查当前用户的聊天数量,忽略其他用户的残留
     var _uid = localStorage.getItem('authUserId') || '';
@@ -9745,11 +9627,6 @@ function initializeConfig() {
     setVal('imageApiKeyOpenrouter', cleanOrKey_Final || '');
     setVal('imageBaseUrlOpenrouter', localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api');
     setVal('imageProvider', localStorage.getItem('imageProvider') || DEFAULT_CONFIG.imageProvider || 'minimax');
-    // ★ 搜索配置必须早于 toggleImageProviderFields(因为后者会触发 saveConfig)
-    createSearchConfigSection();
-    bindSearchEvents();
-    loadSearchConfig();
-    createSearchToggleButton();
     toggleImageProviderFields();
     setVal('systemPrompt', localStorage.getItem('systemPrompt') || DEFAULT_CONFIG.system);
     setVal('customParams', localStorage.getItem('customParams') || DEFAULT_CONFIG.customParams);
@@ -9796,8 +9673,12 @@ function initializeConfig() {
     }
 
     createTitleModelSelector();
+    createSearchConfigSection();
+    bindSearchEvents(); // 静态 HTML 需手动绑定事件
+    loadSearchConfig();  // ★ 确保第二次 initializeConfig(服务器同步后)也重新加载搜索配置
     initFontSize();
     if (window.initToolModeBtn) initToolModeBtn();
+    createSearchToggleButton();
     // Agent 模式初始化
     initAgentConfig();
     updateAgentUI();
@@ -9966,10 +9847,7 @@ function setupEventListeners() {
     // ★ 图像提供商切换:更新字段提示
     var _imgProvider = getEl('imageProvider');
     if (_imgProvider) {
-        _imgProvider.addEventListener('change', function() {
-            window._isUserChangingProvider = true;
-            toggleImageProviderFields();
-        });
+        _imgProvider.addEventListener('change', toggleImageProviderFields);
     }
 }
 
@@ -10107,7 +9985,7 @@ function initializeApp() {
                     if (typeof obj[k] === 'object' && obj[k] !== null) deepClean(obj[k]);
                 });
             })(chats);
-            slimSaveChats(); // 使用压缩保存避免 quota exceeded
+            localStorage.setItem('chats', JSON.stringify(chats));
         } catch(e) {}
 
         // ★ 旧版 /mcp 相对路径迁移为完整URL(直连模式则保持不动)

@@ -223,7 +223,7 @@
     </div>
 
     <script>
-        const SERVER_API_BASE = 'https://xiaoxin.naujtrats.xyz/oneapichat';
+        const SERVER_API_BASE = '/oneapichat';
 
         // ---- 智能跳转：来自哪个站点就跳回哪个 ----
         function getRedirectUrl() {
@@ -285,6 +285,31 @@
                     });
                     const data = await resp.json();
                     if (data.success && data.token) {
+                        // ★ 先保存旧账号数据到服务器,再清空
+                        try {
+                            var oldToken = localStorage.getItem('authToken');
+                            if (oldToken) {
+                                var oldChats = JSON.parse(localStorage.getItem('chats') || '{}');
+                                if (Object.keys(oldChats).length > 0) {
+                                    navigator.sendBeacon(
+                                        SERVER_API_BASE + '/chat.php?auth_token=' + oldToken,
+                                        new Blob([JSON.stringify({ chat_id: 'all', chats: oldChats, title: '聊天备份' })], { type: 'application/json' })
+                                    );
+                                }
+                                var _cfg = {};
+                                for (var _i = 0; _i < localStorage.length; _i++) {
+                                    var _k = localStorage.key(_i);
+                                    if (!_k || _k === 'chats' || _k === 'authToken' || _k === 'authUsername' || _k === 'authUserId') continue;
+                                    _cfg[_k] = localStorage.getItem(_k);
+                                }
+                                if (Object.keys(_cfg).length > 0) {
+                                    navigator.sendBeacon(
+                                        SERVER_API_BASE + '/chat.php?auth_token=' + oldToken + '&action=save_config',
+                                        new Blob([JSON.stringify(_cfg)], { type: 'application/json' })
+                                    );
+                                }
+                            }
+                        } catch(_e) {}
                         localStorage.setItem('authToken', data.token);
                         localStorage.setItem('authUsername', data.username);
                         localStorage.setItem('authUserId', data.user_id);
@@ -313,6 +338,31 @@
                         localStorage.setItem('authToken', data.token);
                         localStorage.setItem('authUsername', data.username);
                         localStorage.setItem('authUserId', data.user_id);
+                        // ★ 先保存旧账号数据到服务器,再清空
+                        try {
+                            var oldToken = localStorage.getItem('authToken');
+                            if (oldToken) {
+                                var oldChats = JSON.parse(localStorage.getItem('chats') || '{}');
+                                if (Object.keys(oldChats).length > 0) {
+                                    navigator.sendBeacon(
+                                        SERVER_API_BASE + '/chat.php?auth_token=' + oldToken,
+                                        new Blob([JSON.stringify({ chat_id: 'all', chats: oldChats, title: '聊天备份' })], { type: 'application/json' })
+                                    );
+                                }
+                                var _cfg = {};
+                                for (var _i = 0; _i < localStorage.length; _i++) {
+                                    var _k = localStorage.key(_i);
+                                    if (!_k || _k === 'chats' || _k === 'authToken' || _k === 'authUsername' || _k === 'authUserId') continue;
+                                    _cfg[_k] = localStorage.getItem(_k);
+                                }
+                                if (Object.keys(_cfg).length > 0) {
+                                    navigator.sendBeacon(
+                                        SERVER_API_BASE + '/chat.php?auth_token=' + oldToken + '&action=save_config',
+                                        new Blob([JSON.stringify(_cfg)], { type: 'application/json' })
+                                    );
+                                }
+                            }
+                        } catch(_e) {}
                         showSuccess('register', '注册成功！正在跳转...');
                         const dest = getRedirectUrl();
                         setTimeout(() => { window.location.replace(dest); }, 300);
@@ -363,7 +413,7 @@
         const CLOUD_CONFIG_KEYS = [
             'apiKey','baseUrl','model','systemPrompt',
             'visionModel','visionApiUrl','visionApiKey',
-            'imageModel','imageApiKey','imageBaseUrl',
+            'imageModel','imageApiKey','imageBaseUrl','imageProvider',
             'temp','tokens','stream',
             'reasoningDelay','contentDelay','requestTimeout',
             'customParams','customEnabled',

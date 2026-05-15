@@ -367,10 +367,11 @@ if (_dd) document.documentElement.classList.add('dark');
         let searchQuery = '';
         let _lastTaskRunning = null;        // 上次 checkRunning 得到的运行状态
         let _consecutiveApiFails = 0;       // 连续 API 失败计数
+        let _recoveryTimer = null;          // 网络恢复检查 timer
         let _logSyncIdleCount = 0;          // 日志同步后日志未变化的次数
         let _lastLogSnapshot = '';          // 上次 syncLogOnly 得到的日志快照
         let _taskStopTime = 0;              // 任务停止的时间戳
-        const MAX_CONSECUTIVE_FAILS = 3;
+        const MAX_CONSECUTIVE_FAILS = 15;
         const MAX_LOG_SYNC_IDLE = 3;
         const LOG_SYNC_SLOW_INTERVAL = 60000;  // 日志稳定后降频到 60s
         const LOG_SYNC_NORMAL_INTERVAL = 15000; // 正常间隔 15s
@@ -1188,13 +1189,37 @@ function setStatus(text, cls) {
                 // 连续失败：停止所有轮询，显示离线
                 stopAllTimers();
                 setStatus('离线（网络异常）', 'text-red-500 bg-red-100 dark:bg-red-900/30');
-                showToast('网络连接异常，已暂停自动刷新', 'error');
+                showToast('网络连接异常，30秒后自动重试', 'error');
+                // 启动后台恢复检查
+                startRecovery();
             }
+        }
+
+        function startRecovery() {
+            if (_recoveryTimer) clearInterval(_recoveryTimer);
+            _recoveryTimer = setInterval(async function() {
+                try {
+                    const r = await fetch('chaoxing_api.php?action=status&auth_token=' + encodeURIComponent(_getAuthToken()));
+                    if (r.ok) {
+                        const d = await r.json();
+                        // 恢复成功：重建轮询
+                        clearInterval(_recoveryTimer); _recoveryTimer = null;
+                        _consecutiveApiFails = 0;
+                        setStatus('已恢复', 'text-green-600 bg-green-100 dark:bg-green-900/30');
+                        showToast('网络已恢复，继续监控', 'success');
+                        startPoll();
+                        startLogSync();
+                    }
+                } catch(e) {
+                    // 静默重试
+                }
+            }, 30000);
         }
 
         function stopAllTimers() {
             if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             if (logSyncTimer) { clearInterval(logSyncTimer); logSyncTimer = null; }
+            if (_recoveryTimer) { clearInterval(_recoveryTimer); _recoveryTimer = null; }
         }
 
         // Polling
@@ -1552,12 +1577,13 @@ function setStatus(text, cls) {
         async function loadStats() {
             try {
                 const r = await fetch('chaoxing_api.php?action=stats&auth_token=' + encodeURIComponent(_getAuthToken()));
+                if (!r.ok) return;
                 const d = await r.json();
                 $('statTotal').textContent = d.total_courses || 0;
                 $('statDone').textContent = d.completed || 0;
                 $('statVideos').textContent = d.videos_done || 0;
                 $('statWorks').textContent = d.works_done || 0;
-            } catch(e) {}
+            } catch(e) { /* 静默忽略 */ }
         }
 
 

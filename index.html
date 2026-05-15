@@ -22,9 +22,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=15">
+    <link rel="stylesheet" href="./css/style.css?v=17">
+    <!-- 模型配置 — 独立适配文件 -->
+    <script defer src="./js/models.js?v=4"></script>
     <!-- 主脚本（defer 不阻塞渲染） -->
-    <script defer src="./js/main.js?v=20260507-sse"></script>
+    <script defer src="./js/main.final.js?v=32"></script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
     <!-- 登录弹窗 -->
@@ -209,7 +211,7 @@
             <div id="agentBanner" class="agent-banner"><span style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M12 6v4m0 2v6" stroke="currentColor" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>Agent 模式已启用 · AI 具备主动工具调用、后台任务调度能力</span></div>
             <div id="filePreviewContainer" class="file-preview-container hidden"></div>
             <div class="input-wrapper">
-                <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition">
+                <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition" style="overflow:hidden;">
                     <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition" title="上传文件或图片">
                         <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -217,7 +219,7 @@
                         </svg>
                     </label>
                     <!-- ★ 工具模式快速开关 -->
-                    <textarea id="userInput" rows="1" class="flex-1 p-3 bg-transparent outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500" placeholder="发送消息... 或拖拽文件至此"></textarea>
+                    <textarea id="userInput" rows="1" class="flex-1 p-3 bg-transparent outline-none resize-none text-sm rounded-full placeholder-gray-400 dark:placeholder-gray-500" placeholder="发送消息... 或拖拽文件至此"></textarea>
                     <div class="send-stop-container">
                         <button onclick="window.sendMessage()" id="sendBtn" class="send-btn">
                             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -348,16 +350,36 @@
                 图像生成
             </div>
             <div class="config-field">
-                <label class="config-label">API Key</label>
-                <input type="password" id="imageApiKey" placeholder="图像生成专用密钥" autocomplete="off" class="config-input">
+                <label class="config-label">提供商</label>
+                <select id="imageProvider" class="config-input config-select">
+                    <option value="minimax">MiniMax (image-01)</option>
+                    <option value="openrouter">OpenRouter (GPT Image 2)</option>
+                </select>
             </div>
-            <div class="config-field">
-                <label class="config-label">API 地址</label>
+            <!-- MiniMax 专用配置 -->
+            <div class="config-field" id="imageKeyField">
+                <label class="config-label">MiniMax API Key</label>
+                <input type="password" id="imageApiKey" placeholder="MiniMax 密钥" autocomplete="off" class="config-input">
+            </div>
+            <div class="config-field" id="imageUrlField">
+                <label class="config-label">MiniMax API 地址</label>
                 <input type="text" id="imageBaseUrl" placeholder="如: https://api.minimaxi.com" class="config-input">
             </div>
-            <div class="config-field">
+            <!-- OpenRouter 专用配置 -->
+            <div class="config-field" id="orKeyField" style="display:none;">
+                <label class="config-label">OpenRouter API Key</label>
+                <input type="password" id="imageApiKeyOpenrouter" placeholder="OpenRouter 密钥" autocomplete="off" class="config-input">
+            </div>
+            <div class="config-field" id="orUrlField" style="display:none;">
+                <label class="config-label">OpenRouter API 地址</label>
+                <input type="text" id="imageBaseUrlOpenrouter" placeholder="如: https://openrouter.ai/api" class="config-input">
+            </div>
+            <div class="config-field" id="imageModelField">
                 <label class="config-label">模型</label>
                 <input type="text" id="imageModel" placeholder="image-01" value="image-01" class="config-input">
+            </div>
+            <div id="imageProviderHint" class="config-hint" style="font-size:12px;color:#666;margin-top:4px;">
+                MiniMax: 使用 image-01 模型,写实风格。OpenRouter: 使用 GPT Image 2。各自使用独立的 API Key 和 API 地址。
             </div>
         </div>
 
@@ -377,9 +399,9 @@
             <div class="config-slider-field">
                 <div class="config-slider-header">
                     <span class="config-label">Max Tokens</span>
-                    <input type="number" id="maxTokensInput" min="256" max="1048576" step="256" value="4096" onchange="window.syncTokenFromInput()" class="config-number" style="width:90px;">
+                    <input type="number" id="maxTokensInput" min="256" max="1048576" step="256" value="8192" onchange="window.syncTokenFromInput()" class="config-number" style="width:90px;">
                 </div>
-                <input type="range" id="maxTokens" min="256" max="1048576" step="256" value="4096" oninput="window.syncTokenFromRange()" class="config-slider w-full">
+                <input type="range" id="maxTokens" min="256" max="1048576" step="256" value="8192" oninput="window.syncTokenFromRange()" class="config-slider w-full">
             </div>
             <div class="config-toggle-row">
                 <span class="config-label">流式输出</span>
@@ -537,6 +559,11 @@
                     <label class="switch small"><input type="checkbox" id="agentModeToggle" onchange="window.toggleAgentMode()"><span class="slider"></span></label>
                 </div>
                 <div class="config-toggle-row">
+                    <span class="config-label">后端中继（SSE 流）</span>
+                    <label class="switch small"><input type="checkbox" id="useBackendSSEToggle"><span class="slider"></span></label>
+                    <span style="font-size:11px;color:#9ca3af;margin-left:8px;">关闭=直连,刷新无保护</span>
+                </div>
+                <div class="config-toggle-row">
                     <span class="config-label">自动决策</span>
                     <label class="switch small"><input type="checkbox" id="agentAutoDecision" checked><span class="slider"></span></label>
                 </div>
@@ -591,6 +618,206 @@
                 </div>
             </div>
         </details>
+        <!-- 工具/技能配置 (可折叠) -->
+        <details class="config-section details-section" id="toolsConfigSection">
+            <summary class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                工具/技能 <span id="toolsActiveCount" style="font-size:10px;color:#9ca3af;font-weight:400;"></span>
+            </summary>
+            <div class="details-content">
+                <!-- 搜索类工具 -->
+                <div class="tools-category-label">🔍 搜索与获取</div>
+                <div class="tool-toggle-row" data-tool="SEARCH_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="联网搜索">联网搜索</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SEARCH_TOOL_DEFINITION" data-toolkey="SEARCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="RAG_SEARCH_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="知识库搜索">知识库搜索</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_RAG_SEARCH_TOOL_DEFINITION" data-toolkey="RAG_SEARCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="WEB_FETCH_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="网页抓取">网页抓取</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_WEB_FETCH_TOOL_DEFINITION" data-toolkey="WEB_FETCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+
+                <!-- 图像工具 -->
+                <div class="tools-category-label">🎨 图像</div>
+                <div class="tool-toggle-row" data-tool="IMAGE_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="图片生成">图片生成</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_IMAGE_TOOL_DEFINITION" data-toolkey="IMAGE_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ANALYZE_IMAGE_TOOL">
+                    <span class="tool-toggle-name" title="图片分析">图片分析</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ANALYZE_IMAGE_TOOL" data-toolkey="ANALYZE_IMAGE_TOOL" checked><span class="slider"></span></label>
+                </div>
+
+                <!-- 刷课工具 -->
+                <div class="tools-category-label">📚 刷课</div>
+                <div class="tool-toggle-row" data-tool="CHAXING_LOGIN_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课登录">登录</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_LOGIN_TOOL_DEFINITION" data-toolkey="CHAXING_LOGIN_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="CHAXING_LIST_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课列表">课程列表</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_LIST_TOOL_DEFINITION" data-toolkey="CHAXING_LIST_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="CHAXING_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课执行">刷课执行</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_TOOL_DEFINITION" data-toolkey="CHAXING_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="CHAXING_STATUS_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课状态">状态</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STATUS_TOOL_DEFINITION" data-toolkey="CHAXING_STATUS_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="CHAXING_STOP_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课停止">停止</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STOP_TOOL_DEFINITION" data-toolkey="CHAXING_STOP_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="CHAXING_STATS_TOOL_DEFINITION">
+                    <span class="tool-toggle-name" title="刷课统计">统计</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STATS_TOOL_DEFINITION" data-toolkey="CHAXING_STATS_TOOL_DEFINITION" checked><span class="slider"></span></label>
+                </div>
+
+                <!-- 服务器工具 (默认关闭组) -->
+                <div class="tools-category-label">💻 服务器操控 ⚠️</div>
+                <div class="tool-toggle-row" data-tool="SERVER_EXEC_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="服务器命令执行 [高危]">命令执行</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_EXEC_TOOL" data-toolkey="SERVER_EXEC_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_PYTHON_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="Python脚本执行 [高危]">Python 执行</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_PYTHON_TOOL" data-toolkey="SERVER_PYTHON_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_FILE_READ_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="读取文件">文件读取</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_READ_TOOL" data-toolkey="SERVER_FILE_READ_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_FILE_WRITE_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="写入文件 [高危]">文件写入</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_WRITE_TOOL" data-toolkey="SERVER_FILE_WRITE_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_SYS_INFO_TOOL">
+                    <span class="tool-toggle-name" title="系统信息">系统信息</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_SYS_INFO_TOOL" data-toolkey="SERVER_SYS_INFO_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_PS_TOOL">
+                    <span class="tool-toggle-name" title="进程列表">进程列表</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_PS_TOOL" data-toolkey="SERVER_PS_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_DISK_TOOL">
+                    <span class="tool-toggle-name" title="磁盘信息">磁盘信息</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DISK_TOOL" data-toolkey="SERVER_DISK_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_NETWORK_TOOL">
+                    <span class="tool-toggle-name" title="网络状态">网络状态</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_NETWORK_TOOL" data-toolkey="SERVER_NETWORK_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_DOCKER_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="Docker管理">Docker</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DOCKER_TOOL" data-toolkey="SERVER_DOCKER_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_DB_QUERY_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="数据库查询">数据库</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DB_QUERY_TOOL" data-toolkey="SERVER_DB_QUERY_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_FILE_SEARCH_TOOL">
+                    <span class="tool-toggle-name" title="文件搜索">文件搜索</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_SEARCH_TOOL" data-toolkey="SERVER_FILE_SEARCH_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="SERVER_FILE_OP_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="文件操作 [高危]">文件操作</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_OP_TOOL" data-toolkey="SERVER_FILE_OP_TOOL"><span class="slider"></span></label>
+                </div>
+
+                <!-- 引擎/Agent 工具 (默认关闭) -->
+                <div class="tools-category-label">🤖 引擎/Agent</div>
+                <div class="tool-toggle-row" data-tool="ENGINE_CRON_LIST_TOOL">
+                    <span class="tool-toggle-name" title="Cron列表">Cron 列表</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_LIST_TOOL" data-toolkey="ENGINE_CRON_LIST_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_CRON_CREATE_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="创建Cron">创建 Cron</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_CREATE_TOOL" data-toolkey="ENGINE_CRON_CREATE_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_CRON_DELETE_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="删除Cron">删除 Cron</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_DELETE_TOOL" data-toolkey="ENGINE_CRON_DELETE_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="DELEGATE_TASK_TOOL">
+                    <span class="tool-toggle-name" title="子代理任务">子代理任务</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_DELEGATE_TASK_TOOL" data-toolkey="DELEGATE_TASK_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_STATUS_TOOL">
+                    <span class="tool-toggle-name" title="子代理状态">子代理状态</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_STATUS_TOOL" data-toolkey="ENGINE_AGENT_STATUS_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_LIST_TOOL">
+                    <span class="tool-toggle-name" title="子代理列表">子代理列表</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_LIST_TOOL" data-toolkey="ENGINE_AGENT_LIST_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_DELETE_TOOL">
+                    <span class="tool-toggle-name tool-warn" title="删除子代理">删除子代理</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_DELETE_TOOL" data-toolkey="ENGINE_AGENT_DELETE_TOOL"><span class="slider"></span></label>
+                </div>
+                <div class="tool-toggle-row" data-tool="ENGINE_PUSH_TOOL">
+                    <span class="tool-toggle-name" title="推送通知">推送通知</span>
+                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_PUSH_TOOL" data-toolkey="ENGINE_PUSH_TOOL"><span class="slider"></span></label>
+                </div>
+
+                <!-- 自定义技能区域 -->
+                <div class="tools-category-label" style="margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;" class="dark:border-gray-700">⚡ 自定义技能</div>
+                <div id="customSkillsList" style="margin:6px 0;">
+                    <div style="font-size:11px;color:#9ca3af;padding:4px;">暂无自定义技能</div>
+                </div>
+                <button onclick="window.showCreateSkillDialog()" class="w-full px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-center gap-2" style="margin-top:4px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>
+                    创建自定义技能
+                </button>
+
+                <!-- 批量操作 -->
+                <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;display:flex;gap:8px;" class="dark:border-gray-700">
+                    <button onclick="window.toggleAllDangerousTools(false)" class="flex-1 px-2 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition">关闭所有高危</button>
+                    <button onclick="window.enableAllTools()" class="flex-1 px-2 py-1.5 text-xs font-medium text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition">全部启用</button>
+                    <button onclick="window.disableAllTools()" class="flex-1 px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition">全部禁用</button>
+                </div>
+            </div>
+        </details>
+
+        <!-- 创建自定义技能对话框 -->
+        <div id="createSkillOverlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50" style="backdrop-filter:blur(2px);">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 mx-4 max-h-[85vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100">创建自定义技能</h3>
+                    <button onclick="window.closeCreateSkillDialog()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <p style="font-size:12px;color:#9ca3af;margin-bottom:12px;">描述你需要的工具功能,AI 会自动生成工具定义。例如: "创建一个搜索B站视频并返回结果的工具"</p>
+                
+                <textarea id="skillDescriptionInput" rows="3" class="config-textarea" style="font-size:13px;" placeholder="描述你需要的工具功能..."></textarea>
+                
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button onclick="window.generateSkillDefinition()" id="generateSkillBtn" class="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-500 hover:bg-indigo-600 rounded-full transition">
+                        🤖 AI 生成
+                    </button>
+                </div>
+
+                <div id="skillPreviewArea" class="hidden" style="margin-top:12px;">
+                    <label class="config-label" style="display:block;margin-bottom:4px;">预览/编辑 Tool Definition (JSON)</label>
+                    <textarea id="skillDefinitionPreview" rows="8" class="config-textarea" style="font-family:monospace;font-size:11px;"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button onclick="window.saveCustomSkill()" class="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-full transition">
+                            💾 保存技能
+                        </button>
+                        <button onclick="window.clearSkillPreview()" class="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition">
+                            清除
+                        </button>
+                    </div>
+                    <div id="skillGenerateStatus" style="font-size:11px;color:#9ca3af;margin-top:6px;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- 知识库管理入口 -->
         <div id="dataManagementSection" class="config-item mt-4 pt-4 border-t border-gray-200 dark:border-gray-800">
             <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">数据管理</h3>
@@ -632,7 +859,7 @@
 
 <script>
 // ==================== 认证逻辑 ====================
-const SERVER_API_BASE = 'https://xiaoxin.naujtrats.xyz/oneapichat';
+const SERVER_API_BASE = '/oneapichat';
 
 function switchAuthTab(tab) {
     const tabLogin = document.getElementById('authTabLogin');
@@ -681,13 +908,44 @@ async function performAuthLogin() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
-        if (!resp.ok) { authError('网络错误 (HTTP ' + resp.status + ')，请检查代理设置'); btn.disabled = false; btn.textContent = orig; return; }
+        if (!resp.ok) {
+            // 读取服务端返回的具体错误消息（如 用户名或密码错误）
+            let errMsg = '网络错误 (HTTP ' + resp.status + ')';
+            try { const errData = await resp.json(); if (errData.error) errMsg = errData.error; } catch(e2) {}
+            authError(errMsg);
+            btn.disabled = false; btn.textContent = orig; return;
+        }
         let data;
         try { data = await resp.json(); } catch(e) {
             authError('服务器响应格式错误，请检查网络代理或稍后重试');
             btn.disabled = false; btn.textContent = orig; return;
         }
         if (data.success && data.token) {
+            // ★ 先保存旧账号数据到服务器,再清空
+            try {
+                var oldToken = localStorage.getItem('authToken');
+                if (oldToken) {
+                    var oldChats = JSON.parse(localStorage.getItem('chats') || '{}');
+                    if (Object.keys(oldChats).length > 0) {
+                        navigator.sendBeacon(
+                            SERVER_API_BASE + '/chat.php?auth_token=' + oldToken,
+                            new Blob([JSON.stringify({ chat_id: 'all', chats: oldChats, title: '聊天备份' })], { type: 'application/json' })
+                        );
+                    }
+                    var _cfg = {};
+                    for (var _i = 0; _i < localStorage.length; _i++) {
+                        var _k = localStorage.key(_i);
+                        if (!_k || _k === 'chats' || _k === 'authToken' || _k === 'authUsername' || _k === 'authUserId') continue;
+                        _cfg[_k] = localStorage.getItem(_k);
+                    }
+                    if (Object.keys(_cfg).length > 0) {
+                        navigator.sendBeacon(
+                            SERVER_API_BASE + '/chat.php?auth_token=' + oldToken + '&action=save_config',
+                            new Blob([JSON.stringify(_cfg)], { type: 'application/json' })
+                        );
+                    }
+                }
+            } catch(_e) {}
             // ★ 切换账号时清空全部旧数据（聊天记录+配置，彻底隔离不同账号）
             localStorage.clear();
             localStorage.setItem('authToken', data.token);
@@ -695,7 +953,9 @@ async function performAuthLogin() {
             localStorage.setItem('authUserId', data.user_id);
             localStorage.setItem('_loginSuccess', '登录成功，欢迎回来!');
             localStorage.setItem('_skipUnloadSave', '1');
-            location.reload();
+            // 使用硬导航强制重新执行 JS，避免 bfcache 导致旧 state 残留
+            window.location.href = window.location.pathname + window.location.search;
+            return;
         } else {
             authError(data.error || '登录失败');
         }
@@ -727,6 +987,31 @@ async function performAuthRegister() {
             btn.disabled = false; btn.textContent = orig; return;
         }
         if (data.success && data.token) {
+            // ★ 先保存旧账号数据到服务器,再清空
+            try {
+                var oldToken = localStorage.getItem('authToken');
+                if (oldToken) {
+                    var oldChats = JSON.parse(localStorage.getItem('chats') || '{}');
+                    if (Object.keys(oldChats).length > 0) {
+                        navigator.sendBeacon(
+                            SERVER_API_BASE + '/chat.php?auth_token=' + oldToken,
+                            new Blob([JSON.stringify({ chat_id: 'all', chats: oldChats, title: '聊天备份' })], { type: 'application/json' })
+                        );
+                    }
+                    var _cfg = {};
+                    for (var _i = 0; _i < localStorage.length; _i++) {
+                        var _k = localStorage.key(_i);
+                        if (!_k || _k === 'chats' || _k === 'authToken' || _k === 'authUsername' || _k === 'authUserId') continue;
+                        _cfg[_k] = localStorage.getItem(_k);
+                    }
+                    if (Object.keys(_cfg).length > 0) {
+                        navigator.sendBeacon(
+                            SERVER_API_BASE + '/chat.php?auth_token=' + oldToken + '&action=save_config',
+                            new Blob([JSON.stringify(_cfg)], { type: 'application/json' })
+                        );
+                    }
+                }
+            } catch(_e) {}
             // ★ 注册新账号时也清空全部旧数据
             localStorage.clear();
             localStorage.setItem('authToken', data.token);
@@ -734,7 +1019,9 @@ async function performAuthRegister() {
             localStorage.setItem('authUserId', data.user_id);
             localStorage.setItem('_loginSuccess', '注册成功，欢迎!');
             localStorage.setItem('_skipUnloadSave', '1');
-            location.reload();
+            // 使用硬导航强制重新执行 JS，避免 bfcache 导致旧 state 残留
+            window.location.href = window.location.pathname + window.location.search;
+            return;
         } else { authError(data.error || '注册失败'); }
     } catch(e) { authError('网络错误'); }
     finally { btn.disabled = false; btn.textContent = orig; }

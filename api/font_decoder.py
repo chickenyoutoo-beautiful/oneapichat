@@ -14,9 +14,18 @@ class FontDecoder:
         if html_content:
             soup = BeautifulSoup(html_content, "lxml")
             style_tag = soup.find("style",id="cxSecretStyle")
+            if style_tag is None:
+                # 没有字体加密,无需解码
+                self.__font_hash_map = None
+                return
             match = re.search(r'base64,([\w\W]+?)\'', style_tag.text)
+            if match is None:
+                self.__font_hash_map = None
+                return
             self.__font_hash_map = cxfont.font2map('data:application/font-ttf;charset=utf-8;base64,'+match.group(1))
 
     def decode(self,target_str:str) -> str:
+        if self.__font_hash_map is None:
+            return target_str
         return cxfont.decrypt(self.__font_hash_map, target_str)
 

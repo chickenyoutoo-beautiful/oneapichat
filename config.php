@@ -12,8 +12,21 @@ $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowed = [
     'https://xiaoxin.naujtrats.xyz',
     'https://naujtrats.xyz',
-    'https://www.naujtrats.xyz'
+    'https://www.naujtrats.xyz',
+    'https://aliyun.naujtrats.xyz',
+    // 直接 IP 访问
+    'http://39.172.0.99',
+    'http://192.168.195.213',
+    'http://192.168.1.129',
 ];
+// 动态匹配: 如果 Origin 的 host 等于当前服务器域名/IP, 也视为同源
+if (!in_array($origin, $allowed, true) && $origin) {
+    $originHost = parse_url($origin, PHP_URL_HOST);
+    $serverHost = $_SERVER['HTTP_HOST'] ?? '';
+    if ($originHost && $originHost === $serverHost) {
+        $allowed[] = $origin;
+    }
+}
 if (in_array($origin, $allowed, true)) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Access-Control-Allow-Credentials: true');
@@ -80,7 +93,7 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'save') 
     $allowedKeys = [
         'apiKey', 'baseUrl', 'model', 'systemPrompt',
         'visionModel', 'visionApiUrl', 'visionApiKey',
-        'imageModel', 'imageApiKey', 'imageBaseUrl',
+        'imageModel', 'imageApiKey', 'imageBaseUrl', 'imageProvider',
         'temp', 'tokens', 'stream',
         'reasoningDelay', 'contentDelay', 'requestTimeout',
         'customParams', 'customEnabled',

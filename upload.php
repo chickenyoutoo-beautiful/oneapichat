@@ -102,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $imageRaw = $data['image'];
-        if (preg_match('/^data:image\/(w+);base64,(.+)$/s', $imageRaw, $matches)) {
+        if (preg_match('/^data:image\/(\w+);base64,(.+)$/s', $imageRaw, $matches)) {
             $ext = strtolower($matches[1]);
             $imageData = base64_decode($matches[2]);
         } else {

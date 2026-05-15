@@ -405,9 +405,24 @@ header, #chatBox {
 }
 .file-tag {
     display: inline-flex; align-items: center; gap: 0.25rem;
-    background: #e5e7eb; border-radius: 20px; padding: 0.2rem 0.6rem;
+    background: #e5e7eb; border-radius: 20px; padding: 0.2rem 0.4rem 0.2rem 0.6rem;
     font-size: 0.75rem; color: #1f2937; max-width: 200px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* 只对文件名部分截断,不隐藏删除按钮 */
+}
+.file-tag .file-tag-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 30px;
+}
+.file-tag .file-tag-remove {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; margin-left: 2px; font-weight: bold; font-size: 0.75rem;
+    width: 18px; height: 18px; border-radius: 50%; color: currentColor;
+    transition: background 0.15s;
+}
+.file-tag .file-tag-remove:hover {
+    background: rgba(0,0,0,0.1); color: var(--danger, #ef4444);
+}
+.dark .file-tag .file-tag-remove:hover {
+    background: rgba(255,255,255,0.15);
 }
 .dark .file-tag { background: #374151; color: #f3f4f6; }
 .file-tag.error { background: #fee2e2; color: #b91c1c; }
@@ -498,6 +513,15 @@ header, #chatBox {
 .config-input:focus {
     border-color: #3b82f6;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* 选择框样式 */
+.config-select {
+    cursor: pointer;
+    appearance: auto;
+    -webkit-appearance: auto;
+    background-image: none;
+    padding-right: 8px;
 }
 
 /* 配置数值显示 */
@@ -2927,4 +2951,84 @@ html:not(.dark) #userInput {
 .engine-status-dot.completed, .engine-status-dot.idle { background: #f59e0b; }
 .engine-status-list {
     min-height: 20px;
+}
+
+/* ===== 文件上传进度条 ===== */
+.file-upload-progress {
+    border-radius: 6px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+}
+.dark .file-upload-progress {
+    background: #1f2937;
+    border-color: #374151;
+}
+.file-upload-progress .progress-name {
+    color: #6b7280;
+}
+.dark .file-upload-progress .progress-name {
+    color: #9ca3af;
+}
+
+/* ===== 工具/技能配置 ===== */
+.tool-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 4px;
+    font-size: 12px;
+    border-bottom: 1px solid #f3f4f6;
+}
+.dark .tool-toggle-row {
+    border-bottom-color: #1f2937;
+}
+
+.tool-toggle-name {
+    color: #374151;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+.dark .tool-toggle-name {
+    color: #e5e7eb;
+}
+
+.tool-toggle-name.tool-warn {
+    color: #dc2626;
+}
+.dark .tool-toggle-name.tool-warn {
+    color: #f87171;
+}
+
+.tools-category-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 4px 4px;
+    margin-top: 6px;
+}
+.dark .tools-category-label {
+    color: #9ca3af;
+}
+
+.custom-skill-item {
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 2px 0;
+    background: #f9fafb;
+    border: 1px solid #f3f4f6;
+}
+.dark .custom-skill-item {
+    background: #1f2937;
+    border-color: #374151;
+}
+.custom-skill-item:hover {
+    background: #f3f4f6;
+}
+.dark .custom-skill-item:hover {
+    background: #374151;
 }
