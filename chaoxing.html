@@ -671,6 +671,16 @@ if (_dd) document.documentElement.classList.add('dark');
                         newLines[i].indexOf('考试已完成') >= 0) {
                         var pc = document.getElementById('progressContainer');
                         if (pc) pc.classList.add('hidden');
+                        // Also remove progress DOM elements
+                        var area = document.getElementById('logArea');
+                        if (area) {
+                            var pels = area.querySelectorAll('.log-line.level-PROGRESS');
+                            pels.forEach(function(el) { el.remove(); });
+                        }
+                        // Remove progress entries from logLinesData
+                        for (var di = logLinesData.length - 1; di >= 0; di--) {
+                            if (logLinesData[di].level === 'PROGRESS') logLinesData.splice(di, 1);
+                        }
                     }
                     normalLines.push(newLines[i]);
                 }
