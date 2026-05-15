@@ -221,6 +221,9 @@ class ChaoxingExam:
                         status = "未知"
                     # 分数由 _fetch_score 单独抓取
                     score = "0"
+                    # 剩余时间
+                    fr_tag = li.find("span", class_="fr")
+                    remain_time = fr_tag.text.strip() if fr_tag else ""
                     exams.append({
                         "exam_id": int(exam_id),
                         "title": title,
@@ -230,6 +233,7 @@ class ChaoxingExam:
                         "cpi": cpi,
                         "enc_task": params.get("enc_task", ["0"])[0],
                         "score": score,
+                        "remain_time": remain_time,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
             # 已完成考试：抓取分数（无论列表页是否显示时间）
