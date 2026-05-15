@@ -164,7 +164,7 @@ if (_dd) document.documentElement.classList.add('dark');
     </header>
     <!-- Tab Bar -->
     <div class="flex justify-center bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-        <div class="flex p-1 gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl my-2">
+        <div class="flex p-1.5 gap-1.5 bg-gray-100 dark:bg-gray-800 rounded-xl my-2.5">
             <button class="tab-btn px-5 py-2 text-sm font-medium rounded-lg transition-all duration-200 active" data-tab="study" style="background:#6366f1;color:#fff;box-shadow:0 1px 3px rgba(99,102,241,0.3);" onclick="switchTab('study')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>学习</button>
             <button class="tab-btn px-5 py-2 text-sm font-medium rounded-lg transition-all duration-200" data-tab="exam" style="background:transparent;color:#6b7280;" onclick="switchTab('exam')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>考试</button>
         </div>
@@ -383,18 +383,18 @@ if (_dd) document.documentElement.classList.add('dark');
     <main class="max-w-4xl mx-auto px-4 py-3 space-y-5">
         <!-- 考试统计：横向并列 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="flex items-stretch divide-x divide-gray-100 dark:divide-gray-700">
-                <div class="flex-1 py-6 text-center">
+            <div class="p-4 grid grid-cols-3 gap-4 text-center">
+                <div>
                     <div class="text-lg font-bold text-indigo-600 dark:text-indigo-400" id="examStatTotal">0</div>
-                    <div class="text-xs text-gray-400 mt-1">待考试</div>
+                    <div class="text-xs text-gray-400">待考试</div>
                 </div>
-                <div class="flex-1 py-6 text-center">
+                <div class="border-x border-gray-200 dark:border-gray-700">
                     <div class="text-lg font-bold text-green-600 dark:text-green-400" id="examStatCompleted">0</div>
-                    <div class="text-xs text-gray-400 mt-1">已完成</div>
+                    <div class="text-xs text-gray-400">已完成</div>
                 </div>
-                <div class="flex-1 py-6 text-center">
+                <div>
                     <div class="text-lg font-bold text-amber-600 dark:text-amber-400" id="examStatSubmit">0</div>
-                    <div class="text-xs text-gray-400 mt-1">已交卷</div>
+                    <div class="text-xs text-gray-400">已交卷</div>
                 </div>
             </div>
         </section>
@@ -1703,7 +1703,10 @@ function setStatus(text, cls) {
             e.preventDefault();
             var panel = $('settingsPanel');
             var content = panel.querySelector('.settings-content');
+            var chevron = panel.querySelector('.chevron-icon');
             if (panel.hasAttribute('open')) {
+                // 立即旋转chevron
+                if (chevron) chevron.style.transform = 'rotate(0deg)';
                 // 收起
                 content.style.maxHeight = content.scrollHeight + 'px';
                 content.style.overflow = 'visible';
@@ -1714,6 +1717,8 @@ function setStatus(text, cls) {
                 content.style.padding = '0 1.25rem';
                 setTimeout(function() { panel.removeAttribute('open'); }, 450);
             } else {
+                // 立即旋转chevron
+                if (chevron) chevron.style.transform = 'rotate(180deg)';
                 // 展开
                 panel.setAttribute('open', '');
                 content.style.maxHeight = '0';
@@ -1734,8 +1739,11 @@ function setStatus(text, cls) {
             e.preventDefault();
             var panel = document.getElementById('examConfigPanel');
             var content = panel.querySelector('.exam-config-content');
+            var chevron = panel.querySelector('.chevron-icon');
             if (panel.hasAttribute('open')) {
-                // 收起
+                // 立即旋转chevron
+                if (chevron) chevron.style.transform = 'rotate(0deg)';
+                // 收起动画
                 content.style.maxHeight = content.scrollHeight + 'px';
                 content.style.overflow = 'visible';
                 void content.offsetHeight;
@@ -1745,7 +1753,8 @@ function setStatus(text, cls) {
                 content.style.padding = '0 1.25rem';
                 setTimeout(function() { panel.removeAttribute('open'); }, 450);
             } else {
-                // 展开
+                // 立即旋转chevron
+                if (chevron) chevron.style.transform = 'rotate(180deg)';
                 panel.setAttribute('open', '');
                 content.style.maxHeight = '0';
                 content.style.opacity = '0';
@@ -1809,25 +1818,39 @@ function setStatus(text, cls) {
         // ═══════════════════════════════════════════
         function switchTab(tab) {
             localStorage.setItem('chaoxing_active_main_tab', tab);
+            // Fade out current tab content
             document.querySelectorAll('.tab-content').forEach(function(el) {
-                el.classList.add('hidden');
+                if (!el.classList.contains('hidden')) {
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(6px)';
+                    setTimeout(function() { el.classList.add('hidden'); }, 150);
+                }
             });
-            var target = document.getElementById('tab-' + tab);
-            if (target) {
-                target.classList.remove('hidden');
-            }
-            document.querySelectorAll('.tab-btn').forEach(function(btn) {
-                btn.style.background = 'transparent';
-                btn.style.color = '#6b7280';
-                btn.classList.remove('active');
-            });
-            var active = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
-            if (active) {
-                active.style.background = '#6366f1';
-                active.style.color = '#fff';
-                active.classList.add('active');
-            }
-            if (tab === 'exam') loadExamList();
+            setTimeout(function() {
+                var target = document.getElementById('tab-' + tab);
+                if (target) {
+                    target.classList.remove('hidden');
+                    target.style.opacity = '0';
+                    target.style.transform = 'translateY(6px)';
+                    requestAnimationFrame(function() {
+                        target.style.transition = 'opacity 0.2s ease-out, transform 0.2s ease-out';
+                        target.style.opacity = '1';
+                        target.style.transform = 'translateY(0)';
+                    });
+                }
+                document.querySelectorAll('.tab-btn').forEach(function(btn) {
+                    btn.style.background = 'transparent';
+                    btn.style.color = '#6b7280';
+                    btn.classList.remove('active');
+                });
+                var active = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
+                if (active) {
+                    active.style.background = '#6366f1';
+                    active.style.color = '#fff';
+                    active.classList.add('active');
+                }
+                if (tab === 'exam') loadExamList();
+            }, 80);
         }
 
 
