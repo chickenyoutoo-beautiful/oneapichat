@@ -419,6 +419,10 @@ if (_dd) document.documentElement.classList.add('dark');
                         <div class="toggle-track on" id="toggleSearchAuto" onclick="toggleSwitch('toggleSearchAuto','examSearchAuto')"><div class="toggle-knob"></div></div>
                     </div>
                 </div>
+                <input type="hidden" id="examAutoSubmit" value="1">
+                <input type="hidden" id="examOnlyUnfinished" value="1">
+                <input type="hidden" id="examSkipSubmitted" value="1">
+                <input type="hidden" id="examSearchAuto" value="1">
                 <div class="flex gap-3 pt-1">
                     <button onclick="loadExamList()" class="refresh-btn flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full transition-all active:scale-95 flex items-center justify-center gap-2">
                         <svg class="w-4 h-4 refresh-icon transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -1789,11 +1793,6 @@ function setStatus(text, cls) {
             if (tab === 'exam') loadExamList();
         }
 
-
-        <input type="hidden" id="examAutoSubmit" value="1">
-        <input type="hidden" id="examOnlyUnfinished" value="1">
-        <input type="hidden" id="examSkipSubmitted" value="1">
-        <input type="hidden" id="examSearchAuto" value="1">
 
         // ═══════════════════════════════════════════
         //  Toggle Switch
