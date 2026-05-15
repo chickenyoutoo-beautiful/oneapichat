@@ -207,10 +207,15 @@ class ChaoxingExam:
                     # 提取标题和状态
                     text = li.get_text(strip=True)
                     import re as _re
-                    m = _re.match(r'(.+?)(?:（(.+?)）|(待做|未开始|已完成|已交|未交)(?:.*)?)', text)
+                    # 格式: 标题（日期范围）状态剩余... or 标题状态
+                    m = _re.match(r'(.+?)（.+?）(待做|未开始|已完成|已交|未交)?|(.+?)(待做|未开始|已完成|已交|未交)', text)
                     if m:
-                        title = m.group(1).strip()
-                        status = m.group(2) or m.group(3) or "未知"
+                        if m.group(3):
+                            title = m.group(3).strip()
+                            status = m.group(4) or "未知"
+                        else:
+                            title = m.group(1).strip()
+                            status = m.group(2) or "未知"
                     else:
                         title = text
                         status = "未知"
