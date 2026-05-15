@@ -167,6 +167,13 @@ switch ($action) {
         echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
+    case 'chat_progress':
+        $msg_id = $_GET['msg_id'] ?? '';
+        if (!$msg_id) { echo json_encode(['error' => '缺少msg_id']); exit; }
+        $url = $engine_url . '/engine/chat/progress/' . urlencode($msg_id) . '?' . $userParam;
+        echo @file_get_contents($url) ?: json_encode(['full_text' => '', 'reasoning_text' => '']);
+        break;
+
     case 'exec':
         $cmd = $_GET['cmd'] ?? '';
         $timeout = intval($_GET['timeout'] ?? 60);
@@ -266,18 +273,17 @@ switch ($action) {
         $tools = $request_data['tools'] ?? null;
 
         $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
-        $eng_req = json_encode([
-            'chat_id' => $chat_id,
-            'msg_id' => $msg_id,
-            'request' => [
-                'api_key' => $api_key,
-                'base_url' => $base_url,
-                'model' => $model,
-                'messages' => $messages,
-                'tools' => $tools,
-                'stream' => true
-            ]
-        ]);
+        // ★ 修复: PHP json_encode 会把空关联数组 [] 输出为 [] 而非 {},
+        // 将原始 payload 直接转发(避免 decode 后 encode 丢失 {} vs [] 的区别)
+        // 只提取 chat_id/msg_id 和注入 user_id
+        $eng_input = file_get_contents('php://input');
+        $eng_payload = @json_decode($eng_input, true);
+        $chat_id = $eng_payload['chat_id'] ?? '';
+        $msg_id = $eng_payload['msg_id'] ?? '';
+        // 如果原 payload 有 request 对象,直接转发;否则用 $input
+        $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
+        // 直接发送原始 JSON 到引擎(不经过 PHP json_encode 避免 {} ↔ [] 混淆)
+        $eng_req = $eng_input;
 
         // proc_open + curl 命令行（SSE 流式代理，不依赖 php-curl 扩展）
         // 使用 shell 字符串形式确保 curl 正确处理 POST 数据
@@ -303,13 +309,14 @@ switch ($action) {
         }
         // stdin pipe 已通过 stderr 关闭（curl 从 --data-raw 读取）
         if ($pipes[0]) fclose($pipes[0]);
-        // stdout 流式转发到客户端
+        // stdout 流式转发到客户端(每 256 字节就 flush,确保实时)
         if ($pipes[1]) {
-            stream_set_chunk_size($pipes[1], 65536);
+            stream_set_chunk_size($pipes[1], 256);
             while (!feof($pipes[1])) {
-                $chunk = @fread($pipes[1], 65536);
+                $chunk = @fread($pipes[1], 256);
                 if ($chunk !== false && strlen($chunk) > 0) {
                     echo $chunk;
+                    if (ob_get_level()) @ob_flush();
                     @flush();
                 }
                 if (feof($pipes[1])) break;

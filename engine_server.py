@@ -295,14 +295,18 @@ def _run_cron_job(name, interval, action, user_id):
                 "stdout": result.stdout[-500:] if result.stdout else "",
                 "stderr": result.stderr[-500:] if result.stderr else ""
             }
-            # Cron完成后推送通知
+            # Cron完成后推送通知(优先 stdout,其次 stderr,兜底推送完成消息)
+            push_store = get_ns("heartbeat", user_id)
+            push_data = push_store.get()
+            pending = push_data.get("pending_messages", [])
             if result.stdout.strip():
-                push_store = get_ns("heartbeat", user_id)
-                push_data = push_store.get()
-                pending = push_data.get("pending_messages", [])
                 pending.append({"msg": f"[Cron] {name}: {result.stdout.strip()[-200:]}", "time": datetime.now().isoformat()})
-                push_data["pending_messages"] = pending
-                push_store.set(push_data)
+            elif result.stderr.strip():
+                pending.append({"msg": f"[Cron] {name} 出错: {result.stderr.strip()[-200:]}", "time": datetime.now().isoformat()})
+            else:
+                pending.append({"msg": f"[Cron] {name} 已完成 (exit: {result.returncode})", "time": datetime.now().isoformat()})
+            push_data["pending_messages"] = pending
+            push_store.set(push_data)
             jobs = store.get()
             if name in jobs:
                 jobs[name]["last_run"] = log_entry
@@ -1656,7 +1660,13 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
 
             # Usage
             if chunk.usage:
-                usage = dict(chunk.usage)
+                try:
+                    usage = chunk.usage.model_dump()
+                except:
+                    try:
+                        usage = json.loads(chunk.usage.model_dump_json())
+                    except:
+                        usage = dict(chunk.usage)
 
         # 流结束
         store.finish_stream(msg_id, full_text, reasoning_text, tool_calls, usage)
@@ -1670,10 +1680,11 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         yield sse_event(json.dumps({'type': 'error', 'error': error}))
 
 def _run_stream(request_data: dict, chat_id: str, msg_id: str, user_id: str, result_queue):
-    """后台线程运行器"""
+    """后台线程运行器,逐块转发SSE事件,不缓存"""
     try:
-        chunks = list(_stream_openai_to_sse(request_data, chat_id, msg_id, user_id))
-        result_queue.put(('ok', chunks))
+        for chunk in _stream_openai_to_sse(request_data, chat_id, msg_id, user_id):
+            result_queue.put(('chunk', chunk))
+        result_queue.put(('done', None))
     except Exception as e:
         result_queue.put(('error', str(e)))
 
@@ -1709,9 +1720,10 @@ async def chat_stream(request: Request, user_id: str = Query("")):
                 if status == 'error':
                     yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
                     break
-                for chunk in data:
-                    yield chunk
-                    # 短暂让出，让后台线程继续生产
+                elif status == 'done':
+                    break
+                elif status == 'chunk':
+                    yield data
                     await asyncio.sleep(0.001)
             except queue.Empty:
                 yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"

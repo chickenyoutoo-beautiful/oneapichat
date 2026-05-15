@@ -11,9 +11,13 @@ parser.add_argument('--reset-in-progress', action='store_true', help='重置 in_
 parser.add_argument('--stats', action='store_true', help='统计模式：返回该用户的聚合统计（取代 stats_query.py）')
 parser.add_argument('--clear-cache', action='store_true', help='清空该用户所有课程记录（切换账号时清理旧数据）')
 args = parser.parse_args()
-# ★ 账号同步：phone 作为唯一标准，优先使用 phone，user_id 仅作兼容
-_phone = args.phone.strip() if args.phone else ''
-user_id = _phone if _phone else args.user_id.strip()
+# ★ 账号同步：同时用 user-id（auth id）和 phone 查询
+_auth_id = args.user_id.strip() if args.user_id else ''
+_phone_val = args.phone.strip() if args.phone else ''
+# 构建去重的 user_id 列表
+_user_ids = list(dict.fromkeys([uid for uid in [_auth_id, _phone_val] if uid]))
+user_id = _user_ids[0] if _user_ids else ''
+user_ids = _user_ids
 
 try:
     conn = sqlite3.connect(db_path)
@@ -36,7 +40,8 @@ try:
             print(json.dumps({'error': '--clear-cache 需要 --user-id 参数'}))
             conn.close()
             sys.exit(1)
-        c.execute("DELETE FROM courses WHERE user_id = ?", (user_id,))
+        placeholders = ','.join('?' * len(user_ids))
+        c.execute(f"DELETE FROM courses WHERE user_id IN ({placeholders})", user_ids)
         conn.commit()
         print(json.dumps({'success': True, 'deleted': c.rowcount, 'action': 'clear_cache'}))
         conn.close()
@@ -48,14 +53,15 @@ try:
             print(json.dumps({'total_courses': 0, 'completed': 0, 'videos_done': 0, 'works_done': 0}))
             conn.close()
             sys.exit(0)
-        r = c.execute("""
+        placeholders = ','.join('?' * len(user_ids))
+        r = c.execute(f"""
             SELECT COUNT(*),
                    SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),
                    SUM(completed_videos),
                    SUM(completed_works)
             FROM courses
-            WHERE user_id = ?
-        """, (user_id,)).fetchone()
+            WHERE user_id IN ({placeholders})
+        """, user_ids).fetchone()
         conn.close()
         print(json.dumps({
             'total_courses': r[0] or 0,
@@ -67,7 +73,8 @@ try:
 
     # ★ 重置 in_progress 课程（stop 时调用）
     if args.reset_in_progress and user_id:
-        c.execute("UPDATE courses SET status='not_started' WHERE user_id=? AND status IN ('in_progress','running')", (user_id,))
+        placeholders = ','.join('?' * len(user_ids))
+        c.execute(f"UPDATE courses SET status='not_started' WHERE user_id IN ({placeholders}) AND status IN ('in_progress','running')", user_ids)
         conn.commit()
         print(json.dumps({'success': True, 'reset': c.rowcount}))
         conn.close()
@@ -80,15 +87,31 @@ try:
         sys.exit(0)
 
     # 带 user_id 过滤的查询
-    rows = c.execute("""
+    placeholders = ','.join('?' * len(user_ids))
+    rows = c.execute(f"""
         SELECT id, status, completed_videos, completed_works, total_videos, total_works
         FROM courses
-        WHERE user_id = ?
-    """, (user_id,)).fetchall()
+        WHERE user_id IN ({placeholders})
+    """, user_ids).fetchall()
     conn.close()
 
-    courses = []
+    # 按 course id 去重（同一个课程可能在多组 user_id 下重复存储），取中最大值
+    seen = {}
     for row in rows:
+        cid = row[0]
+        if cid not in seen:
+            seen[cid] = row
+        else:
+            # 合并：取较大的 completed 值
+            old = list(seen[cid])
+            new = list(row)
+            seen[cid] = tuple(
+                new[i] if i <= 1 else max((old[i] or 0), (new[i] or 0))
+                for i in range(len(row))
+            )
+
+    courses = []
+    for cid, row in seen.items():
         courses.append({
             'id': row[0],
             'status': row[1],

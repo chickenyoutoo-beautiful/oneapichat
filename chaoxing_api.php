@@ -544,6 +544,11 @@ switch ($action) {
         }
         if ($json_line && strpos($json_line, '"courses"') !== false) {
             echo json_encode(['success' => true, 'username' => $user]);
+        } elseif ($json_line) {
+            // 返回 Python 侧的具体错误消息（如 用户名或密码错误）
+            $err_data = json_decode($json_line, true);
+            $err_msg = $err_data['error'] ?? '登录验证失败，请检查账号密码';
+            echo json_encode(['success' => false, 'error' => $err_msg]);
         } else {
             echo json_encode(['success' => false, 'error' => '登录验证失败，请检查账号密码']);
         }
