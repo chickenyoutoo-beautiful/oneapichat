@@ -132,10 +132,7 @@ docker run -d -p 8080:8080 --name oneapichat \
 ├── Dockerfile          # Docker 镜像定义
 ├── docker-compose.yml  # Docker Compose 配置
 ├── nginx.conf          # Nginx 配置（原生部署）
-├── LICENSE             # MIT 许可证（主项目）
-├── NOTICE              # 双许可说明
-├── LICENSES/
-│   └── GPL-3.0.txt     # GPL-3.0（刷课模块）
+├── LICENSE             # GPL-3.0 许可证
 └── README.md           # 本文件
 ```
 
@@ -194,12 +191,7 @@ docker run -d -p 8080:8080 --name oneapichat \
 
 ## 📄 许可证
 
-## 双许可协议
-
-- **主项目（OneAPIChat WebUI）：** [MIT](./LICENSE)
-- **刷课模块（超星自动化）：** [GPL-3.0](./LICENSES/GPL-3.0.txt) — 继承自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
-
-详见 [`NOTICE`](./NOTICE)。
+GPL-3.0 — 见 [LICENSE](./LICENSE)
 
 刷课模块基于 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) 开发，遵循相同许可证。
 
