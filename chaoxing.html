@@ -1918,7 +1918,7 @@ function setStatus(text, cls) {
                 var cfg = await cfgR.json();
 
                 var pending = examData.filter(function(e) {
-                    if (document.getElementById('examOnlyUnfinished').checked) {
+                    if (document.getElementById('examOnlyUnfinished').value === '1') {
                         return e.status !== '已完成' && e.status !== '已交' && e.status !== '已交卷';
                     }
                     return true;
@@ -1933,7 +1933,7 @@ function setStatus(text, cls) {
                 logExam('发现 ' + pending.length + ' 场待考试', 'info');
 
                 // 更新考试配置
-                var newCfg = { auto_submit: document.getElementById('examAutoSubmit').checked };
+                var newCfg = { auto_submit: document.getElementById('examAutoSubmit').value === '1' };
                 await fetch('chaoxing_api.php?action=exam_config&sub=save&auth_token=' + encodeURIComponent(_getAuthToken()), {
                     method: 'POST',
                     body: JSON.stringify({ config: newCfg })
