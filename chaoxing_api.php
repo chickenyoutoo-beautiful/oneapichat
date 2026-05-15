@@ -520,6 +520,69 @@ switch ($action) {
         ]);
         break;
 
+    // ── 考试模式 ────────────────────────────────
+    case 'exam_list':
+        // 列出所有课程的考试
+        $config_path = ensureUserConfig($userId);
+        $ini = parse_ini_file($config_path, true);
+        $username = $ini['common']['username'] ?? '';
+        $password = $ini['common']['password'] ?? '';
+        $course_ids = $ini['common']['course_list'] ?? '';
+        if (!$username) { echo json_encode(['error' => '未配置学习通账号']); exit; }
+
+        // 调用 Python 脚本获取考试列表
+        $tmp = sys_get_temp_dir();
+        $exam_cache = $tmp . '/exam_list_' . $userId . '.json';
+        $cache_ttl = 120;
+        if (file_exists($exam_cache) && (time() - filemtime($exam_cache)) < $cache_ttl) {
+            echo file_get_contents($exam_cache);
+            exit;
+        }
+
+        $cmd = pyCmd('exam_api.py', 'list --user-id ' . escapeshellarg($userId) . ' 2>&1');
+        exec($cmd, $out, $code);
+        $json = implode('', $out);
+        // 找 JSON 行
+        foreach (array_reverse($out) as $line) {
+            $line = trim($line);
+            if (strpos($line, '{"exams"') === 0 || strpos($line, '{"error"') === 0) {
+                $json = $line; break;
+            }
+        }
+        if (!$json) $json = json_encode(['error' => '获取考试列表失败', 'detail' => '退出码='.$code]);
+        file_put_contents($exam_cache, $json);
+        echo $json;
+        break;
+
+    case 'exam_config':
+        // 获取/设置考试配置
+        $action = $_GET['sub'] ?? 'load';
+        $config_path = APP_ROOT . '/users/' . preg_replace('/[^a-zA-Z0-9_-]/', '', $userId) . '_exam_config.json';
+        if ($action === 'load') {
+            $cfg = file_exists($config_path) ? json_decode(file_get_contents($config_path), true) : [];
+            echo json_encode(['success' => true, 'config' => $cfg]);
+        } elseif ($action === 'save') {
+            $raw = file_get_contents('php://input');
+            $body = json_decode($raw, true);
+            $cfg = $body['config'] ?? [];
+            file_put_contents($config_path, json_encode($cfg, JSON_PRETTY_PRINT));
+            echo json_encode(['success' => true]);
+        }
+        break;
+
+    case 'exam_start':
+        // 启动考试模式
+        $config_path = ensureUserConfig($userId);
+        $log_path = userLogPath($userId);
+
+        $cmd = pyBgCmd('main.py', '-c' . escapeshellarg($config_path) . ' --exam', $log_path);
+        $pid = trim(shell_exec($cmd));
+        $pid_file = userPidPath($userId);
+        file_put_contents($pid_file, $pid);
+        echo json_encode(['success' => true, 'pid' => $pid]);
+        break;
+
+
     case 'login':
         $user = $_POST['username'] ?? $_GET['username'] ?? '';
         $pass = $_POST['password'] ?? $_GET['password'] ?? '';
