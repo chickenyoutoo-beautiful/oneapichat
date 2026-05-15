@@ -9,27 +9,15 @@
 
 // 动态 CORS（允许 credentials）
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowed = [
-    'https://xiaoxin.naujtrats.xyz',
-    'https://naujtrats.xyz',
-    'https://www.naujtrats.xyz',
-    'https://aliyun.naujtrats.xyz',
-    // 直接 IP 访问
-    'http://39.172.0.99',
-    'http://192.168.195.213',
-    'http://192.168.1.129',
-];
-// 动态匹配: 如果 Origin 的 host 等于当前服务器域名/IP, 也视为同源
-if (!in_array($origin, $allowed, true) && $origin) {
+if ($origin) {
     $originHost = parse_url($origin, PHP_URL_HOST);
     $serverHost = $_SERVER['HTTP_HOST'] ?? '';
     if ($originHost && $originHost === $serverHost) {
-        $allowed[] = $origin;
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Access-Control-Allow-Credentials: true');
+    } else {
+        header('Access-Control-Allow-Origin: *');
     }
-}
-if (in_array($origin, $allowed, true)) {
-    header('Access-Control-Allow-Origin: ' . $origin);
-    header('Access-Control-Allow-Credentials: true');
 } else {
     header('Access-Control-Allow-Origin: *');
 }
