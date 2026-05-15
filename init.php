@@ -43,6 +43,8 @@ function pyBgCmd($script, $args, $logPath) {
         return 'start /B "" ' . pythonBin() . ' "' . $scriptPath . '" ' . $args
             . ' > "' . $logPath . '" 2>&1';
     }
+    // Ensure space between option flag and its value (argparse compatibility)
+    $args = preg_replace('/^(-[a-z])([\'"])/', '$1 $2', $args);
     return 'cd ' . escapeshellarg(CHAOXING_DIR) . ' && '
         . pythonBin() . ' ' . escapeshellarg($scriptPath) . ' ' . $args
         . ' > ' . escapeshellarg($logPath) . ' 2>&1 & echo $!';
