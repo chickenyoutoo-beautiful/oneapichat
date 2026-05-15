@@ -120,6 +120,12 @@
         .log-line.traceback-line .line-msg { color: #9ca3af; font-size: 11px; }
         .progress-text { font-size: 11px; color: #6366f1; font-weight: 500; padding: 4px 0; }
         .log-count { font-size: 11px; color: #9ca3af; font-weight: normal; }
+        .toggle-track { width: 40px; height: 22px; border-radius: 11px; transition: background 0.2s; cursor: pointer; position: relative; flex-shrink: 0; display: inline-block; }
+        .toggle-track.on { background: #6366f1; }
+        .toggle-track.off { background: #d1d5db; }
+        .dark .toggle-track.off { background: #4b5563; }
+        .toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.2s cubic-bezier(0.4,0,0.2,1); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+        .toggle-track.on .toggle-knob { transform: translateX(18px); }
     </style>
 </head>
 <script>
