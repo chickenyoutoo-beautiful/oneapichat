@@ -2,7 +2,7 @@
 """查询刷课统计数据（供PHP API调用）"""
 import sqlite3, json, sys, argparse
 
-db_path = '/tmp/AutomaticCB/api/learning_records.db'
+db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.engine', 'learning_records.db')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--user-id', default='')
