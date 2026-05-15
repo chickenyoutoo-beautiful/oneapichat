@@ -27,19 +27,28 @@ def get_random_seconds():
     return random.randint(30, 90)
 
 
+_cached_session = None
+
 def init_session(isVideo: bool = False, isAudio: bool = False):
-    _session = requests.session()
-    _session.verify = False
-    _session.mount('http://', HTTPAdapter(max_retries=3))
-    _session.mount('https://', HTTPAdapter(max_retries=3))
-    if isVideo:
-        _session.headers = gc.VIDEO_HEADERS
-    elif isAudio:
-        _session.headers = gc.AUDIO_HEADERS
-    else:
-        _session.headers = gc.HEADERS
-    _session.cookies.update(use_cookies())
-    return _session
+    global _cached_session
+    # Video/Audio sessions get fresh instances each time
+    if isVideo or isAudio:
+        _session = requests.session()
+        _session.verify = False
+        _session.mount('http://', HTTPAdapter(max_retries=3))
+        _session.mount('https://', HTTPAdapter(max_retries=3))
+        _session.headers = gc.VIDEO_HEADERS if isVideo else gc.AUDIO_HEADERS
+        _session.cookies.update(use_cookies())
+        return _session
+    # Default session: cache for reuse (keeps auth cookies)
+    if _cached_session is None:
+        _cached_session = requests.session()
+        _cached_session.verify = False
+        _cached_session.mount('http://', HTTPAdapter(max_retries=3))
+        _cached_session.mount('https://', HTTPAdapter(max_retries=3))
+        _cached_session.headers = gc.HEADERS
+        _cached_session.cookies.update(use_cookies())
+    return _cached_session
 
 
 class Account:
