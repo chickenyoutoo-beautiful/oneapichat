@@ -215,7 +215,7 @@ oneapichat/
 
 ## 📄 ライセンス
 
-GPL-3.0 License
+MIT License
 
 ---
 
