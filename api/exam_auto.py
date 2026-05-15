@@ -219,6 +219,9 @@ class ChaoxingExam:
                     else:
                         title = text
                         status = "未知"
+                    # 尝试提取分数
+                    fr_tag = li.find("span", class_="fr")
+                    score = fr_tag.text.strip() if fr_tag else "0"
                     exams.append({
                         "exam_id": int(exam_id),
                         "title": title,
@@ -227,7 +230,7 @@ class ChaoxingExam:
                         "class_id": class_id,
                         "cpi": cpi,
                         "enc_task": params.get("enc_task", ["0"])[0],
-                        "score": 0,
+                        "score": score,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
         except Exception as e:
