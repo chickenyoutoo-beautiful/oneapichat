@@ -157,6 +157,7 @@ rag/
 
 # Backup files
 *.bak
+*.backup
 *.gz
 
 # Database files
