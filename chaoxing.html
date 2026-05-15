@@ -730,6 +730,7 @@ if (_dd) document.documentElement.classList.add('dark');
                 }
                 el.innerHTML = html;
                 updateLogCount();
+                applyFiltersExisting();
             } else if (startAppend < normalLines.length) {
                 // 增量追加新行
                 var appended = 0;
@@ -767,6 +768,7 @@ if (_dd) document.documentElement.classList.add('dark');
                 logLinesData.push({ html: lineHtml, level: 'PROGRESS', message: parsed.message, raw: progressLine });
                 el.insertAdjacentHTML('beforeend', lineHtml);
                 // progress handled by caller via updateProgressPercent
+                applyFiltersExisting();
             }
             return progressLine;
         }
