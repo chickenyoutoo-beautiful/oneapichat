@@ -233,9 +233,9 @@ class ChaoxingExam:
                         "score": score,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
-            # 已完成考试：抓取分数
+            # 已完成考试：抓取分数（无论列表页是否显示时间）
             for e in exams:
-                if e["status"] == "已完成" and e.get("score","0") == "0":
+                if e["status"] == "已完成":
                     e["score"] = self._fetch_score(s, e)
         except Exception as e:
             logger.debug(f"考试列表获取失败: {e}")
