@@ -168,7 +168,7 @@ naujtrats-ai-chat/
 ### 7.2 Quick Deploy
 1. Fork or upload files
 2. **GitHub Pages**: Settings → Pages → Deploy from `main` branch
-3. Visit: `https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch`
+3. Visit: `https://github.com/chickenyoutoo-beautiful/oneapichat`
 4. Customize: Users set API Key locally
 
 ### 7.3 Customization

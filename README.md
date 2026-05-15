@@ -69,7 +69,7 @@ Dark/light mode toggle, Markdown rendering with KaTeX math formula support, code
 ### One-Click Script (Linux / macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/deploy.sh | bash
 ```
 
 Automatically detects your OS (Ubuntu, Debian, CentOS, macOS) and install method (Docker or native).
@@ -79,10 +79,10 @@ Automatically detects your OS (Ubuntu, Debian, CentOS, macOS) and install method
 ```bash
 # Quick run
 docker run -d -p 8080:8080 --name oneapichat \
-  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+  ghcr.io/chickenyoutoo-beautiful/oneapichat:latest
 
 # Or with docker-compose
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
@@ -92,8 +92,8 @@ Supports `linux/amd64` and `linux/arm64` — works on Raspberry Pi, Synology NAS
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git
-cd Webui-aichat-supportwebsearch
+git clone https://github.com/chickenyoutoo-beautiful/oneapichat.git
+cd oneapichat
 
 # 2. Install Python dependencies
 pip install fastapi uvicorn aiofiles python-multipart

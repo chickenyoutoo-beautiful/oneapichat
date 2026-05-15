@@ -69,7 +69,7 @@ AI 自动判断是否需要联网获取实时信息。支持 **Brave Search**、
 ### 一键脚本（Linux / macOS）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/deploy.sh | bash
 ```
 
 自动检测操作系统（Ubuntu、Debian、CentOS、macOS）和安装方式（Docker 或原生）。
@@ -79,10 +79,10 @@ curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aicha
 ```bash
 # 快速启动
 docker run -d -p 8080:8080 --name oneapichat \
-  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+  ghcr.io/chickenyoutoo-beautiful/oneapichat:latest
 
 # 或使用 docker-compose
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
@@ -92,8 +92,8 @@ docker compose up -d
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git
-cd Webui-aichat-supportwebsearch
+git clone https://github.com/chickenyoutoo-beautiful/oneapichat.git
+cd oneapichat
 
 # 2. 安装 Python 依赖
 pip install fastapi uvicorn aiofiles python-multipart
