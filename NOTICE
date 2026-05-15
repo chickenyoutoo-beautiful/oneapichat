@@ -1,0 +1,20 @@
+This project uses a dual-license model:
+
+## Main Project — MIT License
+
+The core OneAPIChat WebUI code (files outside the 刷课 module) is licensed under the
+MIT License. See the root `LICENSE` file for details.
+
+## 刷课模块（Chaoxing Automation Module）— GPL-3.0
+
+The 刷课 module — including but not limited to:
+- `chaoxing.html`
+- `chaoxing_api.php`
+- `db_course_status.py`
+- other files in `api/` specifically related to chaoxing course operations
+
+is based on [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
+and is therefore licensed under the **GNU General Public License v3.0**.
+See `LICENSES/GPL-3.0.txt` for the full license text.
+
+Any derivative works incorporating these files must comply with GPL-3.0.
