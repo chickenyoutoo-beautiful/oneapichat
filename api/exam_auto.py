@@ -219,9 +219,8 @@ class ChaoxingExam:
                     else:
                         title = text
                         status = "未知"
-                    # 尝试提取分数
-                    fr_tag = li.find("span", class_="fr")
-                    score = fr_tag.text.strip() if fr_tag else "0"
+                    # 分数由 _fetch_score 单独抓取
+                    score = "0"
                     exams.append({
                         "exam_id": int(exam_id),
                         "title": title,
