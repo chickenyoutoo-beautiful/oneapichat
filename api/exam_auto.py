@@ -45,7 +45,7 @@ PAGE_EXAM_PREVIEW  = "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/preview
 API_START_START    = "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/start"
 API_SUBMIT_ANSWER  = "https://mooc1.chaoxing.com/exam-ans/exam/test/reVersionSubmitTestNew"
 API_ANSWER_SHEET   = "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/loadAnswerStatic"
-API_EXAM_LIST      = "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/task-exam-list"
+API_EXAM_LIST      = "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/task-list"
 
 
 class QuestionType(Enum):
@@ -175,56 +175,54 @@ class ChaoxingExam:
         self.exam_student = ""
 
     def _build_session(self):
-        """构建或复用 session"""
+        """复用已登录 session（调用方须先通过 Chaoxing.login() 登录）"""
         if self.session is None:
-            self.session = init_session()
-        # 登陆
-        if hasattr(self.account, 'login'):
-            self.account.login(self.session)
+            from api.base import init_session as _init
+            self.session = _init()
         return self.session
 
     # ── 课程考试列表 ───────────────────────────────
     def list_exams(self, course_id: int, class_id: int, cpi: int) -> list[dict]:
-        """获取课程的考试列表（从课程章节任务点中提取）"""
+        """获取课程的考试列表（SSR HTML页面，与CxKitty一致）"""
         s = self._build_session()
-        # 尝试通过任务列表获取（考试是章节任务的一种类型）
         exams = []
         try:
-            resp = s.get(API_EXAM_LIST, params={
+            resp = s.get(PAGE_EXAM_LIST, params={
                 "courseId": course_id, "classId": class_id, "cpi": cpi,
-            }, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                for item in data.get("data", []):
+            }, timeout=15)
+            resp.raise_for_status()
+            html = BeautifulSoup(resp.text, "lxml")
+            # 考试列表以 <li> 元素呈现，data 属性包含 URL 参数
+            exam_items = html.find_all("li") if html.body else []
+            if exam_items:
+                from urllib.parse import urlparse, parse_qs
+                for li in exam_items:
+                    data_url = li.get("data", "")
+                    if not data_url:
+                        continue
+                    params = parse_qs(urlparse(data_url).query)
+                    exam_id = params.get("taskRefId", params.get("taskrefId", ["0"]))[0]
+                    if not exam_id or exam_id == "0":
+                        continue
+                    # 提取标题和状态（文本在 <li> 内）
+                    text = li.get_text(strip=True)
+                    # 解析 标题\n状态 或 标题 状态（空格分隔）
+                    lines = [l.strip() for l in text.split('\n') if l.strip()]
+                    title = lines[0] if lines else "未知考试"
+                    status = lines[1] if len(lines) > 1 else "未知"
                     exams.append({
-                        "exam_id": item.get("examId"),
-                        "title": item.get("title"),
-                        "status": item.get("status", "未知"),
-                        "score": item.get("score"),
-                        "pass_score": item.get("passScore"),
+                        "exam_id": int(exam_id),
+                        "title": title,
+                        "status": status,
+                        "course_id": course_id,
+                        "class_id": class_id,
+                        "cpi": cpi,
+                        "enc_task": int(params.get("enc_task", [0])[0] or 0) if "enc_task" in str(params) else 0,
+                        "score": 0,
                     })
+            logger.info(f"课程考试: {len(exams)} 个")
         except Exception as e:
-            logger.debug(f"API exam list failed: {e}")
-        
-        # Fallback: 从课程任务点中扫描考试类型
-        if not exams and hasattr(self.account, 'login'):
-            try:
-                from api.base import Chaoxing
-                api = Chaoxing(account=self.account)
-                points = api.get_course_point(str(course_id), str(class_id), cpi)
-                for point in points.get("points", []):
-                    jobs, job_info = api.get_job_list(str(class_id), str(course_id), cpi, point["id"])
-                    for job in jobs:
-                        if job.get("type") == "exam" or "exam" in job.get("otherinfo", "").lower():
-                            exams.append({
-                                "exam_id": job.get("jobid"),
-                                "title": job.get("title") or job.get("name", "未知考试"),
-                                "status": "未完成" if not job.get("isPassed") else "已完成",
-                                "score": job.get("score") or 0,
-                            })
-            except Exception as ee:
-                logger.debug(f"Fallback exam scan failed: {ee}")
-        
+            logger.debug(f"考试列表获取失败: {e}")
         return exams
 
     # ── 拉取元数据 ────────────────────────────────
