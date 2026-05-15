@@ -7,8 +7,8 @@ import json, sys, os, argparse, tempfile
 script_dir = os.path.dirname(os.path.abspath(__file__))  # /var/www/html/oneapichat/
 os.environ["COLUMNS"] = "120"
 # 确保 api 模块可导入（/var/www/html/oneapichat/api/ 和 /tmp/AutomaticCB/ 都加入路径）
-sys.path.insert(0, script_dir)
 sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'AutomaticCB'))
+sys.path.insert(0, script_dir)
 
 import logging
 logging.disable(logging.CRITICAL)
