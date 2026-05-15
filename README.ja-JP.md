@@ -1,225 +1,199 @@
 # OneAPIChat
 
-**マルチモデルAIチャットプラットフォーム（Agentモード対応）**
+**セルフホスト AI チャットプラットフォーム — マルチモデル · Agent モード · SSE ストリーミング**
 
-🚀 **オンライン Demo**: https://naujtrats.xyz/oneapichat
-
----
-
-🌐 **Language / 语言 / 言語**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
-
-MiniMax、DeepSeekなど複数のモデルに接続できる自己ホスト型AIチャットプラットフォーム。Agentモードによる自律的なツール呼び出し、ウェブ検索、SSEストリーミング、多ユーザーサポートを備えています。
+🚀 **デモ**: [naujtrats.xyz/oneapichat](https://naujtrats.xyz/oneapichat)
 
 ---
 
-## 🌟 機能
-
-### 🤖 マルチモデルサポート
-- OpenAI API互換の任意のエンドポイントに接続可能
-- **MiniMax**、**DeepSeek** などの的内蔵サポート
-- モデルルーティングとフォールバック
-- モデルごとのカスタムAPI Base URLとKey設定
-
-### 🧠 Agentモード
-- 自律的なサブAgentの生成与管理
-- ツール呼び出し：ウェブ検索、コード実行、ファイル操作
-- 永続化Agent状態と通知システム
-- 内蔵ハートビート/Cronエンジンによるバックグラウンドタスク調整
-
-### 🔍 ウェブ検索
-- AIが自動的にウェブ検索が必要かどうかを判断
-- 複数検索エンジン：DuckDuckGo、Brave Search、Google カスタム検索
-- 検索タイプ：ウェブ、画像
-- `/search`、`/image` コマンドで強制検索
-
-### 📡 バックエンドSSEストリーミング
-- Pythonエンジン（`engine_server.py`）がポート **8766** でSSEストリームを処理
-- PHPプロキシ（`engine_api.php`）がフロントエンドとバックエンドをbridges
-- リアルタイムのトークン単位打字機效果
-
-### 👥 マルチユーザー・マルチターミナル
-- PHPセッション認証
-- ユーザーごとのSQLiteチャット履歴保存
-- チャット履歴のインポート/エクスポート（JSON形式）
-
-### 🎨 UI機能
-- ダーク/ライトモード切替
-- レスポンシブデザイン（デスクトップ＋モバイル対応）
-- Markdownレンダリング＋コード構文ハイライト
-- ファイルアップロード（テキスト、Office文書、画像など）
-- 会話管理（名前変更、削除、エクスポート）
+🌐 **言語**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
 
 ---
 
-## 🏗️ アーキテクチャ
+OpenAI 互換 API に接続可能なモダンなセルフホスト AI チャットインターフェース。自律 Agent モード（ツール呼び出し）、リアルタイム SSE ストリーミング、ウェブ検索、マルチユーザー対応。クリーンでレスポンシブな UI を備えています。
 
-```
-┌─────────────────────────────────────────────┐
-│  フロントエンド  (index.html + JS/CSS)      │
-│  シングルページアプリ、ビルド不要             │
-└──────────────┬──────────────────────────────┘
-               │ HTTP / SSE
-┌──────────────▼──────────────────────────────┐
-│  PHPプロキシ  (engine_api.php)               │
-│  フロントエンド↔バックエンドをbridges、CORS  │
-│  ポート：標準HTTP (80/443)                   │
-└──────────────┬──────────────────────────────┘
-               │ HTTP / SSE
-┌──────────────▼──────────────────────────────┐
-│  Pythonエンジン  (engine_server.py)          │
-│  SSEストリーミング、Agentロジック、ツール呼び│
-│  ポート：8766（ENGINE_PORTで変更可能）       │
-└─────────────────────────────────────────────┘
-```
+| 🧠 **マルチモデル** | 🔧 **Agent モード** | 🔍 **ウェブ検索** | 📡 **SSE ストリーミング** |
+|---------------------|-------------------|-------------------|--------------------------|
+| MiniMax, DeepSeek, OpenAI + 互換 API | 自律サブAgent + ツール呼び出し | Brave, Google, Tavily | トークン単位のリアルタイム出力 |
 
-### 主要ファイル
+---
 
-| ファイル | 役割 |
-|----------|------|
-| `index.html` | フロントエンドSPAメインエントリ |
-| `engine_server.py` | Pythonバックエンド — SSE、Agentエンジン、心跳/Cron |
-| `engine_api.php` | PHPプロキシ — 認証、ルーティング |
-| `engine_watchdog.sh` | ウォッチドッグ — エンジン自動再起動 |
-| `config.php` | API Keyとエンドポイント設定 |
+## 目次
+
+- [機能概要](#-機能概要)
+- [クイックスタート](#-クイックスタート)
+- [デプロイ方法](#-デプロイ方法)
+- [設定](#%EF%B8%8F-設定)
+- [プロジェクト構造](#-プロジェクト構造)
+- [刷課モジュール（Chaoxing自動化）](#-刷課モジュールchaoxing自動化)
+- [ライセンス](#-ライセンス)
+
+---
+
+## 📸 機能概要
+
+### 🤖 マルチモデル対応
+OpenAI 互換の任意のエンドポイントに接続可能。**MiniMax**、**DeepSeek**、**OpenAI**、**Anthropic** などのモデルを内蔵サポート。モデルごとに API Base URL と Key を個別設定できます。モデルルーティングと自動フォールバックに対応。
+
+### 🧠 Agent モード
+Agent モードを有効にすると、AI が自律的にタスクを実行 — サブ Agent の生成、ウェブ検索、コード実行、ファイル操作が可能。永続化された Agent 状態、通知システム、Cron スケジューリングを搭載。
+
+### 🔍 スマートウェブ検索
+AI が自動的にウェブ検索の必要性を判断。**Brave Search**、**Google Custom Search**、**Tavily** に対応。検索結果は自動整理され要約されます。
+
+### 📡 SSE リアルタイムストリーミング
+Server-Sent Events によるトークン単位のストリーミング出力。ページをリフレッシュしても進行状況を復元可能。
+
+### 👥 マルチユーザー・マルチデバイス
+ユーザー分離と暗号化された API Key 保存。チャット履歴の JSON インポート/エクスポート、ユーザーごとの設定。デスクトップとモバイルの両方に対応。
+
+### 🎨 クリーンな UI
+ダーク/ライトモード切替、Markdown レンダリング + KaTeX 数式 + コードシンタックスハイライト、ファイルアップロード対応。
 
 ---
 
 ## 🚀 クイックスタート
 
-### 1. クローン
-
-```bash
-git clone <リポジトリURL> oneapichat
-cd oneapichat
-```
-
-### 2. 依存関係のインストール
-
-**Pythonバックエンド：**
-
-```bash
-pip install fastapi uvicorn openai httpx sse-starlette python-dotenv requests
-```
-
-**PHPプロキシ（Webサーバー側）：**
-
-```bash
-# PHP 8+と拡張機能をインストール
-# Ubuntu/Debian: sudo apt install php php-curl php-sqlite3 php-mbstring
-```
-
-### 3. 設定と実行
-
-```bash
-# config.phpにAPI Keyを設定
-# ENGINE_PORT=8766 python3 engine_server.py
-```
-
-**またはデプロイスクリプトを使用：**
-
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
-### 4. ブラウザで開く
-
-```
-http://your-server/
-```
+### 必要環境
+- **PHP 8.0+**（プロキシ層）
+- **Python 3.10+**（バックエンドエンジン）
+- OpenAI 互換の API Key
 
 ---
 
-## 🌐 対応OS
+## ☁️ デプロイ方法
 
-| プラットフォーム | 対応状況 | 備考 |
-|------------------|---------|------|
-| **Linux** | ✅ 完全対応 | systemdサービス＋ウォッチドッグ |
-| **macOS** | ✅ 完全対応 | 手動実行またはlaunchd |
-| **Windows / WSL** | ✅ 対応 | WSL2またはGit Bash推奨 |
-| **Windows (ネイティブ)** | ⚠️ 一部対応 | PHPプロキシは動作；エンジン側はWSL推奨 |
+### ワンクリックスクリプト（Linux / macOS）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+```
+
+OS（Ubuntu, Debian, CentOS, macOS）とインストール方式（Docker またはネイティブ）を自動検出します。
+
+### Docker（任意のプラットフォーム）
+
+```bash
+# クイック起動
+docker run -d -p 8080:8080 --name oneapichat \
+  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+
+# または docker-compose を使用
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+
+`linux/amd64` と `linux/arm64` の両方をサポート。Raspberry Pi、Synology NAS、QNAP でも動作します。
+
+### 手動セットアップ
+
+```bash
+# 1. リポジトリをクローン
+git clone https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git
+cd Webui-aichat-supportwebsearch
+
+# 2. Python 依存関係をインストール
+pip install fastapi uvicorn aiofiles python-multipart
+
+# 3. バックエンドエンジンを起動
+python3 engine_server.py &
+
+# 4. PHP サーバーを起動
+php -S localhost:8080
+```
+
+ブラウザで [http://localhost:8080](http://localhost:8080) を開きます。
 
 ---
 
-## ⚙️ 設定方法
+## ⚙️ 設定
 
-### API Key設定
-
-`config.php`を編集：
-
-```php
-<?php
-$config = [
-    'minimax_api_key' => 'your-minimax-key',
-    'deepseek_api_key' => 'your-deepseek-key',
-    'default_model' => 'MiniMax/...',
-    'custom_endpoints' => [
-        'my-model' => 'https://my-custom-api.example.com/v1',
-    ],
-];
-```
+### API Key の追加
+1. UI の設定パネルを開く
+2. API Key と Base URL を入力
+3. 使用するモデルを選択
 
 ### 環境変数
 
-```bash
-ENGINE_PORT=8766       # engine_server.pyのポート
-ENGINE_HOST=0.0.0.0    # バインドアドレス
-LOG_LEVEL=INFO         # ログレベル
-```
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `ENGINE_PORT` | `8766` | バックエンドエンジンのポート |
+| `ENGINE_HOST` | `0.0.0.0` | エンジンのバインドアドレス |
+| `LOG_LEVEL` | `INFO` | ログレベル |
 
 ### 対応モデル
-
-- **MiniMax** — `MiniMax/...`
-- **DeepSeek** — `DeepSeek/...`
+- **MiniMax** — `MiniMax/xxx`
+- **DeepSeek** — `DeepSeek/xxx`
 - **OpenAI** — `gpt-4o`、`gpt-4o-mini` など
-- **Anthropic** — `claude-3-5-sonnet` など（カスタムエンドポイント経由）
-- **任意のOpenAI互換API** — カスタムbase URLを設定
+- **Anthropic** — カスタムエンドポイント経由で `claude-3-5-sonnet` など
+- 任意の **OpenAI 互換 API** — カスタム Base URL を設定
 
 ---
 
-## 📂 プロジェクト構造
+## 📁 プロジェクト構造
 
 ```
-oneapichat/
-├── index.html              # フロントエンドSPA
+.
+├── index.html              # メインチャット UI（SPA）
 ├── login.html              # ログインページ
-├── profile.html            # ユーザープロファイルページ
-├── chat.php                # チャット履歴ページ
-├── engine_api.php          # PHPプロキシ
-├── engine_server.py        # Python SSE + Agentエンジン
-├── engine_watchdog.sh      # ウォッチドッグ
-├── config.php              # API Key・設定
-├── auth.php                # 認証ロジック
+├── profile.html            # ユーザー設定ページ
+├── main.js                 # フロントエンドロジック
 ├── css/
-│   ├── style.css           # メインスタイル
-│   └── tailwind.css        # Tailwindユーティリティ
+│   ├── style.css           # カスタムスタイル
+│   └── tailwind-index.min.css
 ├── js/
-│   └── main.js             # フロントエンドロジック
-├── chat_data/              # SQLiteチャット履歴
-├── users/                  # ユーザーアカウント
-├── uploads/                # アップロードファイル
+│   ├── models.js           # モデル設定
+│   └── translations.js     # 国際化文字列
+├── engine_server.py        # Python バックエンド（FastAPI）
+├── engine_api.php          # PHP プロキシ層
+├── engine_watchdog.sh      # 自動再起動ウォッチドッグ
+├── auth.php                # ユーザー認証
+├── config.php              # API Key 設定
+├── chat.php                # チャット履歴ビューア
+├── deploy.sh               # クロスプラットフォームデプロイスクリプト
+├── Dockerfile              # Docker イメージ
+├── docker-compose.yml      # Docker Compose 設定
+├── nginx.conf              # Nginx 設定
 ├── docs/                   # ドキュメント
-└── deploy.sh               # デプロイスクリプト
+├── LICENSE                 # AGPL-3.0
+└── NOTICE                  # ライセンス詳細
 ```
 
 ---
 
-## 🔐 セキュリティ注意
+## 📖 刷課モジュール（Chaoxing自動化）
 
-- **`config.php`をバージョン管理にコミットしない**
-- API Keyはバックエンドでのみ使用。PHPプロキシはKeyをフロントエンドに開示しない
-- エンジンはデフォルトでlocalhostにバインド。PHPプロキシ経由でのみ露出させる
-- 本番環境ではHTTPSを使用推奨（Let's Encrypt / certbot）
+*これはオプションのアドオン機能です — 本プラットフォームはこのモジュールなしでも完全に動作します。*
+
+OneAPIChat には **Chaoxing（超星/学習通）コース自動化** の Web インターフェースが含まれています。独立したモジュールとして統合されており、以下の機能を提供します：
+
+- コース進捗状況の確認
+- 自動受講の開始/停止
+- 再生速度の設定
+- オプションのデータベース統合
+
+デプロイ後、`/chaoxing.html` にアクセスして利用できます。
+
+GitHub Actions を使用したクラウド実行については、`.github/workflows/` の設定を参照してください。
 
 ---
 
 ## 📄 ライセンス
 
-MIT License
+| コンポーネント | ライセンス | 備考 |
+|--------------|-----------|------|
+| **OneAPIChat（メインプロジェクト）** | **AGPL-3.0** | [LICENSE](./LICENSE) |
+| **刷課モジュール**（Chaoxing自動化） | **GPL-3.0** | [LICENSES/GPL-3.0.txt](./LICENSES/GPL-3.0.txt) — [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) 由来 |
+| **One-API**（インターフェース管理依存） | **MIT** | [songquanpeng/one-api](https://github.com/songquanpeng/one-api) |
+
+詳細は [`NOTICE`](./NOTICE) を参照してください。
 
 ---
 
-## 🔗 リンク
+## 🙏 謝辞
 
-- **GitHubリポジトリ:** `https://github.com/<your-username>/oneapichat`
-- **Issues:** `https://github.com/<your-username>/oneapichat/issues`
+- [songquanpeng/one-api](https://github.com/songquanpeng/one-api) — API 管理ゲートウェイ
+- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — Chaoxing 自動化エンジン（GPL-3.0）
+- [KaTeX](https://katex.org/) — 数式レンダリング
+- [Mermaid](https://mermaid.js.org/) — 図表レンダリング
+- すべてのオープンソース貢献者
