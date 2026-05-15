@@ -106,7 +106,28 @@ jobs:
 
           - **Docker:** 20.10+ (recommended)
           - **Native:** Ubuntu 20.04+ / Debian 11+ / CentOS 8+
+          - **Windows (native):** see Windows installation below
           - **Dependencies:** PHP 8.0+, Python 3.10+
+
+          ### 🪟 Windows Installation
+
+          #### Option 1: PowerShell (admin, recommended)
+
+          \`\`\`powershell
+          irm https://raw.githubusercontent.com/${{ github.repository }}/$VERSION/deploy.ps1 | iex
+          \`\`\`
+
+          This automatically installs PHP 8.3 + Python 3.12, starts the engine and web server.
+
+          #### Option 2: Docker Desktop
+
+          \`\`\`bash
+          docker run -d -p 8080:8080 ghcr.io/${{ github.repository }}:$VERSION
+          \`\`\`
+
+          #### Option 3: Manual download
+
+          Download the Windows ZIP below, extract, and run \`deploy.ps1\` as Administrator.
 
           ---
 
@@ -122,11 +143,24 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           rm -f "$NOTES_FILE"
 
+      - name: Create Windows ZIP
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ZIP_NAME="oneapichat-$VERSION-windows.zip"
+          # Create a clean export (exclude .git, .github, .engine, __pycache__)
+          git archive --format=zip --output="/tmp/$ZIP_NAME" HEAD
+          # Add deploy.ps1 at root (already included via git)
+          echo "zip_asset=$ZIP_NAME" >> $GITHUB_OUTPUT
+          echo "zip_path=/tmp/$ZIP_NAME" >> $GITHUB_OUTPUT
+        id: winzip
+
       - name: Create GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.notes.outputs.notes }}
+          files: |
+            /tmp/oneapichat-*.zip
 
       - name: Upload Docker Image Digest
         run: |
