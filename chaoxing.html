@@ -1967,12 +1967,14 @@ function setStatus(text, cls) {
                 } else {
                     badge = '<span class="text-xs text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full">待考试</span>';
                 }
+                var timeInfo = e.remain_time ? ' · ' + e.remain_time : '';
+                var scoreInfo = e.score && e.score !== '0' && e.score !== '-' ? e.score + '分' : (e.score === '-' ? '-' : '');
                 return '<div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition ' + statusClass + '">' +
                     '<div class="flex-1 min-w-0">' +
                         '<div class="text-sm font-medium truncate flex items-center gap-2">' + (e.title || '?') + ' ' + badge + '</div>' +
-                        '<div class="text-xs text-gray-400">' + (e.course_title || '') + ' · 状态: ' + (e.status || '未知') + '</div>' +
+                        '<div class="text-xs text-gray-400">' + (e.course_title || '') + ' · ' + (e.status || '未知') + timeInfo + '</div>' +
                     '</div>' +
-                    '<span class="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">' + (e.score || '?') + '分</span>' +
+                    (scoreInfo ? '<span class="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full shrink-0">' + scoreInfo + '</span>' : '') +
                 '</div>';
             }).join('');
         }
