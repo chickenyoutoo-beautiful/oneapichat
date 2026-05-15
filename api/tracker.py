@@ -113,7 +113,12 @@ class LearningTracker:
             c[1] for c in chapters
             if c[4]=='completed' and c[3]>0 and c[1] is not None and c[1]>=c[3]
         )
-        all_chapters_completed = all(c[4]=='completed' for c in chapters)
+        # 修复：video_count=0 且 work_count=0 的章节（纯阅读/图片章节）视为自动完成
+        def is_chapter_completed(c):
+            if c[4] == 'completed': return True
+            if c[4] == 'running' and (c[2] or 0) == 0 and (c[3] or 0) == 0: return True
+            return False
+        all_chapters_completed = all(is_chapter_completed(c) for c in chapters)
         # 课程完成：全部章节完成 且 计数达标（或章节数为0且全部完成）
         course_completed = all_chapters_completed and (
             (total_videos > 0 and completed_videos >= total_videos) or
