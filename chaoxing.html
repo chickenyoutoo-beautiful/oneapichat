@@ -156,10 +156,10 @@ if (_dd) document.documentElement.classList.add('dark');
     </header>
     <!-- Tab Bar -->
     <!-- Tab Bar: centered, smooth transitions -->
-    <div class="flex justify-center border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/80 sticky z-40" style="top:57px">
-        <div class="flex gap-1">
-            <button class="tab-btn px-6 py-3 text-sm font-semibold rounded-t-lg transition-all duration-200 -mb-px active" data-tab="study" style="background:#6366f1;color:#fff;" onclick="switchTab('study')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>学习</button>
-            <button class="tab-btn px-6 py-3 text-sm font-semibold rounded-t-lg transition-all duration-200 -mb-px" data-tab="exam" style="background:transparent;color:#6b7280;" onclick="switchTab('exam')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>考试</button>
+    <div class="flex justify-center bg-white dark:bg-gray-900/80 sticky z-40 py-2" style="top:57px">
+        <div class="flex p-1 gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
+            <button class="tab-btn px-5 py-2 text-sm font-medium rounded-lg transition-all duration-200 active" data-tab="study" style="background:#6366f1;color:#fff;box-shadow:0 1px 3px rgba(99,102,241,0.3);" onclick="switchTab('study')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>学习</button>
+            <button class="tab-btn px-5 py-2 text-sm font-medium rounded-lg transition-all duration-200" data-tab="exam" style="background:transparent;color:#6b7280;" onclick="switchTab('exam')"><svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>考试</button>
         </div>
     </div>
 
@@ -180,7 +180,7 @@ if (_dd) document.documentElement.classList.add('dark');
     <!-- Main -->
     <!-- Study Tab -->
     <div id="tab-study" class="tab-content">
-    <main class="max-w-4xl mx-auto p-4 space-y-4">
+    <main class="max-w-4xl mx-auto px-4 py-3 space-y-5">
         <!-- 学习统计 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="p-4 grid grid-cols-4 gap-4 text-center">
@@ -372,7 +372,7 @@ if (_dd) document.documentElement.classList.add('dark');
 
     <!-- Exam Tab -->
     <div id="tab-exam" class="tab-content hidden">
-    <main class="max-w-4xl mx-auto p-4 space-y-4">
+    <main class="max-w-4xl mx-auto px-4 py-3 space-y-5">
         <!-- 考试统计：横向并列 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="flex items-stretch divide-x divide-gray-100 dark:divide-gray-700">
@@ -463,7 +463,7 @@ if (_dd) document.documentElement.classList.add('dark');
                     </div>
                 </div>
             </div>
-            <div id="examLog" class="log-area px-4 py-3 h-72 overflow-y-auto text-xs leading-relaxed" style="font-family:'JetBrains Mono','Fira Code',monospace;scroll-behavior:smooth">
+            <div id="examLog" class="log-area px-4 py-3 text-xs leading-relaxed" style="max-height:288px;overflow-y:auto;font-family:'JetBrains Mono','Fira Code',monospace;scroll-behavior:smooth">
                 <div class="text-gray-400">加载 exam_auto.py 模块...</div>
             </div>
         </section>
