@@ -383,18 +383,20 @@ if (_dd) document.documentElement.classList.add('dark');
     <main class="max-w-4xl mx-auto px-4 py-3 space-y-6">
         <!-- 考试统计：横向并列 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="p-4 grid grid-cols-3 gap-4 text-center">
-                <div>
+            <div class="flex items-center justify-around py-4">
+                <div class="text-center">
                     <div class="text-lg font-bold text-indigo-600 dark:text-indigo-400" id="examStatTotal">0</div>
-                    <div class="text-xs text-gray-400">待考试</div>
+                    <div class="text-xs text-gray-400 mt-0.5">待考试</div>
                 </div>
-                <div class="border-x border-gray-200 dark:border-gray-700">
+                <div class="w-px h-10 bg-gray-200 dark:bg-gray-700"></div>
+                <div class="text-center">
                     <div class="text-lg font-bold text-green-600 dark:text-green-400" id="examStatCompleted">0</div>
-                    <div class="text-xs text-gray-400">已完成</div>
+                    <div class="text-xs text-gray-400 mt-0.5">已完成</div>
                 </div>
-                <div>
+                <div class="w-px h-10 bg-gray-200 dark:bg-gray-700"></div>
+                <div class="text-center">
                     <div class="text-lg font-bold text-amber-600 dark:text-amber-400" id="examStatSubmit">0</div>
-                    <div class="text-xs text-gray-400">已交卷</div>
+                    <div class="text-xs text-gray-400 mt-0.5">已交卷</div>
                 </div>
             </div>
         </section>
