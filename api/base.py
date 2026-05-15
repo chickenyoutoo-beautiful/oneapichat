@@ -261,7 +261,7 @@ class Chaoxing:
         _session = init_session()
         _url = f"https://mooc1.chaoxing.com/ananas/job/document?jobid={_job['jobid']}&knowledgeid={re.findall(r'nodeId_(.*?)-', _job['otherinfo'])[0]}&courseid={_course['courseId']}&clazzid={_course['clazzId']}&jtoken={_job['jtoken']}&_dc={get_timestamp()}"
         _resp = _session.get(_url)
-        logger.info(f"文档任务完成: {_job['name']}")
+        logger.info(f"文档任务完成: {_job.get('name', '?')}")
         if hasattr(self, '_tracker') and self._tracker:
             kid = re.findall(r'nodeId_(.*?)-', _job['otherinfo'])[0]
             chapter_id = f"{_course['courseId']}_{kid}"
