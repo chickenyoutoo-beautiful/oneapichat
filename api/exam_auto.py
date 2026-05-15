@@ -155,10 +155,10 @@ def construct_question_form(question: QuestionModel) -> dict:
 class ChaoxingExam:
     """学习通考试自动化"""
 
-    def __init__(self, account, tiku=None):
+    def __init__(self, account, tiku=None, session=None):
         self.account = account
         self.tiku = tiku or _get_tiku()
-        self.session = None
+        self.session = session
 
         # 考试状态
         self.exam_id = 0
@@ -204,12 +204,16 @@ class ChaoxingExam:
                     exam_id = params.get("taskRefId", params.get("taskrefId", ["0"]))[0]
                     if not exam_id or exam_id == "0":
                         continue
-                    # 提取标题和状态（文本在 <li> 内）
+                    # 提取标题和状态
                     text = li.get_text(strip=True)
-                    # 解析 标题\n状态 或 标题 状态（空格分隔）
-                    lines = [l.strip() for l in text.split('\n') if l.strip()]
-                    title = lines[0] if lines else "未知考试"
-                    status = lines[1] if len(lines) > 1 else "未知"
+                    import re as _re
+                    m = _re.match(r'(.+?)(?:（(.+?)）|(待做|未开始|已完成|已交|未交)(?:.*)?)', text)
+                    if m:
+                        title = m.group(1).strip()
+                        status = m.group(2) or m.group(3) or "未知"
+                    else:
+                        title = text
+                        status = "未知"
                     exams.append({
                         "exam_id": int(exam_id),
                         "title": title,
@@ -217,7 +221,7 @@ class ChaoxingExam:
                         "course_id": course_id,
                         "class_id": class_id,
                         "cpi": cpi,
-                        "enc_task": int(params.get("enc_task", [0])[0] or 0) if "enc_task" in str(params) else 0,
+                        "enc_task": params.get("enc_task", ["0"])[0],
                         "score": 0,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
