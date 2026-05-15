@@ -941,11 +941,13 @@ if (_dd) document.documentElement.classList.add('dark');
                 var hide = false;
                 // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行或 traceback 连续段落的后续也显示
                 if (errorFilterActive) {
-                    var isImportant = (data.level === 'ERROR' || data.level === 'WARNING' || data.level === 'WARN');
+                    var msg = data.message || '';
+                    var isImportant = (data.level === 'ERROR' || data.level === 'WARNING' || data.level === 'WARN' ||
+                        /error|fail|错误|异常/i.test(msg));
                     if (!isImportant) {
                         var prevData = logLinesData[i - 1];
-                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(data.message) ||
-                                              /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(data.message);
+                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(msg) ||
+                            /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(msg);
                         if (!prevData || (!['ERROR','WARNING','WARN'].includes(prevData.level) && !prevWasTraceback)) {
                             if (!isTracebackLine) hide = true;
                         }
@@ -981,11 +983,13 @@ if (_dd) document.documentElement.classList.add('dark');
                 var hide = false;
                 // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行或 traceback 连续段落的后续也显示
                 if (errorFilterActive) {
-                    var isImportant = (data.level === 'ERROR' || data.level === 'WARNING' || data.level === 'WARN');
+                    var msg = data.message || '';
+                    var isImportant = (data.level === 'ERROR' || data.level === 'WARNING' || data.level === 'WARN' ||
+                        /error|fail|错误|异常/i.test(msg));
                     if (!isImportant) {
                         var prevData = logLinesData[i - 1];
-                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(data.message) ||
-                                              /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(data.message);
+                        var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(msg) ||
+                            /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(msg);
                         if (!prevData || (!['ERROR','WARNING','WARN'].includes(prevData.level) && !prevWasTraceback)) {
                             if (!isTracebackLine) hide = true;
                         }
