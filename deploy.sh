@@ -16,7 +16,7 @@ warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 # ── Repository info ─────────────────────────────────────
-REPO_URL="https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git"
+REPO_URL="https://github.com/chickenyoutoo-beautiful/oneapichat.git"
 INSTALL_DIR="/var/www/html/oneapichat"
 
 # ── Detect OS ───────────────────────────────────────────
@@ -368,7 +368,7 @@ main() {
     esac
 
     echo ""
-    success "OneAPIChat 已部署！问题反馈: https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/issues"
+    success "OneAPIChat 已部署！问题反馈: https://github.com/chickenyoutoo-beautiful/oneapichat/issues"
     echo ""
 }
 

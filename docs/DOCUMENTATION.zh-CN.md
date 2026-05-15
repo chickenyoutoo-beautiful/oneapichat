@@ -168,7 +168,7 @@ naujtrats-ai-chat/
 ### 7.2 快速部署
 1. Fork 本仓库或上传文件
 2. **GitHub Pages**：Settings → Pages → Deploy from branch `main`
-3. 访问：`https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch`
+3. 访问：`https://github.com/chickenyoutoo-beautiful/oneapichat`
 4. 配置：用户自行填 API Key（本地存储）
 
 ### 7.3 自定义
