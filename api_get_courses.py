@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """获取课程列表（供PHP API调用）"""
-import json, sys, os, argparse
+import json, sys, os, argparse, tempfile
 
 # 不切换目录，保持 PHP cd 到的 /tmp/AutomaticCB/ 作为工作目录
 # (/tmp/AutomaticCB/ 有 config.ini 和 cookies.txt 等运行时文件)
