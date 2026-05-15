@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """查询刷课统计数据（供PHP API调用）"""
-import sqlite3, json, sys, argparse
+import sqlite3, json, sys, argparse, os, tempfile
 
-db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.engine', 'learning_records.db')
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(SCRIPT_DIR, 'api', 'learning_records.db')
+if not os.path.exists(db_path):
+    alt = os.path.join(tempfile.gettempdir(), 'AutomaticCB', 'api', 'learning_records.db')
+    if os.path.exists(alt):
+        db_path = alt
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--user-id', default='')
