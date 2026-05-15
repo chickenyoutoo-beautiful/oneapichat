@@ -46,7 +46,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=OneAPIChat
             org.opencontainers.image.description=Multi-Model AI Chat Platform with Agent Support
-            org.opencontainers.image.licenses=GPL-3.0
+            org.opencontainers.image.licenses=AGPL-3.0
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -62,52 +62,75 @@ jobs:
       - name: Generate Release Notes
         id: notes
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          if [ -z "$VERSION" ]; then VERSION="${{ inputs.version }}"; fi
-          NOTES="## OneAPIChat \$VERSION\n\n"
-          NOTES+="**Multi-Model AI Chat Platform with Agent Support**\n\n"
-          NOTES+="### 📦 部署方式\n\n"
-          NOTES+="#### Docker (推荐)\n\`\`\`bash\n"
-          NOTES+="docker pull ghcr.io/${{ github.repository }}:\$VERSION\n"
-          NOTES+="docker run -d -p 8080:8080 --name oneapichat \\\n"
-          NOTES+="  ghcr.io/${{ github.repository }}:\$VERSION\n"
-          NOTES+="\`\`\`\n\n"
-          NOTES+="或使用 docker-compose:\n"
-          NOTES+="\`\`\`yaml\n"
-          NOTES+="services:\n"
-          NOTES+="  web:\n"
-          NOTES+="    image: ghcr.io/${{ github.repository }}:\$VERSION\n"
-          NOTES+="    ports:\n"
-          NOTES+="      - \"8080:8080\"\n"
-          NOTES+="\`\`\`\n\n"
-          NOTES+="#### 一键脚本部署\n"
-          NOTES+="\`\`\`bash\n"
-          NOTES+="curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/\${VERSION#v}/deploy.sh | bash\n"
-          NOTES+="\`\`\`\n\n"
-          NOTES+="### 🌟 新功能\n"
-          NOTES+="见 [CHANGELOG](https://github.com/${{ github.repository }}/blob/\$VERSION/CHANGELOG.md)\n\n"
-          NOTES+="### 📋 系统要求\n"
-          NOTES+="- Docker: 20.10+ / 裸机: Ubuntu 20.04+ / Debian 11+ / CentOS 8+\n"
-          NOTES+="- PHP 8.0+ & Python 3.10+ (裸机部署)\n\n"
-          NOTES+="---\n"
-          NOTES+="🐛 问题反馈: https://github.com/${{ github.repository }}/issues\n"
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          VERSION="${GITHUB_REF#refs/tags/}"
+          [ -z "$VERSION" ] && VERSION="${{ inputs.version }}"
+          NOTES_FILE=$(mktemp)
+          cat > "$NOTES_FILE" <<EOF
+          ## OneAPIChat $VERSION
+
+          **Multi-Model AI Chat Platform with Agent Support**
+
+          ### 📦 Deployment
+
+          #### Docker (recommended)
+
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:$VERSION
+          docker run -d -p 8080:8080 --name oneapichat \\
+            ghcr.io/${{ github.repository }}:$VERSION
+          \`\`\`
+
+          Or with docker-compose:
+
+          \`\`\`yaml
+          services:
+            web:
+              image: ghcr.io/${{ github.repository }}:$VERSION
+              ports:
+                - "8080:8080"
+          \`\`\`
+
+          #### One-Click Script
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${VERSION#v}/deploy.sh | sudo bash
+          \`\`\`
+
+          ---
+
+          ### 🌟 What's New
+
+          See [CHANGELOG](https://github.com/${{ github.repository }}/blob/$VERSION/CHANGELOG.md)
+
+          ### 📋 System Requirements
+
+          - **Docker:** 20.10+ (recommended)
+          - **Native:** Ubuntu 20.04+ / Debian 11+ / CentOS 8+
+          - **Dependencies:** PHP 8.0+, Python 3.10+
+
+          ---
+
+          🐛 Issues: https://github.com/${{ github.repository }}/issues
+          EOF
+          # Strip leading whitespace (8 spaces from YAML indent)
+          sed -i 's/^        //' "$NOTES_FILE"
+          # Write to GITHUB_OUTPUT
+          {
+            echo "notes<<DELIM"
+            cat "$NOTES_FILE"
+            echo "DELIM"
+          } >> "$GITHUB_OUTPUT"
+          rm -f "$NOTES_FILE"
 
       - name: Create GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.notes.outputs.notes }}
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Docker Image Digest
         run: |
           echo "## Image Info" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "ghcr.io/${{ github.repository }}:${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
