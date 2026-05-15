@@ -145,3 +145,22 @@ chaoxing.log
 ./cookies.txt
 .idea/
 cache.json
+
+# Project-specific
+.engine/
+.fix_backup_*/
+.vs/
+chat_data/
+uploads/
+users/
+rag/
+
+# Backup files
+*.bak
+*.gz
+
+# Database files
+*.db
+
+# Generated config
+.env.local
