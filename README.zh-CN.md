@@ -132,10 +132,10 @@ docker run -d -p 8080:8080 --name oneapichat \
 ├── Dockerfile          # Docker 镜像定义
 ├── docker-compose.yml  # Docker Compose 配置
 ├── nginx.conf          # Nginx 配置（原生部署）
-├── LICENSE             # AGPL-3.0（主项目，基于 One-API）
-├── NOTICE              # 双许可说明
+├── LICENSE             # AGPL-3.0（主项目）
+├── NOTICE              # 许可说明
 ├── LICENSES/
-│   └── MIT.txt         # MIT（刷课模块）
+│   └── GPL-3.0.txt     # GPL-3.0（刷课模块）
 └── README.md           # 本文件
 ```
 
@@ -195,7 +195,7 @@ docker run -d -p 8080:8080 --name oneapichat \
 ## 📄 双许可协议
 
 - **OneAPIChat（主项目）：** [AGPL-3.0](./LICENSE) — 基于 [One-API](https://github.com/songquanpeng/one-api)
-- **刷课模块（超星自动化）：** [MIT](./LICENSES/MIT.txt)
+- **刷课模块（超星自动化）：** [GPL-3.0](./LICENSES/GPL-3.0.txt) — 继承自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
 
 详见 [`NOTICE`](./NOTICE)。
 
