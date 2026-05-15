@@ -230,7 +230,7 @@ native_run() {
 
     # Create required directories
     mkdir -p users chat_data /tmp/AutomaticCB /tmp/pylib
-    chmod -R 777 users chat_data /tmp/AutomaticCB /tmp/pylib 2>/dev/null || true
+    chmod -R 777 users chat_data api .engine /tmp/AutomaticCB /tmp/pylib 2>/dev/null || true
 
     # Configure nginx
     FPM_SOCK=$(get_fpm_socket)
