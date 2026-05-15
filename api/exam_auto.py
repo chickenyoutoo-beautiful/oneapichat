@@ -260,7 +260,8 @@ class ChaoxingExam:
                 if body:
                     body_text = body.get_text()
                     if "已删除" in body_text:
-                        return "已删除"
+                        exam["status"] = "已删除"
+                        return "-"
                     # 尝试匹配分数格式: XX分, XX.X分
                     import re as _re
                     m = _re.search(r'(\d+\.?\d*)\s*分', body_text)
