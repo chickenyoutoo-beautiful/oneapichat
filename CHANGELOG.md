@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-05-15
+
+### Added
+- **原生 Windows 支持** — 新增 `deploy.ps1` PowerShell 一键部署脚本
+- 自动安装 PHP 8.3 + Python 3.12（winget / 官网下载）
+- 跨平台 Python 路径处理（`Path(__file__).parent` 替代硬编码路径）
+
+### Fixed
+- `engine_server.py`: `import fcntl` 加 try/except 兼容 Windows
+- `engine_server.py`: 所有 `/var/www/html/` 和 `/tmp/` 路径改为动态检测
+- `download.php`: 使用 `sys_get_temp_dir()` 替代硬编码 `/tmp/`
+- `engine_api.php`: 搜索路径默认值改为可配置
+
+---
+
 ## [2.0.0] - 2026-05-15
 
 ### Added
