@@ -208,7 +208,7 @@ if (_dd) document.documentElement.classList.add('dark');
                     <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
                     课程列表
                 </h2>
-                <button onclick="doRefreshCourses()" class="p-2 text-gray-400 hover:text-blue-500 transition rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                <button onclick="doRefreshCourses()" class="p-2 text-indigo-500 hover:text-indigo-700 transition rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
                     <svg class="w-4 h-4 refresh-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                 </button>
             </div>
@@ -373,25 +373,25 @@ if (_dd) document.documentElement.classList.add('dark');
     <main class="max-w-4xl mx-auto p-4 space-y-4">
         <!-- 考试统计：横向并列 -->
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="flex items-center divide-x divide-gray-100 dark:divide-gray-700">
-                <div class="flex-1 py-4 text-center">
+            <div class="flex items-stretch divide-x divide-gray-100 dark:divide-gray-700">
+                <div class="flex-1 py-6 text-center">
                     <div class="text-lg font-bold text-indigo-600 dark:text-indigo-400" id="examStatTotal">0</div>
-                    <div class="text-xs text-gray-400">待考试</div>
+                    <div class="text-xs text-gray-400 mt-1">待考试</div>
                 </div>
-                <div class="flex-1 py-4 text-center">
+                <div class="flex-1 py-6 text-center">
                     <div class="text-lg font-bold text-green-600 dark:text-green-400" id="examStatCompleted">0</div>
-                    <div class="text-xs text-gray-400">已完成</div>
+                    <div class="text-xs text-gray-400 mt-1">已完成</div>
                 </div>
-                <div class="flex-1 py-4 text-center">
+                <div class="flex-1 py-6 text-center">
                     <div class="text-lg font-bold text-amber-600 dark:text-amber-400" id="examStatSubmit">0</div>
-                    <div class="text-xs text-gray-400">已交卷</div>
+                    <div class="text-xs text-gray-400 mt-1">已交卷</div>
                 </div>
             </div>
         </section>
 
         <!-- 考试配置 -->
         <style>
-        .toggle-track { width: 40px; height: 22px; border-radius: 11px; transition: background 0.2s; cursor: pointer; position: relative; }
+        .toggle-track { width: 40px; height: 22px; border-radius: 11px; transition: background 0.2s; cursor: pointer; position: relative; flex-shrink: 0; }
         .toggle-track.on { background: #6366f1; }
         .toggle-track.off { background: #d1d5db; }
         .dark .toggle-track.off { background: #4b5563; }
@@ -399,34 +399,35 @@ if (_dd) document.documentElement.classList.add('dark');
         .toggle-track.on .toggle-knob { transform: translateX(18px); }
         </style>
         <section class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="px-6 py-5 space-y-4">
-                <div class="flex items-center gap-2 px-5 pt-5"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg><h3 class="text-sm font-bold text-gray-700 dark:text-gray-200">考试配置</h3></div>
-            <div class="space-y-4 p-5">
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">自动提交试卷</span>
-                    <div class="toggle-track on" id="toggleAutoSubmit" onclick="toggleSwitch('toggleAutoSubmit','examAutoSubmit')"><div class="toggle-knob"></div></div>
+            <div class="px-6 py-5">
+                <div class="flex items-center gap-2 mb-5 pb-4 border-b border-gray-100 dark:border-gray-700">
+                    <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200">考试配置</h3>
                 </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">仅未完成考试</span>
-                    <div class="toggle-track on" id="toggleOnlyUnfinished" onclick="toggleSwitch('toggleOnlyUnfinished','examOnlyUnfinished')"><div class="toggle-knob"></div></div>
+                <div class="space-y-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">自动提交试卷</span>
+                        <div class="toggle-track on" id="toggleAutoSubmit" onclick="toggleSwitch('toggleAutoSubmit','examAutoSubmit')"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">仅未完成考试</span>
+                        <div class="toggle-track on" id="toggleOnlyUnfinished" onclick="toggleSwitch('toggleOnlyUnfinished','examOnlyUnfinished')"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">自动跳过已交卷</span>
+                        <div class="toggle-track on" id="toggleSkipSubmitted" onclick="toggleSwitch('toggleSkipSubmitted','examSkipSubmitted')"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">搜题自动答题</span>
+                        <div class="toggle-track on" id="toggleSearchAuto" onclick="toggleSwitch('toggleSearchAuto','examSearchAuto')"><div class="toggle-knob"></div></div>
+                    </div>
                 </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">自动跳过已交卷</span>
-                    <div class="toggle-track on" id="toggleSkipSubmitted" onclick="toggleSwitch('toggleSkipSubmitted','examSkipSubmitted')"><div class="toggle-knob"></div></div>
-                </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">搜题自动答题</span>
-                    <div class="toggle-track on" id="toggleSearchAuto" onclick="toggleSwitch('toggleSearchAuto','examSearchAuto')"><div class="toggle-knob"></div></div>
-                </div>
-            </div>
                 <input type="hidden" id="examAutoSubmit" value="1">
                 <input type="hidden" id="examOnlyUnfinished" value="1">
                 <input type="hidden" id="examSkipSubmitted" value="1">
                 <input type="hidden" id="examSearchAuto" value="1">
             </div>
-        </section>
-
-        <!-- 开始考试 -->
+        </section>        <!-- 开始考试 -->
         <div class="flex justify-center">
             <button onclick="startExamAll()" id="examStartBtn" class="px-10 py-3 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full transition-all active:scale-95 shadow-md flex items-center gap-2">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -460,9 +461,9 @@ if (_dd) document.documentElement.classList.add('dark');
                     <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
                     日志
                 </h2>
-                <button onclick="clearExamLog()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
+                <button onclick="clearExamLog()" class="text-xs text-indigo-500 hover:text-indigo-700 transition font-medium">清空</button>
             </div>
-            <div id="examLog" class="log-area p-4 h-72 overflow-y-auto text-xs leading-relaxed" style="font-family:'JetBrains Mono','Fira Code',monospace;scroll-behavior:smooth">
+            <div id="examLog" class="log-area px-4 py-3 h-72 overflow-y-auto text-xs leading-relaxed" style="font-family:'JetBrains Mono','Fira Code',monospace;scroll-behavior:smooth">
                 <div class="text-gray-400">加载 exam_auto.py 模块...</div>
             </div>
         </section>
