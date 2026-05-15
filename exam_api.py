@@ -12,7 +12,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from api.base import Chaoxing, Account, init_session
-from api.answer import get_tiku_from_config
+# Tiku imported lazily in cmd_list
 from api.logger import logger
 import logging
 logging.disable(logging.CRITICAL)  # Suppress debug logs for API mode
@@ -39,7 +39,8 @@ def cmd_list(args):
         return
 
     account = Account(username, password)
-    tiku = get_tiku_from_config()
+    from api.exam_auto import _get_tiku
+    tiku = _get_tiku()
 
     try:
         api = Chaoxing(account=account, tiku=tiku)
