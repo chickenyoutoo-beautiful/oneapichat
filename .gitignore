@@ -146,6 +146,10 @@ chaoxing.log
 .idea/
 cache.json
 
+# Test files
+test_*
+test-*
+
 # Project-specific
 .engine/
 .fix_backup_*/
