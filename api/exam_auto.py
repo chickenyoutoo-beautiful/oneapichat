@@ -185,24 +185,46 @@ class ChaoxingExam:
 
     # ── 课程考试列表 ───────────────────────────────
     def list_exams(self, course_id: int, class_id: int, cpi: int) -> list[dict]:
-        """获取课程的考试列表"""
+        """获取课程的考试列表（从课程章节任务点中提取）"""
         s = self._build_session()
-        resp = s.get(API_EXAM_LIST, params={
-            "courseId": course_id, "classId": class_id, "cpi": cpi,
-        })
-        resp.raise_for_status()
-        data = resp.json()
+        # 尝试通过任务列表获取（考试是章节任务的一种类型）
         exams = []
-        for item in data.get("data", []):
-            exams.append({
-                "exam_id": item.get("examId"),
-                "title": item.get("title"),
-                "status": item.get("status"),  # 未交/已完成/未开始
-                "start_time": item.get("startTime"),
-                "end_time": item.get("endTime"),
-                "score": item.get("score"),
-                "pass_score": item.get("passScore"),
-            })
+        try:
+            resp = s.get(API_EXAM_LIST, params={
+                "courseId": course_id, "classId": class_id, "cpi": cpi,
+            }, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("data", []):
+                    exams.append({
+                        "exam_id": item.get("examId"),
+                        "title": item.get("title"),
+                        "status": item.get("status", "未知"),
+                        "score": item.get("score"),
+                        "pass_score": item.get("passScore"),
+                    })
+        except Exception as e:
+            logger.debug(f"API exam list failed: {e}")
+        
+        # Fallback: 从课程任务点中扫描考试类型
+        if not exams and hasattr(self.account, 'login'):
+            try:
+                from api.base import Chaoxing
+                api = Chaoxing(account=self.account)
+                points = api.get_course_point(str(course_id), str(class_id), cpi)
+                for point in points.get("points", []):
+                    jobs, job_info = api.get_job_list(str(class_id), str(course_id), cpi, point["id"])
+                    for job in jobs:
+                        if job.get("type") == "exam" or "exam" in job.get("otherinfo", "").lower():
+                            exams.append({
+                                "exam_id": job.get("jobid"),
+                                "title": job.get("title") or job.get("name", "未知考试"),
+                                "status": "未完成" if not job.get("isPassed") else "已完成",
+                                "score": job.get("score") or 0,
+                            })
+            except Exception as ee:
+                logger.debug(f"Fallback exam scan failed: {ee}")
+        
         return exams
 
     # ── 拉取元数据 ────────────────────────────────
