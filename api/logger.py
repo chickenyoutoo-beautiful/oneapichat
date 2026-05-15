@@ -1,7 +1,7 @@
 import os, sys, time as _time
 from loguru import logger
 
-log_dir = '/tmp/AutomaticCB'
+log_dir = os.path.join(tempfile.gettempdir(), 'AutomaticCB')
 log_path = os.path.join(log_dir, 'chaoxing.log')
 try:
     if os.path.exists(log_path) and not os.access(log_path, os.W_OK):

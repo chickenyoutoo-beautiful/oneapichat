@@ -8,7 +8,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))  # /var/www/html/oneapic
 os.environ["COLUMNS"] = "120"
 # 确保 api 模块可导入（/var/www/html/oneapichat/api/ 和 /tmp/AutomaticCB/ 都加入路径）
 sys.path.insert(0, script_dir)
-sys.path.insert(0, '/tmp/AutomaticCB')
+sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'AutomaticCB'))
 
 import logging
 logging.disable(logging.CRITICAL)
@@ -23,7 +23,7 @@ args = parser.parse_args()
 # 优先用用户级 config（/tmp/AutomaticCB/config_u_<hash>.ini）
 # 如果不存在则降级到共享 config.ini
 if args.user_id:
-    user_config_path = f'/tmp/AutomaticCB/config_{args.user_id}.ini'
+    user_config_path = os.path.join(tempfile.gettempdir(), 'AutomaticCB', f'config_{args.user_id}.ini')
 else:
     user_config_path = None
 

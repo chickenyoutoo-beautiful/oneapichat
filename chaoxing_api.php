@@ -1,5 +1,6 @@
 <?php
 header('Content-Type: application/json');
+require_once __DIR__ . '/init.php';
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST');
 header('Access-Control-Allow-Headers: Content-Type, Auth-Token');
@@ -19,7 +20,7 @@ set_exception_handler(function (Throwable $e) {
 
 // ---- 用户认证辅助（从 chat.php 复用）----
 function verifyAuthToken($token) {
-    $sessionsFile = '/var/www/html/oneapichat/users/sessions.json';
+    $sessionsFile = APP_ROOT . '/users/sessions.json';
     if (!file_exists($sessionsFile)) return null;
     $sessions = @json_decode(@file_get_contents($sessionsFile), true);
     if (!is_array($sessions)) return null;
@@ -38,21 +39,21 @@ function verifyAuthToken($token) {
  * 获取用户级 config.ini 路径
  */
 function userConfigPath($userId) {
-    return '/tmp/AutomaticCB/config_' . $userId . '.ini';
+    return CHAOXING_DIR . '/config_' . $userId . '.ini';
 }
 
 /**
  * 获取用户级 PID 文件路径
  */
 function userPidPath($userId) {
-    return '/tmp/chaoxing_task_' . $userId . '.pid';
+    return APP_TEMP . '/chaoxing_task_' . $userId . '.pid';
 }
 
 /**
  * 获取任务状态文件路径（记录启动时间、启动者 tab_id）
  */
 function taskStatePath($userId) {
-    return '/tmp/chaoxing_task_state_' . $userId . '.json';
+    return APP_TEMP . '/chaoxing_task_state_' . $userId . '.json';
 }
 
 /**
@@ -111,14 +112,14 @@ function getRunningPid($userId) {
  * 获取用户级日志文件路径
  */
 function userLogPath($userId) {
-    return '/tmp/chaoxing_task_' . $userId . '.log';
+    return APP_TEMP . '/chaoxing_task_' . $userId . '.log';
 }
 
 /**
  * 获取用户级课程缓存文件路径
  */
 function userCoursesCachePath($userId) {
-    return '/tmp/chaoxing_courses_' . md5($userId) . '.json';
+    return APP_TEMP . '/chaoxing_courses_' . md5($userId) . '.json';
 }
 
 /**
@@ -127,10 +128,10 @@ function userCoursesCachePath($userId) {
 function ensureUserConfig($userId) {
     $path = userConfigPath($userId);
     if (!file_exists($path)) {
-        $template = '/tmp/AutomaticCB/config.ini.template';
+        $template = CHAOXING_DIR . '/config.ini.template';
         if (!file_exists($template)) {
             // fallback: 用当前 shared config 作为模板
-            $template = '/tmp/AutomaticCB/config.ini';
+            $template = CHAOXING_DIR . '/config.ini';
         }
         $dir = dirname($path);
         if (!is_dir($dir)) {
@@ -168,7 +169,7 @@ if (!$userId) {
 }
 
 $action = $_GET['action'] ?? '';
-$script_dir = '/tmp/AutomaticCB';
+$script_dir = CHAOXING_DIR;
 
 switch ($action) {
     case 'courses':
@@ -177,7 +178,7 @@ switch ($action) {
         if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
             $json = file_get_contents($cache_file);
         } else {
-            $cmd = "cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
+            $cmd = pyCmd('api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
             exec($cmd, $output, $exit_code);
             $json = '';
             foreach (array_reverse($output) as $line) {
@@ -207,7 +208,7 @@ switch ($action) {
                 $phone = $ini_phone['common']['username'] ?? '';
             }
             $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-            $db_json = shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
+            $db_json = shell_exec(pyCmd('db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
             if ($db_json) {
                 $db_data = json_decode($db_json, true);
                 if ($db_data && isset($db_data['courses'])) {
@@ -226,8 +227,8 @@ switch ($action) {
                 $course_list_str = $ini['common']['course_list'] ?? '';
             } else {
                 // 如果用户 config 还不存在，读取 shared（兼容旧数据）
-                if (file_exists('/tmp/AutomaticCB/config.ini')) {
-                    $ini = parse_ini_file('/tmp/AutomaticCB/config.ini', true);
+                if (file_exists(CHAOXING_DIR . '/config.ini')) {
+                    $ini = parse_ini_file(CHAOXING_DIR . '/config.ini', true);
                     $course_list_str = $ini['common']['course_list'] ?? '';
                 }
             }
@@ -294,7 +295,7 @@ switch ($action) {
         file_put_contents($log_path, '');
 
         // 启动 Python 进程，传入用户级 config
-        $cmd = "cd $script_dir && CHAOXING_USER_ID=" . escapeshellarg($userId) . " PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 main.py -c " . escapeshellarg($config_path) . " > " . escapeshellarg($log_path) . " 2>&1 & echo \$!";
+        $cmd = pyBgCmd('main.py', '-c' . escapeshellarg($config_path), $log_path);
         $pid = trim(shell_exec($cmd));
         file_put_contents($pid_file, $pid);
 
@@ -498,7 +499,7 @@ switch ($action) {
             $phone = $ini_phone['common']['username'] ?? '';
         }
         $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-        @shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg --reset-in-progress 2>/dev/null");
+        $db_json = shell_exec(pyCmd('db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
 
         echo json_encode(['success' => true]);
         break;
@@ -535,7 +536,7 @@ switch ($action) {
         $cache_file = userCoursesCachePath($userId);
         @unlink($cache_file);
 
-        $cmd = "cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/api_get_courses.py --user-id " . escapeshellarg($userId) . " 2>&1";
+        $cmd = pyCmd('api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
         exec($cmd, $out, $code);
         $json_line = '';
         foreach (array_reverse($out) as $line) {
@@ -601,7 +602,7 @@ switch ($action) {
             $phone = $ini_phone['common']['username'] ?? '';
         }
         $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-        $db_json = shell_exec('cd /tmp/AutomaticCB && PYTHONPATH=/tmp/pylib:/home/naujtrats/.local/lib/python3.12/site-packages python3 /var/www/html/oneapichat/db_course_status.py --user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null");
+        $db_json = shell_exec(pyCmd('db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
         if ($db_json) {
             $db_data = json_decode($db_json, true);
             if ($db_data && isset($db_data['courses'])) {
