@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """查询 learning_records.db 中所有课程的 status / completed_videos / completed_works / total_videos / total_works"""
-import sqlite3, json, sys, os, argparse
+import sqlite3, json, sys, os, argparse, tempfile
 
-db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.engine', 'learning_records.db')
+# 读取与 api/tracker.py 相同的 learning_records.db
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(SCRIPT_DIR, 'api', 'learning_records.db')
+# fallback: 旧版路径（/tmp/AutomaticCB/api/learning_records.db）
+if not os.path.exists(db_path):
+    alt = os.path.join(tempfile.gettempdir(), 'AutomaticCB', 'api', 'learning_records.db')
+    if os.path.exists(alt):
+        db_path = alt
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--user-id', default='')
