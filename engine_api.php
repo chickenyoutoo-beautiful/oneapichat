@@ -239,7 +239,7 @@ switch ($action) {
         break;
     case 'file_search':
         $pattern = $_GET['pattern'] ?? '';
-        $path_fs = $_GET['path'] ?? '/var/www';
+        $path_fs = $_GET['path'] ?? (defined('PROJECT_ROOT') ? PROJECT_ROOT : '/var/www');
         if (!$pattern) { echo json_encode(['error' => '缺少pattern']); exit; }
         echo @file_get_contents($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;

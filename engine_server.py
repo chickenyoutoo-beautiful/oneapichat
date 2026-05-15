@@ -11,13 +11,22 @@ import threading
 import subprocess
 import requests
 import re
-import fcntl
 from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
+import tempfile
 
-sys.path.insert(0, '/tmp/pylib')
-sys.path.insert(0, '/var/www/html/oneapichat')
+# Cross-platform: fcntl is Unix-only
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
+# ── Project root detection ────────────────────────────
+PROJECT_ROOT = str(Path(__file__).parent.resolve())
+sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'pylib'))
 
 try:
     from fastapi import FastAPI, Query, HTTPException, Request
@@ -31,8 +40,9 @@ except:
 app = FastAPI(title="OneAPIChat Engine")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-ENGINE_DIR = Path(__file__).parent / ".engine"
+ENGINE_DIR = Path(PROJECT_ROOT) / ".engine"
 ENGINE_DIR.mkdir(parents=True, exist_ok=True)
+TEMP_DIR = Path(tempfile.gettempdir())
 
 # ==================== 存储 ====================
 class EngineStore:
@@ -435,11 +445,11 @@ def _filter_tools_by_role(role: str) -> list:
             "type": "function",
             "function": {
                 "name": "server_file_write",
-                "description": "将内容写入服务器文件。除非用户要求保存文件，否则不要用这个工具，直接用文字回复即可。路径限制 /tmp/ 开头。",
+                "description": "将内容写入服务器文件。除非用户要求保存文件，否则不要用这个工具，直接用文字回复即可。路径限制在临时目录开头。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "文件路径，如 /tmp/myfile.md"},
+                        "path": {"type": "string", "description": "文件路径，如 tempfile/myfile.md"},
                         "content": {"type": "string", "description": "写入的文件内容"}
                     },
                     "required": ["path", "content"]
@@ -468,7 +478,7 @@ def _filter_tools_by_role(role: str) -> list:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "文件路径,如 /tmp/外卖省钱攻略.md"},
+                        "path": {"type": "string", "description": "文件路径,如 tempfile/外卖省钱攻略.md"},
                         "content": {"type": "string", "description": "要追加的内容"}
                     },
                     "required": ["path", "content"]
@@ -641,7 +651,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 try:
                     main_cfg = _get_main_chat_config(user_id)
                     # 从原始 JSON 中读取存储的 Tavily key
-                    config_path = f"/var/www/html/oneapichat/chat_data/config_user_{user_id}.json"
+                    config_path = f"chat_data/config_user_{user_id}.json"
                     with open(config_path) as f:
                         raw_cfg = json.load(f)
                     stored = raw_cfg.get("searchApiKeyTavily", "") or raw_cfg.get("searchApiKey", "") or ""
@@ -723,7 +733,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not path or not content:
                 return "错误:缺少 path 或 content 参数"
             try:
-                allowed_prefix = "/tmp/"
+                allowed_prefix = str(TEMP_DIR) + "/"
                 if not path.startswith(allowed_prefix):
                     return f"错误:只允许写入 {allowed_prefix} 目录"
                 safe_path = os.path.normpath(path)
@@ -746,7 +756,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not path or not content:
                 return "错误:缺少 path 或 content 参数"
             try:
-                allowed_prefix = "/tmp/"
+                allowed_prefix = str(TEMP_DIR) + "/"
                 if not path.startswith(allowed_prefix):
                     return f"错误:只允许写入 {allowed_prefix} 目录"
                 safe_path = os.path.normpath(path)
@@ -936,7 +946,7 @@ def _get_main_chat_config(user_id: str) -> dict:
     result = {"api_key": "", "base_url": "", "model": ""}
     if not user_id:
         return result
-    config_path = f"/var/www/html/oneapichat/chat_data/config_user_{user_id}.json"
+    config_path = f"chat_data/config_user_{user_id}.json"
     try:
         with open(config_path) as f:
             cfg = json.load(f)
@@ -989,7 +999,7 @@ def engine_python(
 ):
     """执行 Python 脚本,返回输出"""
     import tempfile
-    tf = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir='/tmp')
+    tf = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir=str(TEMP_DIR))
     try:
         tf.write(script)
         tf.close()
@@ -1051,7 +1061,7 @@ def engine_file_write(
     try:
         # 安全检查:只允许写入 /tmp 和 /var/www/html/oneapichat
         resolved = Path(path).resolve()
-        allowed = [Path('/tmp').resolve(), Path('/var/www/html/oneapichat').resolve()]
+        allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
         if not any(str(resolved).startswith(str(d)) for d in allowed):
             return {"ok": False, "error": f"写入权限受限,只允许 {[str(d) for d in allowed]}"}
         mode = 'a' if append else 'w'
@@ -1133,7 +1143,7 @@ def engine_db_query(sql: str = Query(...), user_id: str = Query("")):
     """执行数据库查询"""
     import sqlite3
     try:
-        db_path = "/tmp/AutomaticCB/api/learning_records.db"
+        db_path = str(TEMP_DIR / "AutomaticCB" / "api" / "learning_records.db")
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute(sql)
@@ -1166,7 +1176,7 @@ def engine_network(target: str = Query(...), action: str = Query("ping"), timeou
 
 
 @app.get("/engine/file_search")
-def engine_file_search(pattern: str = Query(...), path: str = Query("/var/www"), max_results: int = Query(30)):
+def engine_file_search(pattern: str = Query(...), path: str = Query(PROJECT_ROOT), max_results: int = Query(30)):
     """搜索文件"""
     try:
         cmd = ["find", path, "-name", pattern, "-type", "f", "!", "-path", "*/node_modules/*", "!", "-path", "*/.git/*", "!", "-path", "*/__pycache__/*"]
@@ -1182,11 +1192,11 @@ def engine_file_op(action: str = Query(...), src: str = Query(...), dst: str = Q
     """文件操作"""
     import os as _os, shutil
     try:
-        allowed = ["/tmp", "/var/www/html"]
+        allowed = [str(TEMP_DIR), PROJECT_ROOT]
         def safe(p):
             return any(p.startswith(pre) for pre in allowed)
         if not safe(src) or (dst and not safe(dst)):
-            return {"error": "只允许操作 /tmp 和 /var/www/html 目录"}
+            return {"error": f"只允许操作 {TEMP_DIR} 和 {PROJECT_ROOT} 目录"}
         if action == "cp":
             shutil.copy2(src, dst)
         elif action == "mv":

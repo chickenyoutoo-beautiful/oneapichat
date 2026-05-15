@@ -23,8 +23,8 @@ if (!$filename) {
     exit;
 }
 
-// 安全检查：只允许 /tmp/ 下的 .md 和 .txt 文件
-$allowedDir = '/tmp/';
+// 安全检查：只允许临时目录下的 .md 和 .txt 文件
+$allowedDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR;
 $filepath = $allowedDir . $filename;
 
 // 防止目录穿越
