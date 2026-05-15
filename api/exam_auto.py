@@ -187,7 +187,7 @@ class ChaoxingExam:
         s = self._build_session()
         exams = []
         try:
-            resp = s.get(PAGE_EXAM_LIST, params={
+            resp = s.get(API_EXAM_LIST, params={
                 "courseId": course_id, "classId": class_id, "cpi": cpi,
             }, timeout=15)
             resp.raise_for_status()

@@ -19,11 +19,10 @@ def resource_path(relative_path: str) -> str:
     获取资源文件的绝对路径，兼容源码运行和 PyInstaller 打包后的运行环境。
     """
     if hasattr(sys, '_MEIPASS'):
-        # 打包后的临时目录
         base_path = sys._MEIPASS
     else:
-        # 源码运行时的当前目录
-        base_path = os.path.abspath(".")
+        # 使用本文件的目录作为基准（不依赖 CWD）
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 # 康熙部首替换表
 KX_RADICALS_TAB = str.maketrans(
