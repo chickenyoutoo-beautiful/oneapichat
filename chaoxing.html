@@ -666,6 +666,12 @@ if (_dd) document.documentElement.classList.add('dark');
                 if (newLines[i].indexOf('当前任务:') === 0) {
                     progressLine = newLines[i];
                 } else {
+                    // Detect completion and clear progress
+                    if (newLines[i].indexOf('所有课程学习任务已完成') >= 0 ||
+                        newLines[i].indexOf('考试已完成') >= 0) {
+                        var pc = document.getElementById('progressContainer');
+                        if (pc) pc.classList.add('hidden');
+                    }
                     normalLines.push(newLines[i]);
                 }
             }
@@ -965,11 +971,12 @@ if (_dd) document.documentElement.classList.add('dark');
                 var hide = false;
                 // 仅显示错误模式：ERROR 行显示；NONE 行如果是 ERROR 行或 traceback 连续段落的后续也显示
                 if (errorFilterActive) {
-                    if (data.level !== 'ERROR') {
+                    var isImportant = (data.level === 'ERROR' || data.level === 'WARNING' || data.level === 'WARN');
+                    if (!isImportant) {
                         var prevData = logLinesData[i - 1];
                         var isTracebackLine = /^File\s|^\s*\^+|^\s*\d+\s+\|/.test(data.message) ||
                                               /^(NameError|SyntaxError|TypeError|KeyError|ValueError|AttributeError|ImportError|OperationalError):/i.test(data.message);
-                        if (!prevData || (prevData.level !== 'ERROR' && !prevWasTraceback)) {
+                        if (!prevData || (!['ERROR','WARNING','WARN'].includes(prevData.level) && !prevWasTraceback)) {
                             if (!isTracebackLine) hide = true;
                         }
                         prevWasTraceback = isTracebackLine;
