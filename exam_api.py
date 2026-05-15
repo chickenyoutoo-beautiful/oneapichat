@@ -50,7 +50,8 @@ def cmd_list(args):
             return
 
         courses = api.get_course_list()
-        exam_runner = ChaoxingExam(account, tiku=tiku)
+        from api.base import init_session
+        exam_runner = ChaoxingExam(account, tiku=tiku, session=init_session())
         all_exams = []
 
         for course in courses:
