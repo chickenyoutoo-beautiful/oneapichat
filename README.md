@@ -1,123 +1,135 @@
 # OneAPIChat
 
-**Multi-Model AI Chat Platform with Agent Support**
+**Self-hosted AI Chat Platform — Multi-Model, Agent-Powered, SSE Streaming**
 
-🚀 **Live Demo**: https://naujtrats.xyz/oneapichat
-
----
-
-🌐 **Language / 语言 / 言語**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
+🚀 **Live Demo**: [naujtrats.xyz/oneapichat](https://naujtrats.xyz/oneapichat)
 
 ---
 
-A self-hosted AI chat platform that connects to multiple model providers (MiniMax, DeepSeek, OpenAI-compatible APIs), featuring an Agent mode with autonomous tool-calling, web search, SSE streaming, and multi-user support.
+🌐 **Language**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
 
 ---
 
-## 🌟 Features
+A modern, self-hosted AI chat interface that connects to any OpenAI-compatible API. Features autonomous Agent mode with tool calling, real-time SSE streaming, web search integration, multi-user support, and a clean responsive UI.
+
+| 🧠 **Multi-Model** | 🔧 **Agent Mode** | 🔍 **Web Search** | 📡 **SSE Streaming** |
+|---------------------|-------------------|-------------------|----------------------|
+| MiniMax, DeepSeek, OpenAI + any compatible API | Autonomous sub-agents with tool calling | Brave, Google, Tavily engines | Real-time token-by-token output |
+
+---
+
+## Table of Contents
+
+- [Screenshots & Features](#-screenshots--features)
+- [Quick Start](#-quick-start)
+- [Deployment](#-deployment)
+  - [One-Click Script](#one-click-script)
+  - [Docker](#docker)
+  - [Manual Setup](#manual-setup)
+- [Configuration](#%EF%B8%8F-configuration)
+- [Project Structure](#-project-structure)
+- [刷课 Module (Chaoxing Automation)](#-刷课-module-chaoxing-automation)
+- [License](#-license)
+
+---
+
+## 📸 Screenshots & Features
 
 ### 🤖 Multi-Model Support
-- Connect to any OpenAI API-compatible endpoint
-- Built-in support for **MiniMax**, **DeepSeek**, and more
-- Model routing and fallbacks
-- Custom API base URLs and keys per model
+Connect to any OpenAI-compatible endpoint. Built-in profiles for **MiniMax**, **DeepSeek**, **OpenAI**, and **Anthropic** with custom base URLs per model. Model routing and automatic fallback.
 
 ### 🧠 Agent Mode
-- Autonomous sub-agent spawning and management
-- Tool calling: web search, code execution, file operations
-- Persistent agent state and notification system
-- Cron-scheduled task triggers
+Enable Agent mode for autonomous task execution — the AI can spawn sub-agents, search the web, execute code, and manage files. Includes persistent agent state, notification system, and cron-based scheduling.
 
-### 🔍 Web Search
-- Smart search judgment — AI decides when to search
-- Multiple engines: Brave Search, Google Custom Search, Tavily
-- Search result auto-organization and summarization
+### 🔍 Web Search with Smart Judgment
+The AI automatically decides when to search the web for real-time information. Supports **Brave Search**, **Google Custom Search**, and **Tavily**. Results are automatically organized and summarized.
 
-### 📡 SSE Streaming
-- Real-time streaming responses via Server-Sent Events
-- Backend Python engine with SQLite persistence
-- Progress resumable after page refresh
+### 📡 SSE Real-Time Streaming
+Server-Sent Events power token-by-token streaming for instant response display. Progress survives page refresh — pick up where you left off.
 
-### 👥 Multi-User & Multi-Terminal
-- User isolation with encrypted API keys
-- Chat history import/export
-- Configurable per-user settings
+### 👥 Multi-User & Multi-Device
+User isolation with encrypted API key storage. Chat history import/export in JSON format. Per-user configuration. Works seamlessly on desktop and mobile.
 
-### 🎨 UI/UX
-- Dark/Light mode
-- Markdown rendering with syntax highlighting
-- Responsive design for desktop and mobile
+### 🎨 Clean UI
+Dark/light mode toggle, Markdown rendering with KaTeX math formula support, code syntax highlighting, file upload support, and responsive design.
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- PHP 8.0+ (for the proxy layer)
-- Python 3.10+ (for the backend engine)
-- OneAPI or OpenAI-compatible API key
-
-### One-Command Deploy
-
-```bash
-chmod +x deploy.sh && ./deploy.sh
-```
-
-Then open `http://localhost:8080` in your browser.
-
-### Manual Setup
-
-**1. Clone the repository**
-```bash
-git clone https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git
-cd Webui-aichat-supportwebsearch
-```
-
-**2. Install Python dependencies**
-```bash
-pip install fastapi uvicorn aiofiles python-multipart
-```
-
-**3. Start the backend engine**
-```bash
-python3 engine_server.py &
-```
-
-**4. Start PHP server**
-```bash
-php -S localhost:8080
-```
+- **PHP 8.0+** (proxy layer)
+- **Python 3.10+** (backend engine)
+- An API key from any OpenAI-compatible provider
 
 ---
 
-## ☁️ One-Click Cloud Deployment
+## ☁️ Deployment
 
-### GitHub Actions (刷课 · 云端无人值守)
-See [刷课使用说明](#📖-刷课--automaticcb-使用说明) below.
+### One-Click Script (Linux / macOS)
 
-### Docker (通用 · 任何设备)
 ```bash
-# 方式1: 直接运行（自动拉取最新 release）
+curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
+```
+
+Automatically detects your OS (Ubuntu, Debian, CentOS, macOS) and install method (Docker or native).
+
+### Docker (Any Platform)
+
+```bash
+# Quick run
 docker run -d -p 8080:8080 --name oneapichat \
   ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
 
-# 方式2: 使用 docker-compose
+# Or with docker-compose
 curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
-### 一键脚本（Linux/macOS）
-```bash
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch/main/deploy.sh | bash
-```
-> 支持 Ubuntu / Debian / CentOS / macOS，自动检测 Docker 或原生部署
+Supports `linux/amd64` and `linux/arm64` — works on Raspberry Pi, Synology NAS, and QNAP devices.
 
-### Raspberry Pi / NAS / Arm64 设备
+### Manual Setup
+
 ```bash
-docker run -d -p 8080:8080 --name oneapichat \
-  ghcr.io/chickenyoutoo-beautiful/webui-aichat-supportwebsearch:latest
+# 1. Clone the repository
+git clone https://github.com/chickenyoutoo-beautiful/Webui-aichat-supportwebsearch.git
+cd Webui-aichat-supportwebsearch
+
+# 2. Install Python dependencies
+pip install fastapi uvicorn aiofiles python-multipart
+
+# 3. Start the backend engine
+python3 engine_server.py &
+
+# 4. Start PHP server
+php -S localhost:8080
 ```
-> 镜像支持 `linux/arm64`，适用于树莓派、群晖、威联通等设备
+
+Open [http://localhost:8080](http://localhost:8080) in your browser.
+
+---
+
+## ⚙️ Configuration
+
+### Adding API Keys
+1. Open the settings panel in the UI
+2. Enter your API key and base URL
+3. Select your model
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGINE_PORT` | `8766` | Backend engine port |
+| `ENGINE_HOST` | `0.0.0.0` | Engine bind address |
+| `LOG_LEVEL` | `INFO` | Logging level |
+
+### Supported Models
+- **MiniMax** — `MiniMax/...`
+- **DeepSeek** — `DeepSeek/...`
+- **OpenAI** — `gpt-4o`, `gpt-4o-mini`, etc.
+- **Anthropic** — `claude-3-5-sonnet` via custom endpoint
+- Any **OpenAI-compatible API** — set a custom base URL
 
 ---
 
@@ -125,111 +137,66 @@ docker run -d -p 8080:8080 --name oneapichat \
 
 ```
 .
-├── index.html          # Main chat UI
-├── main.js             # Core frontend logic
-├── style.css           # Styles
-├── engine_api.php      # PHP proxy layer
-├── engine_server.py    # Python backend (Agent/Cron/SSE)
-├── fetch.php           # Web fetch utility
-├── deploy.sh           # Cross-platform deploy script
-├── Dockerfile          # Docker image definition
-├── docker-compose.yml  # Docker Compose config
-├── nginx.conf         # Nginx config (native deploy)
-├── LICENSE             # AGPL-3.0 (main project)
-├── NOTICE              # License details
-├── LICENSES/
-│   └── GPL-3.0.txt     # GPL-3.0 (刷课 module)
-└── README.md           # This file
+├── index.html              # Main chat UI (SPA)
+├── login.html              # Login page
+├── profile.html            # User profile
+├── main.js                 # Core frontend logic
+├── css/
+│   ├── style.css           # Custom styles
+│   └── tailwind-index.min.css
+├── js/
+│   ├── models.js           # Model configuration
+│   └── translations.js     # i18n strings
+├── engine_server.py        # Python backend (FastAPI)
+├── engine_api.php          # PHP proxy layer
+├── engine_watchdog.sh      # Auto-restart watchdog
+├── auth.php                # Authentication
+├── config.php              # API key & endpoint config
+├── chat.php                # Chat history viewer
+├── deploy.sh               # Cross-platform deploy script
+├── Dockerfile              # Docker image
+├── docker-compose.yml      # Docker Compose config
+├── nginx.conf              # Nginx configuration
+├── docs/                   # Documentation
+├── LICENSE                 # AGPL-3.0
+└── NOTICE                  # License details
 ```
 
 ---
 
-## ⚙️ Configuration
+## 📖 刷课 Module (Chaoxing Automation)
 
-### API Configuration
-1. Open the settings panel
-2. Enter your API key and base URL
-3. Select your model
+*This is an optional add-on — the platform works fully without it.*
 
-### Agent Mode
-Enable Agent mode in settings to unlock sub-agent spawning, tool calling, and cron tasks.
+OneAPIChat includes a web interface for **Chaoxing (超星/学习通) course automation** — an independent module integrated for convenience. It supports:
 
----
+- Viewing course completion progress
+- Starting/stopping automated course watching
+- Configurable playback speed
+- Optional question bank integration
 
-## 📖 刷课 · AutomaticCB 使用说明
+Access the web UI at `/chaoxing.html` after deployment.
 
-本平台集成了**学习通自动化刷课脚本**，支持通过 GitHub Actions 云端无人值守刷课。
-
-### 🚀 快速开始
-
-**第一步：Fork 本仓库**
-
-点击本仓库右上角 **Fork** 按钮，将仓库 fork 到你的 GitHub 账号下。
-
-**第二步：设置 GitHub Secrets**
-
-刷课账号信息**必须**通过 GitHub Secrets 传入（禁止明文写在代码中）：
-
-1. 进入你 fork 的仓库 → **Settings** → 左侧 **Secrets and variables** → **Actions** → **New repository secret**
-2. 添加以下三个 secret：
-
-| Secret 名称 | 值 | 说明 |
-|-------------|-----|------|
-| `CHAOXING_USERNAME` | 学习通手机号 | 登录账号 |
-| `CHAOXING_PASSWORD` | 学习通密码 | 登录密码 |
-| `CHAOXING_COURSE_ID` | 课程 ID | 学习通课程 ID，多个用逗号分隔 |
-
-**第三步：开启 GitHub Actions**
-
-1. 进入仓库 → **Actions** 页面
-2. 如果提示 "Workflows must be enabled within the repository settings to run"，点击 **I understand my workflows, go ahead and enable them**
-3. 点击左侧 **刷课** workflow → 右侧 **Run workflow** → 选择 `main` 分支 → 点击 **Run workflow**
-
-**第四步：查看刷课进度**
-
-点击 workflow run 详情 → **Run main.py** 步骤展开日志，即可看到刷课实时进度。
-
-### ⏰ 定时自动刷课（可选）
-
-如果需要每天定时自动执行，编辑 `.github/workflows/main.yml`，取消以下注释：
-
-```yaml
-on:
-  push:
-    branches: [ main ]
-  schedule:
-    - cron: "0 8 * * *"   # 每天北京时间 8:00 自动运行
-```
-
-### 📋 本地运行
-
-```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 手动运行
-python main.py -u 你的手机号 -p 你的密码 -l 课程ID
-```
-
-### ⚠️ 注意事项
-
-- 仓库默认**公开**，Secrets 不会被泄露（GitHub 已做保护）
-- 如担心账号安全，可在仓库 Settings → **Change visibility** 中将仓库设为 **Private**
+For GitHub Actions-based cloud operation, see the workflow at `.github/workflows/`.
 
 ---
 
 ## 📄 License
 
-### Dual License
+| Component | License | Source |
+|-----------|---------|--------|
+| **OneAPIChat (main project)** | **AGPL-3.0** | [LICENSE](./LICENSE) |
+| **刷课 module** (chaoxing automation) | **GPL-3.0** | [LICENSES/GPL-3.0.txt](./LICENSES/GPL-3.0.txt) — derived from [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) |
+| **One-API** (interface management dependency) | **MIT** | [songquanpeng/one-api](https://github.com/songquanpeng/one-api) |
 
-- **OneAPIChat (main project):** [AGPL-3.0](./LICENSE) — based on [One-API](https://github.com/songquanpeng/one-api)
-- **刷课 module (chaoxing automation):** [GPL-3.0](./LICENSES/GPL-3.0.txt) — from [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
-
-See [`NOTICE`](./NOTICE) for details.
+See [`NOTICE`](./NOTICE) for the full licensing breakdown.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — 学习通自动化刷课脚本 (GPL-3.0)
-- All open-source library contributors
+- [songquanpeng/one-api](https://github.com/songquanpeng/one-api) — API management gateway
+- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — Chaoxing automation engine (GPL-3.0)
+- [KaTeX](https://katex.org/) — Math formula rendering
+- [Mermaid](https://mermaid.js.org/) — Diagram rendering
+- All open-source contributors
