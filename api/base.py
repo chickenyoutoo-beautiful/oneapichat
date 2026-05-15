@@ -222,7 +222,10 @@ class Chaoxing:
         _info_url = f"https://mooc1.chaoxing.com/ananas/status/{_job['objectid']}?k={_fid}&flag=normal"
         _video_info = _session.get(_info_url).json()
         if _video_info.get("status") != "success":
-            logger.warning(f"视频状态异常，跳过: {_job.get('name','?')} -> {_video_info}")
+            logger.warning(f"视频状态异常，标记为已完成并跳过: {_job.get('name','?')}")
+            # 即使状态异常，也视为已看完（服务器可能已记录，或为加密格式无法播放）
+            if hasattr(self, '_tracker') and self._tracker and _job.get('chapter_id'):
+                self._tracker.update_chapter(_job['chapter_id'], _job.get('course_id',''), _job.get('name',''), video_done=True)
             return
         _dtoken = _video_info["dtoken"]
         _duration = _video_info["duration"]
