@@ -233,9 +233,49 @@ class ChaoxingExam:
                         "score": score,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
+            # 已完成考试：抓取分数
+            for e in exams:
+                if e["status"] == "已完成" and e.get("score","0") == "0":
+                    e["score"] = self._fetch_score(s, e)
         except Exception as e:
             logger.debug(f"考试列表获取失败: {e}")
         return exams
+
+    # ── 抓取已完成考试的分数 ──────────────────────
+    def _fetch_score(self, s, exam):
+        """从考试结果页抓取分数"""
+        try:
+            resp = s.get(
+                "https://mooc1-api.chaoxing.com/exam-ans/exam/phone/look",
+                params={
+                    "taskrefId": exam["exam_id"],
+                    "courseId": exam["course_id"],
+                    "classId": exam["class_id"],
+                    "cpi": exam["cpi"],
+                    "redo": 1,
+                }, timeout=10, allow_redirects=False)
+            if resp.status_code == 200:
+                html = BeautifulSoup(resp.text, "lxml")
+                body = html.body
+                if body:
+                    body_text = body.get_text()
+                    if "已删除" in body_text:
+                        return "已删除"
+                    # 尝试匹配分数格式: XX分, XX.X分
+                    import re as _re
+                    m = _re.search(r'(\d+\.?\d*)\s*分', body_text)
+                    if m:
+                        return m.group(1)
+                    # 尝试 span/div 元素
+                    for el in body.find_all(["span", "div", "p"]):
+                        t = el.get_text(strip=True)
+                        if "分" in t and len(t) < 20:
+                            m2 = _re.search(r'(\d+\.?\d*)', t)
+                            if m2:
+                                return m2.group(1)
+        except Exception as e:
+            logger.debug(f"分数获取失败: {e}")
+        return "0"
 
     # ── 拉取元数据 ────────────────────────────────
     def get_meta(self, exam_id, course_id, class_id, cpi, enc_task):
