@@ -33,7 +33,7 @@ Write-Host "[OK] Engine started" -ForegroundColor Green
 
 # Start PHP in its own hidden window
 Write-Host "[INFO] Starting PHP on port $PORT..." -ForegroundColor Blue
-Start-Process -FilePath $phpExe -ArgumentList "-S 0.0.0.0:$PORT" -WorkingDirectory $REPO_DIR -WindowStyle Hidden
+Start-Process -FilePath $phpExe -ArgumentList "-S 0.0.0.0:$PORT -t `"$REPO_DIR`"" -WindowStyle Hidden
 Write-Host "[OK] PHP server started" -ForegroundColor Green
 
 # Open browser
