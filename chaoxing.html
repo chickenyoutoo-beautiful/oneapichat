@@ -2231,7 +2231,7 @@ function setStatus(text, cls) {
                         logExam('考试流程已结束' + logSummary, okCount > 0 && errCount === 0 ? 'success' : 'warn');
                         
                         // 检测是否有需要手动开考的考试（CLIENT_FORM_SIGN）
-                        var needManual = d.log && (d.log.indexOf('无法开始考试') >= 0 || d.log.indexOf('客户端APP') >= 0);
+                        var needManual = d.log && (d.log.indexOf('无法开始考试') >= 0 || d.log.indexOf('客户端APP') >= 0 || d.log.indexOf('API 模式失败') >= 0 || d.log.indexOf('Playwright 异常退出') >= 0);
                         if (needManual) {
                             logExam('⚠️ 检测到需要手动开考的考试，3秒后自动弹出代理页面...', 'warn');
                             showToast('需要手动确认，即将弹出代理页面', 'warn');
