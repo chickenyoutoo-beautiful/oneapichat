@@ -33,17 +33,17 @@ Write-Host "[OK] Engine started" -ForegroundColor Green
 
 # Start PHP in its own hidden window
 Write-Host "[INFO] Starting PHP on port $PORT..." -ForegroundColor Blue
-Start-Process -FilePath $phpExe -ArgumentList "-S 0.0.0.0:$PORT -t `"$REPO_DIR`" `"$REPO_DIR\router.php`"" -WindowStyle Hidden
+Start-Process -FilePath $phpExe -ArgumentList "-S 0.0.0.0:$PORT -t `"$REPO_DIR\..`"" -WindowStyle Hidden
 Write-Host "[OK] PHP server started" -ForegroundColor Green
 
 # Open browser
 Start-Sleep -Seconds 2
-Start-Process "http://localhost:$PORT"
+Start-Process "http://localhost:$PORT/oneapichat/"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  OneAPIChat v3.0 is running!" -ForegroundColor Cyan
-Write-Host "  http://localhost:$PORT" -ForegroundColor Cyan
+Write-Host "  http://localhost:$PORT/oneapichat/" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
