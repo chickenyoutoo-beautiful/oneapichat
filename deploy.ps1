@@ -155,7 +155,6 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue) -and
     Write-Info "正在安装 Python 3.12..."
     $pyUrl = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
     $pyInstaller = "$env:TEMP\python-installer.exe"
-    
     try {
         Invoke-WebRequest -Uri $pyUrl -OutFile $pyInstaller -UseBasicParsing
         Start-Process -FilePath $pyInstaller -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait
@@ -174,23 +173,52 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue) -and
 # Refresh PATH
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 
-# Determine Python command
-$PYTHON = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+# Determine Python command — prefer 3.12 for stability
+$PYTHON = $null
+$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($pyLauncher) {
+    # Check if py -3.12 works
+    $test312 = & py -3.12 --version 2>$null
+    if ($test312) {
+        $PYTHON = "py"
+        $PYTHON_ARGS = "-3.12"
+        Write-OK "Using Python 3.12 (py launcher)"
+    }
+}
+if (-not $PYTHON) {
+    if (Get-Command python3 -ErrorAction SilentlyContinue) { 
+        $PYTHON = "python3" 
+    } else { 
+        $PYTHON = "python" 
+    }
+    $pyFullVer = & $PYTHON --version 2>$null
+    Write-Info "Using $pyFullVer"
+    if ($pyFullVer -match '3\.1[4-9]') {
+        Write-Warn "Python 3.14+ detected — some packages may not have wheels yet"
+        Write-Info "Installing Python 3.12 alongside for compatibility..."
+        winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements 2>&1 | Out-Null
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        # Use py launcher to target 3.12
+        $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+        if ($pyLauncher) {
+            $PYTHON = "py"
+            $PYTHON_ARGS = "-3.12"
+            Write-OK "Will use Python 3.12 for this project"
+        }
+    }
+}
 
 # ── Install Python deps ─────────────────────────────
 Write-Info "安装 Python 依赖..."
-& $PYTHON -m pip install --upgrade pip 2>&1 | Out-Null
+& $PYTHON $PYTHON_ARGS -m pip install --upgrade pip 2>&1 | Out-Null
 # 逐个安装，忽略不兼容的包
-$pyDeps = @("fastapi", "uvicorn", "requests", "python-multipart", "beautifulsoup4", "loguru", "lxml")
+$pyDeps = @("fastapi", "uvicorn", "requests", "python-multipart", "beautifulsoup4", "loguru", "lxml", "aiofiles")
 foreach ($dep in $pyDeps) {
-    $result = & $PYTHON -m pip install $dep 2>&1
+    & $PYTHON $PYTHON_ARGS -m pip install $dep 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "  $dep 安装失败（Python 版本可能不兼容），已跳过"
+        Write-Warn "  $dep 安装失败，已跳过"
     }
 }
-# aiofiles 在新 Python 上可能无 wheel，尝试安装
-& $PYTHON -m pip install aiofiles 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Warn "aiofiles 安装失败，已跳过（不影响核心功能）" }
 Write-OK "Python 依赖安装完成"
 
 # ── Create required dirs ──────────────────────────
@@ -211,7 +239,7 @@ if ($engineProc) {
 } else {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = (Get-Command $PYTHON).Source
-    $psi.Arguments = "$REPO_DIR\engine_server.py"
+    $psi.Arguments = "$PYTHON_ARGS $REPO_DIR\engine_server.py"
     $psi.WorkingDirectory = $REPO_DIR
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
