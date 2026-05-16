@@ -126,7 +126,11 @@ if ($phpPath) {
 
 # 注册到 PATH 并配置 php.ini
 $phpDir = Split-Path $phpPath -Parent
-Add-MachinePathItem $phpDir
+# 加入 PATH
+$currentMachinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+if ($currentMachinePath -notlike "*$phpDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$currentMachinePath;$phpDir", "Machine")
+}
 $env:Path = "$phpDir;$env:Path"
 $iniPath = "$phpDir\php.ini"
 if (-not (Test-Path $iniPath)) {
