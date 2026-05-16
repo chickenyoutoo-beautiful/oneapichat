@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Exam Wrapper</title></head>
+<body>
+<h3>超星考试自动化代理</h3>
+<p>加载代理页面后，JavaScript 会自动操作</p>
+<iframe id="examFrame" style="width:100%;height:600px;border:1px solid #ccc"></iframe>
+<div id="status">就绪</div>
+<script>
+const PROXY = 'http://192.168.195.213:8899';
+const EXAM_URL = `${PROXY}/exam-ans/exam/phone/task-exam?taskrefId=9459820&courseId=263695114&classId=146799509&cpi=488376903&ut=s`;
+
+document.getElementById('examFrame').src = EXAM_URL;
+
+const frame = document.getElementById('examFrame');
+const status = document.getElementById('status');
+
+frame.onload = function() {
+    status.textContent = '页面已加载，开始自动化...';
+    try {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        status.textContent = '页面可访问: ' + (doc ? 'yes' : 'no');
+        
+        // Find and click "我已阅读并同意"
+        const agree = doc.querySelector('input[type=checkbox], #agree, [class*=agree]');
+        if (agree && !agree.checked) {
+            agree.checked = true;
+            agree.dispatchEvent(new Event('change', {bubbles: true}));
+            status.textContent = '已勾选同意';
+        }
+        
+        // Click start button after a delay
+        setTimeout(() => {
+            const btn = doc.querySelector('#start, button:contains("Start"), button:contains("开始")');
+            if (btn) {
+                btn.click();
+                status.textContent = '已点击开始按钮';
+            }
+        }, 1000);
+    } catch(e) {
+        status.textContent = '跨域错误: ' + e.message;
+    }
+};
+</script>
+</body></html>
