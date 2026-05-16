@@ -226,7 +226,7 @@ if ($phpProc) {
 } else {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $phpExe
-    $psi.Arguments = "-S 0.0.0.0:$phpPort -t $REPO_DIR"
+    $psi.Arguments = "-S 0.0.0.0:$phpPort -t `"$REPO_DIR`""
     $psi.WorkingDirectory = $REPO_DIR
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
