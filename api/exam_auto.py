@@ -416,11 +416,33 @@ class ChaoxingExam:
 
         if resp.status_code == 200:
             html = BeautifulSoup(resp.text, "lxml")
-            err = html.select_one("p.blankTips,li.msg")
+            # 检查错误消息
+            err = html.select_one("p.blankTips,li.msg,h2.color6")
             if err:
                 msg = err.text.strip()
                 if "验证码错误" in msg: raise ExamCodeDenied(msg)
+                if "已经提交" in msg or "已完成" in msg: raise ExamIsCommitted(msg)
+                if "尚未开始" in msg: raise ExamNotStart(msg)
                 raise ExamError(msg)
+            # 检查是否有 name="enc" 隐藏字段（直接给题的情况）
+            enc_input = html.select_one("input#enc")
+            if enc_input:
+                self.enc = enc_input["value"]
+                form = html.select_one("form#submitTest")
+                if form:
+                    first_q = parse_question(form.select_one("div.questionWrap.singleQuesId.ans-cc-exam"))
+                    logger.info(f"开始考试成功（直接返回第1题）: [{self.title}]")
+                    return first_q
+            # 可能是已完成或未开放的考试
+            body_text = html.body.get_text() if html.body else ""
+            if "已完成" in body_text or "已提交" in body_text:
+                raise ExamIsCommitted("该考试已完成")
+            if "尚未开始" in body_text or "考试尚未开始" in body_text:
+                raise ExamNotStart("考试尚未开始")
+            # 无法解析，记录原始内容以便调试
+            snippet = html.body.get_text()[:300] if html.body else resp.text[:300]
+            logger.warning(f"开始考试响应无法解析 (exam={self.exam_id}): {snippet}")
+            raise ExamError(f"考试响应格式异常: {snippet[:100]}")
         elif resp.status_code == 302:
             loc = resp.headers["Location"]
             # 从重定向 URL 中提取 enc 参数
