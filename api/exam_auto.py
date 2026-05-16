@@ -436,20 +436,32 @@ class ChaoxingExam:
                     value = inp.get("value", "")
                     if name:
                         form_data[name] = value
-                # 提交表单进入考试
+                # 提交表单进入考试（POST form data + query params）
                 form_data["imei"] = _imei()
                 form_data["isphone"] = "true"
                 form_data["faceDetection"] = "0"
                 form_data["code"] = code
                 logger.info(f"提交开始考试表单...")
-                resp2 = s.post(API_START_START, data=form_data, allow_redirects=False)
+                # 表单提交到相同 URL，query params 也要带
+                resp2 = s.post(API_START_START, params={
+                    "courseId": self.course_id, "classId": self.class_id,
+                    "examId": self.exam_id, "source": 0,
+                    "examAnswerId": self.exam_answer_id, "cpi": self.cpi,
+                    "keyboardDisplayRequiresUserAction": 1,
+                    "imei": _imei(), "faceDetection": 0, "jt": 0,
+                    "code": code, "vx": 0, "examsignal": 1,
+                }, data=form_data, allow_redirects=True, timeout=15)
                 resp2.raise_for_status()
-                if resp2.status_code == 302:
-                    from urllib.parse import urlparse, parse_qs
-                    self.enc = parse_qs(urlparse(resp2.headers["Location"]).query).get("enc", [""])[0]
-                    logger.info(f"考试开始成功(表单提交): [{self.title}]")
+                # 检查重定向后的最终 URL 提取 enc
+                from urllib.parse import urlparse, parse_qs
+                final_url = resp2.url
+                parsed = parse_qs(urlparse(final_url).query)
+                enc = parsed.get("enc", [""])[0]
+                if enc:
+                    self.enc = enc
+                    logger.info(f"考试开始成功(表单POST): [{self.title}] enc={enc[:20]}...")
                     return self.fetch(0)
-                # POST 后也可能直接返回第一题
+                # 也可能直接返回题目页面
                 html2 = BeautifulSoup(resp2.text, "lxml")
                 enc2 = html2.select_one("input#enc")
                 if enc2:
@@ -460,7 +472,11 @@ class ChaoxingExam:
                         if qnode:
                             logger.info(f"考试开始成功(表单→直接返回第1题): [{self.title}]")
                             return parse_question(qnode)
-                raise ExamError(f"表单提交失败: {resp2.status_code}")
+                # 检查错误
+                err2 = html2.select_one("p.blankTips,li.msg")
+                if err2:
+                    raise ExamError(err2.text.strip())
+                raise ExamError(f"表单提交后无法解析响应 (URL: {final_url})")
             # 检查是否有 name="enc" 隐藏字段（直接给题的情况）
             enc_input = html.select_one("input#enc")
             if enc_input:
