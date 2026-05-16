@@ -2026,11 +2026,10 @@ function setStatus(text, cls) {
         function openExamManual() {
             var checkedCbs = document.querySelectorAll('.exam-cb:checked');
             var examIds = [];
-            var examData_global = examData; // from closure
             checkedCbs.forEach(function(cb) {
                 var itemDiv = cb.closest('.flex');
                 var idx = Array.from(itemDiv.parentNode.children).indexOf(itemDiv);
-                var e = examData_global[idx];
+                var e = examData[idx];
                 if (e && e.exam_id) examIds.push(e);
             });
             if (examIds.length === 0) { logExam('请先选择要手动开考的考试', 'warn'); return; }
@@ -2039,9 +2038,11 @@ function setStatus(text, cls) {
             var proxyUrl = 'http://192.168.195.213:8899/exam-ans/exam/phone/task-exam?' +
                 'taskrefId=' + e.exam_id + '&courseId=' + e.course_id +
                 '&classId=' + e.class_id + '&cpi=' + e.cpi + '&ut=s';
-            logExam('打开代理页面进行手动开考: ' + e.title, 'info');
-            logExam('在新窗口中勾选「我已阅读并同意」并点击「开始考试」', 'info');
-            window.open(proxyUrl, '_blank');
+            logExam('打开代理页面: ' + e.title, 'info');
+            // 用 location.href 避免被 Chrome 拦截
+            if (confirm('即将跳转到手动考试页面。\n勾选「我已阅读并同意」并点击「开始考试」')) {
+                location.href = proxyUrl;
+            }
         }
 
         function toggleExamCb(el) {
