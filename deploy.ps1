@@ -226,7 +226,7 @@ if ($phpProc) {
 } else {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $phpExe
-    $psi.Arguments = "-S 0.0.0.0:$phpPort -t `"$REPO_DIR`" `"$REPO_DIR\router.php`""
+    $psi.Arguments = "-S 0.0.0.0:$phpPort -t `"$REPO_DIR\..`""
     $psi.WorkingDirectory = $REPO_DIR
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -243,7 +243,7 @@ Write-OK "╔══════════════════════�
 Write-OK "║   OneAPIChat 部署完成！                  ║"
 Write-OK "╚══════════════════════════════════════════╝"
 Write-OK ""
-Write-OK "  访问: http://$localIP`:$phpPort"
+Write-OK "  访问: http://$localIP`:$phpPort/oneapichat/"
 Write-Info "  引擎日志: Get-Content $engineLog -Tail 20"
 Write-Info "  停止服务: Get-Process | Where-Object { `$_.CommandLine -match 'engine_server|php -S' } | Stop-Process"
 Write-OK ""
