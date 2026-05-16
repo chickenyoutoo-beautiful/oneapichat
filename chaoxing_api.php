@@ -49,6 +49,10 @@ function userPidPath($userId) {
     return APP_TEMP . '/chaoxing_task_' . $userId . '.pid';
 }
 
+function examPidPath($userId) {
+    return APP_TEMP . '/chaoxing_exam_' . $userId . '.pid';
+}
+
 /**
  * 获取任务状态文件路径（记录启动时间、启动者 tab_id）
  */
@@ -113,6 +117,10 @@ function getRunningPid($userId) {
  */
 function userLogPath($userId) {
     return APP_TEMP . '/chaoxing_task_' . $userId . '.log';
+}
+
+function examLogPath($userId) {
+    return APP_TEMP . '/chaoxing_exam_' . $userId . '.log';
 }
 
 /**
@@ -404,9 +412,9 @@ switch ($action) {
                 $lastIdx = count($cleaned_lines) - 1;
                 $cleaned_lines[$lastIdx] .= '\n' . implode('\n', $pending_traceback);
             }
-            // 最多保留最后 100 条日志行
-            if (count($cleaned_lines) > 100) {
-                $cleaned_lines = array_slice($cleaned_lines, -100);
+            // 最多保留最后 500 条日志行
+            if (count($cleaned_lines) > 500) {
+                $cleaned_lines = array_slice($cleaned_lines, -500);
             }
             $cleaned = implode("\n", $cleaned_lines);
             if ($lastProgressLine) {
@@ -430,6 +438,79 @@ switch ($action) {
             'starter_tab_id' => $state['starter_tab_id'] ?? '',
             'started_at' => $state['started_at'] ?? 0
         ]);
+        break;
+
+    case 'exam_status':
+        // 考试模式专用状态检查（读考试日志，不混学习日志）
+        $pid_file = examPidPath($userId);
+        $log_path = examLogPath($userId);
+
+        $running = false;
+        if (file_exists($pid_file)) {
+            $pid = trim(file_get_contents($pid_file));
+            if ($pid && is_numeric($pid)) {
+                exec("kill -0 " . intval($pid) . " 2>/dev/null", $null, $exitCode);
+                $running = ($exitCode === 0);
+            }
+            if (!$running) @unlink($pid_file);
+        }
+        $log = '';
+        if (file_exists($log_path)) {
+            $raw = '';
+            $fh = @fopen($log_path, 'r');
+            if ($fh) {
+                fseek($fh, 0, SEEK_END);
+                $fileSize = ftell($fh);
+                $readBytes = min($fileSize, 30720);
+                fseek($fh, $fileSize - $readBytes);
+                $raw = fread($fh, $readBytes);
+                fclose($fh);
+            }
+            // 简化解析：只提取时间戳行
+            $lines = explode("\n", $raw);
+            $cleaned_lines = [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (!$line) continue;
+                // 移除 \r 进度覆盖行（考试模式不需要）
+                if (strpos($line, "\r") !== false) {
+                    $subParts = explode("\r", $line);
+                    foreach ($subParts as $sp) {
+                        $sp = trim($sp);
+                        if (!$sp) continue;
+                        if (strpos($sp, '2026-') === 0 || strpos($sp, '2025-') === 0) {
+                            $cleaned_lines[] = $sp;
+                        }
+                    }
+                } else {
+                    $cleaned_lines[] = $line;
+                }
+            }
+            if (count($cleaned_lines) > 500) {
+                $cleaned_lines = array_slice($cleaned_lines, -500);
+            }
+            $log = implode("\n", $cleaned_lines);
+            if (strlen($log) > 30000) $log = '...' . substr($log, -30000);
+        }
+
+        echo json_encode([
+            'running' => $running,
+            'log' => $log
+        ]);
+        break;
+
+    case 'exam_stop':
+        $pid_file = examPidPath($userId);
+        $stopped = false;
+        if (file_exists($pid_file)) {
+            $pid = trim(file_get_contents($pid_file));
+            if ($pid && is_numeric($pid)) {
+                exec("kill " . intval($pid) . " 2>/dev/null");
+                $stopped = true;
+            }
+            @unlink($pid_file);
+        }
+        echo json_encode(['success' => $stopped, 'message' => $stopped ? '考试已停止' : '没有运行中的考试']);
         break;
 
     case 'poll':
@@ -573,13 +654,43 @@ switch ($action) {
     case 'exam_start':
         // 启动考试模式
         $config_path = ensureUserConfig($userId);
-        $log_path = userLogPath($userId);
+        $log_path = examLogPath($userId);
 
-        $cmd = pyBgCmd('main.py', '-c' . escapeshellarg($config_path) . ' --exam', $log_path);
+        // 清空旧日志
+        if (file_exists($log_path)) @unlink($log_path);
+
+        // 检测刷课是否在运行
+        $study_running = false;
+        $study_pid_file = userPidPath($userId);
+        if (file_exists($study_pid_file)) {
+            $s_pid = trim(file_get_contents($study_pid_file));
+            if ($s_pid && is_numeric($s_pid)) {
+                exec("kill -0 " . intval($s_pid) . " 2>/dev/null", $null, $ec);
+                if ($ec === 0) {
+                    $study_running = true;
+                    // 自动暂停刷课进程，避免风控
+                    exec("kill " . intval($s_pid) . " 2>/dev/null");
+                    @unlink($study_pid_file);
+                }
+            }
+        }
+
+        // 读取选中的考试列表（POST JSON body）
+        $raw = file_get_contents('php://input');
+        $body = json_decode($raw, true);
+        $exam_list = $body['exams'] ?? [];
+        $exam_json_arg = '';
+        if ($exam_list && is_array($exam_list) && count($exam_list) > 0) {
+            $exam_json_path = APP_TEMP . '/exam_selected_' . md5($userId) . '.json';
+            file_put_contents($exam_json_path, json_encode($exam_list));
+            $exam_json_arg = ' --exam-json ' . escapeshellarg($exam_json_path);
+        }
+
+        $cmd = pyBgCmd('main.py', '-c' . escapeshellarg($config_path) . ' --exam' . $exam_json_arg, $log_path);
         $pid = trim(shell_exec($cmd));
-        $pid_file = userPidPath($userId);
+        $pid_file = examPidPath($userId);
         file_put_contents($pid_file, $pid);
-        echo json_encode(['success' => true, 'pid' => $pid]);
+        echo json_encode(['success' => true, 'pid' => $pid, 'study_running' => $study_running]);
         break;
 
 

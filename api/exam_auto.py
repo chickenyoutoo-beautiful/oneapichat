@@ -181,6 +181,11 @@ class ChaoxingExam:
             self.session = _init()
         return self.session
 
+    def _get_uid(self):
+        """从 session cookie 获取用户 UID"""
+        s = self._build_session()
+        return s.cookies.get("_uid", "")
+
     # ── 课程考试列表 ───────────────────────────────
     def list_exams(self, course_id: int, class_id: int, cpi: int) -> list[dict]:
         """获取课程的考试列表（SSR HTML页面，与CxKitty一致）"""
@@ -204,21 +209,55 @@ class ChaoxingExam:
                     exam_id = params.get("taskRefId", params.get("taskrefId", ["0"]))[0]
                     if not exam_id or exam_id == "0":
                         continue
-                    # 提取标题和状态
+                    # 提取标题、日期范围、状态
                     text = li.get_text(strip=True)
                     import re as _re
-                    # 格式: 标题（日期范围）状态剩余... or 标题状态
-                    m = _re.match(r'(.+?)（.+?）(待做|未开始|已完成|已交|未交)?|(.+?)(待做|未开始|已完成|已交|未交)', text)
+                    start_time = ""
+                    end_time = ""
+                    # 日期范围在括号中：支持半角()或全角（），且内部可以是各种格式
+                    # 例如: 名称（5月11日至5月17日）待做
+                    #       名称（2025-01-01 08:00 ~ 2025-01-15 23:59）待做
+                    m = _re.match(r'(.+?)[(（](.+?)[)）](.+)', text)
                     if m:
-                        if m.group(3):
-                            title = m.group(3).strip()
-                            status = m.group(4) or "未知"
+                        title = m.group(1).strip()
+                        date_range = m.group(2).strip()
+                        status_raw = m.group(3).strip()
+                        # 提取状态（从剩余部分中取第一个状态词）
+                        status_m = _re.match(r'(待做|未开始|已完成|已交|未交|已交卷)', status_raw)
+                        status = status_m.group(1) if status_m else "未知"
+                        # 从日期范围中解析起止时间 - 中文格式: X月X日至X月X日
+                        tm_cn = _re.search(
+                            r'(\d{1,2})月(\d{1,2})日\s*至\s*(\d{1,2})月(\d{1,2})日',
+                            date_range
+                        )
+                        if tm_cn:
+                            mon1, day1, mon2, day2 = tm_cn.groups()
+                            # 尝试推测年份（取当前年份或从上下文推测）
+                            from datetime import datetime
+                            now = datetime.now()
+                            start_time = f"{now.year}-{mon1.zfill(2)}-{day1.zfill(2)}"
+                            end_time = f"{now.year}-{mon2.zfill(2)}-{day2.zfill(2)}"
                         else:
-                            title = m.group(1).strip()
-                            status = m.group(2) or "未知"
+                            # 标准时间格式: 2025-01-01 08:00 ~ 2025-01-15 23:59
+                            tm = _re.search(r'(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2})\s*[~-]\s*(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2})', date_range)
+                            if tm:
+                                start_time = tm.group(1).strip()
+                                end_time = tm.group(2).strip()
+                            else:
+                                # 纯日期格式 2025-01-01 ~ 2025-01-15
+                                tm2 = _re.search(r'(\d{4}-\d{2}-\d{2})\s*[~-]\s*(\d{4}-\d{2}-\d{2})', date_range)
+                                if tm2:
+                                    start_time = tm2.group(1).strip()
+                                    end_time = tm2.group(2).strip()
                     else:
-                        title = text
-                        status = "未知"
+                        # 降级：无括号日期范围的格式
+                        m2 = _re.match(r'(.+?)(待做|未开始|已完成|已交|未交|已交卷)', text)
+                        if m2:
+                            title = m2.group(1).strip()
+                            status = m2.group(2).strip()
+                        else:
+                            title = text
+                            status = "未知"
                     # 分数由 _fetch_score 单独抓取
                     score = "0"
                     # 剩余时间
@@ -234,17 +273,60 @@ class ChaoxingExam:
                         "enc_task": params.get("enc_task", ["0"])[0],
                         "score": score,
                         "remain_time": remain_time,
+                        "start_time": start_time,
+                        "end_time": end_time,
                     })
             logger.info(f"课程考试: {len(exams)} 个")
             # 已完成考试：抓取分数（无论列表页是否显示时间）
             for e in exams:
                 if e["status"] == "已完成":
                     e["score"] = self._fetch_score(s, e)
+            # 起止时间补充：列表页没有时间信息的，尝试从封面页获取
+            for e in exams:
+                if e["status"] not in ("已完成", "已交", "已交卷") and (not e["start_time"] or not e["end_time"]):
+                    cover_time = self._fetch_cover_times(s, e)
+                    if cover_time:
+                        if not e["start_time"]: e["start_time"] = cover_time.get("start", "")
+                        if not e["end_time"]: e["end_time"] = cover_time.get("end", "")
         except Exception as e:
             logger.debug(f"考试列表获取失败: {e}")
         return exams
 
     # ── 抓取已完成考试的分数 ──────────────────────
+    def _fetch_cover_times(self, s, exam):
+        """从考试封面页抓取开始/截止时间"""
+        try:
+            uid = s.cookies.get("_uid", "")
+            resp = s.get(PAGE_EXAM_COVER, params={
+                "redo": 1, "taskrefId": exam["exam_id"],
+                "courseId": exam["course_id"],
+                "classId": exam["class_id"],
+                "userId": uid,
+                "role": "", "source": 0,
+                "enc_task": exam.get("enc_task", 0),
+                "cpi": exam["cpi"],
+                "vx": 0, "examsignal": 1,
+            }, allow_redirects=False, timeout=10)
+            if resp.status_code != 200:
+                return None
+            html = BeautifulSoup(resp.text, "lxml")
+            start_time = ""
+            end_time = ""
+            for p_elem in html.find_all("p"):
+                t = p_elem.get_text(strip=True)
+                import re as _re
+                sm = _re.search(r'开始时间[：:]\s*(.+)', t)
+                if sm:
+                    start_time = sm.group(1).strip()
+                em = _re.search(r'截止时间[：:]\s*(.+)', t)
+                if em:
+                    end_time = em.group(1).strip()
+            if start_time or end_time:
+                return {"start": start_time, "end": end_time}
+        except Exception as e:
+            logger.debug(f"封面时间获取失败: {e}")
+        return None
+
     def _fetch_score(self, s, exam):
         """从考试结果页抓取分数"""
         try:
@@ -290,9 +372,10 @@ class ChaoxingExam:
         self.enc_task = enc_task
 
         s = self._build_session()
+        uid = s.cookies.get("_uid", "")
         resp = s.get(PAGE_EXAM_COVER, params={
             "redo": 1, "taskrefId": exam_id, "courseId": course_id,
-            "classId": class_id, "userId": str(self.account.user_id or ""),
+            "classId": class_id, "userId": uid,
             "role": "", "source": 0, "enc_task": enc_task, "cpi": cpi,
             "vx": 0, "examsignal": 1,
         }, allow_redirects=False)
@@ -442,7 +525,7 @@ class ChaoxingExam:
         """提交答案或交卷"""
         s = self._build_session()
         sig = _exam_signature(
-            uid=str(self.account.user_id or ""),
+            uid=str(self._get_uid() or ""),
             qid=question.id if question else 0,
         )
         params = {
@@ -461,7 +544,7 @@ class ChaoxingExam:
             "tempSave": "false" if final else "true",
             "timeOver": "false", "encRemainTime": self.enc_remain_time,
             "encLastUpdateTime": self.last_update_time, "enc": self.enc,
-            "userId": str(self.account.user_id or ""), "source": 0,
+            "userId": str(self._get_uid() or ""), "source": 0,
             "start": index, "enterPageTime": self.last_update_time,
         }
         if question:

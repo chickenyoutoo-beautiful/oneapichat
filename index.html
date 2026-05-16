@@ -26,7 +26,7 @@
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
     <!-- 主脚本（defer 不阻塞渲染） -->
-    <script defer src="./js/main.js?v=34"></script>
+    <script defer src="./js/main.js?v=41"></script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
     <!-- 登录弹窗 -->
@@ -624,145 +624,8 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                 工具/技能 <span id="toolsActiveCount" style="font-size:10px;color:#9ca3af;font-weight:400;"></span>
             </summary>
-            <div class="details-content">
-                <!-- 搜索类工具 -->
-                <div class="tools-category-label">🔍 搜索与获取</div>
-                <div class="tool-toggle-row" data-tool="SEARCH_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="联网搜索">联网搜索</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SEARCH_TOOL_DEFINITION" data-toolkey="SEARCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="RAG_SEARCH_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="知识库搜索">知识库搜索</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_RAG_SEARCH_TOOL_DEFINITION" data-toolkey="RAG_SEARCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="WEB_FETCH_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="网页抓取">网页抓取</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_WEB_FETCH_TOOL_DEFINITION" data-toolkey="WEB_FETCH_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-
-                <!-- 图像工具 -->
-                <div class="tools-category-label">🎨 图像</div>
-                <div class="tool-toggle-row" data-tool="IMAGE_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="图片生成">图片生成</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_IMAGE_TOOL_DEFINITION" data-toolkey="IMAGE_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ANALYZE_IMAGE_TOOL">
-                    <span class="tool-toggle-name" title="图片分析">图片分析</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ANALYZE_IMAGE_TOOL" data-toolkey="ANALYZE_IMAGE_TOOL" checked><span class="slider"></span></label>
-                </div>
-
-                <!-- 刷课工具 -->
-                <div class="tools-category-label">📚 刷课</div>
-                <div class="tool-toggle-row" data-tool="CHAXING_LOGIN_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课登录">登录</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_LOGIN_TOOL_DEFINITION" data-toolkey="CHAXING_LOGIN_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="CHAXING_LIST_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课列表">课程列表</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_LIST_TOOL_DEFINITION" data-toolkey="CHAXING_LIST_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="CHAXING_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课执行">刷课执行</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_TOOL_DEFINITION" data-toolkey="CHAXING_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="CHAXING_STATUS_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课状态">状态</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STATUS_TOOL_DEFINITION" data-toolkey="CHAXING_STATUS_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="CHAXING_STOP_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课停止">停止</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STOP_TOOL_DEFINITION" data-toolkey="CHAXING_STOP_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="CHAXING_STATS_TOOL_DEFINITION">
-                    <span class="tool-toggle-name" title="刷课统计">统计</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_CHAXING_STATS_TOOL_DEFINITION" data-toolkey="CHAXING_STATS_TOOL_DEFINITION" checked><span class="slider"></span></label>
-                </div>
-
-                <!-- 服务器工具 (默认关闭组) -->
-                <div class="tools-category-label">💻 服务器操控 ⚠️</div>
-                <div class="tool-toggle-row" data-tool="SERVER_EXEC_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="服务器命令执行 [高危]">命令执行</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_EXEC_TOOL" data-toolkey="SERVER_EXEC_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_PYTHON_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="Python脚本执行 [高危]">Python 执行</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_PYTHON_TOOL" data-toolkey="SERVER_PYTHON_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_FILE_READ_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="读取文件">文件读取</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_READ_TOOL" data-toolkey="SERVER_FILE_READ_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_FILE_WRITE_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="写入文件 [高危]">文件写入</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_WRITE_TOOL" data-toolkey="SERVER_FILE_WRITE_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_SYS_INFO_TOOL">
-                    <span class="tool-toggle-name" title="系统信息">系统信息</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_SYS_INFO_TOOL" data-toolkey="SERVER_SYS_INFO_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_PS_TOOL">
-                    <span class="tool-toggle-name" title="进程列表">进程列表</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_PS_TOOL" data-toolkey="SERVER_PS_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_DISK_TOOL">
-                    <span class="tool-toggle-name" title="磁盘信息">磁盘信息</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DISK_TOOL" data-toolkey="SERVER_DISK_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_NETWORK_TOOL">
-                    <span class="tool-toggle-name" title="网络状态">网络状态</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_NETWORK_TOOL" data-toolkey="SERVER_NETWORK_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_DOCKER_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="Docker管理">Docker</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DOCKER_TOOL" data-toolkey="SERVER_DOCKER_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_DB_QUERY_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="数据库查询">数据库</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_DB_QUERY_TOOL" data-toolkey="SERVER_DB_QUERY_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_FILE_SEARCH_TOOL">
-                    <span class="tool-toggle-name" title="文件搜索">文件搜索</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_SEARCH_TOOL" data-toolkey="SERVER_FILE_SEARCH_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="SERVER_FILE_OP_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="文件操作 [高危]">文件操作</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_SERVER_FILE_OP_TOOL" data-toolkey="SERVER_FILE_OP_TOOL"><span class="slider"></span></label>
-                </div>
-
-                <!-- 引擎/Agent 工具 (默认关闭) -->
-                <div class="tools-category-label">🤖 引擎/Agent</div>
-                <div class="tool-toggle-row" data-tool="ENGINE_CRON_LIST_TOOL">
-                    <span class="tool-toggle-name" title="Cron列表">Cron 列表</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_LIST_TOOL" data-toolkey="ENGINE_CRON_LIST_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_CRON_CREATE_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="创建Cron">创建 Cron</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_CREATE_TOOL" data-toolkey="ENGINE_CRON_CREATE_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_CRON_DELETE_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="删除Cron">删除 Cron</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_CRON_DELETE_TOOL" data-toolkey="ENGINE_CRON_DELETE_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="DELEGATE_TASK_TOOL">
-                    <span class="tool-toggle-name" title="子代理任务">子代理任务</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_DELEGATE_TASK_TOOL" data-toolkey="DELEGATE_TASK_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_STATUS_TOOL">
-                    <span class="tool-toggle-name" title="子代理状态">子代理状态</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_STATUS_TOOL" data-toolkey="ENGINE_AGENT_STATUS_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_LIST_TOOL">
-                    <span class="tool-toggle-name" title="子代理列表">子代理列表</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_LIST_TOOL" data-toolkey="ENGINE_AGENT_LIST_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_AGENT_DELETE_TOOL">
-                    <span class="tool-toggle-name tool-warn" title="删除子代理">删除子代理</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_AGENT_DELETE_TOOL" data-toolkey="ENGINE_AGENT_DELETE_TOOL"><span class="slider"></span></label>
-                </div>
-                <div class="tool-toggle-row" data-tool="ENGINE_PUSH_TOOL">
-                    <span class="tool-toggle-name" title="推送通知">推送通知</span>
-                    <label class="switch small"><input type="checkbox" id="tool_enabled_ENGINE_PUSH_TOOL" data-toolkey="ENGINE_PUSH_TOOL"><span class="slider"></span></label>
-                </div>
+            <div class="details-content" id="toolToggleContainer">
+                <!-- 工具列表由 JS renderToolPanel() 动态生成 -->
 
                 <!-- 自定义技能区域 -->
                 <div class="tools-category-label" style="margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;" class="dark:border-gray-700">⚡ 自定义技能</div>

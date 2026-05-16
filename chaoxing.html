@@ -411,6 +411,13 @@ if (_dd) document.documentElement.classList.add('dark');
             <div id="examList" class="divide-y divide-gray-100 dark:divide-gray-700">
                 <div class="p-6 text-center text-gray-400 text-sm">加载中...</div>
             </div>
+            <div class="p-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-xs text-gray-500">
+                <span id="examSelectedCount">已选 0 场</span>
+                <div class="flex gap-2">
+                    <button onclick="selectAllExams()" class="hover:text-indigo-600 transition">全选</button>
+                    <button onclick="deselectAllExams()" class="hover:text-indigo-600 transition">取消</button>
+                </div>
+            </div>
         </section>
 
 
@@ -457,7 +464,7 @@ if (_dd) document.documentElement.classList.add('dark');
                         </h2>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button onclick="startExamAll()" id="examStartBtn" class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full transition shadow-sm">开始考试</button>
+                        <button onclick="startExamAll()" id="examStartBtn" class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full transition shadow-sm">开考所选</button>
                         <button onclick="clearExamLog()" class="text-xs text-gray-400 hover:text-red-500 transition px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg> 清空</button>
                     </div>
                 </div>
@@ -468,6 +475,9 @@ if (_dd) document.documentElement.classList.add('dark');
     </div>    <script>
         // ── 全局状态 ──
         let pollTimer = null;
+        let examRunning = false;            // 考试运行中，禁止刷课操作
+        let _examPausedStudy = false;       // 考试前刷课是否在运行，用于考后自动恢复
+        let _examListLoaded = false;        // 考试列表是否已加载，避免切 tab 重复请求
         let logSyncTimer = null;
         let logLinesData = [];
         let errorFilterActive = false;
@@ -1226,6 +1236,7 @@ if (_dd) document.documentElement.classList.add('dark');
 
         // Task（带防抖，防止快速双击）
         async function startTask() {
+            if (examRunning) { showToast('考试进行中，无法开始刷课', 'warn'); return; }
             // 只发送未完成的课程；已完成的课不参与刷课
             const checked = document.querySelectorAll('.course-cb:checked');
             const ids = Array.from(checked)
@@ -1265,6 +1276,7 @@ if (_dd) document.documentElement.classList.add('dark');
 
 
         async function stopTask() {
+            if (examRunning) { showToast('考试进行中，无法中断', 'warn'); return; }
             // 如果当前不是启动者 tab，弹出确认
             var activeTabId = getActiveTabId();
             if (activeTabId && activeTabId !== getTabId()) {
@@ -1455,8 +1467,13 @@ function setStatus(text, cls) {
                     stopLogSync();
                     $('startBtn').disabled = false; $('stopBtn').disabled = true;
                     _taskStopTime = Date.now();
-                    setStatus('已完成', 'text-blue-600 bg-blue-100 dark:bg-blue-900/30');
-                    showToast('刷课任务完成', 'success');
+                    if (examRunning) {
+                        // 被考试暂停，不是真正完成
+                        setStatus('考试中暂停', 'text-amber-600 bg-amber-100 dark:bg-amber-900/30');
+                    } else {
+                        setStatus('已完成', 'text-blue-600 bg-blue-100 dark:bg-blue-900/30');
+                        showToast('刷课任务完成', 'success');
+                    }
                     _lastTaskRunning = false;
                     loadCourses();
                     startLogSync(); // 完成后降级为慢速日志同步
@@ -1868,7 +1885,10 @@ function setStatus(text, cls) {
                     active.style.color = '#fff';
                     active.classList.add('active');
                 }
-                if (tab === 'exam') loadExamList();
+                if (tab === 'exam' && !_examListLoaded) {
+                    _examListLoaded = true;
+                    loadExamList();
+                }
             }, 80);
         }
 
@@ -1954,56 +1974,126 @@ function setStatus(text, cls) {
 
             if (!exams.length) {
                 container.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">暂无考试安排</div>';
+                updateExamCount();
                 return;
             }
             container.innerHTML = exams.map(function(e) {
                 var badge = '';
                 var statusClass = '';
-                if (e.status === '已完成' || e.status === '已交') {
+                var isCompleted = (e.status === '已完成' || e.status === '已交' || e.status === '已交卷');
+                var isDone = (e.status === '已完成' || e.status === '已交');
+                var isSubmitted = (e.status === '已交卷');
+                var itemDisabled = isDone || isSubmitted ? true : false;
+                if (isDone) {
                     badge = '<span class="text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">已完成 ✓</span>';
                     statusClass = 'opacity-70';
-                } else if (e.status === '已交卷') {
+                } else if (isSubmitted) {
                     badge = '<span class="text-xs text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded-full">已交卷</span>';
                 } else {
                     badge = '<span class="text-xs text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full">待考试</span>';
                 }
                 var timeInfo = e.remain_time ? ' · ' + e.remain_time : '';
                 var scoreInfo = e.score && e.score !== '0' && e.score !== '-' ? e.score + '分' : (e.score === '-' ? '-' : '');
-                return '<div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition ' + statusClass + '">' +
+                // 起止时间
+                var startTimeStr = e.start_time ? e.start_time : '';
+                var endTimeStr = e.end_time ? e.end_time : '';
+                var timeRangeStr = '';
+                if (startTimeStr && endTimeStr) {
+                    timeRangeStr = '<span class="text-xs text-gray-400">' + startTimeStr + ' ~ ' + endTimeStr + '</span>';
+                } else if (endTimeStr) {
+                    timeRangeStr = '<span class="text-xs text-gray-400">截止: ' + endTimeStr + '</span>';
+                } else if (startTimeStr) {
+                    timeRangeStr = '<span class="text-xs text-gray-400">开始: ' + startTimeStr + '</span>';
+                }
+                var clickHandler = itemDisabled ? '' : ' onclick="toggleExamCb(this)"';
+                var cursorClass = itemDisabled ? '' : ' cursor-pointer';
+                return '<div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition ' + statusClass + cursorClass + '"' + clickHandler + '>' +
+                    '<input type="checkbox" class="exam-cb w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" ' + (itemDisabled ? 'disabled' : 'checked') + '>' +
                     '<div class="flex-1 min-w-0">' +
                         '<div class="text-sm font-medium truncate flex items-center gap-2">' + (e.title || '?') + ' ' + badge + '</div>' +
-                        '<div class="text-xs text-gray-400">' + (e.course_title || '') + ' · ' + (e.status || '未知') + timeInfo + '</div>' +
+                        '<div class="text-xs text-gray-400">' + (e.course_title || '') + ' · ' + (e.status || '未知') + timeInfo + (timeRangeStr ? ' · ' + timeRangeStr : '') + '</div>' +
                     '</div>' +
                     (scoreInfo ? '<span class="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full shrink-0">' + scoreInfo + '</span>' : '') +
                 '</div>';
             }).join('');
+            // 默认选中所有待考试项目
+            var pendingCbs = container.querySelectorAll('.exam-cb:not(:disabled)');
+            pendingCbs.forEach(function(cb) { cb.checked = true; });
+            updateExamCount();
+        }
+
+        function toggleExamCb(el) {
+            var cb = el.querySelector('.exam-cb');
+            if (cb.disabled) return;
+            cb.checked = !cb.checked;
+            el.classList.toggle('bg-indigo-50', cb.checked);
+            el.classList.toggle('dark:bg-indigo-900/20', cb.checked);
+            updateExamCount();
+        }
+
+        function updateExamCount() {
+            var total = document.querySelectorAll('.exam-cb').length;
+            var checked = document.querySelectorAll('.exam-cb:checked').length;
+            document.getElementById('examSelectedCount').textContent = '已选 ' + checked + ' 场 / 共 ' + total + ' 场';
+        }
+
+        function selectAllExams() {
+            document.querySelectorAll('.exam-cb:not(:disabled)').forEach(function(c) {
+                c.checked = true;
+                var parent = c.closest('[onclick]');
+                if (parent) parent.classList.add('bg-indigo-50', 'dark:bg-indigo-900/20');
+            });
+            updateExamCount();
+        }
+
+        function deselectAllExams() {
+            document.querySelectorAll('.exam-cb:not(:disabled)').forEach(function(c) {
+                c.checked = false;
+                var parent = c.closest('[onclick]');
+                if (parent) parent.classList.remove('bg-indigo-50', 'dark:bg-indigo-900/20');
+            });
+            updateExamCount();
         }
 
         async function startExamAll() {
             var btn = document.getElementById('examStartBtn');
             btn.disabled = true;
             btn.textContent = '考试进行中...';
-            logExam('开始考试模式...', 'info');
-            try {
-                // 获取考试配置
-                var cfgR = await fetch('chaoxing_api.php?action=exam_config&auth_token=' + encodeURIComponent(_getAuthToken()));
-                var cfg = await cfgR.json();
 
-                var pending = examData.filter(function(e) {
-                    if (document.getElementById('examOnlyUnfinished').value === '1') {
-                        return e.status !== '已完成' && e.status !== '已交' && e.status !== '已交卷';
-                    }
-                    return true;
-                });
-
-                if (pending.length === 0) {
-                    logExam('没有待处理的考试', 'warn');
-                    btn.disabled = false; btn.textContent = '开始考试';
-                    return;
+            // 收集选中的考试信息（完整数据，不只是exam_id）
+            var checkedCbs = document.querySelectorAll('.exam-cb:checked');
+            var selectedExams = [];
+            checkedCbs.forEach(function(cb) {
+                var itemDiv = cb.closest('[onclick]') || cb.closest('.flex');
+                var idx = Array.from(itemDiv.parentNode.children).indexOf(itemDiv);
+                var examEntry = examData[idx];
+                if (examEntry && !(examEntry.status === '已完成' || examEntry.status === '已交' || examEntry.status === '已交卷')) {
+                    selectedExams.push({
+                        exam_id: examEntry.exam_id,
+                        course_id: examEntry.course_id,
+                        class_id: examEntry.class_id,
+                        cpi: examEntry.cpi,
+                        enc_task: examEntry.enc_task
+                    });
                 }
+            });
 
-                logExam('发现 ' + pending.length + ' 场待考试', 'info');
+            if (selectedExams.length === 0) {
+                logExam('请先选择要开考的考试', 'warn');
+                btn.disabled = false; btn.textContent = '开考所选';
+                return;
+            }
 
+            // 保存刷课状态，用于考后自动恢复
+            _examPausedStudy = false;
+            try {
+                var sr = await fetch('chaoxing_api.php?action=status&auth_token=' + encodeURIComponent(_getAuthToken()));
+                var sd = await sr.json();
+                _examPausedStudy = !!sd.running;
+            } catch(e) {}
+
+            logExam('开始考试模式，已选 ' + selectedExams.length + ' 场考试...', 'info');
+            try {
                 // 更新考试配置
                 var newCfg = { auto_submit: document.getElementById('examAutoSubmit').value === '1' };
                 await fetch('chaoxing_api.php?action=exam_config&sub=save&auth_token=' + encodeURIComponent(_getAuthToken()), {
@@ -2011,36 +2101,125 @@ function setStatus(text, cls) {
                     body: JSON.stringify({ config: newCfg })
                 });
 
-                // 通过 API 启动考试
-                var r = await fetch('chaoxing_api.php?action=exam_start&auth_token=' + encodeURIComponent(_getAuthToken()));
+                // 启动考试：发送选中考试的完整信息
+                var r = await fetch('chaoxing_api.php?action=exam_start&auth_token=' + encodeURIComponent(_getAuthToken()), {
+                    method: 'POST',
+                    body: JSON.stringify({ exams: selectedExams })
+                });
                 var d = await r.json();
                 if (d.success) {
-                    logExam('考试模式已启动 (PID: ' + d.pid + ')', 'success');
-                    // 定期检查状态
-                    pollExamStatus();
+                    if (d.study_running) {
+                        logExam('📌 已自动暂停刷课，避免风控', 'info');
+                    }
+                    logExam('考试模式已启动 (PID: ' + d.pid + ')，' + selectedExams.length + ' 场考试', 'success');
+                    showToast('刷课已暂停，考试进行中', 'info');
+                    pollExamStatus(btn, selectedExams);
                 } else {
                     logExam('启动失败: ' + (d.error || '未知错误'), 'error');
+                    btn.disabled = false;
+                    btn.textContent = '开考所选';
                 }
             } catch(e) {
                 logExam('启动考试失败: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '开考所选';
             }
-            btn.disabled = false;
-            btn.textContent = '开始考试';
         }
 
-        function pollExamStatus() {
-            // 每 5 秒检查一次状态
+        function pollExamStatus(btn, selectedIds) {
+            if (!btn) btn = document.getElementById('examStartBtn');
+            var statusEl = document.getElementById('examTaskStatus');
+            var studyStatusEl = document.getElementById('taskStatus');
+            var startBtn = document.getElementById('startBtn');
+            var stopBtn = document.getElementById('stopBtn');
+            var seenProgress = {};
+            var processDone = false;
+
+            // 考试进行中：锁定刷课操作
+            examRunning = true;
+            if (startBtn) { startBtn.disabled = true; startBtn.title = '考试进行中，无法开始刷课'; }
+            if (stopBtn) { stopBtn.disabled = true; stopBtn.title = '考试进行中，无法中断'; }
+            if (statusEl) {
+                statusEl.className = 'text-xs px-3 py-1.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300';
+                statusEl.textContent = '运行中';
+            }
             var interval = setInterval(async function() {
                 try {
-                    var r = await fetch('chaoxing_api.php?action=status&auth_token=' + encodeURIComponent(_getAuthToken()));
+                    var r = await fetch('chaoxing_api.php?action=exam_status&auth_token=' + encodeURIComponent(_getAuthToken()));
                     var d = await r.json();
-                    if (!d.running) {
-                        clearInterval(interval);
-                        logExam('考试已完成', 'success');
-                        loadExamList(); // 刷新考试列表
+
+                    // 转发考试后台日志到前端日志区
+                    if (d.log && d.log.length > 0) {
+                        var lines = d.log.split('\n');
+                        var newLines = [];
+                        for (var i = 0; i < lines.length; i++) {
+                            var line = lines[i].trim();
+                            if (!line) continue;
+                            if (seenProgress[line]) continue;
+                            seenProgress[line] = true;
+                            newLines.push(line);
+                        }
+                        if (newLines.length > 0) {
+                            for (var j = 0; j < newLines.length; j++) {
+                                var l = newLines[j];
+                                var level = 'info';
+                                if (l.indexOf('ERROR') >= 0 || l.indexOf('Error') >= 0 || l.indexOf('失败') >= 0 || l.indexOf('尚未开始') >= 0 || l.indexOf('未到') >= 0) {
+                                    level = 'error';
+                                } else if (l.indexOf('WARNING') >= 0 || l.indexOf('Warning') >= 0 || l.indexOf('跳过') >= 0 || l.indexOf('考试异常') >= 0) {
+                                    level = 'warn';
+                                } else if (l.indexOf('SUCCESS') >= 0 || l.indexOf('已完成') >= 0 || l.indexOf('完成并交卷') >= 0 || l.indexOf('成功') >= 0) {
+                                    level = 'success';
+                                }
+                                // 去掉日志时间戳前缀，避免重复
+                                var clean = l.replace(/^\[[\d:]+\]\s*/, '').replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\|\s+/, '');
+                                logExam('[后台] ' + clean, level);
+                            }
+                        }
                     }
-                } catch(e) {}
-            }, 5000);
+
+                    if (!d.running && !processDone) {
+                        processDone = true;
+                        clearInterval(interval);
+                        // 考试结束：解锁刷课操作
+                        examRunning = false;
+                        if (startBtn) { startBtn.disabled = false; startBtn.title = ''; }
+                        if (stopBtn) { stopBtn.disabled = false; stopBtn.title = ''; }
+                        if (studyStatusEl) {
+                            studyStatusEl.className = 'text-xs px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500';
+                            studyStatusEl.textContent = '就绪';
+                        }
+                        // 自动恢复刷课
+                        if (_examPausedStudy) {
+                            _examPausedStudy = false;
+                            showToast('考试完成，自动恢复刷课...', 'info');
+                            setTimeout(function() { startTask(); }, 1000);
+                        }
+                        // 从日志中统计结果
+                        var logSummary = '';
+                        if (d.log) {
+                            var errCount = (d.log.match(/尚未开始|未到开考|考试异常/g) || []).length;
+                            var okCount = (d.log.match(/完成并交卷/g) || []).length;
+                            var skipCount = (d.log.match(/跳过/g) || []).length;
+                            if (errCount > 0 && okCount === 0) {
+                                logSummary = ' — 全部' + errCount + '场未到开考时间';
+                            } else if (okCount > 0 || skipCount > 0) {
+                                logSummary = ' (' + okCount + '场完成, ' + errCount + '场未到开考时间)';
+                            }
+                        }
+                        logExam('考试流程已结束' + logSummary, okCount > 0 && errCount === 0 ? 'success' : 'warn');
+                        if (statusEl) {
+                            statusEl.className = 'text-xs px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500';
+                            statusEl.textContent = '就绪';
+                        }
+                        if (btn) { btn.disabled = false; btn.textContent = '开考所选'; }
+                        loadExamList();
+                    } else if (d.running) {
+                        if (btn) { btn.disabled = true; btn.textContent = '考试进行中...'; }
+                    }
+                } catch(e) {
+                    // 网络错误不中断轮询
+                }
+            }, 3000);
         }
 
         // ═══════════════════════════════════════════
