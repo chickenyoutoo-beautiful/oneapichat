@@ -2,6 +2,8 @@
 
 ## OneAPIChat (Main Platform) — AGPL-3.0
 
+Copyright (c) 2024-2026 OneAPIChat contributors
+
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published
 by the Free Software Foundation, either version 3 of the License, or
@@ -9,14 +11,96 @@ by the Free Software Foundation, either version 3 of the License, or
 
 See [LICENSE](./LICENSE) for the full text.
 
-## 刷课模块（Chaoxing Automation Module）— GPL-3.0
+---
 
-The 刷课 module (chaoxing.html, chaoxing_api.php, etc.) is based on
-[Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)
-and is licensed under **GNU General Public License v3.0**.
+## Integrated Open Source Projects
+
+### Backend Dependencies
+
+| Project | License | Source |
+|---------|---------|--------|
+| **FastAPI** | MIT | https://github.com/tiangolo/fastapi |
+| **Uvicorn** | BSD-3-Clause | https://github.com/encode/uvicorn |
+| **BeautifulSoup4** | MIT | https://code.launchpad.net/beautifulsoup |
+| **lxml** | BSD-3-Clause | https://github.com/lxml/lxml |
+| **loguru** | MIT | https://github.com/Delgan/loguru |
+| **requests** | Apache-2.0 | https://github.com/psf/requests |
+| **pyaes** | MIT | https://github.com/ricmoo/pyaes |
+| **Pillow** | Historical Permission Notice and Disclaimer (HPND) | https://github.com/python-pillow/Pillow |
+
+### Frontend Dependencies
+
+| Project | License | Source |
+|---------|---------|--------|
+| **Tailwind CSS** | MIT | https://github.com/tailwindlabs/tailwindcss |
+| **KaTeX** | MIT | https://github.com/KaTeX/KaTeX |
+| **marked** | MIT | https://github.com/markedjs/marked |
+| **highlight.js** | BSD-3-Clause | https://github.com/highlightjs/highlight.js |
+| **Mermaid** | MIT | https://github.com/mermaid-js/mermaid |
+| **Chart.js** | MIT | https://github.com/chartjs/Chart.js |
+
+### Chaoxing Automation Module — GPL-3.0
+
+#### 刷课 Engine (Study)
+
+Based on **[Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)**
+Licensed under **GNU General Public License v3.0 (GPL-3.0)**
+
 See [LICENSES/GPL-3.0.txt](./LICENSES/GPL-3.0.txt).
 
-## One-API Interface Management — MIT
+Modified files:
+- `api/base.py` — Chaoxing API session, login, course/chapter/job management
+- `api/answer.py` — Tiku (题库) answer engine
+- `api/exceptions.py` — Custom exception classes
+- `api/logger.py` — Logging configuration
+- `main.py` — Entry point (extended with exam mode)
 
-This project uses [One-API](https://github.com/songquanpeng/one-api)
-under the MIT License for API key management.
+#### 考试 Engine (Exam)
+
+Based on **[CxKitty/guowang23333](https://github.com/guowang23333/CxKitty-)**
+Licensed under **GNU General Public License v3.0 (GPL-3.0)**
+
+See [LICENSES/GPL-3.0.txt](./LICENSES/GPL-3.0.txt).
+
+Modified files:
+- `api/exam_auto.py` — ChaoxingExam class (list, start, answer, submit, finish exam flow)
+- `exam_api.py` — CLI wrapper for PHP integration
+
+### Interface Management Dependency — MIT
+
+Based on **[songquanpeng/one-api](https://github.com/songquanpeng/one-api)**
+Licensed under the MIT License.
+
+Integrated components:
+- API key management architecture
+- Multiple channel configuration patterns
+
+---
+
+## Derivative Works Notice
+
+The following files are derivative works of GPL-3.0 licensed projects and
+are therefore also licensed under GPL-3.0:
+
+- `api/exam_auto.py` — derived from CxKitty (GPL-3.0)
+- `api/base.py` — derived from Samueli924/chaoxing (GPL-3.0)
+- `api/answer.py` — derived from Samueli924/chaoxing (GPL-3.0)
+- `api/exceptions.py` — derived from Samueli924/chaoxing (GPL-3.0)
+- `api/logger.py` — derived from Samueli924/chaoxing (GPL-3.0)
+- `api/tracker.py` — derived from Samueli924/chaoxing (GPL-3.0)
+- `main.py` — derived from Samueli924/chaoxing (GPL-3.0) with extensions
+- `exam_api.py` — derived from CxKitty (GPL-3.0)
+- `api_get_courses.py` — derived from Samueli924/chaoxing (GPL-3.0)
+
+The remaining files in this repository are original works licensed under AGPL-3.0,
+unless otherwise noted.
+
+---
+
+## Full License Texts
+
+- [GNU Affero General Public License v3.0](./LICENSE)
+- [GNU General Public License v3.0](./LICENSES/GPL-3.0.txt)
+- [MIT License](https://opensource.org/licenses/MIT)
+- [BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
+- [Apache License 2.0](https://opensource.org/licenses/Apache-2.0)
