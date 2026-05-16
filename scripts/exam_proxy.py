@@ -5,16 +5,58 @@ import http.server, socketserver, requests, re, sys
 PROXY_PORT = 8899
 TARGET_HOST = "mooc1-api.chaoxing.com"
 
+# ── 启动时从 Python 获取登录 cookies ──
+def _load_session_cookies():
+    """通过 Python API 登录并获取 cookies"""
+    try:
+        import configparser, glob as _g
+        configs = sorted(_g.glob('/tmp/AutomaticCB/config_u_*.ini'), key=os.path.getmtime, reverse=True)
+        if not configs: return {}
+        cfg = configparser.ConfigParser()
+        cfg.read(configs[0], encoding='utf8')
+        sys.path.insert(0, '/var/www/html/oneapichat')
+        from api.base import Account, Chaoxing, init_session
+        acc = Account(cfg.get('common','username'), cfg.get('common','password'))
+        api = Chaoxing(account=acc)
+        lr = api.login()
+        if lr['status']:
+            s = init_session()
+            cookies = {}
+            for c in s.cookies:
+                if c.domain and '.chaoxing.com' in c.domain:
+                    cookies[c.name] = c.value
+            print(f"[PROXY] Loaded {len(cookies)} session cookies")
+            return cookies
+    except Exception as e:
+        print(f"[PROXY] Cookie load failed: {e}")
+    return {}
+
 class ExamProxy(http.server.BaseHTTPRequestHandler):
+    _session_cookies = None
+    
+    @classmethod
+    def get_cookies(cls):
+        if cls._session_cookies is None:
+            cls._session_cookies = _load_session_cookies()
+        return cls._session_cookies
+    
     def _forward(self, method='GET'):
         path = self.path
         url = f"https://{TARGET_HOST}{path}"
         
-        # 转发浏览器 headers（包括 Cookie）
         fwd = {}
-        for k in ['User-Agent','Accept','Accept-Language','Referer','Cookie','Content-Type']:
+        for k in ['User-Agent','Accept','Accept-Language','Referer','Content-Type']:
             v = self.headers.get(k, '')
             if v: fwd[k] = v
+        
+        # 浏览器 cookie 优先，无则用 Python session cookies
+        browser_cookie = self.headers.get('Cookie', '')
+        if browser_cookie and 'passport2' not in browser_cookie and '_uid' in browser_cookie:
+            fwd['Cookie'] = browser_cookie
+        else:
+            session_cookies = ExamProxy.get_cookies()
+            if session_cookies:
+                fwd['Cookie'] = '; '.join(f'{k}={v}' for k,v in session_cookies.items())
         
         body = b''
         if method == 'POST':
