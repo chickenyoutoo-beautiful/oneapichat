@@ -1,6 +1,6 @@
 # OneAPIChat
 
-**Self-hosted AI Chat Platform — Multi-Model, Agent-Powered, SSE Streaming**
+**Self-hosted AI Chat Platform — Multi-Model, Agent-Powered, SSE Streaming, Exam Automation**
 
 🚀 **Live Demo**: [naujtrats.xyz/oneapichat](https://naujtrats.xyz/oneapichat)
 
@@ -10,11 +10,11 @@
 
 ---
 
-A modern, self-hosted AI chat interface that connects to any OpenAI-compatible API. Features autonomous Agent mode with tool calling, real-time SSE streaming, web search integration, multi-user support, and a clean responsive UI.
+A modern, self-hosted AI chat interface that connects to any OpenAI-compatible API. Features autonomous Agent mode with dynamic tool registration, real-time SSE streaming, web search integration, multi-user support, and a clean responsive UI.
 
-| 🧠 **Multi-Model** | 🔧 **Agent Mode** | 🔍 **Web Search** | 📡 **SSE Streaming** |
-|---------------------|-------------------|-------------------|----------------------|
-| MiniMax, DeepSeek, OpenAI + any compatible API | Autonomous sub-agents with tool calling | Brave, Google, Tavily engines | Real-time token-by-token output |
+| 🧠 **Multi-Model** | 🤖 **Agent Mode** | 🔍 **Web Search** | 📡 **SSE Streaming** | 📝 **Exam Module** |
+|---------------------|-------------------|-------------------|----------------------|---------------------|
+| MiniMax, DeepSeek, OpenAI + any compatible API | Autonomous agents with dynamic tool registration | Brave, Google, Tavily engines | Real-time token-by-token output | Chaoxing exam automation with selective start |
 
 ---
 
@@ -39,10 +39,13 @@ A modern, self-hosted AI chat interface that connects to any OpenAI-compatible A
 Connect to any OpenAI-compatible endpoint. Built-in profiles for **MiniMax**, **DeepSeek**, **OpenAI**, and **Anthropic** with custom base URLs per model. Model routing and automatic fallback.
 
 ### 🧠 Agent Mode
-Enable Agent mode for autonomous task execution — the AI can spawn sub-agents, search the web, execute code, and manage files. Includes persistent agent state, notification system, and cron-based scheduling.
+Enable Agent mode for autonomous task execution — the AI can spawn sub-agents, search the web, execute code, and manage files. **v3.0 introduces dynamic tool registration** — tools auto-render in the UI panel, no HTML editing required. New tools include exam automation (list, start, monitor, stop), course overview, and login state detection. Persistent agent state, notification system, and cron-based scheduling.
 
 ### 🔍 Web Search with Smart Judgment
 The AI automatically decides when to search the web for real-time information. Supports **Brave Search**, **Google Custom Search**, and **Tavily**. Results are automatically organized and summarized.
+
+### 📝 Chaoxing Exam Automation
+New in v3.0: full exam lifecycle management. **Selective exam start** — choose specific exams to take instead of all at once. **Auto-pause study** to avoid anti-cheat detection. **Real-time progress** with start/end time display. **Independent logging** — exam and study logs never mix. Auto-resume study after exam completion.
 
 ### 📡 SSE Real-Time Streaming
 Server-Sent Events power token-by-token streaming for instant response display. Progress survives page refresh — pick up where you left off.
@@ -168,12 +171,23 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 *This is an optional add-on — the platform works fully without it.*
 
-OneAPIChat includes a web interface for **Chaoxing (超星/学习通) course automation** — an independent module integrated for convenience. It supports:
+OneAPIChat includes a web interface for **Chaoxing (超星/学习通) course automation** — an independent module integrated for convenience.
 
+### Study (刷课)
 - Viewing course completion progress
 - Starting/stopping automated course watching
 - Configurable playback speed
 - Optional question bank integration
+- Per-user tracking and statistics
+
+### Exam (考试) — New in v3.0
+- **Selective exam start** — check which exams to take, don't fire all at once
+- **Start/end time display** per exam
+- **Auto-pause study** on exam start to avoid anti-cheat detection
+- **Auto-resume study** after exam completion
+- **Independent logging** — exam and study logs never interfere
+- **Tool engine integration** — 5 exam tools registered for AI agent use
+- **Login state detection** — AI checks auth status before asking for credentials
 
 Access the web UI at `/chaoxing.html` after deployment.
 
