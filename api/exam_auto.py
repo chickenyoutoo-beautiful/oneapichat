@@ -410,7 +410,9 @@ class ChaoxingExam:
             "examAnswerId": self.exam_answer_id, "cpi": self.cpi,
             "keyboardDisplayRequiresUserAction": 1,
             "imei": _imei(), "faceDetection": 0, "jt": 0,
-            "code": code,
+            "code": code, "vx": 0, "examsignal": 1,
+            "userId": self._get_uid(),
+            "enc_task": self.enc_task,
         }, allow_redirects=False)
         resp.raise_for_status()
 
