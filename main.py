@@ -276,8 +276,11 @@ if __name__ == '__main__':
                 for exam_info in _exam_tasks:
                     try:
                         logger.info(f"处理考试: [{exam_info['exam_id']}]")
+                        result = None
+                        need_browser = False
+                        
                         # 先尝试 API 模式
-                        if not cli_args.exam_browser:
+                        try:
                             result = exam_runner.run(
                                 exam_id=exam_info['exam_id'],
                                 course_id=exam_info['course_id'],
@@ -286,27 +289,33 @@ if __name__ == '__main__':
                                 enc_task=exam_info.get('enc_task', 0),
                                 auto_submit=auto_submit,
                             )
-                        else:
-                            result = None
-                        # 如果没有提交（包括 API 模式返回 None 或异常），尝试浏览器模式
-                        if not result or not result.get('submitted'):
-                            if cli_args.exam_browser or (
-                                result and '可能需要客户端' in str(result.get('_error', ''))):
-                                logger.info(f"  尝试浏览器模式...")
-                                try:
-                                    from api.exam_browser import BrowserExam
-                                    b_exam = BrowserExam(account, tiku=tiku)
-                                    b_result = b_exam.run(
-                                        course_id=exam_info['course_id'],
-                                        class_id=exam_info['class_id'],
-                                        exam_id=exam_info['exam_id'],
-                                        cpi=exam_info['cpi'],
-                                        enc_task=exam_info.get('enc_task', 0),
-                                        auto_submit=auto_submit,
-                                    )
-                                    result = b_result if b_result.get('submitted') else result
-                                except Exception as be:
-                                    logger.warning(f"  浏览器模式也失败: {be}")
+                        except Exception as api_err:
+                            err_msg = str(api_err)
+                            if any(k in err_msg for k in ('客户端APP', '安全验证', 'CLIENT_FORM', '无法开始')):
+                                logger.info(f"  API 模式失败，自动切换浏览器模式...")
+                                need_browser = True
+                            else:
+                                raise  # 其他错误直接抛出
+                        
+                        # 如果需要浏览器模式（或命令行指定了 --exam-browser）
+                        if need_browser or cli_args.exam_browser:
+                            try:
+                                logger.info(f"  启动浏览器考试...")
+                                from api.exam_browser import BrowserExam
+                                b_exam = BrowserExam(account, tiku=tiku)
+                                b_result = b_exam.run(
+                                    course_id=exam_info['course_id'],
+                                    class_id=exam_info['class_id'],
+                                    exam_id=exam_info['exam_id'],
+                                    cpi=exam_info['cpi'],
+                                    enc_task=exam_info.get('enc_task', 0),
+                                    auto_submit=auto_submit,
+                                )
+                                if b_result.get('submitted'):
+                                    result = b_result
+                            except Exception as be:
+                                logger.warning(f"  浏览器模式失败: {be}")
+                        
                         if result and result.get('submitted'):
                             logger.info(f"  ✅ 考试 {result.get('title', '?')} 已完成并交卷")
                         elif result:
