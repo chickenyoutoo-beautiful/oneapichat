@@ -426,57 +426,16 @@ class ChaoxingExam:
                 if "已经提交" in msg or "已完成" in msg: raise ExamIsCommitted(msg)
                 if "尚未开始" in msg: raise ExamNotStart(msg)
                 raise ExamError(msg)
-            # 检查是否有表单需要提交（某些考试需要提交 start 表单才能开始）
+            # 检查是否有表单需要提交——直接尝试 fetch(0) 作为开始
             form = html.select_one("form#submitTest")
-            if form:
-                # 收集表单隐藏字段
-                form_data = {}
-                for inp in form.find_all("input"):
-                    name = inp.get("name", "")
-                    value = inp.get("value", "")
-                    if name:
-                        form_data[name] = value
-                # 提交表单进入考试（POST form data + query params）
-                form_data["imei"] = _imei()
-                form_data["isphone"] = "true"
-                form_data["faceDetection"] = "0"
-                form_data["code"] = code
-                logger.info(f"提交开始考试表单...")
-                # 表单提交到相同 URL，query params 也要带
-                resp2 = s.post(API_START_START, params={
-                    "courseId": self.course_id, "classId": self.class_id,
-                    "examId": self.exam_id, "source": 0,
-                    "examAnswerId": self.exam_answer_id, "cpi": self.cpi,
-                    "keyboardDisplayRequiresUserAction": 1,
-                    "imei": _imei(), "faceDetection": 0, "jt": 0,
-                    "code": code, "vx": 0, "examsignal": 1,
-                }, data=form_data, allow_redirects=True, timeout=15)
-                resp2.raise_for_status()
-                # 检查重定向后的最终 URL 提取 enc
-                from urllib.parse import urlparse, parse_qs
-                final_url = resp2.url
-                parsed = parse_qs(urlparse(final_url).query)
-                enc = parsed.get("enc", [""])[0]
-                if enc:
-                    self.enc = enc
-                    logger.info(f"考试开始成功(表单POST): [{self.title}] enc={enc[:20]}...")
-                    return self.fetch(0)
-                # 也可能直接返回题目页面
-                html2 = BeautifulSoup(resp2.text, "lxml")
-                enc2 = html2.select_one("input#enc")
-                if enc2:
-                    self.enc = enc2["value"]
-                    form2 = html2.select_one("form#submitTest")
-                    if form2:
-                        qnode = form2.select_one("div.questionWrap.singleQuesId.ans-cc-exam")
-                        if qnode:
-                            logger.info(f"考试开始成功(表单→直接返回第1题): [{self.title}]")
-                            return parse_question(qnode)
-                # 检查错误
-                err2 = html2.select_one("p.blankTips,li.msg")
-                if err2:
-                    raise ExamError(err2.text.strip())
-                raise ExamError(f"表单提交后无法解析响应 (URL: {final_url})")
+            if form and not html.select_one("input#enc"):
+                logger.info(f"考试需要表单提交，尝试 fetch(0) 直接拉题...")
+                try:
+                    q = self.fetch(0)
+                    logger.info(f"考试开始成功(fetch直接): [{self.title}]")
+                    return q
+                except Exception as e:
+                    raise ExamError(f"无法开始考试（可能需要客户端APP）：{e}")
             # 检查是否有 name="enc" 隐藏字段（直接给题的情况）
             enc_input = html.select_one("input#enc")
             if enc_input:
