@@ -67,19 +67,30 @@ if (Get-Command php -ErrorAction SilentlyContinue) {
     Write-Info "PHP 已就绪: $phpPath"
 }
 
-# 2. 搜索已安装但不在 PATH 的 PHP
+# 2. 搜索已安装但不在 PATH 的 PHP（快速搜索常见路径）
 if (-not $phpPath) {
-    Write-Info "搜索已安装的 PHP..."
-    $searchDirs = @(
+    Write-Info "搜索已安装的 PHP（探测常见路径）..."
+    # 最快的路径优先
+    $quickDirs = @(
         "$env:ProgramFiles\PHP",
         "$env:ProgramFiles\PHP\v*",
-        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
         "C:\php",
-        "C:\tools\php*"
+        "C:\tools\php"
     )
-    foreach ($dir in $searchDirs) {
-        $found = Get-ChildItem -Path $dir -Filter "php.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
+    foreach ($dir in $quickDirs) {
+        $found = Get-ChildItem -Path $dir -Filter "php.exe" -Depth 1 -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) { $phpPath = $found.FullName; break }
+    }
+    # winget 安装的 PHP 通常在 PHP.PHP 目录下
+    if (-not $phpPath) {
+        $wgBase = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+        if (Test-Path $wgBase) {
+            $wgPhpDir = Get-ChildItem -Path $wgBase -Directory -Filter "PHP.PHP_*" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wgPhpDir) {
+                $found = Get-ChildItem -Path $wgPhpDir.FullName -Filter "php.exe" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($found) { $phpPath = $found.FullName }
+            }
+        }
     }
     if ($phpPath) { Write-OK "找到 PHP: $phpPath" }
 }
@@ -90,14 +101,17 @@ if (-not $phpPath) {
     $wingetResult = winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>&1
     Write-Info "winget 完成，搜索安装位置..."
     Start-Sleep -Seconds 3
-    $searchDirs = @(
-        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
-        "$env:ProgramFiles\PHP",
-        "$env:ProgramFiles\PHP\v*"
-    )
-    foreach ($dir in $searchDirs) {
-        $found = Get-ChildItem -Path $dir -Filter "php.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { $phpPath = $found.FullName; break }
+    $pfPhp = Get-ChildItem -Path "$env:ProgramFiles\PHP" -Filter "php.exe" -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pfPhp) { $phpPath = $pfPhp.FullName }
+    if (-not $phpPath) {
+        $wgBase = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+        if (Test-Path $wgBase) {
+            $wgPhpDir = Get-ChildItem -Path $wgBase -Directory -Filter "PHP.PHP_*" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wgPhpDir) {
+                $found = Get-ChildItem -Path $wgPhpDir.FullName -Filter "php.exe" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($found) { $phpPath = $found.FullName }
+            }
+        }
     }
     if ($phpPath) { Write-OK "PHP 已安装: $phpPath" }
 }
