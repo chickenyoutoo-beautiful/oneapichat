@@ -2685,7 +2685,10 @@ function autoScrollToBottom(reason) {
     const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
     const distFromBottom = scrollHeight - scrollTop - clientHeight;
     // 距离底部超过一屏就不跟随了(用户在看上面的内容)
-    if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') return;
+    // 但如果用户没有手动滚动（streaming），强制跟随
+    if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') {
+        if (reason !== 'streaming' || userScrolled) return;
+    }
     isAutoScrolling = true;
     // 流式期间加锁,防止短暂滚动触发 userScrolled 导致中断
     if (reason === 'streaming') streamingScrollLock = true;
@@ -5909,12 +5912,9 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                                 if (mb2) cb.insertBefore(det, mb2);
                             }
                             det.querySelector('.reasoning-content').textContent = reasoningText;
-                            // 思考内容增长时同步滚动（用 rAF 等待 DOM 重排完成）
+                            // 思考内容增长时同步滚动（streaming 中只要用户没手动滚就强制跟底）
                             requestAnimationFrame(function() {
-                                if ($.chatBox) {
-                                    const st = $.chatBox.scrollTop, sh = $.chatBox.scrollHeight, ch = $.chatBox.clientHeight;
-                                    if (sh - st - ch < 120) autoScrollToBottom('streaming');
-                                }
+                                if ($.chatBox && !userScrolled) autoScrollToBottom('streaming');
                             });
                         }
                     }
@@ -5936,12 +5936,9 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                         // 完整工具调用格式
                         toolCalls.push(event);
                     }
-                    // 工具调用出现时同步滚动（用 rAF 等待 DOM 重排）
+                    // 工具调用出现时同步滚动（streaming 中只要用户没手动滚就强制跟底）
                     requestAnimationFrame(function() {
-                        if ($.chatBox) {
-                            const st = $.chatBox.scrollTop, sh = $.chatBox.scrollHeight, ch = $.chatBox.clientHeight;
-                            if (sh - st - ch < 120) autoScrollToBottom('streaming');
-                        }
+                        if ($.chatBox && !userScrolled) autoScrollToBottom('streaming');
                     });
                 } else if (currentEventType === 'done' || event.type === 'done') {
                     if (event.tool_calls) toolCalls = event.tool_calls;
