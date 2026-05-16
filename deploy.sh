@@ -336,9 +336,17 @@ NGINXEOF
         success "Watchdog 已配置"
     fi
 
-    # Get IP
+    # Get IP — try multiple methods, filter for valid IPs only
     local IP
-    IP=$(ip route get 1 2>/dev/null | awk '{print $NF; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    # Validate it looks like an IP
+    if ! echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        IP=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+    fi
+    if ! echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        IP=$(ip route get 1 2>/dev/null | grep -oP 'src\s+\K[0-9.]+' | head -1)
+    fi
+    [ -z "$IP" ] && IP="localhost"
 
     success "部署完成！"
     echo ""
