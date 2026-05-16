@@ -43,7 +43,17 @@ get_repo() {
         REPO_DIR=$(pwd)
         info "已在仓库目录: $REPO_DIR"
     else
-        need git
+        # ensure git is available
+        if ! command -v git >/dev/null 2>&1; then
+            info "Installing git..."
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get update -qq && apt-get install -y -qq git
+            elif command -v yum >/dev/null 2>&1; then
+                yum install -y -q git
+            elif command -v brew >/dev/null 2>&1; then
+                brew install git
+            fi
+        fi
         if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/index.html" ]; then
             REPO_DIR="$INSTALL_DIR"
             info "仓库已存在: $REPO_DIR"
@@ -341,7 +351,7 @@ NGINXEOF
 main() {
     echo ""
     echo "╔═══════════════════════════════════════════════╗"
-    echo "║      OneAPIChat 一键部署脚本 v2.0             ║"
+    echo "║      OneAPIChat 一键部署脚本 v3.0             ║"
     echo "╚═══════════════════════════════════════════════╝"
     echo ""
 
