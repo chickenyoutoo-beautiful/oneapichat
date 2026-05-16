@@ -55,32 +55,42 @@ Set-Location $REPO_DIR
 
 # ── Install PHP ──────────────────────────────────────
 if (-not (Get-Command php -ErrorAction SilentlyContinue)) {
-    Write-Info "正在安装 PHP 8.3..."
-    # Download PHP from windows.php.net
-    $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.17-nts-Win32-vs16-x64.zip"
-    $phpZip = "$env:TEMP\php.zip"
-    $phpDir = "$env:ProgramFiles\PHP"
+    Write-Info "正在安装 PHP..."
     
+    # 首选 winget
     try {
-        Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
-        Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
-        Add-MachinePathItem "$phpDir"
-        # Copy php.ini
-        Copy-Item "$phpDir\php.ini-development" "$phpDir\php.ini" -Force
-        # Enable necessary extensions
-        $ini = Get-Content "$phpDir\php.ini"
-        $ini = $ini -replace ';extension=curl', 'extension=curl'
-        $ini = $ini -replace ';extension=mbstring', 'extension=mbstring'
-        $ini = $ini -replace ';extension=openssl', 'extension=openssl'
-        $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
-        $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
-        $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
-        $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
-        Set-Content "$phpDir\php.ini" $ini
-        Remove-Item $phpZip -Force
-        Write-OK "PHP 8.3 已安装"
+        winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            # Refresh PATH
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+            Write-OK "PHP 已通过 winget 安装"
+        }
     } catch {
-        Write-Error "PHP 安装失败: $_"
+        Write-Warn "winget 安装失败，尝试直接下载..."
+        $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.19-nts-Win32-vs16-x64.zip"
+        $phpZip = "$env:TEMP\php.zip"
+        $phpDir = "$env:ProgramFiles\PHP"
+        try {
+            Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
+            Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
+            Add-MachinePathItem "$phpDir"
+            # Copy php.ini
+            Copy-Item "$phpDir\php.ini-development" "$phpDir\php.ini" -Force -ErrorAction SilentlyContinue
+            Copy-Item "$phpDir\php.ini-production" "$phpDir\php.ini" -Force -ErrorAction SilentlyContinue
+            $ini = Get-Content "$phpDir\php.ini"
+            $ini = $ini -replace ';extension=curl', 'extension=curl'
+            $ini = $ini -replace ';extension=mbstring', 'extension=mbstring'
+            $ini = $ini -replace ';extension=openssl', 'extension=openssl'
+            $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
+            $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
+            $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
+            $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
+            Set-Content "$phpDir\php.ini" $ini
+            Remove-Item $phpZip -Force -ErrorAction SilentlyContinue
+            Write-OK "PHP 8.3 已安装"
+        } catch {
+            Write-Error "PHP 安装失败: $_"
+        }
     }
 } else {
     Write-Info "PHP 已安装 ($(php -v | Select-Object -First 1))"
