@@ -101,22 +101,29 @@ if __name__ == '__main__':
         # 获取所有的课程列表
         all_course = chaoxing.get_course_list()
         course_task = []
-        # 手动输入要学习的课程ID列表
+        # 手动输入要学习的课程ID列表（考试模式跳过交互）
         if not course_list:
-            print("*" * 10 + "课程列表" + "*" * 10)
+            if cli_args.exam:
+                # 考试模式：直接使用全部课程，不阻塞等待输入
+                course_task = all_course
+                _study_mode = False
+                # 直接跳到考试部分
+            else:
+                print("*" * 10 + "课程列表" + "*" * 10)
+                for course in all_course:
+                    print(f"ID: {course['courseId']} 课程名: {course['title']}")
+                print("*" * 28)
+                try:
+                    course_list = input("请输入想要学习的课程列表,以逗号分隔,例: 2151141,189191,198198\n").split(",")
+                except Exception as e:
+                    raise FormatError("输入格式错误") from e
+        # 筛选需要学习的课程（考试模式下 course_task 已直接设为 all_course）
+        if not cli_args.exam:
             for course in all_course:
-                print(f"ID: {course['courseId']} 课程名: {course['title']}")
-            print("*" * 28)
-            try:
-                course_list = input("请输入想要学习的课程列表,以逗号分隔,例: 2151141,189191,198198\n").split(",")
-            except Exception as e:
-                raise FormatError("输入格式错误") from e
-        # 筛选需要学习的课程
-        for course in all_course:
-            if course["courseId"] in course_list:
-                course_task.append(course)
-        if not course_task:
-            course_task = all_course
+                if course["courseId"] in course_list:
+                    course_task.append(course)
+            if not course_task:
+                course_task = all_course
         # 开始遍历要学习的课程列表
         logger.info(f"课程列表过滤完毕，当前课程任务数量: {len(course_task)}")
         # 纯考试模式跳过学习循环
