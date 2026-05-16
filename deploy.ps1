@@ -116,7 +116,7 @@ $PYTHON = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } e
 
 # ── Install Python deps ─────────────────────────────
 Write-Info "安装 Python 依赖..."
-& $PYTHON -m pip install fastapi uvicorn requests aiofiles python-multipart 2>&1 | Out-Null
+& $PYTHON -m pip install fastapi uvicorn requests aiofiles python-multipart beautifulsoup4 loguru lxml 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-OK "Python 依赖安装完成"
 } else {
