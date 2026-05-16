@@ -11,15 +11,15 @@
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "OneAPIChat Installer"
 
-Write-Host "========================================" -ForegroundColor $CYAN
-Write-Host "  OneAPIChat v3.0 部署脚本" -ForegroundColor $CYAN
-Write-Host "  预计耗时: 1-3 分钟（视网络状况）" -ForegroundColor $CYAN
-Write-Host "========================================" -ForegroundColor $CYAN
-
 $GREEN = "Green"
 $YELLOW = "Yellow"
 $RED = "Red"
 $CYAN = "Cyan"
+
+Write-Host "========================================" -ForegroundColor $CYAN
+Write-Host "  OneAPIChat v3.0 部署脚本" -ForegroundColor $CYAN
+Write-Host "  预计耗时: 1-3 分钟（视网络状况）" -ForegroundColor $CYAN
+Write-Host "========================================" -ForegroundColor $CYAN
 
 function Write-Info($msg) { Write-Host "[INFO] $msg" -ForegroundColor $CYAN }
 function Write-OK($msg) { Write-Host "[OK] $msg" -ForegroundColor $GREEN }
