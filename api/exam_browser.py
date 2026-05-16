@@ -27,6 +27,8 @@ class BrowserExam:
         env = {
             **os.environ,
             'NODE_PATH': NODE_PATH,
+            'DISPLAY': os.environ.get('DISPLAY', ':99'),
+            'HOME': os.environ.get('HOME', '/home/naujtrats'),
             'CX_USERNAME': self.account.username,
             'CX_PASSWORD': self.account.password,
             'EXAM_ID': str(exam_id),
