@@ -11,6 +11,11 @@
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "OneAPIChat Installer"
 
+Write-Host "========================================" -ForegroundColor $CYAN
+Write-Host "  OneAPIChat v3.0 部署脚本" -ForegroundColor $CYAN
+Write-Host "  预计耗时: 1-3 分钟（视网络状况）" -ForegroundColor $CYAN
+Write-Host "========================================" -ForegroundColor $CYAN
+
 $GREEN = "Green"
 $YELLOW = "Yellow"
 $RED = "Red"
@@ -55,87 +60,90 @@ Set-Location $REPO_DIR
 
 # ── Install PHP ──────────────────────────────────────
 $phpPath = $null
+
+# 1. 检查 PATH 中是否有 php
 if (Get-Command php -ErrorAction SilentlyContinue) {
     $phpPath = (Get-Command php).Source
-    Write-Info "PHP 已安装 ($phpPath)"
-} else {
-    # 搜索已安装的 PHP（winget 可能已装但 PATH 没刷新）
-    $searchPaths = @(
+    Write-Info "PHP 已就绪: $phpPath"
+}
+
+# 2. 搜索已安装但不在 PATH 的 PHP
+if (-not $phpPath) {
+    Write-Info "搜索已安装的 PHP..."
+    $searchDirs = @(
         "$env:ProgramFiles\PHP",
-        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\PHP.PHP_*",
+        "$env:ProgramFiles\PHP\v*",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
         "C:\php",
-        "$env:SystemDrive\php"
+        "C:\tools\php*"
     )
-    foreach ($sp in $searchPaths) {
-        $found = Get-ChildItem -Path $sp -Filter "php.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    foreach ($dir in $searchDirs) {
+        $found = Get-ChildItem -Path $dir -Filter "php.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) { $phpPath = $found.FullName; break }
     }
-    
-    if ($phpPath) {
-        Write-OK "找到 PHP: $phpPath"
-        $phpDir = Split-Path $phpPath -Parent
-        Add-MachinePathItem $phpDir
-        $env:Path = "$phpDir;$env:Path"
-    } else {
-        Write-Info "正在安装 PHP..."
-        try {
-            winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
-            # 搜索 winget 安装后的 PHP
-            Start-Sleep -Seconds 5
-            $wingetPhp = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "php.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($wingetPhp) {
-                $phpPath = $wingetPhp.FullName
-                $phpDir = Split-Path $phpPath -Parent
-                Add-MachinePathItem $phpDir
-                $env:Path = "$phpDir;$env:Path"
-                Write-OK "PHP 已通过 winget 安装: $phpPath"
-            } else {
-                # 再搜 Program Files
-                $pfPhp = Get-ChildItem -Path "$env:ProgramFiles\PHP" -Filter "php.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($pfPhp) {
-                    $phpPath = $pfPhp.FullName
-                    $phpDir = Split-Path $phpPath -Parent
-                    Add-MachinePathItem $phpDir
-                    $env:Path = "$phpDir;$env:Path"
-                    Write-OK "PHP 已安装: $phpPath"
-                }
-            }
-        } catch {
-            Write-Warn "winget 安装失败"
-        }
+    if ($phpPath) { Write-OK "找到 PHP: $phpPath" }
+}
+
+# 3. 安装 PHP（显示进度，不吞输出）
+if (-not $phpPath) {
+    Write-Info "正在通过 winget 安装 PHP（请等待，约 1-2 分钟）..."
+    $wingetResult = winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>&1
+    Write-Info "winget 完成，搜索安装位置..."
+    Start-Sleep -Seconds 3
+    $searchDirs = @(
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
+        "$env:ProgramFiles\PHP",
+        "$env:ProgramFiles\PHP\v*"
+    )
+    foreach ($dir in $searchDirs) {
+        $found = Get-ChildItem -Path $dir -Filter "php.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $phpPath = $found.FullName; break }
     }
-    
-    # 还是没找到，直接下载
-    if (-not $phpPath) {
-        Write-Info "直接下载 PHP..."
-        $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.19-nts-Win32-vs16-x64.zip"
-        $phpZip = "$env:TEMP\php.zip"
-        $phpDir = "$env:ProgramFiles\PHP"
-        try {
-            Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
-            Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
-            $phpPath = "$phpDir\php.exe"
-            Add-MachinePathItem $phpDir
-            $env:Path = "$phpDir;$env:Path"
-            if (Test-Path "$phpDir\php.ini-development") { Copy-Item "$phpDir\php.ini-development" "$phpDir\php.ini" -Force }
-            elseif (Test-Path "$phpDir\php.ini-production") { Copy-Item "$phpDir\php.ini-production" "$phpDir\php.ini" -Force }
-            if (Test-Path "$phpDir\php.ini") {
-                $ini = Get-Content "$phpDir\php.ini"
-                $ini = $ini -replace ';extension=curl', 'extension=curl'
-                $ini = $ini -replace ';extension=mbstring', 'extension=mbstring'
-                $ini = $ini -replace ';extension=openssl', 'extension=openssl'
-                $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
-                $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
-                $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
-                $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
-                Set-Content "$phpDir\php.ini" $ini
-            }
-            Remove-Item $phpZip -Force -ErrorAction SilentlyContinue
-            Write-OK "PHP 已安装: $phpPath"
-        } catch {
-            Write-Error "PHP 安装失败: $_"
-        }
+    if ($phpPath) { Write-OK "PHP 已安装: $phpPath" }
+}
+
+# 4. 直接下载 PHP（最后手段）
+if (-not $phpPath) {
+    Write-Info "直接下载 PHP 8.3（约 30MB）..."
+    $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.19-nts-Win32-vs16-x64.zip"
+    $phpZip = "$env:TEMP\php.zip"
+    $phpDir = "$env:ProgramFiles\PHP"
+    try {
+        Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
+        Write-Info "正在解压..."
+        Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
+        $phpPath = "$phpDir\php.exe"
+        Write-OK "PHP 已安装: $phpPath"
+    } catch {
+        Write-Error "PHP 下载失败: $_"
+    } finally {
+        Remove-Item $phpZip -Force -ErrorAction SilentlyContinue
     }
+}
+
+# 注册到 PATH 并配置 php.ini
+if ($phpPath) {
+    $phpDir = Split-Path $phpPath -Parent
+    Add-MachinePathItem $phpDir
+    $env:Path = "$phpDir;$env:Path"
+    $iniPath = "$phpDir\php.ini"
+    if (-not (Test-Path $iniPath)) {
+        if (Test-Path "$phpDir\php.ini-development") { Copy-Item "$phpDir\php.ini-development" $iniPath -Force }
+        elseif (Test-Path "$phpDir\php.ini-production") { Copy-Item "$phpDir\php.ini-production" $iniPath -Force }
+    }
+    if (Test-Path $iniPath) {
+        $ini = Get-Content $iniPath -Raw
+        if ($ini -notmatch 'extension=curl[^;]') { $ini = $ini -replace ';extension=curl', 'extension=curl' }
+        if ($ini -notmatch 'extension=mbstring[^;]') { $ini = $ini -replace ';extension=mbstring', 'extension=mbstring' }
+        if ($ini -notmatch 'extension=openssl[^;]') { $ini = $ini -replace ';extension=openssl', 'extension=openssl' }
+        $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
+        $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
+        $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
+        $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
+        Set-Content $iniPath $ini
+    }
+} else {
+    Write-Error "无法安装 PHP，请手动安装后重试"
 }
 
 # ── Install Python ──────────────────────────────────
