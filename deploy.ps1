@@ -266,3 +266,4 @@ function Add-MachinePathItem($item) {
         [Environment]::SetEnvironmentVariable("Path", "$currentPath;$item", "Machine")
     }
 }
+# force cdn refresh
