@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """超星考试透明代理 — 转发浏览器 Cookie，修改 HTML 绕过 appExamClientSign"""
-import http.server, socketserver, requests, re, sys
+import http.server, socketserver, requests, re, sys, os
 
 PROXY_PORT = 8899
 TARGET_HOST = "mooc1-api.chaoxing.com"
