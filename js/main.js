@@ -614,7 +614,7 @@ const CHAOXING_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "chaoxing_auto",
-        description: "超星学习通自动刷课工具。当用户要求刷课、刷学习通、完成网课、自动答题时调用。调用后自动登录并开始处理指定课程。",
+        description: "超星学习通自动刷课。调用前必须：(1)先调用 chaoxing_auth 检查登录 (2)再调用 chaoxing_overview 检查是否正在刷课。如果正在刷课，先告知用户当前进度并询问是否停止后切换课程。然后再开始新刷课任务。",
         parameters: {
             type: "object",
             properties: {
@@ -629,7 +629,7 @@ const CHAOXING_LOGIN_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "chaoxing_login",
-        description: "登录超星学习通账号。在用户提供了手机号和密码后调用,验证并登录学习通。登录成功后才能使用刷课功能。",
+        description: "登录超星学习通账号。只在 chaoxing_auth 返回未登录时才调用。在用户提供了手机号和密码后调用,验证并登录学习通。",
         parameters: {
             type: "object",
             properties: {
@@ -690,6 +690,66 @@ const CHAOXING_STATS_TOOL_DEFINITION = {
             properties: {},
             required: []
         }
+    }
+};
+
+const CHAOXING_OVERVIEW_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_overview",
+        description: "超星刷课总览：一次性返回登录状态、是否正在刷课、当前刷课课程、已完成课程数、总课程数、视频/答题进度。在用户询问刷课状态、'现在刷到哪了'、'进度如何'时调用此工具。调用前必须先调用 chaoxing_auth 检查登录。",
+        parameters: { type: "object", properties: {}, required: [] }
+    }
+};
+
+const CHAOXING_EXAM_LIST_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_exam_list",
+        description: "列出超星学习通所有课程的考试列表，包含考试ID、课程、名称、状态、起止时间。调用后返回完整JSON供用户选择。",
+        parameters: { type: "object", properties: {}, required: [] }
+    }
+};
+
+const CHAOXING_EXAM_START_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_exam_start",
+        description: "开考超星学习通考试。自动暂停刷课避免风控。调用前必须先调用 chaoxing_auth 确认登录状态。需要用户确认要开考的考试ID。",
+        parameters: {
+            type: "object",
+            properties: {
+                exam_ids: { type: "string", description: "要开考的考试ID,逗号分隔。如'9318653,9219915'。如果不传则开考全部待考。" }
+            },
+            required: []
+        }
+    }
+};
+
+const CHAOXING_EXAM_STATUS_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_exam_status",
+        description: "查询当前考试任务的运行状态、进度和后台日志。",
+        parameters: { type: "object", properties: {}, required: [] }
+    }
+};
+
+const CHAOXING_EXAM_STOP_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_exam_stop",
+        description: "停止正在运行的考试任务。",
+        parameters: { type: "object", properties: {}, required: [] }
+    }
+};
+
+const CHAOXING_AUTH_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_auth",
+        description: "【必须首先调用】检测超星学习通的登录状态。在调用任何 chaoxing 工具（考试列表、开考、刷课）之前，你必须先调用此工具。如果已登录，直接进行下一步操作；如果未登录，才向用户询问手机号和密码。绝对不要在未检查状态的情况下直接问用户要账号密码。",
+        parameters: { type: "object", properties: {}, required: [] }
     }
 };
 
@@ -3858,36 +3918,75 @@ window.setToolEnabled = function(toolKey, enabled) {
 };
 
 // 加载工具开关配置到 UI
-window.loadToolToggleStates = function() {
-    var toolKeys = [
-        'SEARCH_TOOL_DEFINITION', 'RAG_SEARCH_TOOL_DEFINITION', 'WEB_FETCH_TOOL_DEFINITION',
-        'IMAGE_TOOL_DEFINITION', 'ANALYZE_IMAGE_TOOL',
-        'CHAXING_LOGIN_TOOL_DEFINITION', 'CHAXING_LIST_TOOL_DEFINITION', 'CHAXING_TOOL_DEFINITION',
-        'CHAXING_STATUS_TOOL_DEFINITION', 'CHAXING_STOP_TOOL_DEFINITION', 'CHAXING_STATS_TOOL_DEFINITION',
-        'SERVER_EXEC_TOOL', 'SERVER_PYTHON_TOOL', 'SERVER_FILE_READ_TOOL', 'SERVER_FILE_WRITE_TOOL',
-        'SERVER_SYS_INFO_TOOL', 'SERVER_PS_TOOL', 'SERVER_DISK_TOOL', 'SERVER_NETWORK_TOOL',
-        'SERVER_DOCKER_TOOL', 'SERVER_DB_QUERY_TOOL', 'SERVER_FILE_SEARCH_TOOL', 'SERVER_FILE_OP_TOOL',
-        'ENGINE_CRON_LIST_TOOL', 'ENGINE_CRON_CREATE_TOOL', 'ENGINE_CRON_DELETE_TOOL',
-        'DELEGATE_TASK_TOOL', 'ENGINE_AGENT_STATUS_TOOL', 'ENGINE_AGENT_LIST_TOOL',
-        'ENGINE_AGENT_DELETE_TOOL', 'ENGINE_PUSH_TOOL'
-    ];
-    // 加载自定义技能勾选状态
-    var customSkills = window.getCustomSkills();
-    for (var i = 0; i < customSkills.length; i++) {
-        toolKeys.push('CUSTOM_SKILL_' + customSkills[i].name);
+// ── 工具分类定义 (key: 显示名) ──
+const _TOOL_CATEGORIES = [
+    { label: '🔍 搜索与获取', keys: ['SEARCH_TOOL_DEFINITION','RAG_SEARCH_TOOL_DEFINITION','WEB_FETCH_TOOL_DEFINITION'] },
+    { label: '🎨 图像', keys: ['IMAGE_TOOL_DEFINITION','ANALYZE_IMAGE_TOOL'] },
+    { label: '📚 刷课', keys: ['CHAXING_LOGIN_TOOL_DEFINITION','CHAXING_LIST_TOOL_DEFINITION','CHAXING_TOOL_DEFINITION','CHAXING_STATUS_TOOL_DEFINITION','CHAXING_STOP_TOOL_DEFINITION','CHAXING_STATS_TOOL_DEFINITION','CHAXING_OVERVIEW_TOOL'] },
+    { label: '📝 考试', keys: ['CHAXING_AUTH_TOOL','CHAXING_EXAM_LIST_TOOL','CHAXING_EXAM_START_TOOL','CHAXING_EXAM_STATUS_TOOL','CHAXING_EXAM_STOP_TOOL'] },
+    { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'] },
+    { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'] }
+];
+
+// ── 工具显示名映射 ──
+const _TOOL_LABELS = {
+    'SEARCH_TOOL_DEFINITION': '联网搜索', 'RAG_SEARCH_TOOL_DEFINITION': '知识库搜索', 'WEB_FETCH_TOOL_DEFINITION': '网页抓取',
+    'IMAGE_TOOL_DEFINITION': '图片生成', 'ANALYZE_IMAGE_TOOL': '图片分析',
+    'CHAXING_LOGIN_TOOL_DEFINITION': '登录', 'CHAXING_LIST_TOOL_DEFINITION': '课程列表', 'CHAXING_TOOL_DEFINITION': '刷课执行',
+    'CHAXING_STATUS_TOOL_DEFINITION': '状态', 'CHAXING_STOP_TOOL_DEFINITION': '停止', 'CHAXING_STATS_TOOL_DEFINITION': '统计',
+    'CHAXING_OVERVIEW_TOOL': '总览',
+    'CHAXING_AUTH_TOOL': '登录检测', 'CHAXING_EXAM_LIST_TOOL': '考试列表', 'CHAXING_EXAM_START_TOOL': '开始考试',
+    'CHAXING_EXAM_STATUS_TOOL': '考试状态', 'CHAXING_EXAM_STOP_TOOL': '停止考试',
+    'SERVER_EXEC_TOOL': '命令执行', 'SERVER_PYTHON_TOOL': 'Python 执行', 'SERVER_FILE_READ_TOOL': '文件读取',
+    'SERVER_FILE_WRITE_TOOL': '文件写入', 'SERVER_SYS_INFO_TOOL': '系统信息', 'SERVER_PS_TOOL': '进程列表',
+    'SERVER_DISK_TOOL': '磁盘信息', 'SERVER_NETWORK_TOOL': '网络状态', 'SERVER_DOCKER_TOOL': 'Docker',
+    'SERVER_DB_QUERY_TOOL': '数据库', 'SERVER_FILE_SEARCH_TOOL': '文件搜索', 'SERVER_FILE_OP_TOOL': '文件操作',
+    'ENGINE_CRON_LIST_TOOL': 'Cron 列表', 'ENGINE_CRON_CREATE_TOOL': '创建 Cron', 'ENGINE_CRON_DELETE_TOOL': '删除 Cron',
+    'DELEGATE_TASK_TOOL': '子代理任务', 'ENGINE_AGENT_STATUS_TOOL': '子代理状态', 'ENGINE_AGENT_LIST_TOOL': '子代理列表',
+    'ENGINE_AGENT_DELETE_TOOL': '删除子代理', 'ENGINE_PUSH_TOOL': '推送通知'
+};
+
+// ── 动态渲染工具面板 ──
+window.renderToolPanel = function() {
+    var container = document.getElementById('toolToggleContainer');
+    if (!container) return;
+    // 移除已有的动态工具行（保留自定义技能区域）
+    var existingRows = container.querySelectorAll('.tool-toggle-row.dynamic, .tools-category-label.dynamic');
+    existingRows.forEach(function(r) { r.remove(); });
+
+    var customSkillsEl = document.getElementById('customSkillsList');
+    var rendered = '';
+
+    _TOOL_CATEGORIES.forEach(function(cat) {
+        rendered += '<div class="tools-category-label dynamic">' + cat.label + '</div>';
+        cat.keys.forEach(function(key) {
+            var label = _TOOL_LABELS[key] || key;
+            var isDanger = (key.indexOf('SERVER_EXEC') >= 0 || key.indexOf('SERVER_PYTHON') >= 0 || key.indexOf('SERVER_FILE_WRITE') >= 0 || key.indexOf('SERVER_DOCKER') >= 0 || key.indexOf('SERVER_DB') >= 0 || key.indexOf('SERVER_FILE_OP') >= 0 || key.indexOf('CRON_CREATE') >= 0 || key.indexOf('CRON_DELETE') >= 0 || key.indexOf('AGENT_DELETE') >= 0);
+            var warnClass = isDanger ? ' tool-warn' : '';
+            var checked = window.isToolEnabled(key) ? ' checked' : '';
+            rendered += '<div class="tool-toggle-row dynamic" data-tool="' + key + '">';
+            rendered += '<span class="tool-toggle-name' + warnClass + '" title="' + label + '">' + label + '</span>';
+            rendered += '<label class="switch small"><input type="checkbox" id="tool_enabled_' + key + '" data-toolkey="' + key + '"' + checked + '><span class="slider"></span></label>';
+            rendered += '</div>';
+        });
+    });
+
+    // 插入到自定义技能区域之前
+    if (customSkillsEl) {
+        customSkillsEl.insertAdjacentHTML('beforebegin', rendered);
+    } else {
+        container.insertAdjacentHTML('beforeend', rendered);
     }
 
-    toolKeys.forEach(function(key) {
-        var el = document.getElementById('tool_enabled_' + key);
-        if (!el) {
-            // 可能是自定义技能的 checkbox
-            return;
-        }
-        el.checked = window.isToolEnabled(key);
-    });
-    // ★ 绑定事件监听
+    // 绑定事件
     if (typeof bindToolToggleEvents === 'function') bindToolToggleEvents();
-    // ★ 也绑定自定义技能的监听
+    window.updateToolsActiveCount();
+};
+
+window.loadToolToggleStates = function() {
+    // 动态渲染工具面板
+    window.renderToolPanel();
+    // 自定义技能绑定
     if (typeof bindCustomSkillEvents === 'function') bindCustomSkillEvents();
     window.updateToolsActiveCount();
 };
@@ -5810,6 +5909,13 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                                 if (mb2) cb.insertBefore(det, mb2);
                             }
                             det.querySelector('.reasoning-content').textContent = reasoningText;
+                            // 思考内容增长时同步滚动（用 rAF 等待 DOM 重排完成）
+                            requestAnimationFrame(function() {
+                                if ($.chatBox) {
+                                    const st = $.chatBox.scrollTop, sh = $.chatBox.scrollHeight, ch = $.chatBox.clientHeight;
+                                    if (sh - st - ch < 120) autoScrollToBottom('streaming');
+                                }
+                            });
                         }
                     }
                 } else if (currentEventType === 'tool_call' || event.type === 'tool_call') {
@@ -5830,6 +5936,13 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                         // 完整工具调用格式
                         toolCalls.push(event);
                     }
+                    // 工具调用出现时同步滚动（用 rAF 等待 DOM 重排）
+                    requestAnimationFrame(function() {
+                        if ($.chatBox) {
+                            const st = $.chatBox.scrollTop, sh = $.chatBox.scrollHeight, ch = $.chatBox.clientHeight;
+                            if (sh - st - ch < 120) autoScrollToBottom('streaming');
+                        }
+                    });
                 } else if (currentEventType === 'done' || event.type === 'done') {
                     if (event.tool_calls) toolCalls = event.tool_calls;
                     if (event.usage) usage = event.usage;
@@ -7287,6 +7400,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         tools.push(CHAOXING_STATUS_TOOL_DEFINITION);
         tools.push(CHAOXING_STOP_TOOL_DEFINITION);
         tools.push(CHAOXING_STATS_TOOL_DEFINITION);
+        tools.push(CHAOXING_OVERVIEW_TOOL);
+        tools.push(CHAOXING_AUTH_TOOL);
+        tools.push(CHAOXING_EXAM_LIST_TOOL);
+        tools.push(CHAOXING_EXAM_START_TOOL);
+        tools.push(CHAOXING_EXAM_STATUS_TOOL);
+        tools.push(CHAOXING_EXAM_STOP_TOOL);
         // 引擎工具已在上面 Agent 模式分支添加,避免重复
 
                     tools.push(SERVER_EXEC_TOOL);
@@ -7328,6 +7447,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'chaoxing_status': 'CHAXING_STATUS_TOOL_DEFINITION',
                 'chaoxing_stop': 'CHAXING_STOP_TOOL_DEFINITION',
                 'chaoxing_stats': 'CHAXING_STATS_TOOL_DEFINITION',
+                'chaoxing_overview': 'CHAXING_OVERVIEW_TOOL',
+                'chaoxing_auth': 'CHAXING_AUTH_TOOL',
+                'chaoxing_exam_list': 'CHAXING_EXAM_LIST_TOOL',
+                'chaoxing_exam_start': 'CHAXING_EXAM_START_TOOL',
+                'chaoxing_exam_status': 'CHAXING_EXAM_STATUS_TOOL',
+                'chaoxing_exam_stop': 'CHAXING_EXAM_STOP_TOOL',
                 'server_exec': 'SERVER_EXEC_TOOL',
                 'server_python': 'SERVER_PYTHON_TOOL',
                 'server_file_read': 'SERVER_FILE_READ_TOOL',
@@ -7906,6 +8031,24 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'chaoxing_stats') {
                         toolResult = await chaoxingToolHandler('stats');
+                    }
+                     else if (func.name === 'chaoxing_overview') {
+                        toolResult = await chaoxingToolHandler('overview');
+                    }
+                     else if (func.name === 'chaoxing_auth') {
+                        toolResult = await chaoxingToolHandler('auth_check');
+                    }
+                     else if (func.name === 'chaoxing_exam_list') {
+                        toolResult = await chaoxingToolHandler('exam_list');
+                    }
+                     else if (func.name === 'chaoxing_exam_start') {
+                        toolResult = await chaoxingToolHandler('exam_start', args.exam_ids || '');
+                    }
+                     else if (func.name === 'chaoxing_exam_status') {
+                        toolResult = await chaoxingToolHandler('exam_status');
+                    }
+                     else if (func.name === 'chaoxing_exam_stop') {
+                        toolResult = await chaoxingToolHandler('exam_stop');
                     }
                      else if (func.name === 'engine_cron_list') {
                         toolResult = await engineApiHandler('cron_list');
@@ -10569,6 +10712,92 @@ async function chaoxingToolHandler(action, ids, username, password) {
                 return { result: msg };
             }
             return { error: '获取统计失败' };
+        }
+        if (action === 'overview') {
+            // 综合总览：登录+运行状态+进度
+            var [sR, stR] = await Promise.all([
+                fetch('/oneapichat/chaoxing_api.php?action=status' + authSuffix),
+                fetch('/oneapichat/chaoxing_api.php?action=stats' + authSuffix)
+            ]);
+            var sD = await sR.json();
+            var stD = await stR.json();
+            var running = !!sD.running;
+            var msg = '📋 超星刷课总览\n';
+            msg += '登录状态: ✅ 已登录\n';
+            msg += '刷课状态: ' + (running ? '🟢 运行中' : '⚪ 空闲') + '\n';
+            if (running && sD.log) {
+                var lastLine = sD.log.split('\n').filter(function(l) { return l.indexOf('开始学习课程') >= 0; }).pop();
+                if (lastLine) msg += '当前课程: ' + lastLine.replace(/.*开始学习课程: /, '') + '\n';
+            }
+            if (stD.total_courses !== undefined) {
+                msg += '总课程: ' + stD.total_courses + ' | 已完成: ' + stD.completed + '\n';
+                msg += '视频: ' + stD.videos_done + ' | 答题: ' + stD.works_done + '\n';
+            }
+            if (running) {
+                msg += '\n💡 刷课正在运行。如需停止请调用 chaoxing_stop，如需切换课程请先停止。';
+            }
+            return { result: msg };
+        }
+        if (action === 'auth_check') {
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=courses' + authSuffix);
+            if (r.ok) return { result: '✅ 学习通已登录，可直接操作' };
+            return { error: '❌ 未登录，需要提供学习通手机号和密码' };
+        }
+        if (action === 'exam_list') {
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=exam_list' + authSuffix);
+            var d = await r.json();
+            if (d.exams) {
+                var msg = '📋 考试列表 (' + d.total + ' 场):\n';
+                d.exams.forEach(function(e) {
+                    var timeStr = (e.start_time && e.end_time) ? (' | ' + e.start_time + ' ~ ' + e.end_time) : '';
+                    msg += '- [' + e.exam_id + '] ' + (e.course_title || '') + ' / ' + e.title + ' (' + e.status + ')' + timeStr + '\n';
+                });
+                return { result: msg };
+            }
+            return { error: d.error || '获取考试列表失败' };
+        }
+        if (action === 'exam_start') {
+            var selectedExams = [];
+            if (ids) {
+                // 先用 exam_list 获取所有考试
+                var elR = await fetch('/oneapichat/chaoxing_api.php?action=exam_list' + authSuffix);
+                var elD = await elR.json();
+                var targetIds = ids.split(',').map(function(s) { return parseInt(s.trim()); });
+                var exams = elD.exams || [];
+                exams.forEach(function(e) {
+                    if (targetIds.indexOf(e.exam_id) >= 0 && e.status !== '已完成' && e.status !== '已交' && e.status !== '已交卷') {
+                        selectedExams.push({ exam_id: e.exam_id, course_id: e.course_id + '', class_id: e.class_id + '', cpi: e.cpi, enc_task: e.enc_task + '' });
+                    }
+                });
+            } else {
+                // 全选
+                var elR = await fetch('/oneapichat/chaoxing_api.php?action=exam_list' + authSuffix);
+                var elD = await elR.json();
+                var exams = elD.exams || [];
+                exams.forEach(function(e) {
+                    if (e.status !== '已完成' && e.status !== '已交' && e.status !== '已交卷') {
+                        selectedExams.push({ exam_id: e.exam_id, course_id: e.course_id + '', class_id: e.class_id + '', cpi: e.cpi, enc_task: e.enc_task + '' });
+                    }
+                });
+            }
+            if (selectedExams.length === 0) return { error: '没有可开考的考试' };
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=exam_start' + authSuffix, {
+                method: 'POST',
+                body: JSON.stringify({ exams: selectedExams })
+            });
+            var d = await r.json();
+            if (d.success) return { result: '✅ 考试已启动 (PID: ' + d.pid + '), 共 ' + selectedExams.length + ' 场' + (d.study_running ? '。刷课已自动暂停。' : '') };
+            return { error: d.error || '启动失败' };
+        }
+        if (action === 'exam_status') {
+            var r = await fetch('/oneapichat/chaoxing_api.php?action=exam_status' + authSuffix);
+            var d = await r.json();
+            var logPreview = d.log ? d.log.slice(-2000) : '(无日志)';
+            return { result: '考试任务' + (d.running ? '运行中' : '未运行') + '\n\n日志:\n' + logPreview };
+        }
+        if (action === 'exam_stop') {
+            await fetch('/oneapichat/chaoxing_api.php?action=exam_stop' + authSuffix, { method: 'POST' });
+            return { result: '考试任务已停止' };
         }
         return { error: '未知操作' };
     } catch(e) {

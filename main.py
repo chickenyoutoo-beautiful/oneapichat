@@ -8,6 +8,7 @@ from api.answer import Tiku
 from api.tracker import LearningTracker
 from urllib3 import disable_warnings,exceptions
 import os
+import json
 
 # # 定义全局变量，用于存储配置文件路径
 # textPath = './resource/BookID.txt'
@@ -41,6 +42,8 @@ def init_config():
     parser.add_argument("-s", "--speed", type=float, default=2.0, help="视频播放倍速(默认1，最大2)")
     parser.add_argument("--exam", action="store_true", help="考试模式：自动完成课程考试")
     parser.add_argument("--exam-no-submit", action="store_true", help="考试模式：搜题但不自动提交")
+    parser.add_argument("--exam-ids", type=str, default=None, help="考试模式：仅处理指定考试ID（逗号分隔）")
+    parser.add_argument("--exam-json", type=str, default=None, help="考试模式：从JSON文件读取考试列表直接处理")
     args = parser.parse_args()
     if args.config:
         config = configparser.ConfigParser()
@@ -116,6 +119,8 @@ if __name__ == '__main__':
             course_task = all_course
         # 开始遍历要学习的课程列表
         logger.info(f"课程列表过滤完毕，当前课程任务数量: {len(course_task)}")
+        # 纯考试模式跳过学习循环
+        _study_mode = not cli_args.exam
         for course in course_task:
             # 检查课程是否已完成，完成则跳过避免卡死
             existing_status = tracker.conn.execute(
@@ -124,6 +129,9 @@ if __name__ == '__main__':
             ).fetchone()
             if existing_status and existing_status[0] == 'completed':
                 logger.info(f"课程 {course['title']} 已完成，跳过")
+                continue
+            # 纯考试模式：跳过学习内容
+            if not _study_mode:
                 continue
             logger.info(f"开始学习课程: {course['title']}")
             tracker.start_course(course['courseId'], course['title'], course.get('teacher', ''))
@@ -210,33 +218,71 @@ if __name__ == '__main__':
             try:
                 from api.exam_auto import ChaoxingExam
                 exam_runner = ChaoxingExam(account, tiku=tiku)
-                for course in course_task:
+                auto_submit = not cli_args.exam_no_submit
+
+                # 收集要处理的考试
+                _exam_tasks = []
+                if cli_args.exam_json and os.path.exists(cli_args.exam_json):
+                    # 从 JSON 文件直接读取选中的考试信息
+                    with open(cli_args.exam_json, 'r', encoding='utf8') as f:
+                        _exam_tasks = json.load(f)
+                    logger.info(f"直接处理选中的 {len(_exam_tasks)} 场考试")
+                elif cli_args.exam_ids:
+                    # 兼容旧方式：按 exam_ids 从所有课程中搜索
+                    selected_exam_ids = set()
+                    for eid in cli_args.exam_ids.split(','):
+                        eid = eid.strip()
+                        if eid.isdigit():
+                            selected_exam_ids.add(int(eid))
+                    logger.info(f"搜索指定考试: {selected_exam_ids}")
+                    for course in all_course:
+                        try:
+                            exams = exam_runner.list_exams(course['courseId'], course['clazzId'], course['cpi'])
+                            for e in exams:
+                                if e['exam_id'] in selected_exam_ids and e.get('status') not in ('已完成', '已交'):
+                                    _exam_tasks.append({
+                                        'exam_id': e['exam_id'],
+                                        'course_id': e['course_id'],
+                                        'class_id': e['class_id'],
+                                        'cpi': e['cpi'],
+                                        'enc_task': e.get('enc_task', 0),
+                                    })
+                        except: pass
+                else:
+                    # 无选择：遍历所有课程
+                    for course in all_course:
+                        try:
+                            exams = exam_runner.list_exams(course['courseId'], course['clazzId'], course['cpi'])
+                            for e in exams:
+                                if e.get('status') not in ('已完成', '已交'):
+                                    _exam_tasks.append({
+                                        'exam_id': e['exam_id'],
+                                        'course_id': e['course_id'],
+                                        'class_id': e['class_id'],
+                                        'cpi': e['cpi'],
+                                        'enc_task': e.get('enc_task', 0),
+                                    })
+                        except: pass
+
+                # 逐场执行考试
+                for exam_info in _exam_tasks:
                     try:
-                        logger.info(f"检查课程考试: {course['title']}")
-                        exams = exam_runner.list_exams(course['courseId'], course['clazzId'], course['cpi'])
-                        if not exams:
-                            logger.info(f"  无考试安排")
-                            continue
-                        for exam_info in exams:
-                            if exam_info.get('status') in ('已完成', '已交'):
-                                logger.info(f"  考试 [{exam_info['title']}] 已完成，跳过")
-                                continue
-                            logger.info(f"  发现考试: {exam_info['title']}")
-                            auto_submit = not cli_args.exam_no_submit
-                            result = exam_runner.run(
-                                exam_id=exam_info['exam_id'],
-                                course_id=course['courseId'],
-                                class_id=course['clazzId'],
-                                cpi=course['cpi'],
-                                enc_task=exam_info.get('enc_task', 0),
-                                auto_submit=auto_submit,
-                            )
-                            if result.get('submitted'):
-                                logger.info(f"  ✅ 考试 {exam_info['title']} 已完成并交卷")
-                            else:
-                                logger.info(f"  ⚠️ 考试 {exam_info['title']} 处理结果: {result['answered']}/{result['total']} 题已答")
+                        logger.info(f"处理考试: [{exam_info['exam_id']}]")
+                        result = exam_runner.run(
+                            exam_id=exam_info['exam_id'],
+                            course_id=exam_info['course_id'],
+                            class_id=exam_info['class_id'],
+                            cpi=exam_info['cpi'],
+                            enc_task=exam_info.get('enc_task', 0),
+                            auto_submit=auto_submit,
+                        )
+                        if result.get('submitted'):
+                            logger.info(f"  ✅ 考试 {result.get('title', '?')} 已完成并交卷")
+                        else:
+                            logger.info(f"  ⚠️ 考试 {result.get('title', '?')} 处理结果: {result['answered']}/{result['total']} 题已答")
                     except Exception as e:
-                        logger.warning(f"  课程考试处理异常: {e}")
+                        err_type = type(e).__name__
+                        logger.warning(f"  ⛔ 考试 [{exam_info.get('exam_id', '?')}] 处理异常: {err_type}: {e}")
                         continue
             except Exception as e:
                 logger.warning(f"考试模式初始化失败: {e}")
