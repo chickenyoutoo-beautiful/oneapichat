@@ -2035,7 +2035,7 @@ function setStatus(text, cls) {
             if (examIds.length === 0) { logExam('请先选择要手动开考的考试', 'warn'); return; }
             if (examIds.length > 1) { logExam('手动开考一次只能选一个考试', 'warn'); return; }
             var e = examIds[0];
-            var proxyUrl = 'http://192.168.195.213:8899/exam-ans/exam/phone/task-exam?' +
+            var proxyUrl = 'http://192.168.195.213:8898/exam-ans/exam/phone/task-exam?' +
                 'taskrefId=' + e.exam_id + '&courseId=' + e.course_id +
                 '&classId=' + e.class_id + '&cpi=' + e.cpi + '&ut=s';
             logExam('打开代理页面: ' + e.title, 'info');
