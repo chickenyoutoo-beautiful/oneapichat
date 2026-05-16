@@ -465,6 +465,7 @@ if (_dd) document.documentElement.classList.add('dark');
                     </div>
                     <div class="flex items-center gap-3">
                         <button onclick="startExamAll()" id="examStartBtn" class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full transition shadow-sm">开考所选</button>
+                        <button onclick="openExamManual()" class="px-3 py-1 text-xs font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-full transition border border-amber-200 dark:border-amber-800 flex items-center gap-1" title="超星需手动确认的考试，点此在代理页面中手动开考"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg> 手动开考</button>
                         <button onclick="clearExamLog()" class="text-xs text-gray-400 hover:text-red-500 transition px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg> 清空</button>
                     </div>
                 </div>
@@ -2022,6 +2023,27 @@ function setStatus(text, cls) {
             updateExamCount();
         }
 
+        function openExamManual() {
+            var checkedCbs = document.querySelectorAll('.exam-cb:checked');
+            var examIds = [];
+            var examData_global = examData; // from closure
+            checkedCbs.forEach(function(cb) {
+                var itemDiv = cb.closest('.flex');
+                var idx = Array.from(itemDiv.parentNode.children).indexOf(itemDiv);
+                var e = examData_global[idx];
+                if (e && e.exam_id) examIds.push(e);
+            });
+            if (examIds.length === 0) { logExam('请先选择要手动开考的考试', 'warn'); return; }
+            if (examIds.length > 1) { logExam('手动开考一次只能选一个考试', 'warn'); return; }
+            var e = examIds[0];
+            var proxyUrl = 'http://192.168.195.213:8899/exam-ans/exam/phone/task-exam?' +
+                'taskrefId=' + e.exam_id + '&courseId=' + e.course_id +
+                '&classId=' + e.class_id + '&cpi=' + e.cpi + '&ut=s';
+            logExam('打开代理页面进行手动开考: ' + e.title, 'info');
+            logExam('在新窗口中勾选「我已阅读并同意」并点击「开始考试」', 'info');
+            window.open(proxyUrl, '_blank');
+        }
+
         function toggleExamCb(el) {
             var cb = el.querySelector('.exam-cb');
             if (cb.disabled) return;
@@ -2207,6 +2229,17 @@ function setStatus(text, cls) {
                             }
                         }
                         logExam('考试流程已结束' + logSummary, okCount > 0 && errCount === 0 ? 'success' : 'warn');
+                        
+                        // 检测是否有需要手动开考的考试（CLIENT_FORM_SIGN）
+                        var needManual = d.log && (d.log.indexOf('无法开始考试') >= 0 || d.log.indexOf('客户端APP') >= 0);
+                        if (needManual) {
+                            logExam('⚠️ 检测到需要手动开考的考试，3秒后自动弹出代理页面...', 'warn');
+                            showToast('需要手动确认，即将弹出代理页面', 'warn');
+                            setTimeout(function() {
+                                openExamManual();
+                            }, 3000);
+                        }
+                        
                         if (statusEl) {
                             statusEl.className = 'text-xs px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500';
                             statusEl.textContent = '就绪';
