@@ -44,6 +44,7 @@ def init_config():
     parser.add_argument("--exam-no-submit", action="store_true", help="考试模式：搜题但不自动提交")
     parser.add_argument("--exam-ids", type=str, default=None, help="考试模式：仅处理指定考试ID（逗号分隔）")
     parser.add_argument("--exam-json", type=str, default=None, help="考试模式：从JSON文件读取考试列表直接处理")
+    parser.add_argument("--exam-browser", action="store_true", help="考试模式：使用无头浏览器（需要 playwright，有 CLIENT_FORM_SIGN 的考试用）")
     args = parser.parse_args()
     if args.config:
         config = configparser.ConfigParser()
@@ -275,17 +276,40 @@ if __name__ == '__main__':
                 for exam_info in _exam_tasks:
                     try:
                         logger.info(f"处理考试: [{exam_info['exam_id']}]")
-                        result = exam_runner.run(
-                            exam_id=exam_info['exam_id'],
-                            course_id=exam_info['course_id'],
-                            class_id=exam_info['class_id'],
-                            cpi=exam_info['cpi'],
-                            enc_task=exam_info.get('enc_task', 0),
-                            auto_submit=auto_submit,
-                        )
-                        if result.get('submitted'):
-                            logger.info(f"  ✅ 考试 {result.get('title', '?')} 已完成并交卷")
+                        # 先尝试 API 模式
+                        if not cli_args.exam_browser:
+                            result = exam_runner.run(
+                                exam_id=exam_info['exam_id'],
+                                course_id=exam_info['course_id'],
+                                class_id=exam_info['class_id'],
+                                cpi=exam_info['cpi'],
+                                enc_task=exam_info.get('enc_task', 0),
+                                auto_submit=auto_submit,
+                            )
                         else:
+                            result = None
+                        # 如果没有提交（包括 API 模式返回 None 或异常），尝试浏览器模式
+                        if not result or not result.get('submitted'):
+                            if cli_args.exam_browser or (
+                                result and '可能需要客户端' in str(result.get('_error', ''))):
+                                logger.info(f"  尝试浏览器模式...")
+                                try:
+                                    from api.exam_browser import BrowserExam
+                                    b_exam = BrowserExam(account, tiku=tiku)
+                                    b_result = b_exam.run(
+                                        course_id=exam_info['course_id'],
+                                        class_id=exam_info['class_id'],
+                                        exam_id=exam_info['exam_id'],
+                                        cpi=exam_info['cpi'],
+                                        enc_task=exam_info.get('enc_task', 0),
+                                        auto_submit=auto_submit,
+                                    )
+                                    result = b_result if b_result.get('submitted') else result
+                                except Exception as be:
+                                    logger.warning(f"  浏览器模式也失败: {be}")
+                        if result and result.get('submitted'):
+                            logger.info(f"  ✅ 考试 {result.get('title', '?')} 已完成并交卷")
+                        elif result:
                             logger.info(f"  ⚠️ 考试 {result.get('title', '?')} 处理结果: {result['answered']}/{result['total']} 题已答")
                     except Exception as e:
                         err_type = type(e).__name__
