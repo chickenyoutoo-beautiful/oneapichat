@@ -95,43 +95,63 @@ if (-not $phpPath) {
     if ($phpPath) { Write-OK "找到 PHP: $phpPath" }
 }
 
-# 3. 安装 PHP（显示进度，不吞输出）
+# 3. 安装 PHP（显示进度）
 if (-not $phpPath) {
     Write-Info "正在通过 winget 安装 PHP（请等待，约 1-2 分钟）..."
-    $wingetResult = winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>&1
-    Write-Info "winget 完成，搜索安装位置..."
-    Start-Sleep -Seconds 3
-    $pfPhp = Get-ChildItem -Path "$env:ProgramFiles\PHP" -Filter "php.exe" -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($pfPhp) { $phpPath = $pfPhp.FullName }
-    if (-not $phpPath) {
-        $wgBase = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
-        if (Test-Path $wgBase) {
-            $wgPhpDir = Get-ChildItem -Path $wgBase -Directory -Filter "PHP.PHP_*" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($wgPhpDir) {
-                $found = Get-ChildItem -Path $wgPhpDir.FullName -Filter "php.exe" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($found) { $phpPath = $found.FullName }
-            }
-        }
+    winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
+    Write-Info "winget 完成，刷新 PATH..."
+    # winget 安装后 PHP 已加入系统 PATH，刷新当前会话
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command php -ErrorAction SilentlyContinue) {
+        $phpPath = (Get-Command php).Source
+        Write-OK "PHP 已就绪: $phpPath"
+    } else {
+        # 搜索常见位置
+        Write-Info "搜索安装位置..."
+        $pfPhp = Get-ChildItem -Path "$env:ProgramFiles\PHP" -Filter "php.exe" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pfPhp) { $phpPath = $pfPhp.FullName }
     }
-    if ($phpPath) { Write-OK "PHP 已安装: $phpPath" }
 }
 
-# 4. 直接下载 PHP（最后手段）
+# 4. 直接下载 PHP（最后手段，用 choco 或直接下载）
 if (-not $phpPath) {
-    Write-Info "直接下载 PHP 8.3（约 30MB）..."
-    $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.19-nts-Win32-vs16-x64.zip"
-    $phpZip = "$env:TEMP\php.zip"
-    $phpDir = "$env:ProgramFiles\PHP"
-    try {
-        Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
+    # 尝试 choco
+    $hasChoco = Get-Command choco -ErrorAction SilentlyContinue
+    if ($hasChoco) {
+        Write-Info "通过 Chocolatey 安装 PHP..."
+        choco install php -y --limit-output 2>&1 | ForEach-Object { Write-Host "  $_" }
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+        if (Get-Command php -ErrorAction SilentlyContinue) {
+            $phpPath = (Get-Command php).Source
+            Write-OK "PHP 已就绪: $phpPath"
+        }
+    } else {
+        Write-Info "直接下载 PHP（约 30MB）..."
+        # 使用最新稳定版的重定向 URL
+        $phpUrls = @(
+            "https://windows.php.net/downloads/releases/latest/php-8.3-nts-Win32-vs16-x64-latest.zip",
+            "https://windows.php.net/downloads/releases/php-8.4.5-nts-Win32-vs16-x64.zip",
+            "https://windows.php.net/downloads/releases/php-8.3.17-nts-Win32-vs16-x64.zip"
+        )
+        $phpZip = "$env:TEMP\php.zip"
+        $phpDir = "$env:ProgramFiles\PHP"
+        $downloaded = $false
+        foreach ($url in $phpUrls) {
+            try {
+                Write-Info "尝试: $url"
+                Invoke-WebRequest -Uri $url -OutFile $phpZip -UseBasicParsing -ErrorAction Stop
+                $downloaded = $true
+                break
+            } catch { continue }
+        }
+        if (-not $downloaded) {
+            Write-Error "PHP 下载失败，请手动安装 PHP: https://windows.php.net/download"
+        }
         Write-Info "正在解压..."
         Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
         $phpPath = "$phpDir\php.exe"
-        Write-OK "PHP 已安装: $phpPath"
-    } catch {
-        Write-Error "PHP 下载失败: $_"
-    } finally {
         Remove-Item $phpZip -Force -ErrorAction SilentlyContinue
+        Write-OK "PHP 已安装: $phpPath"
     }
 }
 
