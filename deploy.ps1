@@ -54,46 +54,88 @@ if ((Test-Path ".\index.html") -and (Test-Path ".\engine_server.py")) {
 Set-Location $REPO_DIR
 
 # ── Install PHP ──────────────────────────────────────
-if (-not (Get-Command php -ErrorAction SilentlyContinue)) {
-    Write-Info "正在安装 PHP..."
+$phpPath = $null
+if (Get-Command php -ErrorAction SilentlyContinue) {
+    $phpPath = (Get-Command php).Source
+    Write-Info "PHP 已安装 ($phpPath)"
+} else {
+    # 搜索已安装的 PHP（winget 可能已装但 PATH 没刷新）
+    $searchPaths = @(
+        "$env:ProgramFiles\PHP",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\PHP.PHP_*",
+        "C:\php",
+        "$env:SystemDrive\php"
+    )
+    foreach ($sp in $searchPaths) {
+        $found = Get-ChildItem -Path $sp -Filter "php.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $phpPath = $found.FullName; break }
+    }
     
-    # 首选 winget
-    try {
-        winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            # Refresh PATH
-            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-            Write-OK "PHP 已通过 winget 安装"
+    if ($phpPath) {
+        Write-OK "找到 PHP: $phpPath"
+        $phpDir = Split-Path $phpPath -Parent
+        Add-MachinePathItem $phpDir
+        $env:Path = "$phpDir;$env:Path"
+    } else {
+        Write-Info "正在安装 PHP..."
+        try {
+            winget install --id PHP.PHP -e --source winget --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
+            # 搜索 winget 安装后的 PHP
+            Start-Sleep -Seconds 5
+            $wingetPhp = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "php.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wingetPhp) {
+                $phpPath = $wingetPhp.FullName
+                $phpDir = Split-Path $phpPath -Parent
+                Add-MachinePathItem $phpDir
+                $env:Path = "$phpDir;$env:Path"
+                Write-OK "PHP 已通过 winget 安装: $phpPath"
+            } else {
+                # 再搜 Program Files
+                $pfPhp = Get-ChildItem -Path "$env:ProgramFiles\PHP" -Filter "php.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($pfPhp) {
+                    $phpPath = $pfPhp.FullName
+                    $phpDir = Split-Path $phpPath -Parent
+                    Add-MachinePathItem $phpDir
+                    $env:Path = "$phpDir;$env:Path"
+                    Write-OK "PHP 已安装: $phpPath"
+                }
+            }
+        } catch {
+            Write-Warn "winget 安装失败"
         }
-    } catch {
-        Write-Warn "winget 安装失败，尝试直接下载..."
+    }
+    
+    # 还是没找到，直接下载
+    if (-not $phpPath) {
+        Write-Info "直接下载 PHP..."
         $phpUrl = "https://windows.php.net/downloads/releases/php-8.3.19-nts-Win32-vs16-x64.zip"
         $phpZip = "$env:TEMP\php.zip"
         $phpDir = "$env:ProgramFiles\PHP"
         try {
             Invoke-WebRequest -Uri $phpUrl -OutFile $phpZip -UseBasicParsing
             Expand-Archive -Path $phpZip -DestinationPath $phpDir -Force
-            Add-MachinePathItem "$phpDir"
-            # Copy php.ini
-            Copy-Item "$phpDir\php.ini-development" "$phpDir\php.ini" -Force -ErrorAction SilentlyContinue
-            Copy-Item "$phpDir\php.ini-production" "$phpDir\php.ini" -Force -ErrorAction SilentlyContinue
-            $ini = Get-Content "$phpDir\php.ini"
-            $ini = $ini -replace ';extension=curl', 'extension=curl'
-            $ini = $ini -replace ';extension=mbstring', 'extension=mbstring'
-            $ini = $ini -replace ';extension=openssl', 'extension=openssl'
-            $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
-            $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
-            $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
-            $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
-            Set-Content "$phpDir\php.ini" $ini
+            $phpPath = "$phpDir\php.exe"
+            Add-MachinePathItem $phpDir
+            $env:Path = "$phpDir;$env:Path"
+            if (Test-Path "$phpDir\php.ini-development") { Copy-Item "$phpDir\php.ini-development" "$phpDir\php.ini" -Force }
+            elseif (Test-Path "$phpDir\php.ini-production") { Copy-Item "$phpDir\php.ini-production" "$phpDir\php.ini" -Force }
+            if (Test-Path "$phpDir\php.ini") {
+                $ini = Get-Content "$phpDir\php.ini"
+                $ini = $ini -replace ';extension=curl', 'extension=curl'
+                $ini = $ini -replace ';extension=mbstring', 'extension=mbstring'
+                $ini = $ini -replace ';extension=openssl', 'extension=openssl'
+                $ini = $ini -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite'
+                $ini = $ini -replace ';extension=sqlite3', 'extension=sqlite3'
+                $ini = $ini -replace ';extension_dir = "ext"', 'extension_dir = "ext"'
+                $ini = $ini -replace ';date.timezone =', 'date.timezone = Asia/Shanghai'
+                Set-Content "$phpDir\php.ini" $ini
+            }
             Remove-Item $phpZip -Force -ErrorAction SilentlyContinue
-            Write-OK "PHP 8.3 已安装"
+            Write-OK "PHP 已安装: $phpPath"
         } catch {
             Write-Error "PHP 安装失败: $_"
         }
     }
-} else {
-    Write-Info "PHP 已安装 ($(php -v | Select-Object -First 1))"
 }
 
 # ── Install Python ──────────────────────────────────
@@ -126,12 +168,19 @@ $PYTHON = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } e
 
 # ── Install Python deps ─────────────────────────────
 Write-Info "安装 Python 依赖..."
-& $PYTHON -m pip install fastapi uvicorn requests aiofiles python-multipart beautifulsoup4 loguru lxml 2>&1 | Out-Null
-if ($LASTEXITCODE -eq 0) {
-    Write-OK "Python 依赖安装完成"
-} else {
-    Write-Warn "Python 依赖安装警告，继续..."
+& $PYTHON -m pip install --upgrade pip 2>&1 | Out-Null
+# 逐个安装，忽略不兼容的包
+$pyDeps = @("fastapi", "uvicorn", "requests", "python-multipart", "beautifulsoup4", "loguru", "lxml")
+foreach ($dep in $pyDeps) {
+    $result = & $PYTHON -m pip install $dep 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "  $dep 安装失败（Python 版本可能不兼容），已跳过"
+    }
 }
+# aiofiles 在新 Python 上可能无 wheel，尝试安装
+& $PYTHON -m pip install aiofiles 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warn "aiofiles 安装失败，已跳过（不影响核心功能）" }
+Write-OK "Python 依赖安装完成"
 
 # ── Create required dirs ──────────────────────────
 $dataDir = Join-Path $REPO_DIR "users"
@@ -166,12 +215,14 @@ if ($engineProc) {
 # ── Start PHP built-in server ─────────────────────
 Write-Info "启动 PHP Web 服务器..."
 $phpPort = 8080
+$phpExe = if ($phpPath) { $phpPath } else { (Get-Command php -ErrorAction SilentlyContinue).Source }
+if (-not $phpExe) { Write-Error "找不到 PHP，请手动安装 PHP 后重试" }
 $phpProc = Get-Process -Name "php*" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "localhost:$phpPort" }
 if ($phpProc) {
     Write-Info "PHP 服务器已在运行 (PID: $($phpProc.Id))"
 } else {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = (Get-Command php).Source
+    $psi.FileName = $phpExe
     $psi.Arguments = "-S 0.0.0.0:$phpPort -t $REPO_DIR"
     $psi.WorkingDirectory = $REPO_DIR
     $psi.UseShellExecute = $false
