@@ -1384,23 +1384,26 @@ async function restoreUserData() {
                     var added = 0;
                     for (var _scid in serverChats) {
                         if (_deletedChatIds && _deletedChatIds[_scid]) continue; // 跳过已删除
+                        var _sc = serverChats[_scid];
                         if (!merged[_scid]) {
-                            merged[_scid] = serverChats[_scid];
+                            merged[_scid] = _sc;
                             added++;
                         } else {
-                            // ★ 如果本地是压缩过的(图片丢失),用服务器的图片数据恢复
-                            var _sc = serverChats[_scid];
                             var _mc = merged[_scid];
-                            if (_sc.messages && _mc.messages && _sc.messages.length === _mc.messages.length) {
-                                for (var _smi = 0; _smi < _sc.messages.length; _smi++) {
+                            // ★ 修复: 服务器有更多消息时用服务器数据补充本地
+                            if (_sc.messages && (!_mc.messages || _sc.messages.length > _mc.messages.length)) {
+                                _mc.messages = _sc.messages;
+                            }
+                            // 图片数据恢复
+                            if (_sc.messages && _mc.messages) {
+                                var _minLen = Math.min(_sc.messages.length, _mc.messages.length);
+                                for (var _smi = 0; _smi < _minLen; _smi++) {
                                     var _sm = _sc.messages[_smi];
                                     var _mm = _mc.messages[_smi];
                                     if (_sm && _mm) {
-                                        // 本地 generatedImage 丢失时用服务器的
                                         if (_sm.generatedImage && (!_mm.generatedImage || _mm.generatedImage.indexOf('data:') !== 0)) {
                                             _mm.generatedImage = _sm.generatedImage;
                                         }
-                                        // 本地 generatedImages 丢失时用服务器的
                                         if (_sm.generatedImages && _sm.generatedImages.length > 0 && (!_mm.generatedImages || _mm.generatedImages.length === 0 || _mm.generatedImages[0].indexOf('data:') !== 0)) {
                                             _mm.generatedImages = _sm.generatedImages;
                                         }
@@ -5890,9 +5893,8 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                             }
                         }
                         if (currentBubble) {
-                            const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
-                            if (scrollHeight - scrollTop - clientHeight < 100) {
-                                autoScrollToBottom('streaming');
+                            if (!userScrolled) {
+                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
                             }
                         }
                     }
@@ -5912,9 +5914,11 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                                 if (mb2) cb.insertBefore(det, mb2);
                             }
                             det.querySelector('.reasoning-content').textContent = reasoningText;
-                            // 思考内容增长时同步滚动（streaming 中只要用户没手动滚就强制跟底）
+                            // 思考增长直接强制跟底（绕过 autoScrollToBottom 的距离阈值）
                             requestAnimationFrame(function() {
-                                if ($.chatBox && !userScrolled) autoScrollToBottom('streaming');
+                                if ($.chatBox && !userScrolled) {
+                                    $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                }
                             });
                         }
                     }
@@ -5936,9 +5940,11 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                         // 完整工具调用格式
                         toolCalls.push(event);
                     }
-                    // 工具调用出现时同步滚动（streaming 中只要用户没手动滚就强制跟底）
+                    // 工具调用出现时直接强制跟底
                     requestAnimationFrame(function() {
-                        if ($.chatBox && !userScrolled) autoScrollToBottom('streaming');
+                        if ($.chatBox && !userScrolled) {
+                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                        }
                     });
                 } else if (currentEventType === 'done' || event.type === 'done') {
                     if (event.tool_calls) toolCalls = event.tool_calls;
@@ -6319,10 +6325,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
                             }
                         }
-                        // ★ 思考内容滚动追踪
-                        if (!window._streamContentRendered) {
-                            window._streamContentRendered = true;
-                            autoScrollToBottom('streaming');
+                        // ★ 思考内容滚动追踪 — 每次 thinking delta 都跟底
+                        if (!userScrolled) {
+                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
                         }
                         // 无延迟: 立即渲染
                     } else if (hasReasoningContent) {
@@ -6344,10 +6349,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
                             }
                         }
-                        // ★ 思考内容也触发滚动追踪(首次思考触发一次)
-                        if (!window._streamContentRendered) {
-                            window._streamContentRendered = true;
-                            autoScrollToBottom('streaming');
+                        // ★ 思考内容滚动追踪 — 每次 thinking delta 都跟底
+                        if (!userScrolled) {
+                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
                         }
                     }
 
@@ -6468,16 +6472,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     markdownBody.textContent = typeof _t !== 'undefined' ? _t : fullText;
                                 }
                                 // AI流式回复时,如果用户没有主动滚动上查,则跟随滚动
-                                // ★ 首次收到内容时强制滚动到底部(不判断距离),后续按常规逻辑
                                 var _isFirstContent = !window._streamContentRendered;
-                                if (!_isFirstContent) {
-                                    const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
-                                    if (!userScrolled && scrollHeight - scrollTop - clientHeight < 100) {
-                                        autoScrollToBottom('streaming');
-                                    }
-                                } else {
+                                if (_isFirstContent) {
                                     window._streamContentRendered = true;
-                                    autoScrollToBottom('streaming');
+                                }
+                                if (!userScrolled) {
+                                    $.chatBox.scrollTop = $.chatBox.scrollHeight;
                                 }
                             }
                         }
@@ -9328,29 +9328,20 @@ function compressChatsForStorage(chatsObj) {
         return tb.localeCompare(ta); // 最新的排前面
     });
 
-    // 只保留最近 N 个聊天的完整数据,其余的只保留标题和时间
-    const MAX_CHATS = 30;
+    // 保留最近 N 个聊天的完整数据
+    const MAX_CHATS = 50;
     chatIds.forEach((id, idx) => {
         const chat = chatsObj[id];
-        if (idx < MAX_CHATS) {
-            // 保留完整数据,不过滤图片(图片数据留在服务器备份中)
-            slim[id] = JSON.parse(JSON.stringify(chat));
-            if (slim[id].messages) {
-                slim[id].messages = slim[id].messages.map(function(msg) {
-                    // 截断超长消息内容
-                    if (msg.content && msg.content.length > 10000) {
-                        msg.content = msg.content.slice(0, 10000) + '...(内容已截断)';
-                    }
-                    return msg;
+        // 保留所有聊天的完整消息，不做截断
+        slim[id] = JSON.parse(JSON.stringify(chat));
+        if (slim[id].messages) {
+            slim[id].messages = slim[id].messages.map(function(msg) {
+                // 截断超长消息内容
+                if (msg.content && msg.content.length > 10000) {
+                    msg.content = msg.content.slice(0, 10000) + '...(内容已截断)';
+                }
+                return msg;
             });
-            }
-        } else {
-            // 旧聊天只保留骨架
-            slim[id] = {
-                title: chat.title || '新对话',
-                updated_at: chat.updated_at || '',
-                messages: chat.messages ? chat.messages.slice(-2) : []
-            };
         }
     });
     return slim;
