@@ -113,11 +113,12 @@ window.fixImageAnalysisConfig = function() {
     localStorage.removeItem('visionModel');
 
     // 设置简单的 MCP 配置
-    localStorage.setItem('visionApiUrl', '/mcp');
-    localStorage.setItem('visionApiKey', 'not-needed');
-    localStorage.setItem('visionModel', 'MiniMax-VL-01');
+    localStorage.setItem('visionApiUrl', 'https://api.minimaxi.com/v1/coding_plan/vlm');
+    localStorage.setItem('visionApiKey', '');
+    localStorage.setItem('visionModel', 'MiniMax-M2');
     return {
-        visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
+        visionApiUrl: 'https://api.minimaxi.com/v1/coding_plan/vlm',
+        visionModel: 'MiniMax-M2',
         message: '配置已重置,请刷新页面'
     };
 };
@@ -344,9 +345,36 @@ window.quickSetupOneAPIChat = function() {
     return config;
 };
 
-// ★ 获取 auth_token(兼容 deviceId fallback)
+// ★ 跨域登录状态同步（naujtrats.xyz / www 共享登录）
+function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : '';
+}
+function setCookie(name, value, days) {
+    var expires = days ? ';max-age=' + (days * 86400) : '';
+    document.cookie = name + '=' + encodeURIComponent(value) + ';path=/;domain=.naujtrats.xyz;Secure' + expires;
+}
+function removeCookie(name) {
+    document.cookie = name + '=;path=/;domain=.naujtrats.xyz;max-age=0;Secure';
+}
+
+// ★ 获取 auth_token(兼容 deviceId fallback)，优先读跨域 cookie
 function getAuthToken() {
-    return localStorage.getItem('authToken') || localStorage.getItem('deviceId') || '';
+    return getCookie('auth_token') || localStorage.getItem('authToken') || localStorage.getItem('deviceId') || '';
+}
+
+// 登录成功后同步到跨域 cookie
+function syncAuthToken(token) {
+    if (token) {
+        localStorage.setItem('authToken', token);
+        setCookie('auth_token', token, 30);
+    }
+}
+
+// 退出时清除跨域 cookie
+function clearAuthToken() {
+    localStorage.removeItem('authToken');
+    removeCookie('auth_token');
 }
 
 const MOBILE_BREAKPOINT = 786;
@@ -1158,17 +1186,22 @@ async function saveChatsToServer() {
         url += '?auth_token=' + token;
 
         // ★ 合并:先读服务器已有数据,再合并本地聊天,防止多窗口覆盖
+        // ★ 防丢失:如果本地聊天数过少,视为异常,不强制覆盖服务器
+        var _localCount = Object.keys(chats).length;
         var mergedChats = JSON.parse(JSON.stringify(chats));
         // ★ 保留完整图片数据(不压缩,服务器备份需要完整 base64)
         console.log('[save] 本地聊天数:', Object.keys(mergedChats).length);
+        var serverChats = {};  // 用于防误覆盖检查
+        var _getOk = false;    // GET是否成功
         try {
             var getUrl = url + '&chat_id=all';
             console.log('[save] GET:', getUrl.substring(0,80));
             var getResp = await fetch(getUrl);
             console.log('[save] GET响应:', getResp.status);
+            _getOk = getResp.ok;
             if (getResp.ok) {
                 var serverData = await getResp.json();
-                var serverChats = serverData.chats || {};
+                serverChats = serverData.chats || {};
                 console.log('[save] 已删IDs:', Object.keys(_deletedChatIds).join(','));
                 console.log('[save] 服务器聊天数:', Object.keys(serverChats).length);
                 var added = 0;
@@ -1182,6 +1215,16 @@ async function saveChatsToServer() {
             }
         } catch(e) {
             console.warn('[save] GET合并失败:', e.message);
+        }
+
+        // ★ 防误覆盖:GET失败或服务器数据远多于本地时,跳过保存
+        if (!_getOk) {
+            console.warn('[save] GET失败,跳过保存防止覆盖');
+            return false;
+        }
+        if (Object.keys(serverChats).length >= 3 && _localCount <= 2) {
+            console.warn('[save] 本地仅'+_localCount+'条,服务器有'+Object.keys(serverChats).length+'条,跳过保存');
+            return false;
         }
 
         var response = await fetch(url, {
@@ -1309,7 +1352,7 @@ async function loadConfigFromServer() {
         }
         // 静默写入所有键,只在出错时记录
         for (var k in config) {
-            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && k !== 'useBackendSSE') {
+            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') {
                 try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
         }
@@ -1324,7 +1367,8 @@ async function loadConfigFromServer() {
 
 async function loadChatsFromServer() {
     try {
-        const token = localStorage.getItem('authToken');
+        // ★ 兼容跨域 cookie（从 www 过来时 localStorage 暂无 token）
+        const token = localStorage.getItem('authToken') || getCookie('auth_token');
         var deviceId = localStorage.getItem('deviceId');
         if (!token && !deviceId) return null;
         let url = SERVER_API_BASE + '/chat.php?chat_id=all';
@@ -1348,7 +1392,9 @@ async function loadChatsFromServer() {
 // ★ 登录后的数据恢复:从服务器加载当前账号的配置和聊天记录
 async function restoreUserData() {
     console.log('[restoreUserData] 开始恢复用户数据');
-    var token = localStorage.getItem('authToken');
+    // ★ 优先读 localStorage,其次跨域 cookie（从其他域名过来时）
+    var token = localStorage.getItem('authToken') || getCookie('auth_token');
+    if (!token && typeof getAuthToken === 'function') token = getAuthToken();
     console.log('[restoreUserData] token:', token ? token.substring(0,20)+'...' : 'null');
     if (!token) { console.log('[restoreUserData] 无token,跳过'); return; }
 
@@ -1500,41 +1546,7 @@ async function restoreUserData() {
             localStorage.removeItem('_savedInputText');
         }
     } catch(e) {}
-    // ★ 尝试恢复后端 SSE 流(刷新前未完成的 AI 回复)
-    try {
-        var _lastChatId = currentChatId || localStorage.getItem('lastChatId') || '';
-        var _savedMsgId = localStorage.getItem('_lastStreamMsgId_' + _lastChatId);
-        if (_savedMsgId && chats[_lastChatId]) {
-            var _token2 = getAuthToken();
-            fetch('/oneapichat/engine_api.php?action=chat_progress&msg_id=' + encodeURIComponent(_savedMsgId) + '&auth_token=' + encodeURIComponent(_token2))
-                .then(function(r) { return r.json(); })
-                .then(function(_prog) {
-                    if (!_prog || !_prog.full_text) return;
-                    // ★ 移除旧的 _recovered 消息(如果有)
-                    if (chats[_lastChatId]) {
-                        chats[_lastChatId].messages = chats[_lastChatId].messages.filter(function(m) { return !m._recovered; });
-                    }
-                    // 追加为 assistant 消息
-                    var _recContent = _prog.full_text;
-                    var _recReasoning = _prog.reasoning_text || '';
-                    var _msgText = _recReasoning ? ('```thinking\n' + _recReasoning + '\n```\n\n' + _recContent) : _recContent;
-                    chats[_lastChatId].messages.push({
-                        role: 'assistant',
-                        content: _msgText,
-                        reasoning: _recReasoning,
-                        partial: false,
-                        time: Date.now(),
-                        _recovered: true
-                    });
-                    if (currentChatId === _lastChatId) loadChat(_lastChatId);
-                    showToast('📄 已恢复闪断前的回复', 'info', 5000);
-                    // ★ 标记后端已恢复,禁止 localStorage auto-recover 发新请求
-                    window._backendRecovered = true;
-                    // 清理标记
-                    localStorage.removeItem('_lastStreamMsgId_' + _lastChatId);
-                }).catch(function() {});
-        }
-    } catch(e) {}
+
 
     console.log('[restoreUserData] 恢复完成');
 }
@@ -1583,19 +1595,16 @@ const TITLE_MAX_LENGTH = 20;
 const MAX_TOKENS_SAFETY_MARGIN = 1000;
 const STREAM_DELAY = 2;
 
-// ★ 后端 SSE 流式配置(Feature Flag)
-// ★ 直连/后端中继切换(默认直连,走后端 SSE 流会增加延迟且偶尔卡顿)
-var USE_BACKEND_SSE = localStorage.getItem('useBackendSSE') === 'true';  // 默认 false（直连），true=中继
-const BACKEND_SSE_URL = '/oneapichat/engine_api.php?action=chat_stream';
+
 
 const DEFAULT_CONFIG = {
     // 预置 oneapi API Key
     key: 'sk-cM3e0h5kb2GvNO7zCeF9025e00B14e2794D9Fd0c51F0C71b',
     url: 'https://oneapi.naujtrats.xyz/v1',
     model: 'deepseek-v4-flash',
-    visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
+    visionApiUrl: 'https://api.minimaxi.com/v1/coding_plan/vlm',
     visionApiKey: 'sk-cM3e0h5kb2GvNO7zCeF9025e00B14e2794D9Fd0c51F0C71b',
-    visionModel: 'MiniMax-VL-01',
+    visionModel: 'MiniMax-M2',
     imageModel: 'image-01',
     imageBaseUrl: 'https://api.minimaxi.com/v1',
     imageProvider: 'minimax',
@@ -1812,7 +1821,46 @@ let userAbortMap = {};
 let activeBubbleMap = {};
 let userScrolled = false;
 let isAutoScrolling = false;  // 防止自动滚动时干扰 userScrolled
-let streamingScrollLock = false;  // 流式期间锁定滚动跟随
+let streamingScrollLock = false;
+
+// ★ 流式渲染节流: buffer 收拢内容,每 60~100ms 渲染一次,避免每帧都重绘
+var _streamRenderTimer = {};
+var _streamPendingText = {};
+function applyStreamRender(chatId, fullText, userScrolled, force) {
+    _streamPendingText[chatId] = fullText;
+    if (force) {
+        // 立即渲染
+        if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); }
+        _flushStreamRender(chatId, userScrolled);
+    } else if (!_streamRenderTimer[chatId]) {
+        _streamRenderTimer[chatId] = setTimeout(function() {
+            _flushStreamRender(chatId);
+        }, 80);
+    }
+}
+function _flushStreamRender(chatId, userScrolled) {
+    _streamRenderTimer[chatId] = null;
+    var text = _streamPendingText[chatId];
+    if (!text) return;
+    var currentBubble = activeBubbleMap[chatId];
+    if (currentBubble && window.marked) {
+        var mb = currentBubble.querySelector('.markdown-body');
+        if (mb) {
+            try {
+                const html = _renderMarkdownWithMath(autoLinkURLs(text));
+                mb.innerHTML = html;
+                if (window.hljs) {
+                    mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
+                        try { hljs.highlightElement(b); } catch(e) {} });
+                }
+            } catch(e) { mb.textContent = text; }
+        }
+    }
+    if (currentBubble && !userScrolled) {
+        $.chatBox.scrollTop = $.chatBox.scrollHeight;
+    }
+}
+  // 流式期间锁定滚动跟随
 let modelContextLength = JSON.parse(localStorage.getItem('modelContextLength') || '{}');
 let modelMaxOutputTokens = JSON.parse(localStorage.getItem('modelMaxOutputTokens') || '{}');
 let prevWidth = window.innerWidth;
@@ -2080,6 +2128,14 @@ const MarkdownRenderer = {
     clearCache() { this.cache.clear(); }
 };
 
+// 后处理辅助:渲染完 HTML 后触发代码高亮 + Mermaid 图表
+function _triggerPostRender(container) {
+    if (!container || !MarkdownRenderer) return;
+    setTimeout(function() {
+        MarkdownRenderer.postRender(container);
+    }, 0);
+}
+
 // ==================== 图表绘制工具 (AI可调用) ====================
 window.ChartRenderer = {
     async render(code) {
@@ -2139,6 +2195,21 @@ window.ChartRenderer = {
                 const formatted = nums.trim().split(/\s+/).filter(n => n).join(', ');
                 return `line "${label}" ${formatted}`;
             });
+        // ★ 修复 x-axis 标签数量与数据点不匹配的问题
+        var xMatch = c.match(/x-axis[^[]*\[([^\]]*)\]/);
+        var lineMatches = c.match(/line\s+"[^"]*"\s+([\d.,\s]+)/g);
+        if (xMatch && lineMatches && lineMatches.length > 0) {
+            var xLabels = xMatch[1].split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            var lastLine = lineMatches[lineMatches.length - 1];
+            var dataPoints = lastLine.replace(/line\s+"[^"]*"\s+/, '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            if (xLabels.length > 0 && dataPoints.length > 0 && xLabels.length < dataPoints.length) {
+                var newLabels = [];
+                for (var li = 0; li < dataPoints.length; li++) {
+                    newLabels.push(xLabels[li % xLabels.length]);
+                }
+                c = c.replace(/x-axis[^[]*\[([^\]]*)\]/, xMatch[0].replace(xMatch[1], newLabels.join(', ')));
+            }
+        }
         }
         return c;
     },
@@ -2378,10 +2449,14 @@ function buildUserContent(text, files) {
                     image_url: { url: _imgUrl }
                 });
             } else {
-                // 非图片文件转为文本
+                // 非图片文件转为文本(截断超大附件)
+                var _fileText = f.content || '';
+                if (_fileText.length > 80000) {
+                    _fileText = _fileText.substring(0, 80000) + '\n...(文件过长已截断)';
+                }
                 content.push({
                     type: 'text',
-                    text: `[附件: ${f.name}]\n${f.content}`
+                    text: `[附件: ${f.name}]\n${_fileText}`
                 });
             }
         }
@@ -2395,13 +2470,18 @@ function buildUserContent(text, files) {
     // 非视觉模型:图片转为文本描述(不传base64,避免token爆炸)
     if (hasImages) {
         const imageFiles = files.filter(f => f.type?.startsWith('image/'));
-        // 保存当前消息的图片数据到全局变量,供 analyze_image 工具处理器使用
-        window._currentMessageImages = imageFiles.map(f => ({ name: f.name, content: f.content, type: f.type }));
+        // 保存当前消息的图片数据到 chat 隔离变量,供 analyze_image 工具处理器使用
+        if (!window._currentMessageImagesByChat) window._currentMessageImagesByChat = {};
+        window._currentMessageImagesByChat[currentChatId] = imageFiles.map(f => ({ name: f.name, content: f.content, type: f.type }));
 
         const imageDescs = imageFiles.map(f => `[用户上传了图片: ${f.name}]`);
         const otherFiles = files.filter(f => !f.type?.startsWith('image/'));
         const otherContent = otherFiles.length
-            ? otherFiles.map(f => `[附件: ${f.name}]\n${f.content}`).join('\n\n')
+            ? otherFiles.map(f => {
+                var _fc = f.content || '';
+                if (_fc.length > 80000) _fc = _fc.substring(0, 80000) + '\n...(文件过长已截断)';
+                return `[附件: ${f.name}]\n${_fc}`;
+            }).join('\n\n')
             : '';
         const imagePart = imageDescs.join(', ');
         // 不强制要求调用工具,让AI自主决定是否分析图片
@@ -2410,8 +2490,16 @@ function buildUserContent(text, files) {
         return (imagePart + (imagePart && otherContent ? '\n\n' : '') + otherContent + textPart).trim();
     }
 
-    // 非图片文件:保持原有文本格式
-    return files.map(f => `[附件: ${f.name}]\n${f.content}`).join('\n\n') + (text ? `\n指令: ${text}` : '');
+    // 非图片文件:保持原有文本格式,但截断超大附件避免超token
+    const MAX_FILE_CHARS = 80000;
+    const fileParts = files.map(f => {
+        var c = f.content || '';
+        if (c.length > MAX_FILE_CHARS) {
+            c = c.substring(0, MAX_FILE_CHARS) + '\n...(文件过长已截断,原始长度' + c.length + '字符)';
+        }
+        return `[附件: ${f.name}]\n${c}`;
+    });
+    return fileParts.join('\n\n') + (text ? `\n指令: ${text}` : '');
 }
 
 function checkStorageSpace() {
@@ -2482,6 +2570,50 @@ async function extractFileContent(file) {
         if (!window.XLSX) throw new Error('SheetJS 未加载');
         const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
         return wb.SheetNames.map((name, i) => `【工作表 ${i + 1}: ${name}】\n` + XLSX.utils.sheet_to_csv(wb.Sheets[name], { FS: '\t', RS: '\n' })).join('\n\n');
+    }
+    if (ext === 'pptx' || ext === 'ppt') {
+        if (!window.JSZip) throw new Error('JSZip 未加载');
+        const zip = await JSZip.loadAsync(await file.arrayBuffer());
+        // PPTX 中幻灯片在 ppt/slides/slideN.xml 中
+        const slideFiles = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/i.test(f)).sort();
+        if (!slideFiles.length) {
+            // 也检查 ppt/slides/_rels/ 或老格式
+            return '[PPT] 未找到幻灯片内容，请确认文件格式正确。';
+        }
+        var slideTexts = [];
+        var MAX_SLIDE_CHARS = 5000;  // 每张幻灯片最多取前5000字符
+        var MAX_TOTAL_CHARS = 80000; // 整个PPT最多取80000字符
+        var totalChars = 0;
+        for (let i = 0; i < slideFiles.length; i++) {
+            if (totalChars >= MAX_TOTAL_CHARS) {
+                slideTexts.push('...(后续' + (slideFiles.length - i) + '张幻灯片因内容过长已截断)');
+                break;
+            }
+            var xmlStr = await zip.files[slideFiles[i]].async('text');
+            // 提取 a:t 标签内的文本（PPTX 文本存放在 <a:t>text</a:t>）
+            var texts = [];
+            var regex = /<a:t[^>]*>([^<]*)<\/a:t>/g;
+            var match;
+            while ((match = regex.exec(xmlStr)) !== null) {
+                if (match[1].trim()) texts.push(match[1].trim());
+            }
+            var slideText = texts.join(' ');
+            if (slideText.trim()) {
+                // 单张幻灯片截断
+                if (slideText.length > MAX_SLIDE_CHARS) {
+                    slideText = slideText.substring(0, MAX_SLIDE_CHARS) + '...(本页过长已截断)'; 
+                }
+                var slideEntry = '【幻灯片 ' + (i + 1) + '】' + slideText;
+                totalChars += slideEntry.length;
+                slideTexts.push(slideEntry);
+            }
+        }
+        var result = slideTexts.length ? slideTexts.join('\n\n') : '[PPT] 解析完成，未提取到文字内容。'; 
+        // 如果整体仍过大,在最外层再截断一次
+        if (result.length > MAX_TOTAL_CHARS + 200) {
+            result = result.substring(0, MAX_TOTAL_CHARS) + '\n\n...(内容过长已截断)'; 
+        }
+        return result;
     }
     // fallback
     return new Promise((resolve, reject) => {
@@ -4403,9 +4535,6 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('agentMaxToolRounds', getVal('agentMaxToolRounds') || '30');
     localStorage.setItem('agentThinkingDepth', getVal('agentThinkingDepth') || 'standard');
     localStorage.setItem('agentSystemPrompt', getVal('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
-    localStorage.setItem('useBackendSSE', getChecked('useBackendSSEToggle') ? 'true' : 'false');
-    // ★ 实时更新 USE_BACKEND_SSE 变量
-    USE_BACKEND_SSE = getChecked('useBackendSSEToggle');
     // ★ 保存工具开关状态
     if (window.saveToolToggleStates) window.saveToolToggleStates();
     } catch(e) {
@@ -4472,7 +4601,7 @@ window.updateMarkdownConfig = () => {
         // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理)
     }
     // 清空 Markdown 缓存使新配置生效
-    if (window.MarkdownRenderer) MarkdownRenderer.clearCache();
+    if (MarkdownRenderer) MarkdownRenderer.clearCache();
     if (currentChatId) loadChat(currentChatId);
 };
 
@@ -4599,6 +4728,32 @@ function copyMessageContent(content) {
     navigator.clipboard.writeText(compressNewlines(content, 2));
 }
 
+// ★ 流式响应完成后重新生成最后一条回复
+window.regenLastAssistant = async function(text) {
+    if (!currentChatId || !chats[currentChatId]) return;
+    var msgs = chats[currentChatId].messages;
+    var idx = -1;
+    for (var ri = msgs.length - 1; ri >= 0; ri--) {
+        if (msgs[ri].role === 'assistant') { idx = ri; break; }
+    }
+    if (idx === -1) return;
+    var sys = msgs.filter(function(m) { return m.role === 'system' && !m.temporary && !m.timestamp; });
+    var timestamp = null;
+    for (var ti = 0; ti < msgs.length; ti++) {
+        if (msgs[ti].timestamp) { timestamp = msgs[ti]; break; }
+    }
+    var others = msgs.slice(0, idx).filter(function(m) { return m.role !== 'system' || m.temporary || m.timestamp; });
+    chats[currentChatId].messages = sys.concat(others).concat(timestamp ? [timestamp] : []);
+    saveChatsDebounced();
+    loadChat(currentChatId);
+    var lastUser = null;
+    for (var ui = idx - 1; ui >= 0; ui--) {
+        if (msgs[ui].role === 'user') { lastUser = msgs[ui]; break; }
+    }
+    if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
+};
+
+
 function autoLinkURLs(markdownText) {
     // ★ 统一将所有裸 URL 转为可点击的 markdown 链接,不再区分图片
     return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, url, after) => {
@@ -4627,7 +4782,7 @@ function showImageLightbox(images, startIdx) {
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;';
 
     var img = document.createElement('img');
-    img.style.cssText = 'max-width:90vw;max-height:80vh;object-fit:contain;border-radius:4px;';
+    img.style.cssText = 'max-width:90vw;max-height:80vh;object-fit:contain;border-radius:4px;cursor:grab;transition:transform 0.15s ease;';
 
     var counter = document.createElement('div');
     counter.style.cssText = 'color:#fff;margin-bottom:12px;font-size:14px;';
@@ -4635,25 +4790,115 @@ function showImageLightbox(images, startIdx) {
     var actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:12px;margin-top:12px;';
 
+    // ════ 缩放状态 ════
+    var scale = 1;
+    var minScale = 1;
+    var maxScale = 5;
+    // 拖拽平移状态
+    var isDragging = false;
+    var dragStartX = 0, dragStartY = 0;
+    var offsetX = 0, offsetY = 0;
+
+    function applyTransform() {
+        img.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + scale + ')';
+        if (scale > 1) {
+            img.style.cursor = 'grabbing';
+            img.style.maxWidth = 'none';
+            img.style.maxHeight = 'none';
+            img.style.width = 'auto';
+            img.style.height = 'auto';
+        } else {
+            img.style.cursor = 'grab';
+            img.style.maxWidth = '90vw';
+            img.style.maxHeight = '80vh';
+        }
+    }
+
     function updateView() {
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
         img.src = cleanImageUrl(images[idx]);
         counter.textContent = (idx + 1) + ' / ' + images.length;
+        applyTransform();
     }
+
+    // ════ 鼠标滚轮缩放 ════
+    img.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var delta = e.deltaY > 0 ? -0.1 : 0.1;
+        var newScale = Math.max(minScale, Math.min(maxScale, scale + delta));
+        newScale = Math.round(newScale * 10) / 10;
+        scale = newScale;
+        applyTransform();
+    }, { passive: false });
+
+    // ════ 拖拽平移 ════
+    img.addEventListener('mousedown', function(e) {
+        if (scale <= 1) return;
+        e.preventDefault();
+        isDragging = true;
+        dragStartX = e.clientX - offsetX;
+        dragStartY = e.clientY - offsetY;
+        img.style.cursor = 'grabbing';
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        offsetX = e.clientX - dragStartX;
+        offsetY = e.clientY - dragStartY;
+        applyTransform();
+    });
+    document.addEventListener('mouseup', function() {
+        isDragging = false;
+        if (scale > 1) img.style.cursor = 'grabbing';
+    });
 
     // 左右切换
     if (images.length > 1) {
         var prev = document.createElement('button');
         prev.textContent = '\u25c0';
-        prev.style.cssText = 'position:absolute;left:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;';
+        prev.style.cssText = 'position:absolute;left:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;z-index:10000;';
         prev.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx - 1 + images.length) % images.length; updateView(); });
         overlay.appendChild(prev);
 
         var next = document.createElement('button');
         next.textContent = '\u25b6';
-        next.style.cssText = 'position:absolute;right:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;';
+        next.style.cssText = 'position:absolute;right:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;z-index:10000;';
         next.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx + 1) % images.length; updateView(); });
         overlay.appendChild(next);
     }
+
+    // ════ 缩放按钮 ════
+    var zoomInBtn = document.createElement('button');
+    zoomInBtn.innerHTML = '+'; zoomInBtn.title = '放大';
+    zoomInBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:16px;font-weight:bold;cursor:pointer;line-height:1;';
+    zoomInBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        scale = Math.min(maxScale, Math.round((scale + 0.2) * 10) / 10);
+        applyTransform();
+    });
+    actions.appendChild(zoomInBtn);
+
+    var zoomOutBtn = document.createElement('button');
+    zoomOutBtn.innerHTML = '\u2212'; zoomOutBtn.title = '缩小';
+    zoomOutBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:16px;font-weight:bold;cursor:pointer;line-height:1;';
+    zoomOutBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        scale = Math.max(minScale, Math.round((scale - 0.2) * 10) / 10);
+        applyTransform();
+    });
+    actions.appendChild(zoomOutBtn);
+
+    var resetBtn = document.createElement('button');
+    resetBtn.textContent = '1:1'; resetBtn.title = '重置缩放';
+    resetBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;';
+    resetBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        scale = 1; offsetX = 0; offsetY = 0;
+        applyTransform();
+    });
+    actions.appendChild(resetBtn);
 
     // 下载按钮
     var download = document.createElement('a');
@@ -4671,7 +4916,7 @@ function showImageLightbox(images, startIdx) {
     // 关闭
     var close = document.createElement('button');
     close.textContent = '\u2715';
-    close.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;';
+    close.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10000;';
     close.addEventListener('click', function() { overlay.remove(); });
     overlay.appendChild(close);
 
@@ -4689,6 +4934,9 @@ function showImageLightbox(images, startIdx) {
         if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', keyHandler); }
         if (images.length > 1 && e.key === 'ArrowLeft') { idx = (idx - 1 + images.length) % images.length; updateView(); }
         if (images.length > 1 && e.key === 'ArrowRight') { idx = (idx + 1) % images.length; updateView(); }
+        if (e.key === '+' || e.key === '=') { scale = Math.min(maxScale, Math.round((scale + 0.2) * 10) / 10); applyTransform(); }
+        if (e.key === '-') { scale = Math.max(minScale, Math.round((scale - 0.2) * 10) / 10); applyTransform(); }
+        if (e.key === '0') { scale = 1; offsetX = 0; offsetY = 0; applyTransform(); }
     }
     document.addEventListener('keydown', keyHandler);
 
@@ -4805,6 +5053,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             display = autoLinkURLs(display);
             // ★ 使用保护渲染: _protectMath → marked → _restoreMath (含 KaTeX)
             contentDiv.innerHTML = _renderMarkdownWithMath(display);
+            // ★ 延迟Mermaid渲染（appendMessage自身有内联处理,不与_triggerPostRender冲突）
             setTimeout(() => {
                 // 查找所有 language-mermaid 的代码块(来自 ```mermaid)
                 const mermaidCodes = contentDiv.querySelectorAll('pre code[class*="mermaid"]');
@@ -4833,14 +5082,17 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                     mermaidDiv.setAttribute('data-original-code', code);
                     pre.parentNode.replaceChild(mermaidDiv, pre);
                 });
-                if (window.mermaid && contentDiv.querySelectorAll('.mermaid').length > 0) {
+                var _toRender = contentDiv.querySelectorAll('.mermaid');
+                // ★ 过滤已渲染的(.mermaid 内已有 svg 的跳过)
+                _toRender = Array.from(_toRender).filter(function(d) { return !d.querySelector('svg'); });
+                if (window.mermaid && _toRender.length > 0) {
                     requestAnimationFrame(function() {
                     requestAnimationFrame(function() {
                     // 检查容器是否仍在DOM中
                     if (!contentDiv.isConnected || !contentDiv.parentElement) return;
                     mermaid.run({
-                        nodes: contentDiv.querySelectorAll('.mermaid'),
-                        suppressErrors: false
+                        nodes: _toRender,
+                        suppressErrors: true
                     }).then(() => {
                         // 渲染成功后检查:是否产生了有效的SVG而非CSS文本
                         contentDiv.querySelectorAll('.mermaid').forEach(div => {
@@ -5878,25 +6130,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     const delta = event.delta || event.content || '';
                     if (delta) {
                         fullText += delta;
-                        var currentBubble = activeBubbleMap[chatId];
-                        if (currentBubble && window.marked) {
-                            var mb = currentBubble.querySelector('.markdown-body');
-                            if (mb) {
-                                try {
-                                    const html = _renderMarkdownWithMath(autoLinkURLs(fullText));
-                                    mb.innerHTML = html;
-                                    if (window.hljs) {
-                                        mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
-                                            try { hljs.highlightElement(b); } catch(e) {} });
-                                    }
-                                } catch(e) { mb.textContent = fullText; }
-                            }
-                        }
-                        if (currentBubble) {
-                            if (!userScrolled) {
-                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
-                            }
-                        }
+                        applyStreamRender(chatId, fullText, userScrolled);
                     }
                 } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
                     const rd = event.delta || event.reasoning || '';
@@ -6618,6 +6852,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         _imgElStream.decoding = 'async';
                         _imgElStream.style.cssText = 'max-width:' + (pendingMsg.generatedImages.length > 1 ? '160px' : '320px') + ';width:100%;border-radius:8px;display:block;';
                         _imgElStream.setAttribute('loading', 'lazy');
+                        _imgElStream.addEventListener('click', function() { showImageLightbox(pendingMsg.generatedImages, _idx); });
                         _wrapStream.appendChild(_imgElStream);
                         _imgContStream.appendChild(_wrapStream);
                     }, _idx * 50); // 每张间隔50ms,给主线程喘息
@@ -6842,6 +7077,9 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     if (_htAllThink.trim() && !reasoningText) {
         reasoningText = _htAllThink.trim();
     }
+    // ★ 流结束: 取消未执行的节流渲染,直接用最终内容
+    if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
+
     pendingMsg.content = fullText.replace(/\[object Object\]/g, '');
     pendingMsg.reasoning = reasoningText;
 
@@ -6860,7 +7098,30 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                 const contentEl = document.createElement('div');
                 contentEl.innerHTML = _renderMarkdownWithMath(fullText);
                 markdownBody.appendChild(contentEl);
+                _triggerPostRender(contentEl);
             }
+            // ★ 流式完成:添加操作按钮(复制+重新生成)
+            if (!currentBubble.querySelector('.msg-actions')) {
+                var _aDiv = document.createElement('div');
+                _aDiv.className = 'msg-actions';
+                // 复制按钮
+                var _copyB = document.createElement('div');
+                _copyB.className = 'msg-action-btn copy-msg-btn';
+                _copyB.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+                _copyB.onclick = function(e2) { e2.stopPropagation(); copyMessageContent(fullText); };
+                _aDiv.appendChild(_copyB);
+                // 重新生成按钮
+                var _rB = document.createElement('div');
+                _rB.className = 'msg-action-btn regenerate-btn';
+                _rB.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+                _rB.onclick = function(e2) { e2.stopPropagation(); window.regenLastAssistant(fullText); };
+                _aDiv.appendChild(_rB);
+                currentBubble.appendChild(_aDiv);
+            }
+            // ★ 流式完成:滚到底部(图表可能已延迟渲染导致高度变化)
+            setTimeout(function _scrollAfterRender() {
+                if (!userScrolled) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+            }, 200);
             // ★ 非流式响应完成:如果有生成的图片,渲染到气泡
             if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0 && !currentBubble.querySelector('.generated-images-container')) {
                 var _imgContNs = document.createElement('div');
@@ -7686,106 +7947,58 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 }
             }
 
-            // ★ 后端 SSE 流式分支(Feature Flag 控制)
-            if (USE_BACKEND_SSE) {
-                var _msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
-                // ★ 保存 msg_id 到 localStorage,刷新后可恢复
-                try { localStorage.setItem('_lastStreamMsgId_' + chatId, _msgId); } catch(e) {}
-                clearTimeout(timeoutIdVal);
-                var _token = getAuthToken();
-                var _engineUrl = '/oneapichat/engine_api.php?action=chat_stream&auth_token=' + encodeURIComponent(_token);
-                // ★ 修复: 使用 body.messages(原始数组),不是被日志截断的 _reqBody.messages
-                var _streamPayload = JSON.stringify({
-                    chat_id: chatId,
-                    msg_id: _msgId,
-                    request: {
-                        api_key: getVal('apiKey'),
-                        base_url: getVal('baseUrl'),
-                        model: body.model,
-                        messages: body.messages,
-                        tools: body.tools || null,
-                        stream: true
+            const res = await fetch(_reqUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+                body: JSON.stringify(body),
+                signal: abortCtrl.signal
+            });
+            clearTimeout(timeoutIdVal);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+            const model = getVal('modelSelect') || '';
+            const isMiniMax = model.toLowerCase().includes('minimax');
+            const useStream = getChecked('streamToggle');
+
+            if (useStream) {
+                try {
+                    const result = await streamResponse(res, chatId, pendingMsg, 3, 2);
+                    usage = result.usage;
+                    toolCalls = result.toolCalls || [];
+                    // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
+                    if (result.reasoningText && !pendingMsg.reasoning) {
+                        pendingMsg.reasoning = result.reasoningText;
                     }
-                });
-                var _res = await fetch(_engineUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: _streamPayload,
-                    signal: abortCtrl.signal
-                });
-                if (!_res.ok) throw new Error(`HTTP ${_res.status}: ${await _res.text()}`);
-                var _result = await window._backendSSEHandler(_res, chatId, pendingMsg, _msgId);
-                usage = _result.usage;
-                toolCalls = _result.toolCalls || [];
-                // ★ SSE 结束后立即关闭打字状态
-                if (pendingMsg) {
-                    delete pendingMsg.partial;
-                    if (currentChatId === chatId) {
-                        var _bubble = activeBubbleMap[chatId];
-                        if (_bubble) {
-                            var _md = _bubble.querySelector('.markdown-body');
-                            if (_md && pendingMsg.content) _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
-                            _bubble.classList.remove('typing');
-                            var _st = _bubble.querySelector('.search-status');
-                            if (_st) _st.remove();
-                        }
+                } catch (streamErr) {
+                    // ★ HTTP2/网络错误降级: 非流式重试一次
+                    const isStreamNetErr = streamErr.name === 'TypeError' ||
+                        (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
+                    if (isStreamNetErr) {
+                        console.warn('[STREAM] 流式读取失败,尝试非流式降级:', streamErr.message);
+                        showToast('流式中断,切换非流式重试...', 'warning', 2000);
+                        // 重新构造非流式请求体(清除stream标记)
+                        var _nsBody = JSON.parse(JSON.stringify(body));
+                        if (_nsBody.stream !== undefined) _nsBody.stream = false;
+                        const _nsRes = await fetch(_reqUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+                            body: JSON.stringify(_nsBody),
+                            signal: abortCtrl.signal
+                        });
+                        clearTimeout(timeoutIdVal);
+                        if (!_nsRes.ok) throw new Error(`HTTP ${_nsRes.status}: ${await _nsRes.text()}`);
+                        const _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
+                        usage = _nsResult.usage;
+                        toolCalls = _nsResult.toolCalls || [];
+                    } else {
+                        throw streamErr;
                     }
                 }
             } else {
-                const res = await fetch(_reqUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
-                    body: JSON.stringify(body),
-                    signal: abortCtrl.signal
-                });
-                clearTimeout(timeoutIdVal);
-                if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-
-                const model = getVal('modelSelect') || '';
-                const isMiniMax = model.toLowerCase().includes('minimax');
-                const useStream = getChecked('streamToggle');
-
-                if (useStream) {
-                    try {
-                        const result = await streamResponse(res, chatId, pendingMsg, 3, 2);
-                        usage = result.usage;
-                        toolCalls = result.toolCalls || [];
-                        // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
-                        if (result.reasoningText && !pendingMsg.reasoning) {
-                            pendingMsg.reasoning = result.reasoningText;
-                        }
-                    } catch (streamErr) {
-                        // ★ HTTP2/网络错误降级: 非流式重试一次
-                        const isStreamNetErr = streamErr.name === 'TypeError' ||
-                            (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
-                        if (isStreamNetErr) {
-                            console.warn('[STREAM] 流式读取失败,尝试非流式降级:', streamErr.message);
-                            showToast('流式中断,切换非流式重试...', 'warning', 2000);
-                            // 重新构造非流式请求体(清除stream标记)
-                            var _nsBody = JSON.parse(JSON.stringify(body));
-                            if (_nsBody.stream !== undefined) _nsBody.stream = false;
-                            const _nsRes = await fetch(_reqUrl, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
-                                body: JSON.stringify(_nsBody),
-                                signal: abortCtrl.signal
-                            });
-                            clearTimeout(timeoutIdVal);
-                            if (!_nsRes.ok) throw new Error(`HTTP ${_nsRes.status}: ${await _nsRes.text()}`);
-                            const _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
-                            usage = _nsResult.usage;
-                            toolCalls = _nsResult.toolCalls || [];
-                        } else {
-                            throw streamErr;
-                        }
-                    }
-                } else {
-                    const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
-                    usage = result.usage;
-                    toolCalls = result.toolCalls || [];
-                }
-            }  // end of else branch
-
+                const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
+                usage = result.usage;
+                toolCalls = result.toolCalls || [];
+            }
             // 处理工具调用
             if (toolCalls.length > 0) {
                 toolCallCount++;
@@ -8268,11 +8481,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         const userPrompt = args.prompt;
                         let primaryImage = args.image;
 
-                        // ★ 找出所有用户上传的图片(支持多张参考图)
+                        // ★ 找出当前聊天中用户上传的图片(支持多张参考图)
                         var _allImages = [];
-                        // 优先从全局变量获取
-                        if (window._currentMessageImages && window._currentMessageImages.length > 0) {
-                            _allImages = window._currentMessageImages.filter(function(f) {
+                        // 优先从 chat 级变量获取（当前聊天专属）
+                        var _chatImages = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
+                        if (_chatImages && _chatImages.length > 0) {
+                            _allImages = _chatImages.filter(function(f) {
                                 return f.isImage || (f.type && f.type.startsWith('image/'));
                             });
                         }
@@ -8282,15 +8496,27 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 return f.isImage || (f.type && f.type.startsWith('image/'));
                             });
                         }
-                        // 最后从聊天历史中获取
+                        // 最后从聊天历史中获取（用户上传或AI生成的图片）
                         if (!_allImages.length && chatId && chats[chatId]) {
                             var msgs = chats[chatId].messages;
                             for (var _miI2i = msgs.length - 1; _miI2i >= 0; _miI2i--) {
+                                // 用户上传的图片
                                 if (msgs[_miI2i].role === 'user' && msgs[_miI2i].files && msgs[_miI2i].files.length > 0) {
                                     _allImages = msgs[_miI2i].files.filter(function(f) {
                                         return f.isImage || (f.type && f.type.startsWith('image/'));
                                     });
                                     if (_allImages.length > 0) break;
+                                }
+                                // AI 生成的图片
+                                if (msgs[_miI2i].role === 'assistant' && msgs[_miI2i].generatedImages && msgs[_miI2i].generatedImages.length > 0) {
+                                    _allImages = msgs[_miI2i].generatedImages.map(function(imgUrl) {
+                                        return { name: 'AI生成的图片', content: imgUrl, isImage: true, type: 'image/png' };
+                                    });
+                                    if (_allImages.length > 0) break;
+                                }
+                                if (msgs[_miI2i].role === 'assistant' && msgs[_miI2i].generatedImage) {
+                                    _allImages = [{ name: 'AI生成的图片', content: msgs[_miI2i].generatedImage, isImage: true, type: 'image/png' }];
+                                    break;
                                 }
                             }
                         }
@@ -8408,18 +8634,28 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         const imgIdx = (typeof args.image_index === 'number' && args.image_index >= 0) ? args.image_index : 0;
 
                         // 获取当前消息中的所有图片(优先从全局变量获取)
-                        let currentFiles = window._currentMessageImages || [];
+                        var _imgsForChat = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
+                        let currentFiles = _imgsForChat || [];
                         if (!currentFiles.length) {
                             currentFiles = pendingFiles.length > 0 ? pendingFiles : (chats[chatId]?.messages?.slice(-1)[0]?.files || []);
                         }
 
-                        // 如果仍然没有找到图片,尝试从聊天历史中查找最近的用户上传图片
+                        // 如果仍然没有找到图片,尝试从聊天历史中查找（用户上传或AI生成的图片）
                         if (!currentFiles.length && chats[chatId]) {
                             const msgs = chats[chatId].messages;
                             for (let i = msgs.length - 1; i >= 0; i--) {
                                 if (msgs[i].role === 'user' && msgs[i].files && msgs[i].files.length > 0) {
                                     currentFiles = msgs[i].files.filter(f => f.isImage || f.type?.startsWith('image/'));
                                     if (currentFiles.length > 0) break;
+                                }
+                                // AI 生成的图片
+                                if (msgs[i].role === 'assistant' && msgs[i].generatedImages && msgs[i].generatedImages.length > 0) {
+                                    currentFiles = msgs[i].generatedImages.map(url => ({ name: 'AI生成的图片', content: url, isImage: true, type: 'image/png' }));
+                                    if (currentFiles.length > 0) break;
+                                }
+                                if (msgs[i].role === 'assistant' && msgs[i].generatedImage) {
+                                    currentFiles = [{ name: 'AI生成的图片', content: msgs[i].generatedImage, isImage: true, type: 'image/png' }];
+                                    break;
                                 }
                             }
                         }
@@ -8909,6 +9145,7 @@ window.useAlternativeVisionModel = function() {
                                 var _md = _bubble.querySelector('.markdown-body');
                                 if (_md && pendingMsg.content) {
                                     _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
+                                    _triggerPostRender(_md);
                                     _bubble.classList.remove('typing');
                                 }
                                 var _status = _bubble.querySelector('.search-status');
@@ -8954,6 +9191,7 @@ window.useAlternativeVisionModel = function() {
                     var _md = _bubble.querySelector('.markdown-body');
                     if (_md && pendingMsg.content) {
                         _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
+                        _triggerPostRender(_md);
                         _bubble.classList.remove('typing');
                     }
                     // ★ 追加生成的图片到气泡(如果有)
@@ -9411,7 +9649,15 @@ function renderChatHistory() {
     var _chatIds = Object.keys(chats).filter(function(id) {
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
-    list.innerHTML = _chatIds.reverse().map(id => `
+    // ★ 按更新时间排序,最新的在最上面
+    _chatIds.sort(function(a, b) {
+        var ta = chats[a].updated_at || chats[a].time || 0;
+        var tb = chats[b].updated_at || chats[b].time || 0;
+        if (ta !== tb) return tb - ta;
+        // ★ 时间相同时按聊天ID降序稳定排序,避免刷新后乱跳
+        return a < b ? 1 : (a > b ? -1 : 0);
+    });
+    list.innerHTML = _chatIds.map(id => `
         <div onclick="window.loadChat('${id}')" class="group flex items-center justify-between p-2 rounded-xl cursor-pointer transition ${id === currentChatId ? 'bg-white dark:bg-gray-800 shadow-sm text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'}">
             <span class="truncate text-sm">${escapeHtml(chats[id].title)}</span>
             <button onclick="window.deleteChat(event, '${id}')" class="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
@@ -9455,6 +9701,7 @@ window.createNewChat = function () {
     chats[id] = {
         title: '新对话',
         userId: uid,
+        updated_at: Date.now(),
         messages: [
             { role: 'system', content: getVal('systemPrompt') || DEFAULT_CONFIG.system }
         ]
@@ -10003,7 +10250,6 @@ function initAgentConfig() {
     setChecked('agentModeToggle', agentMode);
     setChecked('agentAutoDecision', localStorage.getItem('agentAutoDecision') !== 'false');
     setChecked('agentProactive', localStorage.getItem('agentProactive') === 'true');
-    setChecked('useBackendSSEToggle', localStorage.getItem('useBackendSSE') === 'true');
     setVal('agentMaxToolRounds', localStorage.getItem('agentMaxToolRounds') || '30');
     setVal('agentThinkingDepth', localStorage.getItem('agentThinkingDepth') || 'standard');
     setVal('agentSystemPrompt', localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
@@ -10158,6 +10404,14 @@ async function loadAllResources() {
         await Promise.all(resources.map(r => r.type === 'script' ? loadScript(r.src) : loadStyle(r.href, r.id)));
         if (window.mermaid) {
             mermaid.initialize({ startOnLoad: false, theme: 'default' }); // 初始化 Mermaid
+            // ★ Mermaid 加载完成后,重新渲染所有已有气泡中的图表
+            setTimeout(function _renderPendingMermaid() {
+                document.querySelectorAll('.markdown-body').forEach(function(el) {
+                    if (el.querySelector('pre code[class*="language-mermaid"]') || el.querySelector('.mermaid:not(svg)')) {
+                        MarkdownRenderer.renderMermaid(el);
+                    }
+                });
+            }, 100);
         }
     } catch (err) {
         console.warn('部分资源加载失败', err);
@@ -10241,11 +10495,12 @@ function initializeApp() {
             slimSaveChats(); // 使用压缩保存避免 quota exceeded
         } catch(e) {}
 
-        // ★ 旧版 /mcp 相对路径迁移为完整URL(直连模式则保持不动)
+        // ★ 旧版 /mcp 迁移为直连 MiniMax Vision API
         var _oldVision = localStorage.getItem('visionApiUrl');
-        if (_oldVision === '/mcp' || _oldVision === '') {
-            localStorage.setItem('visionApiUrl', 'https://xiaoxin.naujtrats.xyz/mcp');
-            console.log('[migrate] visionApiUrl: /mcp → https://xiaoxin.naujtrats.xyz/mcp');
+        if (_oldVision && (_oldVision.indexOf('/mcp') >= 0 || _oldVision === '')) {
+            localStorage.setItem('visionApiUrl', 'https://api.minimaxi.com/v1/coding_plan/vlm');
+            localStorage.setItem('visionModel', 'MiniMax-M2');
+            console.log('[migrate] visionApiUrl: /mcp → MiniMax 直连');
         }
 
         // ★ 从服务器恢复当前账号的配置和聊天记录(登录用户专用)
@@ -10330,6 +10585,14 @@ function initializeApp() {
             }
         }, 30000);
         // ★ 页面关闭/刷新前强制保存到localStorage + 服务器
+        // ★ 强制定时重试:如果数据还没加载(跨域cookie可能延迟到达)
+        setTimeout(function _retryRestore() {
+            if (Object.keys(chats).length <= 2 && localStorage.getItem('authToken')) {
+                console.log('[retry] 聊天数极少,尝试重新加载...');
+                restoreUserData().catch(function(){});
+            }
+        }, 2000);
+
         // ★ 登录/注册成功提示
         try {
             var loginMsg = localStorage.getItem('_loginSuccess');

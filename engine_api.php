@@ -167,12 +167,6 @@ switch ($action) {
         echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
-    case 'chat_progress':
-        $msg_id = $_GET['msg_id'] ?? '';
-        if (!$msg_id) { echo json_encode(['error' => '缺少msg_id']); exit; }
-        $url = $engine_url . '/engine/chat/progress/' . urlencode($msg_id) . '?' . $userParam;
-        echo @file_get_contents($url) ?: json_encode(['full_text' => '', 'reasoning_text' => '']);
-        break;
 
     case 'exec':
         $cmd = $_GET['cmd'] ?? '';
@@ -250,79 +244,4 @@ switch ($action) {
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
         echo @file_get_contents($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
-
-    case 'chat_stream':
-        // POST proxy for SSE streaming to /engine/chat/stream
-        // 使用 proc_open + curl 命令行（不依赖 php-curl 扩展）
-        header('Content-Type: text/event-stream');
-        header('Cache-Control: no-cache');
-        header('X-Accel-Buffering: no');  // 禁用 nginx 缓冲
-        if (ob_get_level()) ob_end_clean();
-        flush();
-
-        $input = file_get_contents('php://input');
-        $payload = @json_decode($input, true);
-        if (!$payload) { echo "event: error\ndata: ".json_encode(['error'=>'invalid JSON'])."\n\n"; exit; }
-        $chat_id = $payload['chat_id'] ?? '';
-        $msg_id = $payload['msg_id'] ?? '';
-        $request_data = $payload['request'] ?? [];
-        $api_key = $request_data['api_key'] ?? '';
-        $base_url = rtrim($request_data['base_url'] ?? '', '/');
-        $model = $request_data['model'] ?? 'deepseek-chat';
-        $messages = $request_data['messages'] ?? [];
-        $tools = $request_data['tools'] ?? null;
-
-        $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
-        // ★ 修复: PHP json_encode 会把空关联数组 [] 输出为 [] 而非 {},
-        // 将原始 payload 直接转发(避免 decode 后 encode 丢失 {} vs [] 的区别)
-        // 只提取 chat_id/msg_id 和注入 user_id
-        $eng_input = file_get_contents('php://input');
-        $eng_payload = @json_decode($eng_input, true);
-        $chat_id = $eng_payload['chat_id'] ?? '';
-        $msg_id = $eng_payload['msg_id'] ?? '';
-        // 如果原 payload 有 request 对象,直接转发;否则用 $input
-        $engine_stream_url = $engine_url . '/engine/chat/stream?user_id=' . urlencode($userId);
-        // 直接发送原始 JSON 到引擎(不经过 PHP json_encode 避免 {} ↔ [] 混淆)
-        $eng_req = $eng_input;
-
-        // proc_open + curl 命令行（SSE 流式代理，不依赖 php-curl 扩展）
-        // 使用 shell 字符串形式确保 curl 正确处理 POST 数据
-        $curl_cmd = 'curl -s -N -X POST ' .
-            '-H ' . escapeshellarg('Content-Type: application/json') . ' ' .
-            '-H ' . escapeshellarg('Accept: text/event-stream') . ' ' .
-            '-H ' . escapeshellarg('Connection: close') . ' ' .
-            '--tlsv1.2 ' .
-            '--max-time 300 ' .
-            '--no-buffer ' .
-            '--data-raw ' . escapeshellarg($eng_req) . ' ' .
-            escapeshellarg($engine_stream_url) . ' 2>/dev/null';
-
-        $descriptors = [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['file', '/dev/null', 'w']
-        ];
-        $proc = proc_open($curl_cmd, $descriptors, $pipes);
-        if (!$proc) {
-            echo "event: error\ndata: ".json_encode(['error'=>'proc_open failed'])."\n\n";
-            exit;
-        }
-        // stdin pipe 已通过 stderr 关闭（curl 从 --data-raw 读取）
-        if ($pipes[0]) fclose($pipes[0]);
-        // stdout 流式转发到客户端(每 256 字节就 flush,确保实时)
-        if ($pipes[1]) {
-            stream_set_chunk_size($pipes[1], 256);
-            while (!feof($pipes[1])) {
-                $chunk = @fread($pipes[1], 256);
-                if ($chunk !== false && strlen($chunk) > 0) {
-                    echo $chunk;
-                    if (ob_get_level()) @ob_flush();
-                    @flush();
-                }
-                if (feof($pipes[1])) break;
-            }
-            fclose($pipes[1]);
-        }
-        proc_close($proc);
-        exit;
 }

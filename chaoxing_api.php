@@ -170,13 +170,14 @@ $userId = null;
 if (!empty($authToken)) {
     $userId = verifyAuthToken($authToken);
 }
-if (!$userId) {
+$action = $_GET['action'] ?? '';
+if ($action === 'search_answer') {
+    // 搜题接口不需要认证，放行
+} elseif (!$userId) {
     http_response_code(401);
     echo json_encode(['error' => '未认证，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
 }
-
-$action = $_GET['action'] ?? '';
 $script_dir = CHAOXING_DIR;
 
 switch ($action) {
@@ -249,11 +250,13 @@ switch ($action) {
                 $course['db_status'] = $db_status;
                 $course['videos'] = $db_videos[$cid] ?? ['done' => 0, 'total' => 0];
                 $course['works'] = $db_works[$cid] ?? ['done' => 0, 'total' => 0];
-                // 正在刷课中或已完成的，checkbox 禁用 + 勾选
-                $is_in_list = in_array($cid, $config_course_ids);
-                if ($db_status === 'completed' || $db_status === 'in_progress' || $is_in_list) {
+                // checkbox 状态：completed → 勾选+禁用；in_progress → 勾选但不禁用；not_started → 不勾选+可用
+                if ($db_status === 'completed') {
                     $course['checked'] = true;
                     $course['disabled'] = true;
+                } elseif ($db_status === 'in_progress') {
+                    $course['checked'] = true;
+                    $course['disabled'] = false;
                 } else {
                     $course['checked'] = false;
                     $course['disabled'] = false;
@@ -293,6 +296,10 @@ switch ($action) {
         // 清理旧状态/pid/log文件
         @unlink($pid_file);
         clearTaskState($userId);
+
+        // 重置 DB 中被选课程的 in_progress 状态（允许重新刷）
+        $reset_cmd = pyCmd('db_course_status.py', '--user-id ' . escapeshellarg($userId) . ' --reset-start ' . escapeshellarg($course_ids) . ' 2>/dev/null');
+        exec($reset_cmd);
 
         // 写入 course_list 到用户级 config
         $ini = file_get_contents($config_path);
@@ -339,9 +346,11 @@ switch ($action) {
             if ($fh) {
                 fseek($fh, 0, SEEK_END);
                 $fileSize = ftell($fh);
-                $readBytes = min($fileSize, 30720); // 30KB
-                fseek($fh, $fileSize - $readBytes);
-                $raw = fread($fh, $readBytes);
+                if ($fileSize > 0) {
+                    $readBytes = min($fileSize, 30720); // 30KB
+                    fseek($fh, $fileSize - $readBytes);
+                    $raw = fread($fh, $readBytes);
+                }
                 fclose($fh);
             }
             // ★ 正确解析 \r（视频进度覆盖）和 \n（正常日志）混合的日志
@@ -461,9 +470,11 @@ switch ($action) {
             if ($fh) {
                 fseek($fh, 0, SEEK_END);
                 $fileSize = ftell($fh);
-                $readBytes = min($fileSize, 30720);
-                fseek($fh, $fileSize - $readBytes);
-                $raw = fread($fh, $readBytes);
+                if ($fileSize > 0) {
+                    $readBytes = min($fileSize, 30720);
+                    fseek($fh, $fileSize - $readBytes);
+                    $raw = fread($fh, $readBytes);
+                }
                 fclose($fh);
             }
             // 简化解析：只提取时间戳行
@@ -633,6 +644,28 @@ switch ($action) {
         if (!$json) $json = json_encode(['error' => '获取考试列表失败', 'detail' => '退出码='.$code]);
         file_put_contents($exam_cache, $json);
         echo $json;
+        break;
+
+    case 'search_answer':
+        // 自动答题脚本调用的搜题接口（无需认证）
+        $input = json_decode(file_get_contents('php://input'), true);
+        $title = $input['title'] ?? '';
+        $options = $input['options'] ?? '';
+        $qtype = $input['type'] ?? 'single';
+        if (!$title) { echo json_encode(['answer' => null]); break; }
+
+        $pyScript = APP_ROOT . '/api/search_question.py';
+        $cmd = 'cd ' . escapeshellarg(CHAOXING_DIR)
+            . ' && PLAYWRIGHT_BROWSERS_PATH=' . escapeshellarg('/home/naujtrats/.cache/ms-playwright')
+            . ' PYTHONPATH=' . escapeshellarg(APP_ROOT)
+            . ' python3 ' . escapeshellarg($pyScript)
+            . ' --title ' . escapeshellarg($title)
+            . ' --options ' . escapeshellarg($options)
+            . ' --type ' . escapeshellarg($qtype)
+            . ' 2>&1';
+        $output = shell_exec($cmd);
+        $result = json_decode($output, true);
+        echo json_encode(['answer' => $result['answer'] ?? null]);
         break;
 
     case 'exam_config':
