@@ -243,6 +243,7 @@ if (_dd) document.documentElement.classList.add('dark');
                 刷课与题库设置
                 <span id="syncStatus" class="ml-auto text-xs font-normal text-gray-400"></span>
             </summary>
+
             <div class="border-t border-gray-200 dark:border-gray-700 space-y-4 settings-content">
                 <!-- 视频倍速 -->
                 <div class="flex items-center justify-between">
@@ -464,8 +465,9 @@ if (_dd) document.documentElement.classList.add('dark');
                         </h2>
                     </div>
                     <div class="flex items-center gap-3">
+					
                         <button onclick="startExamAll()" id="examStartBtn" class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full transition shadow-sm">开考所选</button>
-                        <button onclick="openExamManual()" class="px-3 py-1 text-xs font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-full transition border border-amber-200 dark:border-amber-800 flex items-center gap-1" title="超星需手动确认的考试，点此在代理页面中手动开考"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg> 手动开考</button>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap"><button onclick="openExamManual()" class="px-3 py-1 text-xs font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-full transition border border-amber-200 dark:border-amber-800 flex items-center gap-1" title="超星需手动确认的考试，点此在代理页面中手动开考"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg> 手动开考</button>
                         <button onclick="clearExamLog()" class="text-xs text-gray-400 hover:text-red-500 transition px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg> 清空</button>
                     </div>
                 </div>
@@ -1108,6 +1110,8 @@ if (_dd) document.documentElement.classList.add('dark');
                 const d = await r.json();
                 if (d.success) {
                     showToast('登录成功: ' + user, 'success');
+                    examData = [];
+                    loadExamList();
                     hideLogin();
                     loadAccount();
                     loadCourses();
@@ -2032,17 +2036,14 @@ function setStatus(text, cls) {
                 var e = examData[idx];
                 if (e && e.exam_id) examIds.push(e);
             });
-            if (examIds.length === 0) { logExam('请先选择要手动开考的考试', 'warn'); return; }
-            if (examIds.length > 1) { logExam('手动开考一次只能选一个考试', 'warn'); return; }
+            if (examIds.length === 0) { logExam('\u8bf7\u5148\u9009\u62e9\u8981\u624b\u52a8\u5f00\u8003\u7684\u8003\u8bd5', 'warn'); return; }
+            if (examIds.length > 1) { logExam('\u624b\u52a8\u5f00\u8003\u4e00\u6b21\u53ea\u80fd\u9009\u4e00\u4e2a\u8003\u8bd5', 'warn'); return; }
             var e = examIds[0];
-            var proxyUrl = 'http://192.168.195.213:8898/exam-ans/exam/phone/task-exam?' +
-                'taskrefId=' + e.exam_id + '&courseId=' + e.course_id +
-                '&classId=' + e.class_id + '&cpi=' + e.cpi + '&ut=s';
-            logExam('打开代理页面: ' + e.title, 'info');
-            // 用 location.href 避免被 Chrome 拦截
-            if (confirm('即将跳转到手动考试页面。\n勾选「我已阅读并同意」并点击「开始考试」')) {
-                location.href = proxyUrl;
-            }
+            // \u76f4\u63a5\u6253\u5f00\u8d85\u661f\u539f\u59cb\u9875\u9762\uff08\u9a8c\u8bc1\u7801\u6b63\u5e38\u5de5\u4f5c\uff09
+            var examUrl = 'https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes?courseId=' + e.course_id + '&classId=' + e.class_id + '&examId=' + e.exam_id + '&cpi=' + e.cpi + '&ut=s';
+            logExam('\u6253\u5f00\u8003\u8bd5\u9875\u9762: ' + e.title, 'info');
+            logExam('\u5b89\u88c5 OCS \u540e\u4f1a\u81ea\u52a8\u7b54\u9898', 'info');
+            window.open(examUrl, '_blank');
         }
 
         function toggleExamCb(el) {
@@ -2078,75 +2079,26 @@ function setStatus(text, cls) {
             updateExamCount();
         }
 
-        async function startExamAll() {
-            var btn = document.getElementById('examStartBtn');
-            btn.disabled = true;
-            btn.textContent = '考试进行中...';
-
-            // 收集选中的考试信息（完整数据，不只是exam_id）
+        function startExamAll() {
+            // 只开第一个选中的考试
             var checkedCbs = document.querySelectorAll('.exam-cb:checked');
-            var selectedExams = [];
+            var target = null;
             checkedCbs.forEach(function(cb) {
+                if (target) return;
                 var itemDiv = cb.closest('[onclick]') || cb.closest('.flex');
                 var idx = Array.from(itemDiv.parentNode.children).indexOf(itemDiv);
-                var examEntry = examData[idx];
-                if (examEntry && !(examEntry.status === '已完成' || examEntry.status === '已交' || examEntry.status === '已交卷')) {
-                    selectedExams.push({
-                        exam_id: examEntry.exam_id,
-                        course_id: examEntry.course_id,
-                        class_id: examEntry.class_id,
-                        cpi: examEntry.cpi,
-                        enc_task: examEntry.enc_task
-                    });
+                var e = examData[idx];
+                if (e && !(e.status === '\u5df2\u5b8c\u6210' || e.status === '\u5df2\u4ea4' || e.status === '\u5df2\u4ea4\u5377')) {
+                    target = e;
                 }
             });
-
-            if (selectedExams.length === 0) {
-                logExam('请先选择要开考的考试', 'warn');
-                btn.disabled = false; btn.textContent = '开考所选';
+            if (!target) {
+                logExam('\u8bf7\u5148\u9009\u62e9\u8981\u5f00\u8003\u7684\u8003\u8bd5', 'warn');
                 return;
             }
-
-            // 保存刷课状态，用于考后自动恢复
-            _examPausedStudy = false;
-            try {
-                var sr = await fetch('chaoxing_api.php?action=status&auth_token=' + encodeURIComponent(_getAuthToken()));
-                var sd = await sr.json();
-                _examPausedStudy = !!sd.running;
-            } catch(e) {}
-
-            logExam('开始考试模式，已选 ' + selectedExams.length + ' 场考试...', 'info');
-            try {
-                // 更新考试配置
-                var newCfg = { auto_submit: document.getElementById('examAutoSubmit').value === '1' };
-                await fetch('chaoxing_api.php?action=exam_config&sub=save&auth_token=' + encodeURIComponent(_getAuthToken()), {
-                    method: 'POST',
-                    body: JSON.stringify({ config: newCfg })
-                });
-
-                // 启动考试：发送选中考试的完整信息
-                var r = await fetch('chaoxing_api.php?action=exam_start&auth_token=' + encodeURIComponent(_getAuthToken()), {
-                    method: 'POST',
-                    body: JSON.stringify({ exams: selectedExams })
-                });
-                var d = await r.json();
-                if (d.success) {
-                    if (d.study_running) {
-                        logExam('📌 已自动暂停刷课，避免风控', 'info');
-                    }
-                    logExam('考试模式已启动 (PID: ' + d.pid + ')，' + selectedExams.length + ' 场考试', 'success');
-                    showToast('刷课已暂停，考试进行中', 'info');
-                    pollExamStatus(btn, selectedExams);
-                } else {
-                    logExam('启动失败: ' + (d.error || '未知错误'), 'error');
-                    btn.disabled = false;
-                    btn.textContent = '开考所选';
-                }
-            } catch(e) {
-                logExam('启动考试失败: ' + e.message, 'error');
-                btn.disabled = false;
-                btn.textContent = '开考所选';
-            }
+            var examUrl2 = 'https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes?courseId=' + target.course_id + '&classId=' + target.class_id + '&examId=' + target.exam_id + '&cpi=' + target.cpi + '&ut=s';
+            window.open(examUrl2, '_blank');
+            logExam('\u6253\u5f00: ' + target.title, 'success');
         }
 
         function pollExamStatus(btn, selectedIds) {
@@ -2314,5 +2266,22 @@ function setStatus(text, cls) {
       刷课引擎: <a href="https://github.com/Samueli924/chaoxing" style="color:#666;" target="_blank">Samueli924/chaoxing</a> (GPL-3.0) &nbsp;|&nbsp; 考试引擎: <a href="https://github.com/guowang23333/CxKitty-" style="color:#666;" target="_blank">CxKitty</a> (GPL-3.0)
     </div>
 
+
+<!-- 浮动书签 -->
+<div id="_bookmark_floating" style="position:fixed;bottom:20px;left:20px;z-index:99999;background:#1e293b;border:1px solid #6366f1;border-radius:10px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.4);font-size:11px;max-width:260px;color:#e2e8f0">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span style="font-size:16px">📌</span>
+    <span style="font-weight:600">自动答题书签</span>
+  </div>
+  <div style="color:#94a3b8;margin-bottom:8px;line-height:1.4">把下面的按钮<strong style="color:#f59e0b">拖到书签栏</strong>，考试时点它自动答题</div>
+  <div style="text-align:center">
+    <a href="javascript:(function(){var s=document.createElement('script');s.src='https://115.29.211.17/oneapichat/auto_answer_bookmark.js';document.body.appendChild(s)})();"
+       style="display:inline-block;padding:6px 16px;background:#6366f1;color:#fff;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;cursor:grab"
+       draggable="true">🤖 拖我到书签栏</a>
+  </div>
+  <div style="text-align:right;margin-top:4px">
+    <span onclick="this.parentElement.parentElement.style.display='none'" style="font-size:10px;color:#64748b;cursor:pointer">关闭</span>
+  </div>
+</div>
 </body>
 </html>

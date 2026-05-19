@@ -451,6 +451,9 @@ class ChaoxingExam:
                 raise ExamIsCommitted("该考试已完成")
             if "尚未开始" in body_text or "考试尚未开始" in body_text:
                 raise ExamNotStart("考试尚未开始")
+            # 检查安全验证
+            if "安全验证" in body_text:
+                raise ExamAccessDenied("考试需要安全验证（滑动验证码）")
             # 无法解析，记录原始内容以便调试
             snippet = html.body.get_text()[:300] if html.body else resp.text[:300]
             logger.warning(f"开始考试响应无法解析 (exam={self.exam_id}): {snippet}")

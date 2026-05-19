@@ -66,6 +66,24 @@ function jsonError($code, $msg) {
 }
 
 function jsonSuccess($data = []) {
+    // ★ 保存 token 到 session（跨域共享）
+    if (isset($data['token']) && session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['auth_token'] = $data['token'];
+        $_SESSION['auth_username'] = $data['username'] ?? '';
+        $_SESSION['auth_user_id'] = $data['user_id'] ?? '';
+    }
+
+    // ★ 跨域登录状态同步 cookie
+    if (isset($data['token'])) {
+        setcookie('auth_token', $data['token'], [
+            'expires' => time() + 30 * 86400,
+            'path' => '/',
+            'domain' => '.naujtrats.xyz',
+            'secure' => true,
+            'httponly' => false,
+            'samesite' => 'Lax'
+        ]);
+    }
     echo json_encode(array_merge(['success' => true], $data));
     exit;
 }
@@ -108,6 +126,34 @@ function verifyToken($token) {
 $method = $_SERVER['REQUEST_METHOD'];
 $action = isset($_GET['action']) ? trim($_GET['action']) : '';
 $input = json_decode(file_get_contents('php://input'), true);
+
+
+/**
+ * 获取跨域认证 token（优先 session，其次 cookie）
+ */
+
+// ★ 跨域 session: 所有子域名共享登录态
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 30 * 86400,
+        'path' => '/',
+        'domain' => '.naujtrats.xyz',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax'
+    ]);
+    @session_start();
+}
+
+function getCrossDomainToken() {
+    if (session_status() === PHP_SESSION_ACTIVE && !empty($_SESSION['auth_token'])) {
+        return $_SESSION['auth_token'];
+    }
+    if (!empty($_COOKIE['auth_token'])) {
+        return $_COOKIE['auth_token'];
+    }
+    return null;
+}
 
 switch ($method) {
     case 'POST':
@@ -279,11 +325,18 @@ switch ($method) {
                 'created_at' => $users[$userId]['created_at'] ?? null
             ]);
             exit;
+        } elseif ($action === 'cross_domain_token') {
+            // ★ 跨域 cookie/session → 返回 token
+            $token = getCrossDomainToken();
+            if ($token) {
+                echo json_encode(['success' => true, 'token' => $token, 'username' => ($_SESSION['auth_username'] ?? '')]);
+            } else {
+                echo json_encode(['success' => false]);
+            }
+            exit;
         }
         jsonError(400, '未知操作');
         break;
-
     default:
-        http_response_code(405);
         echo json_encode(['error' => 'Method not allowed']);
 }

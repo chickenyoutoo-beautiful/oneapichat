@@ -94,6 +94,7 @@ body {
 .bubble {
     max-width: 90%;
     padding: 0.4rem 0.6rem;
+    contain: layout style; overflow-anchor: auto;
     border-radius: 1.2rem;
     position: relative;
     word-wrap: break-word;
@@ -112,6 +113,15 @@ body {
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 .dark .bubble.assistant { background: #1f2937 !important; color: #f3f4f6 !important; }
+
+/* 气泡内容变化过渡(防止图表渲染时突然撑大) */
+.markdown-body { transition: min-height 0.15s ease; }
+.mermaid svg { max-width: 100%; height: auto; display: block; }
+
+/* KaTeX 稳定性:防止数学公式渲染时抖动 */
+.katex { line-height: 1.4; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.2em 0; }
+.markdown-body .katex { min-height: 1.4em; vertical-align: baseline; }
 
 /* ===== Markdown 样式 ===== */
 .markdown-body {
@@ -179,11 +189,13 @@ body {
 /* 表格 */
 .markdown-body table {
     display: block; overflow-x: auto; border-collapse: collapse;
-    width: 100%; margin: 0 0 var(--chat-paragraph-margin) 0; white-space: nowrap;
+    width: 100%; margin: 0 0 var(--chat-paragraph-margin) 0; white-space: normal;
 }
 .markdown-body th, .markdown-body td {
-    border: 1px solid #d1d5db; padding: 0.4rem; text-align: left;
+    border: 1px solid #d1d5db; padding: 0.4rem 0.6rem; text-align: left; min-width: 40px;
+    white-space: normal; overflow: visible; word-break: break-word;
 }
+.markdown-body td .katex { white-space: normal; word-break: break-word; display: inline-block; max-width: 100%; overflow: visible; }
 .dark .markdown-body th, .dark .markdown-body td { border-color: #4b5563; }
 .markdown-body th { background: #f3f4f6; font-weight: 600; }
 .dark .markdown-body th { background: #2d3748; }
@@ -1281,8 +1293,11 @@ input:checked + .slider:before { transform: translateX(20px); }
 .config-input:focus { outline: 2px solid #3b82f6; outline-offset: 2px; }
 .dark .config-input:focus { outline-color: #60a5fa; }
 
-/* ===== 侧边栏下拉框宽度限制 ===== */
-.sidebar select#compressModel,
+/* API Key 文字遮罩（替代 type=password） */
+.config-input[data-lpignore="true"],
+.masked-key {
+    -webkit-text-security: disc;
+}
 .sidebar select#titleModel {
     width: 120px;
     flex: none;
