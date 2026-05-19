@@ -17,6 +17,7 @@ parser.add_argument('--phone', default='')
 parser.add_argument('--reset-in-progress', action='store_true', help='重置 in_progress/running 状态为 not_started')
 parser.add_argument('--stats', action='store_true', help='统计模式：返回该用户的聚合统计（取代 stats_query.py）')
 parser.add_argument('--clear-cache', action='store_true', help='清空该用户所有课程记录（切换账号时清理旧数据）')
+parser.add_argument('--reset-start', default='', help='重置指定课程ID的状态为in_progress（重新开始刷课时清空旧进度）')
 args = parser.parse_args()
 # ★ 账号同步：同时用 user-id（auth id）和 phone 查询
 _auth_id = args.user_id.strip() if args.user_id else ''
@@ -45,6 +46,20 @@ try:
     if args.clear_cache:
         if not user_id:
             print(json.dumps({'error': '--clear-cache 需要 --user-id 参数'}))
+
+    # ★ 重置指定课程为 in_progress（重新开始刷课）
+    if args.reset_start:
+        reset_ids = [x.strip() for x in args.reset_start.split(',') if x.strip()]
+        if reset_ids and user_ids:
+            placeholders = ','.join('?' * len(user_ids))
+            id_placeholders = ','.join('?' * len(reset_ids))
+            for cid in reset_ids:
+                c.execute("DELETE FROM chapters WHERE course_id=? AND user_id IN (" + placeholders + ")", (cid,) + tuple(user_ids))
+            c.execute(f"UPDATE courses SET status='in_progress', completed_videos=0, completed_works=0, total_videos=0, total_works=0 WHERE id IN ({id_placeholders}) AND user_id IN ({placeholders})", reset_ids + user_ids)
+            conn.commit()
+            print(json.dumps({'success': True, 'reset': len(reset_ids)}))
+            conn.close()
+            sys.exit(0)
             conn.close()
             sys.exit(1)
         placeholders = ','.join('?' * len(user_ids))

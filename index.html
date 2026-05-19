@@ -22,11 +22,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=17">
+    <link rel="stylesheet" href="./css/style.css?v=25">
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
+    <!-- PPT/PPTX 解析 -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <!-- 主脚本（defer 不阻塞渲染） -->
-    <script defer src="./js/main.js?v=44"></script>
+    
+
+<script defer src="./js/main.js?v=20260519af"></script>
+
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
     <!-- 登录弹窗 -->
@@ -213,7 +218,7 @@
             <div class="input-wrapper">
                 <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition" style="overflow:hidden;">
                     <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition" title="上传文件或图片">
-                        <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg">
+                        <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.pptx,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
                         </svg>
@@ -323,7 +328,7 @@
             </div>
             <div class="config-field">
                 <label class="config-label">API Key</label>
-                <input type="password" id="apiKey" placeholder="输入 API Key" autocomplete="off" class="config-input">
+                <input type="text" id="apiKey" autocomplete="off" class="config-input masked-key" placeholder="输入 API Key">
             </div>
             <div class="config-field">
                 <label class="config-label">Base URL</label>
@@ -339,7 +344,7 @@
             </div>
             <div class="config-field">
                 <label class="config-label">视觉理解 API Key</label>
-                <input type="password" id="visionApiKey" placeholder="视觉理解专用密钥" autocomplete="off" class="config-input">
+                <input type="text" id="visionApiKey" autocomplete="off" class="config-input masked-key" placeholder="视觉理解专用密钥">
             </div>
         </div>
 
@@ -359,7 +364,7 @@
             <!-- MiniMax 专用配置 -->
             <div class="config-field" id="imageKeyField">
                 <label class="config-label">MiniMax API Key</label>
-                <input type="password" id="imageApiKey" placeholder="MiniMax 密钥" autocomplete="off" class="config-input">
+                <input type="text" id="imageApiKey" autocomplete="off" class="config-input masked-key" placeholder="MiniMax 密钥">
             </div>
             <div class="config-field" id="imageUrlField">
                 <label class="config-label">MiniMax API 地址</label>
@@ -368,7 +373,7 @@
             <!-- OpenRouter 专用配置 -->
             <div class="config-field" id="orKeyField" style="display:none;">
                 <label class="config-label">OpenRouter API Key</label>
-                <input type="password" id="imageApiKeyOpenrouter" placeholder="OpenRouter 密钥" autocomplete="off" class="config-input">
+                <input type="text" id="imageApiKeyOpenrouter" autocomplete="off" class="config-input masked-key" placeholder="OpenRouter 密钥">
             </div>
             <div class="config-field" id="orUrlField" style="display:none;">
                 <label class="config-label">OpenRouter API 地址</label>
@@ -457,14 +462,14 @@
                         </div>
                         <div class="flex items-center gap-[10px] py-2">
                             <span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">API Key</span>
-                            <input type="password" id="searchApiKey" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="当前引擎 Key">
+                            <input type="text" id="searchApiKey" autocomplete="off" class="config-input flex-1 text-xs masked-key" style="font-size:11px;padding:4px 8px;" placeholder="当前引擎 Key">
                         </div>
                         <details class="text-xs py-2">
                             <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs">各引擎 Key</summary>
                             <div class="mt-[10px] space-y-[8px] pl-[4px]">
-                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Brave</span><input type="password" id="searchApiKeyBrave" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
-                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Google</span><input type="password" id="searchApiKeyGoogle" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
-                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Tavily</span><input type="password" id="searchApiKeyTavily" class="config-input flex-1 text-xs" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
+                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Brave</span><input type="text" id="searchApiKeyBrave" autocomplete="off" class="config-input flex-1 text-xs masked-key" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
+                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Google</span><input type="text" id="searchApiKeyGoogle" autocomplete="off" class="config-input flex-1 text-xs masked-key" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
+                                <div class="flex items-center gap-[10px]"><span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">Tavily</span><input type="text" id="searchApiKeyTavily" autocomplete="off" class="config-input flex-1 text-xs masked-key" style="font-size:11px;padding:4px 8px;" placeholder="Key"></div>
                             </div>
                         </details>
                         <div class="flex items-center justify-between py-2">
@@ -557,11 +562,6 @@
                 <div class="config-toggle-row">
                     <span class="config-label">启用 Agent 模式</span>
                     <label class="switch small"><input type="checkbox" id="agentModeToggle" onchange="window.toggleAgentMode()"><span class="slider"></span></label>
-                </div>
-                <div class="config-toggle-row">
-                    <span class="config-label">后端中继（SSE 流）</span>
-                    <label class="switch small"><input type="checkbox" id="useBackendSSEToggle"><span class="slider"></span></label>
-                    <span style="font-size:11px;color:#9ca3af;margin-left:8px;">关闭=直连,刷新无保护</span>
                 </div>
                 <div class="config-toggle-row">
                     <span class="config-label">自动决策</span>
@@ -811,13 +811,13 @@ async function performAuthLogin() {
             } catch(_e) {}
             // ★ 切换账号时清空全部旧数据（聊天记录+配置，彻底隔离不同账号）
             localStorage.clear();
-            localStorage.setItem('authToken', data.token);
+            syncAuthToken(data.token);
             localStorage.setItem('authUsername', data.username);
             localStorage.setItem('authUserId', data.user_id);
             localStorage.setItem('_loginSuccess', '登录成功，欢迎回来!');
             localStorage.setItem('_skipUnloadSave', '1');
             // 使用硬导航强制重新执行 JS，避免 bfcache 导致旧 state 残留
-            window.location.href = window.location.pathname + window.location.search;
+            var _nocache = (window.location.search ? "&" : "?") + "_t=" + Date.now(); window.location.href = window.location.pathname + window.location.search + _nocache;
             return;
         } else {
             authError(data.error || '登录失败');
@@ -877,13 +877,13 @@ async function performAuthRegister() {
             } catch(_e) {}
             // ★ 注册新账号时也清空全部旧数据
             localStorage.clear();
-            localStorage.setItem('authToken', data.token);
+            syncAuthToken(data.token);
             localStorage.setItem('authUsername', data.username);
             localStorage.setItem('authUserId', data.user_id);
             localStorage.setItem('_loginSuccess', '注册成功，欢迎!');
             localStorage.setItem('_skipUnloadSave', '1');
             // 使用硬导航强制重新执行 JS，避免 bfcache 导致旧 state 残留
-            window.location.href = window.location.pathname + window.location.search;
+            var _nocache = (window.location.search ? "&" : "?") + "_t=" + Date.now(); window.location.href = window.location.pathname + window.location.search + _nocache;
             return;
         } else { authError(data.error || '注册失败'); }
     } catch(e) { authError('网络错误'); }
@@ -911,6 +911,9 @@ function logout() {
         saveUserDataBeforeLogout();
     }
     
+    // ★ 清除跨域 cookie（所有子域名共享登录态）
+    if (typeof clearAuthToken === 'function') clearAuthToken();
+    
     // ★ 清空全部本地数据
     localStorage.clear();
     
@@ -928,27 +931,56 @@ function logout() {
     location.reload();
 }
 
-// 初始化：检查登录状态
-(function() {
-    updateAuthHeaderBtn();
-    const token = localStorage.getItem('authToken');
-    if (token) {
-        fetch(SERVER_API_BASE + '/auth.php?action=verify&token=' + encodeURIComponent(token))
-            .then(r => r.json())
-            .then(data => {
-                if (!data.valid) {
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('authUsername');
-                    localStorage.removeItem('authUserId');
-                    updateAuthHeaderBtn();
-                }
-            })
-            .catch(() => {});
+// 初始化：检查登录状态 + 跨域 cookie 同步
+// ★ 用 DOMContentLoaded 确保 main.js 的 getCookie/getAuthToken 已就绪
+document.addEventListener('DOMContentLoaded', function initAuth() {
+    // ★ 先确保按钮初始状态正确
+    try { updateAuthHeaderBtn(); } catch(e) {}
+    // ★ 尝试从跨域 cookie/session 恢复登录态，然后验证
+    function doVerify() {
+        var _t = getAuthToken();
+        if (_t) {
+            fetch(SERVER_API_BASE + '/auth.php?action=verify&token=' + encodeURIComponent(_t))
+                .then(function(r){ return r.json(); })
+                .then(function(d) {
+                    if (!d.valid) {
+                        if (typeof clearAuthToken === 'function') clearAuthToken();
+                        localStorage.removeItem('authUsername');
+                        localStorage.removeItem('authUserId');
+                    }
+                    try { updateAuthHeaderBtn(); } catch(e) {}
+                }).catch(function(){ try { updateAuthHeaderBtn(); } catch(e) {} });
+        } else {
+            try { updateAuthHeaderBtn(); } catch(e) {}
+        }
     }
-})();
+    try {
+        fetch(SERVER_API_BASE + '/auth.php?action=cross_domain_token')
+            .then(function(r){ return r.json(); })
+            .then(function(data) {
+                if (data.success && data.token) {
+                    if (!localStorage.getItem('authToken')) {
+                        if (typeof syncAuthToken === 'function') syncAuthToken(data.token);
+                        if (data.username) localStorage.setItem('authUsername', data.username);
+                    }
+                }
+                // 始终执行验证（检查 token 有效性）
+                doVerify();
+            })
+            .catch(function() {
+                // 网络错误，降级本地检查
+                doVerify();
+            });
+    } catch(e) { doVerify(); }
+});
 
-// 恢复页面（bfcache/前进后退）时重新同步暗色
-window.addEventListener('pageshow', function() {
+// 恢复页面（bfcache/前进后退）时强制重新加载（防止旧账号数据残留）
+window.addEventListener('pageshow', function(e) {
+    // BFCache 恢复时（e.persisted=true），强制刷新获取新状态的聊天记录
+    if (e.persisted) {
+        window.location.reload();
+        return;
+    }
     var shouldBeDark = localStorage.getItem('dark') === 'true';
     var isDark = document.documentElement.classList.contains('dark');
     if (shouldBeDark !== isDark) {
