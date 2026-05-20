@@ -7784,7 +7784,7 @@ function injectCachedImageAnalyses(chatId, apiMessages) {
 }
 
 function buildApiMessages(chatId) {
-    const apiMessages = [];
+    const apiMessagesUnfiltered = [];
     // 只检查当前消息(pendingFiles)是否包含图片,避免历史图片触发视觉模型
     const currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/'));
 
@@ -7804,17 +7804,17 @@ function buildApiMessages(chatId) {
             }
         }
         const merged = sysMsgs.length > 0 ? sysMsgs.join('\n\n') : (getVal('systemPrompt') || DEFAULT_CONFIG.system);
-        apiMessages.push({ role: 'system', content: merged });
+        apiMessagesUnfiltered.push({ role: 'system', content: merged });
     } else {
         for (const msg of chats[chatId].messages) {
             if (msg.role === 'system' && !msg.temporary) {
-                apiMessages.push({ role: 'system', content: msg.content });
+                apiMessagesUnfiltered.push({ role: 'system', content: msg.content });
             }
         }
 
-        if (apiMessages.length === 0) {
+        if (apiMessagesUnfiltered.length === 0) {
             const defaultSystemContent = getVal('systemPrompt') || DEFAULT_CONFIG.system;
-            apiMessages.push({ role: 'system', content: defaultSystemContent });
+            apiMessagesUnfiltered.push({ role: 'system', content: defaultSystemContent });
             if (!chats[chatId].messages.some(m => m.role === 'system' && !m.temporary)) {
                 chats[chatId].messages.unshift({ role: 'system', content: defaultSystemContent });
             }
@@ -7852,35 +7852,35 @@ function buildApiMessages(chatId) {
             if (msgHasImage || (i === msgs.length - 1 && currentHasImage)) {
                 window._forceVisionFormat = true;
             }
-            apiMessages.push({ role: 'user', content: buildUserContent(msg.text, files) });
+            apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(msg.text, files) });
             window._forceVisionFormat = prev;
         } else if (msg.role === 'assistant' && !msg.partial) {
-            apiMessages.push({ role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' });
+            apiMessagesUnfiltered.push({ role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' });
         } else if (msg.temporary) {
             // ★ 模型适配: 部分模型不支持过多 system 消息,将临时消息合并到最近的非 system 消息
             // MiniMax/QwQ 等:系统消息支持有限
             var _needMergeTemp = _needMergeSystem;
             if (_needMergeTemp) {
                 // 找到前面最近的非 system 消息,追加内容
-                let lastIdx = apiMessages.length - 1;
-                if (lastIdx >= 0 && apiMessages[lastIdx].role !== 'system') {
-                    apiMessages[lastIdx].content += '\n\n' + (cleanObjectObject(msg.content) || '');
+                let lastIdx = apiMessagesUnfiltered.length - 1;
+                if (lastIdx >= 0 && apiMessagesUnfiltered[lastIdx].role !== 'system') {
+                    apiMessagesUnfiltered[lastIdx].content += '\n\n' + (cleanObjectObject(msg.content) || '');
                 } else {
-                    apiMessages.push({ role: 'user', content: cleanObjectObject(msg.content) || '(empty)' });
+                    apiMessagesUnfiltered.push({ role: 'user', content: cleanObjectObject(msg.content) || '(empty)' });
                 }
             } else {
-                apiMessages.push({ role: msg.role, content: cleanObjectObject(msg.content) || '(empty)' });
+                apiMessagesUnfiltered.push({ role: msg.role, content: cleanObjectObject(msg.content) || '(empty)' });
             }
         }
     }
 
     // 只有当前消息有图片时才使用视觉模型
     if (currentHasImage) {
-        apiMessages._useVisionModel = true;
+        apiMessagesUnfiltered._useVisionModel = true;
     }
 
     // ★ 最终安全过滤: 移除任何 content 为空/null/undefined 的消息
-    apiMessages = apiMessages.filter(function(m) {
+    var apiMessages = apiMessagesUnfiltered.filter(function(m) {
         return m && m.role && m.content !== undefined && m.content !== null && String(m.content).length > 0;
     });
     return apiMessages;
