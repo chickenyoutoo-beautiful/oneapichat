@@ -13588,6 +13588,19 @@ async function engineApiHandler(action, args) {
             if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
         }
+        // ===== PS / DISK: 无需参数的工具,直接用明确 URL =====
+        if (action === 'ps') {
+            var _r = await fetch('/oneapichat/engine_api.php?action=ps' + authSuffix);
+            var _d = await _r.json();
+            if (_d.ok) return { result: _d.stdout, total: _d.total };
+            return { error: _d.error || 'unreachable' };
+        }
+        if (action === 'disk') {
+            var _r = await fetch('/oneapichat/engine_api.php?action=disk' + authSuffix);
+            var _d = await _r.json();
+            if (_d.ok) return { result: _d.stdout };
+            return { error: _d.error || 'unreachable' };
+        }
         // ===== 浏览��工具 (无头浏览器操控) =====
         var browserActions = ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot'];
         if (browserActions.indexOf(action) >= 0) {
