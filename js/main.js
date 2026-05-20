@@ -5396,15 +5396,20 @@ window._processAgentNotifyQueue = async function() {
     var summaryLine = agentCount === 1 ? '1 个子代理已完成' : agentCount + ' 个子代理已完成';
 
     // ★ 核心:子代理结果不推送到聊天界面,仅注入为系统上下文
-    // 主代理静默整合结果后,由 sendMessage 自动回复用户
-    var ctx = '## 📥 子代理完成报告(' + summaryLine + ')\n' +
-        '以下子代理已完成任务,请阅读结果并整合:\n' + results.join('\n---\n') + '\n\n' +
+    // 参考 Claude Code: 用 <task-notification> XML 通知主代理
+    // 参考 DeepSeek-TUI: 父代理发 eval 查询子代理结果
+    var ctx = '<task-notification>\n' +
+        '<summary>' + summaryLine + '</summary>\n';
+    for (var _ri = 0; _ri < results.length; _ri++) {
+        ctx += '  <result agent="' + agents[_ri] + '">' + (results[_ri] || '(empty)') + '</result>\n';
+    }
+    ctx += '</task-notification>\n\n' +
         '### 🔒 规则\n' +
         '1. 【禁止】调用 delegate_task / agent_create / agent_run 等任何创建新子代理的工具\n' +
-        '2. 仔细阅读子代理结果,用简洁的语言告知用户进展和结论\n' +
+        '2. 仔细阅读 <task-notification> 中的子代理结果,用简洁的语言告知用户进展和结论\n' +
         '3. 如果子代理结果是错误/空的,诚实告知用户并建议重试\n' +
         '4. 【重要】你现在正在和用户对话,请直接回复用户,不要调用任何工具\n' +
-        '5. 这条消息是系统级上下文,不要在回复中提及"系统通知""子代理报告"等内部术语';
+        '5. 这是系统级通知,不要在回复中提及"系统通知""task-notification"等内部术语';
 
     window._pendingNotifyExecId = null;
 
