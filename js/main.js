@@ -4636,7 +4636,7 @@ window._renderAgentList = function(agents, container) {
             '</div>' +
             '<div class="flex items-center gap-1 flex-shrink-0">' +
                 '<span class="text-xs" style="color:' + statusColor + ';font-weight:500;font-size:10px;">' + (a.status || 'idle') + '</span>' +
-                '<button onclick="event.stopPropagation();window.deleteAgent(\'' + safeName + '\');window._refreshAllAgentLists();" class="p-1 text-gray-400 hover:text-red-500 transition" title="删除子代理"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>' +
+                '<button onclick="event.stopPropagation();window.deleteAgent(\'' + safeName + '\');" class="p-1 text-gray-400 hover:text-red-500 transition" title="删除子代理"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -5548,6 +5548,8 @@ function showConfirmDialog(title, message, confirmText) {
     return new Promise(function(resolve) {
         var overlay = document.createElement('div');
         overlay.className = 'approval-overlay';
+        // ★ 点击遮罩关闭 = 取消
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); resolve(false); } });
         overlay.innerHTML = '<div class="approval-modal confirm-dialog">' +
             '<div class="approval-title">' + escapeHtml(title) + '</div>' +
             '<div class="confirm-message">' + escapeHtml(message) + '</div>' +
@@ -5557,13 +5559,18 @@ function showConfirmDialog(title, message, confirmText) {
             '</div>' +
             '</div>';
         document.body.appendChild(overlay);
+        // ★ ESC 关闭
+        var escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); resolve(false); } };
+        document.addEventListener('keydown', escHandler);
         
         overlay.querySelector('#confirmOkBtn').onclick = function() {
             overlay.remove();
+            document.removeEventListener('keydown', escHandler);
             resolve(true);
         };
         overlay.querySelector('#confirmCancelBtn').onclick = function() {
             overlay.remove();
+            document.removeEventListener('keydown', escHandler);
             resolve(false);
         };
     });
