@@ -9290,7 +9290,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 toolCallCount++;
                 sessionUsage.toolCalls += toolCalls.length;
                 // Feature 6: 工具调用预判 — 标记所有调用的工具为已记录
-                validToolCalls.forEach(function(tc) {
+                toolCalls.forEach(function(tc) {
                     if (tc && tc.function && tc.function.name) {
                         toolCallStats.record(tc.function.name);
                     }
