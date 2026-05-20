@@ -363,6 +363,17 @@ function getAuthToken() {
     return getCookie('auth_token') || localStorage.getItem('authToken') || localStorage.getItem('deviceId') || '';
 }
 
+// ★ 安全 fetch (token 走 Authorization header, 不暴露在 URL)
+function fetchWithAuth(url, options) {
+    var token = getAuthToken();
+    if (!token) token = localStorage.getItem('authToken') || '';
+    var opts = Object.assign({}, options || {});
+    if (token) {
+        opts.headers = Object.assign({}, opts.headers || {}, { 'Authorization': 'Bearer ' + token });
+    }
+    return fetch(url, opts);
+}
+
 // 登录成功后同步到跨域 cookie
 function syncAuthToken(token) {
     if (token) {
