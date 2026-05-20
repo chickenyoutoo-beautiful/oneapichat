@@ -1,5 +1,5 @@
 
-// main.js 优化版 v17.2 (实时数学公式渲染)
+// main.js 优化版 v18.0 (三模式系统 + 审批门 + 成本追踪)
 // 抑制 KaTeX 字体指标警告(中文字符如①②③不影响渲染)
 (function(){
     var _origWarn = console.warn;
@@ -433,7 +433,7 @@ function compressImage(dataUrl, maxDim, quality) {
         img.src = dataUrl;
     });
 }
-const SEARCH_PROXY = 'https://search.naujtrats.xyz';
+const SEARCH_PROXY = 'https://search.naujtrats.xyz'; // GCP代理（国内绕过GFW）
 const FETCH_PROXY = '/oneapichat/fetch.php';  // ★ 网页内容抓取代理
 const ENCRYPTION_KEY = 'naujtrats-secret';
 
@@ -910,6 +910,454 @@ const ENGINE_PUSH_TOOL = {
         }
     }
 };
+// ==================== 统一工具注册表 (Tool Registry) ====================
+// 参考 Claude Code 的 buildTool() 模式,每个工具自带元数据
+// ToolCapability: 描述工具的权限和能力
+const ToolCapability = {
+  READS_FILES: 'reads_files',
+  WRITES_FILES: 'writes_files',
+  NETWORK: 'network',
+  EXEC: 'exec',
+  SYSTEM: 'system',
+  AGENT_CREATE: 'agent_create',
+  AGENT_LIST: 'agent_list',
+  DATABASE: 'database',
+  FILE_SEARCH: 'file_search',
+  IMAGE_GENERATE: 'image_generate',
+  IMAGE_ANALYZE: 'image_analyze',
+  CHAOXING: 'chaoxing',
+  CRON: 'cron',
+  NONE: 'none'
+};
+
+// 审批级别
+const ApprovalLevel = {
+  AUTO: 'auto',      // 自动批准
+  SUGGEST: 'suggest', // 建议但不需要强制审批
+  REQUIRED: 'required' // 必须审批
+};
+
+/**
+ * 构建工具元数据
+ * 参考 Claude Code 的 buildTool() 模式
+ */
+function buildToolMeta(name, opts) {
+  return {
+    name: name,
+    capabilities: opts.capabilities || [],
+    approval: opts.approval || ApprovalLevel.AUTO,
+    maxResultSizeChars: opts.maxResultSizeChars || 100000,
+    searchHint: opts.searchHint || '',
+    isReadOnly: opts.isReadOnly !== undefined ? opts.isReadOnly : true,
+    isAgentOnly: opts.isAgentOnly || false,
+    // 渲染工具调用消息 (可覆写)
+    renderUseMessage: opts.renderUseMessage || function(input) {
+      var summary = typeof input === 'object' ? JSON.stringify(input).substring(0, 80) : String(input).substring(0, 80);
+      return '<div class="tool-card"><div class="tool-card-header"><span class="tool-card-icon">🔧</span><span class="tool-card-name">' + escapeHtml(name) + '</span></div><div class="tool-card-body">' + escapeHtml(summary) + '</div></div>';
+    },
+    // 渲染工具结果 (可覆写)
+    renderResultMessage: opts.renderResultMessage || function(output) {
+      var text = typeof output === 'string' ? output : (output && output.result ? output.result : JSON.stringify(output));
+      var truncated = text.length > 500 ? text.substring(0, 500) + '...' : text;
+      return '<div class="tool-result"><div class="tool-result-header">✅ 结果</div><pre class="tool-result-body">' + escapeHtml(truncated) + '</pre></div>';
+    },
+    // 获取简要摘要
+    getSummary: opts.getSummary || function(input) {
+      return name + ': ' + (typeof input === 'object' ? JSON.stringify(input).substring(0, 60) : String(input).substring(0, 60));
+    }
+  };
+}
+
+// ==================== 工具注册表 (全局) ====================
+var toolRegistry = (function() {
+  var _registry = {};
+
+  function register(name, meta) {
+    _registry[name] = meta;
+  }
+
+  function get(name) {
+    return _registry[name] || null;
+  }
+
+  function has(name) {
+    return !!_registry[name];
+  }
+
+  function getApprovalLevel(name) {
+    var meta = _registry[name];
+    if (!meta) return ApprovalLevel.REQUIRED; // 未知工具默认需要审批
+    return meta.approval;
+  }
+
+  function isReadOnly(name) {
+    var meta = _registry[name];
+    if (!meta) return false;
+    return meta.isReadOnly;
+  }
+
+  function isAgentOnly(name) {
+    var meta = _registry[name];
+    if (!meta) return false;
+    return meta.isAgentOnly;
+  }
+
+  function getSearchHint(name) {
+    var meta = _registry[name];
+    return meta ? (meta.searchHint || '') : '';
+  }
+
+  function getCapabilities(name) {
+    var meta = _registry[name];
+    return meta ? (meta.capabilities || []) : [];
+  }
+
+  function getAllToolNames() {
+    return Object.keys(_registry);
+  }
+
+  function getStats() {
+    var names = Object.keys(_registry);
+    var readOnly = names.filter(function(n) { return _registry[n].isReadOnly; }).length;
+    var write = names.filter(function(n) { return !_registry[n].isReadOnly; }).length;
+    var auto = names.filter(function(n) { return _registry[n].approval === 'auto'; }).length;
+    var required = names.filter(function(n) { return _registry[n].approval === 'required'; }).length;
+    return { total: names.length, readOnly: readOnly, write: write, autoApproval: auto, requiresApproval: required };
+  }
+
+  /**
+   * 生成 AI 可读的工具选择提示
+   */
+  function getToolSelectionPrompt() {
+    var names = Object.keys(_registry);
+    var lines = names.map(function(n) {
+      var m = _registry[n];
+      var caps = m.capabilities.join(', ');
+      var appLevel = m.approval === 'auto' ? '✅ 自动' : (m.approval === 'suggest' ? '💡 建议' : '🔐 需审批');
+      return '- ' + n + ' [' + caps + '] ' + appLevel + (m.isReadOnly ? ' 📖只读' : ' ✏️写') + (m.searchHint ? ' → ' + m.searchHint : '');
+    });
+    return '可用工具:\n' + lines.join('\n');
+  }
+
+  return {
+    register: register,
+    get: get,
+    has: has,
+    getApprovalLevel: getApprovalLevel,
+    isReadOnly: isReadOnly,
+    isAgentOnly: isAgentOnly,
+    getSearchHint: getSearchHint,
+    getCapabilities: getCapabilities,
+    getAllToolNames: getAllToolNames,
+    getStats: getStats,
+    getToolSelectionPrompt: getToolSelectionPrompt
+  };
+})();
+
+// ==================== 注册所有工具到注册表 ====================
+(function _registerAllTools() {
+  // 读操作 - 只读,自动审批
+  toolRegistry.register('server_file_read', buildToolMeta('server_file_read', {
+    capabilities: [ToolCapability.READS_FILES],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '读取服务器文件',
+  }));
+  toolRegistry.register('server_file_search', buildToolMeta('server_file_search', {
+    capabilities: [ToolCapability.FILE_SEARCH],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '搜索服务器文件',
+  }));
+  toolRegistry.register('server_sys_info', buildToolMeta('server_sys_info', {
+    capabilities: [ToolCapability.SYSTEM],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '获取系统信息',
+  }));
+  toolRegistry.register('server_ps', buildToolMeta('server_ps', {
+    capabilities: [ToolCapability.SYSTEM],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '查看进程列表',
+  }));
+  toolRegistry.register('server_disk', buildToolMeta('server_disk', {
+    capabilities: [ToolCapability.SYSTEM],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '查看磁盘使用',
+  }));
+  toolRegistry.register('server_network', buildToolMeta('server_network', {
+    capabilities: [ToolCapability.SYSTEM],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '查看网络状态',
+  }));
+  toolRegistry.register('server_db_query', buildToolMeta('server_db_query', {
+    capabilities: [ToolCapability.DATABASE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '查询数据库',
+  }));
+
+  // 搜索/网络 - 只读,自动审批
+  toolRegistry.register('web_search', buildToolMeta('web_search', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '搜索互联网',
+  }));
+  toolRegistry.register('web_fetch', buildToolMeta('web_fetch', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '抓取网页内容',
+  }));
+  toolRegistry.register('rag_search', buildToolMeta('rag_search', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '搜索本地知识库',
+  }));
+
+  // 图片 - 只读/自动
+  toolRegistry.register('image_gen', buildToolMeta('image_gen', {
+    capabilities: [ToolCapability.IMAGE_GENERATE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    searchHint: '生成图片',
+  }));
+  toolRegistry.register('analyze_image', buildToolMeta('analyze_image', {
+    capabilities: [ToolCapability.IMAGE_ANALYZE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '分析图片',
+  }));
+
+  // 写操作 - 需要审批
+  toolRegistry.register('server_exec', buildToolMeta('server_exec', {
+    capabilities: [ToolCapability.EXEC],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '执行Shell命令',
+  }));
+  toolRegistry.register('server_python', buildToolMeta('server_python', {
+    capabilities: [ToolCapability.EXEC],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '执行Python代码',
+  }));
+  toolRegistry.register('server_file_write', buildToolMeta('server_file_write', {
+    capabilities: [ToolCapability.WRITES_FILES],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '写入文件',
+  }));
+  toolRegistry.register('server_file_op', buildToolMeta('server_file_op', {
+    capabilities: [ToolCapability.WRITES_FILES],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '文件操作(复制/移动/删除)',
+  }));
+  toolRegistry.register('server_docker', buildToolMeta('server_docker', {
+    capabilities: [ToolCapability.EXEC],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '执行Docker命令',
+  }));
+
+  // Cron - 需要审批
+  toolRegistry.register('engine_cron_create', buildToolMeta('engine_cron_create', {
+    capabilities: [ToolCapability.CRON],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '创建定时任务',
+  }));
+  toolRegistry.register('engine_cron_delete', buildToolMeta('engine_cron_delete', {
+    capabilities: [ToolCapability.CRON],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '删除定时任务',
+  }));
+  toolRegistry.register('engine_cron_list', buildToolMeta('engine_cron_list', {
+    capabilities: [ToolCapability.CRON],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '列出定时任务',
+  }));
+
+  // 子代理 - 中等风险
+  toolRegistry.register('delegate_task', buildToolMeta('delegate_task', {
+    capabilities: [ToolCapability.AGENT_CREATE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '创建后台子代理执行任务',
+  }));
+  toolRegistry.register('engine_agent_create', buildToolMeta('engine_agent_create', {
+    capabilities: [ToolCapability.AGENT_CREATE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '创建子代理',
+  }));
+  toolRegistry.register('engine_agent_status', buildToolMeta('engine_agent_status', {
+    capabilities: [ToolCapability.AGENT_LIST],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '查询子代理状态',
+  }));
+  toolRegistry.register('engine_agent_list', buildToolMeta('engine_agent_list', {
+    capabilities: [ToolCapability.AGENT_LIST],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '列出所有子代理',
+  }));
+  toolRegistry.register('engine_agent_delete', buildToolMeta('engine_agent_delete', {
+    capabilities: [ToolCapability.AGENT_CREATE],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '删除子代理(不可撤销)',
+  }));
+  toolRegistry.register('engine_agent_ask', buildToolMeta('engine_agent_ask', {
+    capabilities: [ToolCapability.AGENT_LIST],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '与子代理对话',
+  }));
+  toolRegistry.register('engine_agent_stop', buildToolMeta('engine_agent_stop', {
+    capabilities: [ToolCapability.AGENT_CREATE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '停止子代理',
+  }));
+  toolRegistry.register('engine_push', buildToolMeta('engine_push', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '推送通知给用户',
+  }));
+
+  // 模式控制
+  toolRegistry.register('ask_agent', buildToolMeta('ask_agent', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '请求启用Agent模式',
+  }));
+  toolRegistry.register('autonomous_mode', buildToolMeta('autonomous_mode', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '切换自主模式',
+  }));
+
+  // 刷课工具
+  toolRegistry.register('chaoxing_login', buildToolMeta('chaoxing_login', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    searchHint: '登录超星',
+  }));
+  toolRegistry.register('chaoxing_list_courses', buildToolMeta('chaoxing_list_courses', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '列出超星课程',
+  }));
+  toolRegistry.register('chaoxing_auto', buildToolMeta('chaoxing_auto', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    searchHint: '自动刷课',
+  }));
+  toolRegistry.register('chaoxing_status', buildToolMeta('chaoxing_status', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '查看刷课状态',
+  }));
+  toolRegistry.register('chaoxing_stop', buildToolMeta('chaoxing_stop', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    searchHint: '停止刷课',
+  }));
+  toolRegistry.register('chaoxing_stats', buildToolMeta('chaoxing_stats', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '查看刷课统计',
+  }));
+  toolRegistry.register('chaoxing_overview', buildToolMeta('chaoxing_overview', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '查看课程概览',
+  }));
+  toolRegistry.register('chaoxing_auth', buildToolMeta('chaoxing_auth', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '检测超星登录状态',
+  }));
+  toolRegistry.register('chaoxing_exam_list', buildToolMeta('chaoxing_exam_list', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '列出超星考试',
+  }));
+  toolRegistry.register('chaoxing_exam_start', buildToolMeta('chaoxing_exam_start', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    searchHint: '开始超星考试',
+  }));
+  toolRegistry.register('chaoxing_exam_status', buildToolMeta('chaoxing_exam_status', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '查看考试状态',
+  }));
+  toolRegistry.register('chaoxing_exam_stop', buildToolMeta('chaoxing_exam_stop', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    searchHint: '停止考试',
+  }));
+
+  // 自定义/impl工具 - 标记为中等风险
+  toolRegistry.register('delegate_workflow', buildToolMeta('delegate_workflow', {
+    capabilities: [ToolCapability.AGENT_CREATE],
+    approval: ApprovalLevel.SUGGEST,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '创建工作流代理',
+  }));
+
+  console.log('[ToolRegistry] 已注册', Object.keys(toolRegistry.getAllToolNames()).length, '个工具');
+})();
+
 // ==================== 搜索工具定义 (Tool Calling) ====================
 const RAG_SEARCH_TOOL_DEFINITION = {
     type: "function",
@@ -1044,6 +1492,43 @@ const ANALYZE_IMAGE_TOOL = {
                     description: "要分析的图片索引(0=第一张,1=第二张...)。当用户上传了多张图片时使用此参数指定具体分析哪一张,避免每次都分析第一张。默认0。"
                 }
             }
+        }
+    }
+};
+
+// ==================== Agent 模式控制工具 ====================
+const ASK_AGENT_TOOL = {
+    type: "function",
+    function: {
+        name: "ask_agent",
+        description: "向用户请求启用Agent模式。当需要执行文件操作、运行命令、管理定时任务或使用子代理时调用此工具。用户确认后才可执行这些操作。",
+        parameters: {
+            type: "object",
+            properties: {
+                reason: {
+                    type: "string",
+                    description: "启用Agent模式的理由,如'我需要执行系统命令来...'"
+                }
+            },
+            required: ["reason"]
+        }
+    }
+};
+
+const AUTONOMOUS_MODE_TOOL = {
+    type: "function",
+    function: {
+        name: "autonomous_mode",
+        description: "在Agent模式下控制自主行为模式。启用后AI可以自主决定是否使用工具而无需每次都询问用户。",
+        parameters: {
+            type: "object",
+            properties: {
+                enabled: {
+                    type: "boolean",
+                    description: "true=启用自主模式,false=禁用自主模式"
+                }
+            },
+            required: ["enabled"]
         }
     }
 };
@@ -2929,6 +3414,7 @@ window.toggleConfigPanel = () => {
     } else {
         const isOpening = $.configPanel?.classList.contains('hidden-panel');
         $.configPanel?.classList.toggle('hidden-panel');
+        document.querySelector(".flex-1.flex-col")?.classList.toggle("config-open", isOpening);
         // 打开时保存配置快照,关闭时清除
         if (isOpening) {
             configSnapshot = snapshotConfig();
@@ -3239,17 +3725,144 @@ window.initToolModeBtn = function() { updateToolModeBtn(); };
 
 // ★ Agent 模式切换
 var agentModeToolCallsMap = {};
+var sessionUsage = { promptTokens: 0, completionTokens: 0, totalCost: 0, prefixCacheHits: 0, toolCalls: 0, approvalsGranted: 0, approvalsRejected: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
 
-window.toggleAgentMode = function() {
-    var isActive = localStorage.getItem('agentMode') === 'true';
-    var newVal = !isActive;
-    localStorage.setItem('agentMode', newVal);
-    updateAgentUI();
-    if (newVal) {
-        // 开启 Agent 模式时自动打开代理面板
-        window.openAgentPanel();
+// ==================== 增强用量追踪 ====================
+/** 按工具分类统计调用次数 */
+var toolCallStats = (function() {
+  var _stats = {};
+  return {
+    record: function(toolName) {
+      _stats[toolName] = (_stats[toolName] || 0) + 1;
+    },
+    get: function(toolName) { return _stats[toolName] || 0; },
+    getAll: function() { return JSON.parse(JSON.stringify(_stats)); },
+    reset: function() { _stats = {}; },
+    getTopTools: function(n) {
+      n = n || 5;
+      var entries = Object.entries(_stats);
+      entries.sort(function(a, b) { return b[1] - a[1]; });
+      return entries.slice(0, n);
     }
-    showToast(newVal ? '🧠 Agent 模式已开启' : '🧠 Agent 模式已关闭', 'info', 1500);
+  };
+})();
+
+/** 费用/用量可视化组件 */
+var usageVisualizer = {
+  /** 渲染费用进度条 */
+  costBar: function(maxCost) {
+    maxCost = maxCost || 0.1; // 默认0.1刀
+    var ratio = Math.min(sessionUsage.totalCost / maxCost, 1);
+    var pct = (ratio * 100).toFixed(1);
+    return '<div class="usage-bar-container"><div class="usage-bar-label">💰 费用: $' + sessionUsage.totalCost.toFixed(4) + ' / $' + maxCost.toFixed(2) + '</div><div class="usage-bar-track"><div class="usage-bar-fill cost-bar" style="width:' + pct + '%"></div></div></div>';
+  },
+  /** 渲染 Token 进度条 */
+  tokenBar: function(maxTokens) {
+    maxTokens = maxTokens || 500000;
+    var total = sessionUsage.promptTokens + sessionUsage.completionTokens;
+    var ratio = Math.min(total / maxTokens, 1);
+    var pct = (ratio * 100).toFixed(1);
+    return '<div class="usage-bar-container"><div class="usage-bar-label">🔤 Tokens: ' + total.toLocaleString() + ' / ' + maxTokens.toLocaleString() + '</div><div class="usage-bar-track"><div class="usage-bar-fill token-bar" style="width:' + pct + '%"></div></div></div>';
+  },
+  /** 缓存命中提示 */
+  cacheHint: function() {
+    var totalCache = sessionUsage.cacheHitTokens + sessionUsage.cacheMissTokens;
+    if (totalCache === 0) return '';
+    var rate = (sessionUsage.cacheHitTokens / totalCache * 100).toFixed(1);
+    var color = rate > 50 ? '#10b981' : (rate > 20 ? '#f59e0b' : '#ef4444');
+    return '<div class="usage-cache-hint" style="color:' + color + '">💾 缓存命中率: ' + rate + '% (' + sessionUsage.cacheHitTokens.toLocaleString() + '/' + totalCache.toLocaleString() + ')</div>';
+  },
+  /** 工具调用统计 */
+  toolStatsDisplay: function() {
+    var top = toolCallStats.getTopTools(5);
+    if (top.length === 0) return '';
+    return '<div class="usage-tool-stats">🔧 常用工具:<br>' + top.map(function(e, i) {
+      return '<span class="tool-stat-item">#' + (i+1) + ' ' + e[0] + ' ✕' + e[1] + '</span>';
+    }).join(' ') + '</div>';
+  },
+  /** 完整用量面板 */
+  fullDisplay: function() {
+    var total = sessionUsage.promptTokens + sessionUsage.completionTokens;
+    return '<div class="usage-panel">' +
+      this.costBar() +
+      this.tokenBar() +
+      '<div style="font-size:11px;line-height:1.8;margin-top:4px;">' +
+      '📤 输入: ' + sessionUsage.promptTokens.toLocaleString() + ' tokens<br>' +
+      '📥 输出: ' + sessionUsage.completionTokens.toLocaleString() + ' tokens<br>' +
+      (sessionUsage.prefixCacheHits > 0 ? '💾 缓存命中: ' + sessionUsage.prefixCacheHits.toLocaleString() + ' tokens<br>' : '') +
+      this.cacheHint() +
+      '🔧 工具调用: ' + sessionUsage.toolCalls + ' 次<br>' +
+      '✅ 已批准: ' + sessionUsage.approvalsGranted + ' ❌ 已拒绝: ' + sessionUsage.approvalsRejected +
+      '</div>' +
+      this.toolStatsDisplay() +
+      '</div>';
+  }
+};
+
+// ==================== 三模式系统 (Plan / Agent / YOLO) ====================
+
+/** 获取当前 Agent 模式: 'off' | 'plan' | 'agent' | 'yolo' */
+function getAgentMode() {
+    var val = localStorage.getItem('agentMode');
+    // 从旧版布尔格式迁移
+    if (val === 'true') { localStorage.setItem('agentMode', 'agent'); return 'agent'; }
+    if (val === 'false' || val === null || val === undefined) { localStorage.setItem('agentMode', 'off'); return 'off'; }
+    if (['off','plan','agent','yolo'].indexOf(val) === -1) { localStorage.setItem('agentMode', 'off'); return 'off'; }
+    return val;
+}
+
+/** 设置 Agent 模式并更新 UI */
+function setAgentMode(mode) {
+    if (['off','plan','agent','yolo'].indexOf(mode) === -1) mode = 'off';
+    localStorage.setItem('agentMode', mode);
+    updateAgentUI();
+    if (mode === 'agent' || mode === 'yolo') {
+        // Agent/YOLO 模式开启时自动启用 Agent 专属工具
+        var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'];
+        _agentKeys.forEach(function(k) { window.setToolEnabled(k, true); });
+    }
+    // 模式切换不弹 toast（已有横幅和绿点提示）
+    if (typeof renderToolPanel === 'function') renderToolPanel();
+}
+
+/** 循环切换模式: off → plan → agent → yolo → off */
+function cycleAgentMode() {
+    var modes = ['off', 'plan', 'agent', 'yolo'];
+    var current = getAgentMode();
+    var idx = modes.indexOf(current);
+    if (idx === -1 || idx >= modes.length - 1) idx = 0;
+    else idx++;
+    setAgentMode(modes[idx]);
+}
+
+/** 判断 Agent 工具是否激活 (agent 或 yolo 模式) */
+function isAgentToolsActive() {
+    var mode = getAgentMode();
+    return mode === 'agent' || mode === 'yolo';
+}
+
+/** 判断是否审批模式 (plan 或 agent 模式) */
+function isApprovalMode() {
+    var mode = getAgentMode();
+    return mode === 'plan' || mode === 'agent';
+}
+
+/** 判断是否 YOLO 自动批准模式 */
+function isYoloMode() {
+    return getAgentMode() === 'yolo';
+}
+
+/** 判断是否 Plan 只读模式 */
+function isPlanMode() {
+    return getAgentMode() === 'plan';
+}
+
+// 兼容旧版 toggleAgentMode
+window.toggleAgentMode = function() {
+    var curMode = getAgentMode();
+    // 只切换 on/off：off → agent, agent/plan/yolo → off
+    var newMode = (curMode === 'off' || !curMode) ? 'agent' : 'off';
+    setAgentMode(newMode);
 };
 
 // ==================== 代理面板控制 ====================
@@ -3283,7 +3896,6 @@ window.openAgentPanel = function() {
     });
     // 清除非通知红点
     var dot = getEl('agentNotifDot');
-    if (dot) dot.classList.remove('show');
     window.refreshAgentPanel();
     startAgentPanelRefresh();
 };
@@ -3434,10 +4046,12 @@ window._refreshAllAgentLists = async function() {
         window._agentListCacheTime = Date.now();
         window._renderAgentList(agents, getEl('agentSubList'));
         window._renderAgentList(agents, getEl('engineAgentList'));
+        var dptuiContainer = getEl('agentSubListDptui');
+        if (dptuiContainer && dptuiContainer !== getEl('agentSubList')) window._renderAgentList(agents, dptuiContainer);
     } catch(e) {
         // 显示错误但不中断,保留上次缓存
         var msg = '加载失败: ' + e.message;
-        var lists = ['agentSubList', 'engineAgentList'];
+        var lists = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
         lists.forEach(function(id) {
             var el = getEl(id);
             if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
@@ -3451,6 +4065,33 @@ window._refreshAllAgentLists = async function() {
 };
 
 window.refreshAgentPanel = window._refreshAllAgentLists;
+
+/** 更新 Agent 面板中的费用/用量显示 */
+function updateAgentUsageDisplay() {
+    var usageEl = getEl('agentUsageDisplay');
+    if (!usageEl) return;
+    var cost = sessionUsage.totalCost.toFixed(4);
+    var pt = sessionUsage.promptTokens;
+    var ct = sessionUsage.completionTokens;
+    var cacheHits = sessionUsage.prefixCacheHits;
+    var toolCalls = sessionUsage.toolCalls;
+    // 使用增强可视化
+    usageEl.innerHTML = usageVisualizer.fullDisplay();
+}
+
+/** 实时用量更新 (轻量级,仅更新数字不刷新全组件) */
+function updateUsageLive() {
+    // 保留给未来实时更新使用
+}
+
+/** 重置会话用量统计 */
+function resetSessionUsage() {
+    sessionUsage = { promptTokens: 0, completionTokens: 0, totalCost: 0, prefixCacheHits: 0, toolCalls: 0, approvalsGranted: 0, approvalsRejected: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+    toolCallStats.reset();
+    // 清除会话级别审批记忆
+    sessionStorage.removeItem('approvalRemembered');
+    updateAgentUsageDisplay();
+}
 
 window.selectAgentChat = function(agentName) {
     _selectedAgentName = agentName;
@@ -3529,7 +4170,7 @@ window.mainAgentReply = function() {
                     result: n.result || '',
                     error: n.error || ''
                 };
-                if (localStorage.getItem('agentMode') === 'true') {
+                if (isAgentToolsActive()) {
                     window.triggerAgentAutoReplyForSubAgent(n.agent);
                 }
             });
@@ -3540,8 +4181,11 @@ window.mainAgentReply = function() {
 };
 
 function updateAgentUI() {
-    var isActive = localStorage.getItem('agentMode') === 'true';
-    // Header 按钮(分离按钮:左边Agent模式,右边代理聊天室)
+    var mode = getAgentMode();
+    var isActive = mode === 'agent' || mode === 'yolo';
+    // 更新三模式选择器按钮
+    updateModeSelector(mode);
+    // Header Agent 按钮绿点状态
     var splitBtn = getEl('agentSplitBtn');
     if (splitBtn) {
         splitBtn.classList.toggle('active', isActive);
@@ -3551,12 +4195,30 @@ function updateAgentUI() {
     if (configToggle) {
         configToggle.checked = isActive;
     }
-    // 输入区横幅
+    // 聊天区 Agent 模式标签
+    var agentLabel = getEl('agentModeLabel');
+    if (agentLabel) {
+        var labels = { 'off': 'Agent ⚪', 'plan': 'Plan 🛡️', 'agent': 'Agent 🔄', 'yolo': 'YOLO ⚠️' };
+        agentLabel.textContent = labels[mode] || 'Agent ⚪';
+    }
+    // 输入框上方模式提示
     var banner = getEl('agentBanner');
     if (banner) {
-        banner.classList.toggle('visible', isActive);
+        if (mode === 'off') {
+            banner.classList.add('hidden');
+        } else {
+            banner.classList.remove('hidden');
+            var tips = { 'plan': '🛡️ Plan 只读 · 仅搜索和读取', 'agent': '🔄 Agent 交互 · AI 可操作需审批', 'yolo': '⚠️ YOLO 自动 · 所有操作自动批准' };
+            banner.textContent = tips[mode] || '';
+        }
     }
-    // ★ Agent 模式下自动启用工具调用,隐藏工具调用开关
+    // 更新 Agent 面板中的模式标识
+    var modeDisplay = getEl('agentModeDisplay');
+    if (modeDisplay) {
+        var modeSymbols = { 'off': '⚪', 'plan': '🛡️', 'agent': '🔄', 'yolo': '⚠️' };
+        modeDisplay.textContent = modeSymbols[mode] + ' ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+    }
+    // ★ Agent/YOLO 模式下自动启用工具调用,隐藏工具调用开关
     var toolCallToggle = getEl('searchToolCallToggle');
     var toolCallRow = toolCallToggle ? toolCallToggle.closest('.config-toggle-row') : null;
     if (isActive) {
@@ -3569,8 +4231,8 @@ function updateAgentUI() {
             toolCallRow.style.pointerEvents = 'none';
             toolCallRow.title = 'Agent 模式下自动启用工具调用';
         }
-        // 启动心跳轮询
-        window.startAgentNotificationPolling();
+        // 启动心跳轮询 + 实时更新
+        window.startAgentRealtimeUpdates();
     } else {
         if (toolCallRow) {
             toolCallRow.style.opacity = '1';
@@ -3580,10 +4242,300 @@ function updateAgentUI() {
     }
 }
 
+/** 更新三模式选择器的 UI 状态 */
+// ★ 悬停模式菜单定位
+function _positionModePopup() {
+    var wrapper = document.querySelector('.agent-mode-wrapper');
+    if (wrapper) {
+        wrapper.addEventListener('mouseenter', _positionModePopup);
+    }
+    var popup = getEl('agentModePopup');
+    var wrapper = document.querySelector('.agent-mode-wrapper');
+    if (!popup || !wrapper) return;
+    var rect = wrapper.getBoundingClientRect();
+    popup.style.top = (rect.bottom + 2) + 'px';
+    popup.style.left = (rect.left) + 'px';
+    popup.style.transform = 'none';
+}
+
+// 页面加载时预定位模式菜单
+setTimeout(_positionModePopup, 500);
+window.addEventListener('resize', _positionModePopup);
+// ★ Agent 模式弹出菜单（鼠标延迟隐藏）
+window._agentPopupTimer = null;
+window._setupAgentPopup = function() {
+    var wrapper = document.querySelector('.agent-mode-wrapper');
+    var popup = getEl('agentModePopup');
+    if (!wrapper || !popup) return;
+    wrapper.addEventListener('mouseenter', function() {
+        if (window._agentPopupTimer) { clearTimeout(window._agentPopupTimer); }
+        _positionModePopup();
+        popup.classList.add('show');
+    });
+    wrapper.addEventListener('mouseleave', function() {
+        window._agentPopupTimer = setTimeout(function() {
+            popup.classList.remove('show');
+        }, 150);
+    });
+    popup.addEventListener('mouseenter', function() {
+        if (window._agentPopupTimer) { clearTimeout(window._agentPopupTimer); }
+    });
+    popup.addEventListener('mouseleave', function() {
+        popup.classList.remove('show');
+    });
+};
+
+
+function updateModeSelector(mode) {
+    mode = mode || getAgentMode();
+    // 更新下拉菜单中的模式按钮
+    var dropdown = getEl('agentModeDropdown');
+    if (dropdown) {
+        var opts = dropdown.querySelectorAll('.agent-mode-opt');
+        opts.forEach(function(opt) {
+            var optMode = opt.getAttribute('data-mode');
+            opt.classList.toggle('active', optMode === mode);
+        });
+    }
+    // 也更新旧模式选择器（兼容）
+    var selector = getEl('agentModeSelector');
+    if (selector) {
+        var btns = selector.querySelectorAll('.mode-btn');
+        btns.forEach(function(btn) {
+            var btnMode = btn.getAttribute('data-mode');
+            btn.classList.toggle('active', btnMode === mode);
+        });
+    }
+}
+
+// ==================== 审批门 (Approval Gate v2) ====================
+// 参考 DeepSeek-TUI 的 execpolicy 设计
+
+/**
+ * 获取工具的审批级别 (优先使用注册表,回退旧逻辑)
+ */
+function getToolApprovalLevel(toolName) {
+  // 优先从注册表获取
+  if (window.toolRegistry && toolRegistry.has(toolName)) {
+    return toolRegistry.getApprovalLevel(toolName);
+  }
+  // 回退: 检查是否在旧的高危列表中
+  var oldHighRisk = ['server_file_write','server_file_op','server_exec','server_python','server_docker','engine_cron_create','engine_cron_delete'];
+  var oldMediumRisk = ['delegate_task','engine_agent_create','server_db_query','autonomous_mode'];
+  if (oldHighRisk.indexOf(toolName) !== -1) return 'required';
+  if (oldMediumRisk.indexOf(toolName) !== -1) return 'suggest';
+  return 'auto';
+}
+
+/** 判断是否是高危工具(需要审批) */
+function isHighRiskTool(toolName) {
+    return getToolApprovalLevel(toolName) === 'required';
+}
+
+/** 判断是否是只读工具 (无需审批) */
+function isReadOnlyTool(toolName) {
+  if (window.toolRegistry && toolRegistry.has(toolName)) {
+    return toolRegistry.isReadOnly(toolName);
+  }
+  // 回退旧逻辑
+  var readOnlyTools = ['web_search','web_fetch','rag_search','server_file_read','server_file_search','server_sys_info','server_ps','server_disk','server_network','server_db_query','engine_agent_status','engine_agent_list','engine_cron_list','engine_push','ask_agent','autonomous_mode'];
+  return readOnlyTools.indexOf(toolName) !== -1;
+}
+
+/** 判断命令是否危险(需要审批) */
+function isDangerousCommand(cmd) {
+    if (!cmd || typeof cmd !== 'string') return false;
+    var dangerPatterns = ['rm ', 'dd ', 'mkfs', 'shutdown', 'reboot', 'kill ', '>:'];
+    var lower = cmd.toLowerCase();
+    for (var i = 0; i < dangerPatterns.length; i++) {
+        if (lower.indexOf(dangerPatterns[i]) !== -1) return true;
+    }
+    return false;
+}
+
+/**
+ * 请求用户批准高危操作
+ * @param {string} toolName - 工具名称
+ * @param {object} args - 工具参数
+ * @returns {Promise<boolean>} true=批准, false=拒绝
+ */
+/**
+ * 检查是否有 '始终允许此工具' 规则
+ */
+function getAlwaysAllowRules() {
+  try { return JSON.parse(localStorage.getItem('approvalAlwaysAllowRules') || '{}'); } catch(e) { return {}; }
+}
+
+/**
+ * 检查工具是否在 '始终允许' 规则中
+ */
+function isAlwaysAllowed(toolName) {
+  var rules = getAlwaysAllowRules();
+  return !!rules[toolName];
+}
+
+/**
+ * 添加 '始终允许此工具' 规则
+ */
+function addAlwaysAllowRule(toolName) {
+  var rules = getAlwaysAllowRules();
+  rules[toolName] = true;
+  try { localStorage.setItem('approvalAlwaysAllowRules', JSON.stringify(rules)); } catch(e) {}
+}
+
+/**
+ * 移除 '始终允许此工具' 规则
+ */
+function removeAlwaysAllowRule(toolName) {
+  var rules = getAlwaysAllowRules();
+  delete rules[toolName];
+  try { localStorage.setItem('approvalAlwaysAllowRules', JSON.stringify(rules)); } catch(e) {}
+}
+
+/**
+ * 请求用户批准高危操作 (增强版)
+ * 参考 DeepSeek-TUI execpolicy 设计模式
+ * @param {string} toolName - 工具名称
+ * @param {object} args - 工具参数
+ * @returns {Promise<boolean>} true=批准, false=拒绝
+ */
+function requestToolApproval(toolName, args) {
+    return new Promise(function(resolve) {
+        var mode = getAgentMode();
+        
+        // YOLO 模式: 自动批准所有操作
+        if (mode === 'yolo') {
+            sessionUsage.approvalsGranted++;
+            resolve(true);
+            return;
+        }
+        
+        // Plan 模式: 拒绝所有写操作
+        if (mode === 'plan') {
+            sessionUsage.approvalsRejected++;
+            
+            resolve(false);
+            return;
+        }
+        
+        // Agent 模式: 检查 '始终允许此工具' 规则
+        if (isAlwaysAllowed(toolName)) {
+            sessionUsage.approvalsGranted++;
+            resolve(true);
+            return;
+        }
+        
+        // 只读工具自动批准 (Feature 6)
+        if (isReadOnlyTool(toolName)) {
+            sessionUsage.approvalsGranted++;
+            resolve(true);
+            return;
+        }
+        
+        // 检查是否已记住此工具(会话级别)
+        var remembered = {};
+        try { remembered = JSON.parse(sessionStorage.getItem('approvalRemembered') || '{}'); } catch(e) {}
+        var cmdPart = (args && args.cmd) ? args.cmd.substring(0, 50) : '';
+        if (args && args.name && !cmdPart) cmdPart = args.name.substring(0, 50);
+        var rememberKey = toolName + '_' + (cmdPart || '');
+        if (remembered[rememberKey] !== undefined) {
+            var approved = remembered[rememberKey];
+            if (approved) { sessionUsage.approvalsGranted++; } else { sessionUsage.approvalsRejected++; }
+            resolve(approved);
+            return;
+        }
+        
+        // Agent 模式: 显示审批弹窗
+        // 参数预览(截断避免过长)
+        var argsPreview = '';
+        try {
+            if (typeof args === 'object' && args !== null) {
+                var previewParts = [];
+                for (var k in args) {
+                    var v = typeof args[k] === 'string' ? args[k].substring(0, 100) : JSON.stringify(args[k]).substring(0, 100);
+                    previewParts.push(k + ': ' + v);
+                }
+                argsPreview = previewParts.join('\n');
+            } else {
+                argsPreview = String(args).substring(0, 200);
+            }
+        } catch(e) {
+            argsPreview = '无法预览参数';
+        }
+        
+        // 检测是否需要额外的危险警告
+        var extraWarning = '';
+        if (toolName === 'server_exec') {
+            var cmd = (args && args.cmd) || '';
+            if (isDangerousCommand(cmd)) {
+                extraWarning = '⚠️ 此命令包含危险操作,请谨慎确认!';
+            }
+        }
+        // 从注册表获取工具描述
+        var toolHint = '';
+        if (window.toolRegistry && toolRegistry.has(toolName)) {
+          toolHint = toolRegistry.getSearchHint(toolName);
+        }
+        
+        // 创建审批弹窗 (增强版: 支持 '始终允许此类型')
+        var overlay = document.createElement('div');
+        overlay.className = 'approval-overlay';
+        overlay.innerHTML = '<div class="approval-modal v2">' +
+            '<div class="approval-title">🔐 操作审批</div>' +
+            (extraWarning ? '<div class="approval-warning">' + extraWarning + '</div>' : '') +
+            '<div class="approval-tool"><span class="approval-tool-label">工具:</span> <span class="approval-tool-name">' + escapeHtml(toolName) + '</span>' +
+            (toolHint ? '<span class="approval-tool-hint">' + escapeHtml(toolHint) + '</span>' : '') +
+            '</div>' +
+            '<div class="approval-args"><span class="approval-tool-label">参数:</span><pre class="approval-args-preview">' + escapeHtml(argsPreview) + '</pre></div>' +
+            '<div class="approval-options">' +
+            '<label class="approval-option"><input type="checkbox" id="approvalRememberCheck"> 本次会话记住此决定</label>' +
+            '<label class="approval-option"><input type="checkbox" id="approvalAlwaysAllowCheck"> 始终允许此类型</label>' +
+            '</div>' +
+            '<div class="approval-buttons">' +
+            '<button class="approval-reject" id="approvalRejectBtn">❌ 拒绝</button>' +
+            '<button class="approval-confirm" id="approvalConfirmBtn">✅ 批准</button>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        
+        
+        // 按钮事件
+        var confirmBtn = overlay.querySelector('#approvalConfirmBtn');
+        var rejectBtn = overlay.querySelector('#approvalRejectBtn');
+        
+        confirmBtn.onclick = function() {
+            var remember = overlay.querySelector('#approvalRememberCheck');
+            if (remember && remember.checked) {
+                remembered[rememberKey] = true;
+                try { sessionStorage.setItem('approvalRemembered', JSON.stringify(remembered)); } catch(e) {}
+            }
+            // Feature 2: 始终允许此类型
+            var alwaysAllow = overlay.querySelector('#approvalAlwaysAllowCheck');
+            if (alwaysAllow && alwaysAllow.checked) {
+                addAlwaysAllowRule(toolName);
+            }
+            sessionUsage.approvalsGranted++;
+            overlay.remove();
+            resolve(true);
+        };
+        
+        rejectBtn.onclick = function() {
+            var remember = overlay.querySelector('#approvalRememberCheck');
+            if (remember && remember.checked) {
+                remembered[rememberKey] = false;
+                try { sessionStorage.setItem('approvalRemembered', JSON.stringify(remembered)); } catch(e) {}
+            }
+            sessionUsage.approvalsRejected++;
+            overlay.remove();
+            resolve(false);
+        };
+    });
+}
+
 // ★ Agent 主动建议功能
 async function generateProactiveSuggestions(chatId, lastResponse) {
     if (!chatId || !lastResponse) return;
-    var isActive = localStorage.getItem('agentMode') === 'true';
+    var isActive = isAgentToolsActive();
     var proactive = localStorage.getItem('agentProactive') === 'true';  // default false
     if (!isActive || !proactive) return;
 
@@ -3885,18 +4837,130 @@ window.triggerAgentAutoReply = function(summary, chatId) {
     // 旧接口,保留兼容但不再使用
 };
 
+// ==================== Session 管理 (Feature 5) ====================
+
+/**
+ * 增强的 fetch 包装: 自动重试 + 指数退避
+ * @param {string} url - 请求URL
+ * @param {object} options - fetch 选项
+ * @param {number} maxRetries - 最大重试次数(默认3)
+ * @returns {Promise<Response>}
+ */
+function fetchWithRetry(url, options, maxRetries) {
+    maxRetries = maxRetries || 3;
+    return new Promise(function(resolve, reject) {
+        var attempt = 0;
+        function tryFetch() {
+            attempt++;
+            var signal = (options && options.signal) || null;
+            // 为每次重试创建新的 AbortController (如果原signal未超时)
+            var ctrl = new AbortController();
+            var mergedSignal = null;
+            if (signal) {
+                // 合并信号
+                mergedSignal = signal;
+            } else {
+                mergedSignal = ctrl.signal;
+            }
+            var opts = Object.assign({}, options, { signal: mergedSignal });
+            
+            fetch(url, opts).then(function(resp) {
+                resolve(resp);
+            }).catch(function(err) {
+                if (attempt >= maxRetries) {
+                    reject(err);
+                    return;
+                }
+                // 指数退避: 1s, 2s, 4s, 8s...
+                var delay = Math.pow(2, attempt) * 500;
+                console.log('[fetchWithRetry] 重试', attempt, '/', maxRetries, '延迟', delay + 'ms:', err.message);
+                setTimeout(tryFetch, delay);
+            });
+        }
+        tryFetch();
+    });
+}
+
+/**
+ * 清理确认对话框 (替代原生 confirm)
+ * @param {string} title - 标题
+ * @param {string} message - 消息
+ * @param {string} confirmText - 确认按钮文字
+ * @returns {Promise<boolean>}
+ */
+function showConfirmDialog(title, message, confirmText) {
+    return new Promise(function(resolve) {
+        var overlay = document.createElement('div');
+        overlay.className = 'approval-overlay';
+        overlay.innerHTML = '<div class="approval-modal confirm-dialog">' +
+            '<div class="approval-title">' + escapeHtml(title) + '</div>' +
+            '<div class="confirm-message">' + escapeHtml(message) + '</div>' +
+            '<div class="approval-buttons">' +
+            '<button class="approval-reject" id="confirmCancelBtn">取消</button>' +
+            '<button class="approval-confirm" id="confirmOkBtn">' + (confirmText || '确认') + '</button>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        
+        overlay.querySelector('#confirmOkBtn').onclick = function() {
+            overlay.remove();
+            resolve(true);
+        };
+        overlay.querySelector('#confirmCancelBtn').onclick = function() {
+            overlay.remove();
+            resolve(false);
+        };
+    });
+}
+
+/**
+ * 清理确认对话框 + 子代理聊天记录清理
+ */
 window.deleteAgent = async function(name) {
-    if (!confirm('确定要删除子代理 "' + name + '" 吗?此操作不可撤销。')) return;
+    var confirmed = await showConfirmDialog('删除子代理', '确定要删除子代理 "' + name + '" 吗?此操作不可撤销。\n\n同时会删除该代理的聊天记录。', '删除');
+    if (!confirmed) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
+        var r = await fetchWithRetry('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name));
         var d = await r.json();
         if (d.ok) {
+            // 清理本地聊天记录
+            var key = 'agent_chat_' + name;
+            localStorage.removeItem(key);
             window.refreshEngineStatus();
         } else {
             alert('删除失败: ' + (d.error || '未知错误'));
         }
     } catch(e) {
         alert('删除请求失败: ' + e.message);
+    }
+};
+
+/**
+ * 清理所有子代理
+ */
+window.clearAllAgents = async function() {
+    var confirmed = await showConfirmDialog('清理所有子代理', '确定要删除所有子代理吗?\n\n此操作不可撤销,同时会删除所有子代理的聊天记录。', '全部删除');
+    if (!confirmed) return;
+    try {
+        var r = await fetchWithRetry('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken());
+        var agents = await r.json();
+        var names = Object.keys(agents);
+        var deleted = 0;
+        for (var i = 0; i < names.length; i++) {
+            try {
+                await fetchWithRetry('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(names[i]));
+                var key = 'agent_chat_' + names[i];
+                localStorage.removeItem(key);
+                deleted++;
+            } catch(e) {
+                console.warn('[clearAllAgents] 删除失败:', names[i], e.message);
+            }
+        }
+        window.refreshEngineStatus();
+        window._refreshAllAgentLists();
+        alert('已清理 ' + deleted + ' 个子代理');
+    } catch(e) {
+        alert('清理失败: ' + e.message);
     }
 };
 
@@ -4062,8 +5126,9 @@ const _TOOL_CATEGORIES = [
     { label: '🎨 图像', keys: ['IMAGE_TOOL_DEFINITION','ANALYZE_IMAGE_TOOL'] },
     { label: '📚 刷课', keys: ['CHAXING_LOGIN_TOOL_DEFINITION','CHAXING_LIST_TOOL_DEFINITION','CHAXING_TOOL_DEFINITION','CHAXING_STATUS_TOOL_DEFINITION','CHAXING_STOP_TOOL_DEFINITION','CHAXING_STATS_TOOL_DEFINITION','CHAXING_OVERVIEW_TOOL'] },
     { label: '📝 考试', keys: ['CHAXING_AUTH_TOOL','CHAXING_EXAM_LIST_TOOL','CHAXING_EXAM_START_TOOL','CHAXING_EXAM_STATUS_TOOL','CHAXING_EXAM_STOP_TOOL'] },
-    { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'] },
-    { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'] }
+    { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'], agentOnly: true },
+    { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'], agentOnly: true },
+    { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] }
 ];
 
 // ── 工具显示名映射 ──
@@ -4081,7 +5146,8 @@ const _TOOL_LABELS = {
     'SERVER_DB_QUERY_TOOL': '数据库', 'SERVER_FILE_SEARCH_TOOL': '文件搜索', 'SERVER_FILE_OP_TOOL': '文件操作',
     'ENGINE_CRON_LIST_TOOL': 'Cron 列表', 'ENGINE_CRON_CREATE_TOOL': '创建 Cron', 'ENGINE_CRON_DELETE_TOOL': '删除 Cron',
     'DELEGATE_TASK_TOOL': '子代理任务', 'ENGINE_AGENT_STATUS_TOOL': '子代理状态', 'ENGINE_AGENT_LIST_TOOL': '子代理列表',
-    'ENGINE_AGENT_DELETE_TOOL': '删除子代理', 'ENGINE_PUSH_TOOL': '推送通知'
+    'ENGINE_AGENT_DELETE_TOOL': '删除子代理', 'ENGINE_PUSH_TOOL': '推送通知',
+    'ASK_AGENT_TOOL': '请求 Agent 模式', 'AUTONOMOUS_MODE_TOOL': '自主模式开关'
 };
 
 // ── 动态渲染工具面板 ──
@@ -4095,16 +5161,23 @@ window.renderToolPanel = function() {
     var customSkillsEl = document.getElementById('customSkillsList');
     var rendered = '';
 
+    var _agentOn = isAgentToolsActive();
     _TOOL_CATEGORIES.forEach(function(cat) {
-        rendered += '<div class="tools-category-label dynamic">' + cat.label + '</div>';
+        var _disabled = cat.agentOnly && !_agentOn;
+        if (_disabled) {
+            rendered += '<div class="tools-category-label dynamic" style="opacity:0.4;">' + cat.label + ' <span style="font-size:10px;color:#f59e0b;">🔒Agent</span></div>';
+        } else {
+            rendered += '<div class="tools-category-label dynamic">' + cat.label + '</div>';
+        }
         cat.keys.forEach(function(key) {
             var label = _TOOL_LABELS[key] || key;
             var isDanger = (key.indexOf('SERVER_EXEC') >= 0 || key.indexOf('SERVER_PYTHON') >= 0 || key.indexOf('SERVER_FILE_WRITE') >= 0 || key.indexOf('SERVER_DOCKER') >= 0 || key.indexOf('SERVER_DB') >= 0 || key.indexOf('SERVER_FILE_OP') >= 0 || key.indexOf('CRON_CREATE') >= 0 || key.indexOf('CRON_DELETE') >= 0 || key.indexOf('AGENT_DELETE') >= 0);
             var warnClass = isDanger ? ' tool-warn' : '';
             var checked = window.isToolEnabled(key) ? ' checked' : '';
-            rendered += '<div class="tool-toggle-row dynamic" data-tool="' + key + '">';
+            var disabledAttr = _disabled ? ' disabled' : '';
+            rendered += '<div class="tool-toggle-row dynamic' + (_disabled ? ' tool-disabled' : '') + '" data-tool="' + key + '">';
             rendered += '<span class="tool-toggle-name' + warnClass + '" title="' + label + '">' + label + '</span>';
-            rendered += '<label class="switch small"><input type="checkbox" id="tool_enabled_' + key + '" data-toolkey="' + key + '"' + checked + '><span class="slider"></span></label>';
+            rendered += '<label class="switch small"><input type="checkbox" id="tool_enabled_' + key + '" data-toolkey="' + key + '"' + checked + disabledAttr + '><span class="slider"></span></label>';
             rendered += '</div>';
         });
     });
@@ -4944,6 +6017,107 @@ function showImageLightbox(images, startIdx) {
     document.body.appendChild(overlay);
 }
 
+// ==================== 工具调用渲染 (Feature 3) ====================
+/**
+ * 创建可折叠的工具调用卡片
+ * @param {string} toolName - 工具名称
+ * @param {object} args - 调用参数
+ * @param {object} result - 调用结果
+ * @param {number} durationMs - 执行耗时(毫秒)
+ * @returns {HTMLElement}
+ */
+function createToolCallCard(toolName, args, result, durationMs) {
+    var card = document.createElement('div');
+    card.className = 'tool-call-card';
+    
+    // 从注册表获取元数据
+    var meta = (window.toolRegistry && toolRegistry.has(toolName)) ? toolRegistry.get(toolName) : null;
+    var capHint = meta ? meta.capabilities.slice(0, 2).join(', ') : '';
+    var toolHint = meta ? meta.searchHint : '';
+    
+    // 摘要
+    var summary = (meta && meta.getSummary) ? meta.getSummary(args) : (toolName + ': ' + JSON.stringify(args).substring(0, 60));
+    
+    // 格式化结果(截断长结果)
+    var resultText = '';
+    if (result) {
+        if (typeof result === 'string') resultText = result;
+        else if (result.result) resultText = result.result;
+        else if (result.error) resultText = '❌ ' + result.error;
+        else resultText = JSON.stringify(result).substring(0, 300);
+    }
+    var resultTruncated = resultText.length > 500;
+    var maxResultChars = meta ? meta.maxResultSizeChars : 100000;
+    var displayResult = resultText.length > 500 ? resultText.substring(0, 500) : resultText;
+    
+    // 构建卡片
+    var durationStr = '';
+    if (durationMs !== undefined && durationMs !== null) {
+        if (durationMs < 1000) durationStr = durationMs + 'ms';
+        else if (durationMs < 60000) durationStr = (durationMs / 1000).toFixed(1) + 's';
+        else durationStr = Math.floor(durationMs / 60000) + 'm ' + Math.floor((durationMs % 60000) / 1000) + 's';
+    }
+    
+    var isError = result && result.error;
+    var icon = isError ? '❌' : (meta && !meta.isReadOnly ? '✏️' : '🔧');
+    
+    card.innerHTML = '<details class="tool-call-details" ' + (isError ? '' : '') + '>' +
+        '<summary class="tool-call-summary">' +
+            '<span class="tool-call-icon">' + icon + '</span> ' +
+            '<span class="tool-call-name">' + escapeHtml(toolName) + '</span>' +
+            (toolHint ? '<span class="tool-call-hint">' + escapeHtml(toolHint) + '</span>' : '') +
+            (durationStr ? '<span class="tool-call-duration">⏱ ' + durationStr + '</span>' : '') +
+            (capHint ? '<span class="tool-call-cap">[' + escapeHtml(capHint) + ']</span>' : '') +
+        '</summary>' +
+        '<div class="tool-call-body">' +
+            '<div class="tool-call-section">' +
+                '<div class="tool-call-section-title">📥 参数</div>' +
+                '<pre class="tool-call-args">' + escapeHtml(JSON.stringify(args, null, 2)).substring(0, 2000) + '</pre>' +
+            '</div>' +
+            '<div class="tool-call-section">' +
+                '<div class="tool-call-section-title">📤 结果' + (resultTruncated ? ' (截断)' : '') + '</div>' +
+                '<pre class="tool-call-result">' + escapeHtml(displayResult).substring(0, 5000) + '</pre>' +
+                (resultTruncated ? '<button class="tool-call-expand-btn" onclick="this.previousElementSibling.textContent=' + escapeHtml(JSON.stringify(resultText.substring(0, 50000))) + ';this.remove()">展开全部 (' + resultText.length + ' 字符)</button>' : '') +
+            '</div>' +
+        '</div>' +
+    '</details>';
+    
+    return card;
+}
+
+/**
+ * 追加带工具调用的消息(在 appendMessage 基础上增加 tool_calls 渲染)
+ */
+function appendToolCallMessage(toolName, args, result, durationMs, chatId) {
+    var card = createToolCallCard(toolName, args, result, durationMs);
+    var container = $.chatMessagesContainer;
+    if (!container) return;
+    
+    var row = document.createElement('div');
+    row.className = 'message-row assistant tool-call-row';
+    
+    var avatar = document.createElement('div');
+    avatar.className = 'avatar assistant';
+    avatar.textContent = 'N';
+    
+    var wrapper = document.createElement('div');
+    wrapper.className = 'message-content-wrapper';
+    
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble assistant tool-call-bubble';
+    bubble.appendChild(card);
+    
+    wrapper.appendChild(bubble);
+    row.appendChild(avatar);
+    row.appendChild(wrapper);
+    container.appendChild(row);
+    
+    // 自动滚动
+    if (isAutoScrolling) scrollToBottom();
+    
+    return row;
+}
+
 function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null) {
     // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
     const safeStr = (val) => {
@@ -4987,12 +6161,15 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     const bubble = document.createElement('div');
     bubble.className = `bubble ${role}`;
 
-    // 思考过程
+    // 思考过程 (Feature 3: 可折叠推理过程)
     if (role === 'assistant' && reasoning) {
         const details = document.createElement('details');
         details.className = 'reasoning-details';
-        details.open = true;
-        details.innerHTML = `<summary>深度思考</summary><div class="reasoning-content">${compressNewlines(reasoning, 2)}</div>`;
+        // 默认折叠,如果推理内容较短(<200字)则展开
+        var reasoningLen = (reasoning || '').length;
+        details.open = reasoningLen < 200;
+        var summaryText = '🤔 推理过程' + (reasoningLen >= 200 ? ' (' + reasoningLen + '字符)' : '');
+        details.innerHTML = `<summary>${summaryText}</summary><div class="reasoning-content">${compressNewlines(reasoning, 2)}</div>`;
         bubble.appendChild(details);
     }
 
@@ -5432,7 +6609,7 @@ async function performWebSearch(query, signal, type = 'web') {
         if (country) params += `&country=${country}`;
         params += '&safesearch=off';
         if (SEARCH_PROXY) {
-            url = `${SEARCH_PROXY}/brave?${params}&type=${type}`;
+            url = `${SEARCH_PROXY}?engine=brave&${params}&type=${type}&key=${encodeURIComponent(apiKey)}`;
         } else {
             let endpoint = '';
             switch (type) {
@@ -5473,7 +6650,7 @@ async function performWebSearch(query, signal, type = 'web') {
         }
     } else {
         url = SEARCH_PROXY
-            ? `${SEARCH_PROXY}/duckduckgo?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`
+            ? `${SEARCH_PROXY}?engine=duckduckgo&q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`
             : `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`;
     }
 
@@ -7527,7 +8704,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     }
 
     // ★ Agent 模式: 合并 agent 系统提示词
-    if (localStorage.getItem('agentMode') === 'true') {
+    if (isAgentToolsActive()) {
         var agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         if (agentPrompt) {
             // 追加到第一条 system 消息
@@ -7600,7 +8777,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // MiniMax M2: 默认使用<think>标签模式(不传reasoning_split以避免参数错误)
 
     // ★ Agent 模式: 始终启用工具调用
-    var agentModeActive = localStorage.getItem('agentMode') === 'true';
+    var agentModeActive = isAgentToolsActive();
     var effectiveToolCall = useToolCall || currentMessageHasImages || agentModeActive;
 
     // ★ 终极检查: 模型在 no-tool 列表中就直接跳过整个工具注册
@@ -7629,17 +8806,43 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     const searchOn = getChecked('searchToggle');
     const toolMode = effectiveToolCall;
     if (toolMode) {
+        // ★ 工具分类: A类(始终可用) | B类(Agent模式启用后额外可用) | C类(始终在列表中)
         var tools = [];
-        // 只在搜索开关打开时才注册搜索类工具(非Agent模式且关闭搜索时彻底不注册)
+        
+        // ===== A 类工具: 始终可用(无论是否 Agent 模式) =====
+        // 搜索工具(受搜索开关控制)
         if (searchOn) {
             tools.push(SEARCH_TOOL_DEFINITION);
-            if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
             tools.push(WEB_FETCH_TOOL_DEFINITION);
+            if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
         }
-        // Agent模式额外注册引擎工具
+        // 图片工具(始终可用)
+        tools = tools.concat(imageTools);
+        // 文件读取/搜索(基础操作,不限制)
+        tools.push(SERVER_FILE_READ_TOOL);
+        tools.push(SERVER_FILE_SEARCH_TOOL);
+        // ask_agent: AI可通过此工具请求用户启用Agent模式
+        tools.push(ASK_AGENT_TOOL);
+        
+        // ===== B 类工具: Agent 模式启用后额外可用 =====
         if (agentModeActive) {
-            // rag_search 已在 searchOn 分支添加(若 RAG 开启),避免重复
-            if (!window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
+            // RAG 搜索(仅当搜索关闭时加入,避免重复)
+            if (!searchOn || !window.RAG_ENABLED) {
+                if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
+                else if (!searchOn) tools.push(RAG_SEARCH_TOOL_DEFINITION);
+            }
+            // 服务器操控工具
+            tools.push(SERVER_EXEC_TOOL);
+            tools.push(SERVER_PYTHON_TOOL);
+            tools.push(SERVER_FILE_WRITE_TOOL);
+            tools.push(SERVER_FILE_OP_TOOL);
+            tools.push(SERVER_SYS_INFO_TOOL);
+            tools.push(SERVER_PS_TOOL);
+            tools.push(SERVER_DISK_TOOL);
+            tools.push(SERVER_NETWORK_TOOL);
+            tools.push(SERVER_DOCKER_TOOL);
+            tools.push(SERVER_DB_QUERY_TOOL);
+            // 引擎/Agent工具
             tools.push(ENGINE_CRON_LIST_TOOL);
             tools.push(ENGINE_CRON_CREATE_TOOL);
             tools.push(ENGINE_CRON_DELETE_TOOL);
@@ -7647,11 +8850,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             tools.push(ENGINE_AGENT_STATUS_TOOL);
             tools.push(ENGINE_AGENT_LIST_TOOL);
             tools.push(ENGINE_AGENT_DELETE_TOOL);
+            tools.push(ENGINE_AGENT_ASK_TOOL);
             tools.push(ENGINE_PUSH_TOOL);
             // web_fetch 已在 searchOn 分支添加,此处不再重复
         }
-        tools = tools.concat(imageTools);
-        // 刷课工具(登录后可用,始终注册让AI知道可以引导用户登录)
+        
+        // ===== 刷课工具(始终注册,不受Agent模式影响) =====
         tools.push(CHAOXING_LOGIN_TOOL_DEFINITION);
         tools.push(CHAOXING_LIST_TOOL_DEFINITION);
         tools.push(CHAOXING_TOOL_DEFINITION);
@@ -7664,20 +8868,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         tools.push(CHAOXING_EXAM_START_TOOL);
         tools.push(CHAOXING_EXAM_STATUS_TOOL);
         tools.push(CHAOXING_EXAM_STOP_TOOL);
-        // 引擎工具已在上面 Agent 模式分支添加,避免重复
-
-                    tools.push(SERVER_EXEC_TOOL);
-                    tools.push(SERVER_PYTHON_TOOL);
-                    tools.push(SERVER_FILE_READ_TOOL);
-                    tools.push(SERVER_FILE_WRITE_TOOL);
-                    tools.push(SERVER_SYS_INFO_TOOL);
-                    tools.push(SERVER_PS_TOOL);
-                    tools.push(SERVER_DISK_TOOL);
-                    tools.push(SERVER_NETWORK_TOOL);
-                    tools.push(SERVER_DOCKER_TOOL);
-                    tools.push(SERVER_DB_QUERY_TOOL);
-                    tools.push(SERVER_FILE_SEARCH_TOOL);
-                    tools.push(SERVER_FILE_OP_TOOL);
+        
+        // ===== C 类工具: 始终在列表中,由 ask_agent 控制是否启用 =====
+        tools.push(AUTONOMOUS_MODE_TOOL);
         // ★ 添加自定义技能到工具列表
         (function() {
             var _customSkills = [];
@@ -7731,7 +8924,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'engine_agent_list': 'ENGINE_AGENT_LIST_TOOL',
                 'engine_agent_delete': 'ENGINE_AGENT_DELETE_TOOL',
                 'engine_agent_ask': 'ENGINE_AGENT_DELETE_TOOL',
-                'engine_push': 'ENGINE_PUSH_TOOL'
+                'engine_push': 'ENGINE_PUSH_TOOL',
+                'ask_agent': 'ASK_AGENT_TOOL',
+                'autonomous_mode': 'AUTONOMOUS_MODE_TOOL'
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
@@ -7739,7 +8934,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 var _toggleKey = _toolFuncNameToToggleKey[_ftName];
                 if (_toggleKey) {
                     if (window.isToolEnabled(_toggleKey)) {
-                        _filteredTools.push(_ft);
+                        // ★ Agent 模式关闭时,过滤掉 Agent 专属工具
+                        var _agentOn = isAgentToolsActive();
+                        var _agentOnlyKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'];
+                        if (!_agentOn && _agentOnlyKeys.indexOf(_toggleKey) >= 0) {
+                            // Agent 未启用,跳过此工具
+                        } else {
+                            _filteredTools.push(_ft);
+                        }
                     }
                 } else if (_ftName.startsWith('impl_') || _ftName.startsWith('custom_')) {
                     // 自定义技能: 用 CUSTOM_SKILL_ 前缀检查
@@ -7965,6 +9167,25 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     const result = await streamResponse(res, chatId, pendingMsg, 3, 2);
                     usage = result.usage;
                     toolCalls = result.toolCalls || [];
+                    // ★ 成本追踪: 累加 token 用量
+                    if (usage) {
+                        var _pt = usage.prompt_tokens || usage.input_tokens || 0;
+                        var _ct = usage.completion_tokens || usage.output_tokens || 0;
+                        sessionUsage.promptTokens += _pt;
+                        sessionUsage.completionTokens += _ct;
+                        sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                        // Feature 7: 增强缓存追踪
+                        var _cHit = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                        var _totalCache = (_pt || _ct);
+                        if (_cHit > 0) {
+                            sessionUsage.cacheHitTokens += _cHit;
+                            sessionUsage.cacheMissTokens += (_totalCache > _cHit) ? (_totalCache - _cHit) : 0;
+                        }
+                        // 估算费用 (基于 DeepSeek V4 定价: $0.5/M input, $2/M output)
+                        var pt = _pt / 1000000;
+                        var ct = _ct / 1000000;
+                        sessionUsage.totalCost += pt * 0.5 + ct * 2;
+                    }
                     // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
                     if (result.reasoningText && !pendingMsg.reasoning) {
                         pendingMsg.reasoning = result.reasoningText;
@@ -7989,6 +9210,21 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         if (!_nsRes.ok) throw new Error(`HTTP ${_nsRes.status}: ${await _nsRes.text()}`);
                         const _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
                         usage = _nsResult.usage;
+                        if (usage) {
+                            var _pt2 = usage.prompt_tokens || usage.input_tokens || 0;
+                            var _ct2 = usage.completion_tokens || usage.output_tokens || 0;
+                            sessionUsage.promptTokens += _pt2;
+                            sessionUsage.completionTokens += _ct2;
+                            sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                            var _cHit2 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                            if (_cHit2 > 0) {
+                                sessionUsage.cacheHitTokens += _cHit2;
+                                sessionUsage.cacheMissTokens += (_pt2 + _ct2 > _cHit2) ? (_pt2 + _ct2 - _cHit2) : 0;
+                            }
+                            var pt2 = _pt2 / 1000000;
+                            var ct2 = _ct2 / 1000000;
+                            sessionUsage.totalCost += pt2 * 0.5 + ct2 * 2;
+                        }
                         toolCalls = _nsResult.toolCalls || [];
                     } else {
                         throw streamErr;
@@ -7997,11 +9233,47 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             } else {
                 const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
                 usage = result.usage;
+                if (usage) {
+                    var _pt3 = usage.prompt_tokens || usage.input_tokens || 0;
+                    var _ct3 = usage.completion_tokens || usage.output_tokens || 0;
+                    sessionUsage.promptTokens += _pt3;
+                    sessionUsage.completionTokens += _ct3;
+                    sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                    var _cHit3 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                    if (_cHit3 > 0) {
+                        sessionUsage.cacheHitTokens += _cHit3;
+                        sessionUsage.cacheMissTokens += (_pt3 + _ct3 > _cHit3) ? (_pt3 + _ct3 - _cHit3) : 0;
+                    }
+                    var pt3 = _pt3 / 1000000;
+                    var ct3 = _ct3 / 1000000;
+                    sessionUsage.totalCost += pt3 * 0.5 + ct3 * 2;
+                }
                 toolCalls = result.toolCalls || [];
             }
             // 处理工具调用
             if (toolCalls.length > 0) {
                 toolCallCount++;
+                sessionUsage.toolCalls += toolCalls.length;
+                // Feature 6: 工具调用预判 — 标记所有调用的工具为已记录
+                validToolCalls.forEach(function(tc) {
+                    if (tc && tc.function && tc.function.name) {
+                        toolCallStats.record(tc.function.name);
+                    }
+                });
+                // Feature 6: YOLO 模式下显示进度
+                var _yoloMode = getAgentMode() === 'yolo';
+                if (_yoloMode && currentChatId === chatId) {
+                    var _bubble = activeBubbleMap[chatId];
+                    if (_bubble) {
+                        var _yoloStatus = _bubble.querySelector('.yolo-progress');
+                        if (!_yoloStatus) {
+                            _yoloStatus = document.createElement('div');
+                            _yoloStatus.className = 'yolo-progress';
+                            _bubble.querySelector('.markdown-body')?.appendChild(_yoloStatus);
+                        }
+                        _yoloStatus.textContent = '🤖 YOLO 自动执行中... 第 ' + toolCallCount + '/' + maxToolCalls + ' 轮';
+                    }
+                }
                 if (toolCallCount > maxToolCalls) {
                     throw new Error('工具调用次数过多,可能存在循环,已停止');
                 }
@@ -8264,10 +9536,16 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('cron_list');
                     }
                      else if (func.name === 'engine_cron_create') {
-                        toolResult = await engineApiHandler('cron_create', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('cron_create', args); }
+                        } else { toolResult = await engineApiHandler('cron_create', args); }
                     }
                      else if (func.name === 'engine_cron_delete') {
-                        toolResult = await engineApiHandler('cron_delete', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('cron_delete', args); }
+                        } else { toolResult = await engineApiHandler('cron_delete', args); }
                     }
                      else if (func.name === 'engine_agent_create') {
                         _hasCreatedSubAgent = true;
@@ -8287,19 +9565,31 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('agent_delete', args);
                     }
                      else if (func.name === 'engine_cron_delete') {
-                        toolResult = await engineApiHandler('cron_delete', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('cron_delete', args); }
+                        } else { toolResult = await engineApiHandler('cron_delete', args); }
                     }
                      else if (func.name === 'server_exec') {
-                        toolResult = await engineApiHandler('exec', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('exec', args); }
+                        } else { toolResult = await engineApiHandler('exec', args); }
                     }
                      else if (func.name === 'server_python') {
-                        toolResult = await engineApiHandler('python', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('python', args); }
+                        } else { toolResult = await engineApiHandler('python', args); }
                     }
                      else if (func.name === 'server_file_read') {
                         toolResult = await engineApiHandler('file_read', args);
                     }
                      else if (func.name === 'server_file_write') {
-                        toolResult = await engineApiHandler('file_write', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_write', args); }
+                        } else { toolResult = await engineApiHandler('file_write', args); }
                     }
                      else if (func.name === 'server_sys_info') {
                         toolResult = await engineApiHandler('sys_info', args);
@@ -8314,7 +9604,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('network', args);
                     }
                      else if (func.name === 'server_docker') {
-                        toolResult = await engineApiHandler('docker', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('docker', args); }
+                        } else { toolResult = await engineApiHandler('docker', args); }
                     }
                      else if (func.name === 'server_db_query') {
                         toolResult = await engineApiHandler('db_query', args);
@@ -8323,7 +9616,24 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('file_search', args);
                     }
                      else if (func.name === 'server_file_op') {
-                        toolResult = await engineApiHandler('file_op', args);
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_op', args); }
+                        } else { toolResult = await engineApiHandler('file_op', args); }
+                    }
+                     else if (func.name === 'ask_agent') {
+                        var reason = args.reason || '执行高级操作';
+                        if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
+                            setAgentMode('agent');
+                            toolResult = { result: '✅ Agent 模式已启用,现在可以执行文件操作和命令了。' };
+                        } else {
+                            toolResult = { result: '❌ 用户拒绝了 Agent 模式请求,继续普通模式。' };
+                        }
+                    }
+                     else if (func.name === 'autonomous_mode') {
+                        var enabled = args.enabled !== false;
+                        localStorage.setItem('agentProactive', enabled ? 'true' : 'false');
+                        toolResult = { result: enabled ? '✅ 自主模式已启用,AI可以自主决定使用工具。' : '🔒 自主模式已禁用,AI将每次请求用户确认。' };
                     }
                      else if (func.name === 'engine_agent_ask') {
                         toolResult = await engineApiHandler('agent_ask', args);
@@ -9230,7 +10540,7 @@ window.useAlternativeVisionModel = function() {
                 autoGenerateTitle(chatId);
             }
             // ★ Agent 模式: 主动建议(不阻塞主流程)
-            if (localStorage.getItem('agentMode') === 'true' && localStorage.getItem('agentProactive') === 'true') {
+            if (getAgentMode() === 'agent' && localStorage.getItem('agentProactive') === 'true') {
                 var lastContent = typeof pendingMsg.content === 'string' ? pendingMsg.content : '';
                 if (lastContent) {
                     // 延迟执行,让 UI 先完成渲染
@@ -10246,15 +11556,18 @@ function initializeConfig() {
 }
 
 function initAgentConfig() {
-    var agentMode = localStorage.getItem('agentMode') === 'true';
-    setChecked('agentModeToggle', agentMode);
+    var mode = getAgentMode();
+    var isActive = mode === 'agent' || mode === 'yolo';
+    setChecked('agentModeToggle', isActive);
     setChecked('agentAutoDecision', localStorage.getItem('agentAutoDecision') !== 'false');
     setChecked('agentProactive', localStorage.getItem('agentProactive') === 'true');
     setVal('agentMaxToolRounds', localStorage.getItem('agentMaxToolRounds') || '30');
     setVal('agentThinkingDepth', localStorage.getItem('agentThinkingDepth') || 'standard');
     setVal('agentSystemPrompt', localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
-    // ★ Agent 模式下强制启用工具调用
-    if (agentMode) {
+    // 更新三模式选择器
+    updateModeSelector(mode);
+    // ★ Agent/YOLO 模式下强制启用工具调用
+    if (isActive) {
         setChecked('searchToolCallToggle', true);
         localStorage.setItem('searchToolCall', 'true');
         var tcToggle = getEl('searchToolCallToggle');
@@ -10593,7 +11906,10 @@ function initializeApp() {
             }
         }, 2000);
 
-        // ★ 登录/注册成功提示
+        // ★ 初始化 Agent 模式悬停菜单
+    setTimeout(function() { if (typeof _setupAgentPopup === 'function') _setupAgentPopup(); }, 1000);
+
+    // ★ 登录/注册成功提示
         try {
             var loginMsg = localStorage.getItem('_loginSuccess');
             if (loginMsg) {
@@ -11441,9 +12757,107 @@ function checkChaoxingProgress() {
 
 
 // ==================== Agent 通知与轮询系统 ====================
+// ==================== 代理聊天室实时更新 (Feature 4) ====================
 var _agentPollTimer = null;
 var _agentPanelRefreshTimer = null;
+var _agentChatPollTimer = null;
 var _selectedAgentName = null;
+var _lastAgentListJson = '';
+
+/**
+ * 开始代理聊天室实时更新
+ * - 代理列表每3秒轮询
+ * - 选中代理的聊天内容自动同步
+ * - 新消息通知红点
+ * - 代理运行中脉冲动画
+ */
+window.startAgentRealtimeUpdates = function() {
+    // 启动现有轮询(15s)
+    window.startAgentNotificationPolling();
+    
+    // 新增: 3秒快速轮询代理列表
+    if (!_agentPanelRefreshTimer) {
+        _agentPanelRefreshTimer = setInterval(function() {
+            if (!getAuthToken()) return;
+            window._refreshAllAgentLists();
+            // 如果有选中代理,自动同步聊天内容
+            if (_selectedAgentName) {
+                window.syncAgentChat(_selectedAgentName);
+            }
+        }, 3000);
+    }
+    
+    // 红点通知脉冲
+    var dot = getEl('agentNotifDot');
+    if (dot) {
+        dot.classList.add('pulse');
+    }
+    
+    // 给所有运行中的代理添加脉冲动画
+    _applyRunningAgentAnimation();
+};
+
+window.stopAgentRealtimeUpdates = function() {
+    window.stopAgentNotificationPolling();
+    if (_agentPanelRefreshTimer) {
+        clearInterval(_agentPanelRefreshTimer);
+        _agentPanelRefreshTimer = null;
+    }
+};
+
+/**
+ * 同步选中代理的聊天内容
+ */
+window.syncAgentChat = function(agentName) {
+    if (!agentName || !_selectedAgentName) return;
+    if (agentName !== _selectedAgentName) return;
+    
+    var msgArea = getEl('agentChatMessages');
+    if (!msgArea) return;
+    
+    var key = 'agent_chat_' + agentName;
+    var msgs = JSON.parse(localStorage.getItem(key) || '[]');
+    if (msgs.length > 0) {
+        var html = msgs.map(function(m) {
+            var roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
+            var timeStr = m.time ? new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
+            var contentPreview = (m.content || '').substring(0, 3000);
+            return '<div class="agent-chat-bubble ' + roleClass + '">' +
+                '<div class="text-xs text-gray-400 mb-1">' + (m.role === 'user' ? '你' : escapeHtml(agentName)) + (timeStr ? ' · ' + timeStr : '') + '</div>' +
+                '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(contentPreview) + '</div>' +
+                '</div>';
+        }).join('');
+        
+        if (msgArea.innerHTML !== html) {
+            msgArea.innerHTML = html;
+            msgArea.scrollTop = msgArea.scrollHeight;
+        }
+    }
+};
+
+/**
+ * 为运行中的代理应用脉冲动画
+ */
+function _applyRunningAgentAnimation() {
+    var runningDots = document.querySelectorAll('.agent-sub-dot.running');
+    runningDots.forEach(function(dot) {
+        if (!dot.style.animation) {
+            dot.style.animation = 'agent-pulse 1.5s ease-in-out infinite';
+        }
+    });
+}
+
+// 在 _renderAgentList 后触发动画
+(function() {
+    var _origRender = window._renderAgentList;
+    if (_origRender) {
+        var _wrapped = function(agents, container) {
+            _origRender(agents, container);
+            setTimeout(_applyRunningAgentAnimation, 100);
+        };
+        window._renderAgentList = _wrapped;
+    }
+})();
 
 function ensureChatExists() {
     if (!currentChatId || !chats[currentChatId]) {
@@ -11535,7 +12949,7 @@ window.checkAgentNotifications = function() {
                 }
 
                 // 触发主代理处理(会自行管理队列)
-                if (localStorage.getItem('agentMode') === 'true') {
+                if (isAgentToolsActive()) {
                     window.triggerAgentAutoReplyForSubAgent(agentName);
                 } else {
                     console.log('[AgentNotify] 非 Agent 模式,静默处理子代理', agentName);
@@ -11548,16 +12962,7 @@ window.checkAgentNotifications = function() {
 };
 
 window.showAgentNotification = function(type, message) {
-    window.refreshAgentPanel();
-    window.refreshEngineStatus();
-    // ★ 显示可见通知
-    if (message) {
-        var icon = '🔔';
-        if (type === 'error') icon = '❌';
-        else if (type === 'success') icon = '✅';
-        else if (type === 'info') icon = 'ℹ️';
-        showToast(icon + ' ' + message, type === 'error' ? 'error' : 'success', 8000);
-    }
+    // 右上角通知已禁用（冗余且太频繁）
 };
 
 window.appendAgentSystemMessage = function(text, source) {
