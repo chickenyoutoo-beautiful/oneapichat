@@ -3435,20 +3435,68 @@ window.hideThinking = function() {
     if (el) el.classList.remove('active');
 };
 
-// ==================== 🔄 工具执行状态浮条 API ====================
-// 参考 Claude Code 的 ToolUseLoader + DeepSeek-TUI 的实时工具显示
+// ==================== 🔄 工具调用滚动卡片 ====================
+// 每个工具调用在回复气泡底部追加一条，调用完后保留显示
+// 下一个工具调用时自动追加新行，旧行向上滚动（单向滚动，不闪烁）
+window._toolCallLines = [];
+
 window.showToolStatus = function(toolName, argPreview, isRunning) {
-    var bar = getEl('toolStatusBar');
-    if (!bar) return;
-    if (isRunning) {
-        var nameEl = getEl('toolStatusName');
-        var argEl = getEl('toolStatusArg');
-        if (nameEl) nameEl.textContent = toolName || '...';
-        if (argEl) argEl.textContent = argPreview ? ': ' + argPreview.substring(0, 60) : '';
-        bar.classList.remove('hidden');
-    } else {
-        bar.classList.add('hidden');
+    if (!currentChatId) return;
+    var bubble = activeBubbleMap[currentChatId];
+    if (!bubble) return;
+    
+    // 查找或创建工具调用行容器
+    var tcContainer = bubble.querySelector('.tool-call-lines');
+    if (!tcContainer) {
+        tcContainer = document.createElement('div');
+        tcContainer.className = 'tool-call-lines';
+        bubble.appendChild(tcContainer);
     }
+    
+    if (!isRunning) {
+        // 所有工具完成：3 秒后淡出整个容器
+        setTimeout(function() {
+            if (tcContainer && tcContainer.parentNode) {
+                tcContainer.style.opacity = '0';
+                tcContainer.style.maxHeight = '0';
+                setTimeout(function() { if (tcContainer.parentNode) tcContainer.remove(); }, 400);
+            }
+        }, 3000);
+        return;
+    }
+    
+    // 为新工具调用追加一行
+    var line = document.createElement('div');
+    line.className = 'tool-call-line';
+    line.innerHTML = 
+        '<svg class="tool-call-line-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2">' +
+            '<path d="M5 12a7 7 0 0 1 7-7"/>' +
+        '</svg>' +
+        '<span class="tool-call-line-name">' + escapeHtml(toolName) + '</span>' +
+        (argPreview ? '<span class="tool-call-line-arg">' + escapeHtml(argPreview.substring(0, 80)) + '</span>' : '');
+    
+    // 标记上一个完成的工具调用
+    var prevRunning = tcContainer.querySelector('.tool-call-line-running');
+    if (prevRunning) prevRunning.classList.replace('tool-call-line-running', 'tool-call-line-done');
+    
+    // 新行标记为 running
+    line.classList.add('tool-call-line-running');
+    tcContainer.appendChild(line);
+    
+    // 滚动到最新行
+    tcContainer.scrollTop = tcContainer.scrollHeight;
+    
+    // 限制最多保留 6 行，溢出时移除最早的
+    var lines = tcContainer.querySelectorAll('.tool-call-line');
+    while (lines.length > 6) {
+        var first = lines[0];
+        first.style.maxHeight = '0';
+        first.style.opacity = '0';
+        setTimeout(function() { if (first.parentNode) first.remove(); }, 300);
+        lines = tcContainer.querySelectorAll('.tool-call-line');
+    }
+    
+    window._toolCallLines.push({ name: toolName, arg: argPreview });
 };
 
 function showToast(msg, type = 'info', dur = 3000) {
