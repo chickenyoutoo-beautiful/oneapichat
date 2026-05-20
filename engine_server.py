@@ -37,12 +37,30 @@ except:
     print("[引擎] 需要安装 fastapi/uvicorn: pip install fastapi uvicorn --break-system-packages")
     sys.exit(1)
 
+# ── 引擎层模块 ────────────────────────────────────────────
+from engine.exec_policy import ExecPolicy, ExecDecision, Priority
+from engine.speculation import SpeculationEngine, SpeculationState
+from engine.retry import RetryEngine, RetryStatus
+from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind, get_global_registry
+from engine.event_frame import EventFlowBuilder, EventType, EventLog
+
+
 app = FastAPI(title="OneAPIChat Engine")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ENGINE_DIR = Path(PROJECT_ROOT) / ".engine"
 ENGINE_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR = Path(tempfile.gettempdir())
+
+# ── 引擎层全局实例 ──────────────────────────────────────────
+exec_policy = ExecPolicy(rules_file=str(ENGINE_DIR / "exec_policy.json"))
+speculation_engine = SpeculationEngine()
+retry_engine = RetryEngine(max_attempts=3, backoff_base_ms=500)
+tool_registry = get_global_registry()
+event_log = EventLog()
+
+if exec_policy._rules_file and not exec_policy._rules_file.exists():
+    exec_policy.save()
 
 # ==================== 存储 ====================
 class EngineStore:
@@ -1484,6 +1502,296 @@ def workflow_delete(name: str = Query(...), user_id: str = Query("")):
 def workflow_roles(user_id: str = Query("")):
     """返回可用角色列表(供前端下拉选择)"""
     return {"roles": [{"id": k, "label": v["label"], "desc": v["desc"]} for k, v in AGENT_ROLES.items()]}
+
+
+# ==================== 引擎层 API ====================
+
+@app.get("/engine/v2/exec-policy/evaluate")
+def exec_policy_evaluate(
+    domain: str = Query("exec"),
+    target: str = Query(...),
+    user_id: str = Query("")
+):
+    """评估一个操作是否需要审批"""
+    policy = exec_policy
+    decision = policy.evaluate(domain, target)
+    return {
+        "ok": True,
+        "domain": domain,
+        "target": target,
+        "decision": decision.kind,
+        "reason": decision.reason,
+        "matched_rule": decision.matched_rule,
+        "matched_priority": decision.matched_priority,
+    }
+
+
+@app.get("/engine/v2/exec-policy/rules")
+def exec_policy_rules(
+    domain: str = Query(""),
+    user_id: str = Query("")
+):
+    """获取策略规则列表"""
+    return {"ok": True, "rules": exec_policy.list_rules(domain), "count": len(exec_policy.rules)}
+
+
+@app.get("/engine/v2/exec-policy/add")
+def exec_policy_add(
+    domain: str = Query("exec"),
+    pattern: str = Query(...),
+    decision_kind: str = Query("skip"),
+    reason: str = Query(""),
+    priority: int = Query(2),
+    description: str = Query(""),
+    user_id: str = Query("")
+):
+    """添加策略规则"""
+    if decision_kind == "skip":
+        decision = ExecDecision.skip()
+    elif decision_kind == "forbidden":
+        decision = ExecDecision.forbidden(reason or "禁止操作")
+    else:
+        decision = ExecDecision.needs_approval(reason or "需要审批")
+    rule = exec_policy.add_rule(domain, pattern, decision, priority=priority, description=description)
+    return {"ok": True, "rule": rule.to_dict()}
+
+
+@app.get("/engine/v2/exec-policy/remove")
+def exec_policy_remove(
+    domain: str = Query("exec"),
+    pattern: str = Query(...),
+    priority: int = Query(-1),
+    user_id: str = Query("")
+):
+    """移除策略规则"""
+    p = Priority(priority) if priority >= 0 else None
+    removed = exec_policy.remove_rule(domain, pattern, p)
+    return {"ok": removed}
+
+
+@app.get("/engine/v2/exec-policy/reset")
+def exec_policy_reset(user_id: str = Query("")):
+    """重置为默认规则"""
+    exec_policy.reset_to_defaults()
+    return {"ok": True, "rules": len(exec_policy.rules)}
+
+
+# ── 推测执行 API ─────────────────────────────────────
+
+@app.get("/engine/v2/speculate")
+def speculate(
+    prompt: str = Query(...),
+    user_id: str = Query("")
+):
+    """推测指令需要的工具调用"""
+    result = speculation_engine.predict(prompt)
+    return {
+        "ok": True,
+        "suggested_tools": [
+            {"tool_name": t.tool_name, "confidence": t.confidence,
+             "estimated_duration_ms": t.estimated_duration_ms}
+            for t in result.suggested_tools
+        ],
+        "estimated_savings_ms": result.estimated_savings_ms,
+    }
+
+
+@app.get("/engine/v2/speculate/confirm")
+def speculate_confirm(user_id: str = Query("")):
+    """确认推测结果（命中）"""
+    speculation_engine.confirm()
+    return {"ok": True, "state": speculation_engine.state.value}
+
+
+@app.get("/engine/v2/speculate/abort")
+def speculate_abort(
+    reason: str = Query("用户中止"),
+    user_id: str = Query("")
+):
+    """中止推测"""
+    speculation_engine.abort(reason=reason)
+    return {"ok": True, "state": speculation_engine.state.value}
+
+
+@app.get("/engine/v2/speculate/status")
+def speculate_status(user_id: str = Query("")):
+    """推测引擎状态"""
+    return {"ok": True, **speculation_engine.summary()}
+
+
+@app.get("/engine/v2/speculate/toggle")
+def speculate_toggle(
+    enabled: bool = Query(True),
+    yolo: bool = Query(False),
+    user_id: str = Query("")
+):
+    """切换推测引擎"""
+    if enabled:
+        speculation_engine.enable(yolo_mode=yolo)
+    else:
+        speculation_engine.disable()
+    return {"ok": True, "enabled": enabled, "yolo_mode": yolo}
+
+
+# ── 重试机制 API ─────────────────────────────────────
+
+@app.get("/engine/v2/retry/status")
+def retry_status(
+    task_id: str = Query(""),
+    user_id: str = Query("")
+):
+    """查询重试任务状态"""
+    if task_id:
+        meta = retry_engine.get_status(task_id)
+        if not meta:
+            return {"ok": False, "error": "Task not found (may have completed)"}
+        return {"ok": True, "task": meta.to_dict()}
+    return {"ok": True, **retry_engine.summary()}
+
+
+@app.get("/engine/v2/retry/list")
+def retry_list(
+    status: str = Query(""),
+    user_id: str = Query("")
+):
+    """列出重试任务"""
+    if status:
+        try:
+            s = RetryStatus(status)
+            tasks = retry_engine.list_tasks(s)
+        except ValueError:
+            tasks = retry_engine.list_active()
+    else:
+        tasks = retry_engine.list_active()
+    return {"ok": True, "tasks": [t.to_dict() for t in tasks], "count": len(tasks)}
+
+
+@app.get("/engine/v2/retry/config")
+def retry_config(
+    max_attempts: int = Query(3),
+    backoff_base_ms: int = Query(500),
+    user_id: str = Query("")
+):
+    """配置重试参数"""
+    retry_engine.max_attempts = max_attempts
+    retry_engine._default_backoff_base_ms = backoff_base_ms
+    return {"ok": True, "max_attempts": max_attempts, "backoff_base_ms": backoff_base_ms}
+
+
+# ── 工具注册表 API ───────────────────────────────────
+
+@app.get("/engine/v2/tools/list")
+def tools_list(
+    capability: str = Query(""),
+    approval: str = Query(""),
+    tag: str = Query(""),
+    role: str = Query(""),
+    user_id: str = Query("")
+):
+    """列出工具（支持按能力/审批要求/标签/角色过滤）"""
+    if role:
+        tools = tool_registry.to_openai_tools(role=role)
+        return {"ok": True, "tools": tools, "count": len(tools), "format": "openai"}
+
+    filters = {}
+    if capability:
+        try:
+            filters["capabilities"] = [Capability[capability]]
+        except KeyError:
+            pass
+    if approval:
+        try:
+            filters["approval"] = ApprovalKind(approval)
+        except ValueError:
+            pass
+    if tag:
+        tools = tool_registry.list_by_tag(tag)
+    elif filters:
+        tools = tool_registry.filter(**filters)
+    else:
+        tools = tool_registry.list_enabled()
+    return {"ok": True, "tools": [t.to_dict() for t in tools], "count": len(tools)}
+
+
+@app.get("/engine/v2/tools/openai")
+def tools_openai(
+    role: str = Query(""),
+    user_id: str = Query("")
+):
+    """导出工具为 OpenAI tool format"""
+    return {"ok": True, "tools": tool_registry.to_openai_tools(role=role)}
+
+
+@app.get("/engine/v2/tools/summary")
+def tools_summary(user_id: str = Query("")):
+    """工具注册表摘要"""
+    return {"ok": True, **tool_registry.summary()}
+
+
+# ── 事件帧 API ───────────────────────────────────────
+
+_session_flows: dict = {}
+
+
+@app.get("/engine/v2/events/create")
+def events_create(
+    session_id: str = Query(""),
+    user_id: str = Query("")
+):
+    """创建新的事件流会话"""
+    builder = EventFlowBuilder(session_id=session_id)
+    _session_flows[builder.session_id] = builder
+    return {"ok": True, "session_id": builder.session_id}
+
+
+@app.get("/engine/v2/events/emit")
+def events_emit(
+    event_type: str = Query(...),
+    data: str = Query("{}"),
+    session_id: str = Query(""),
+    user_id: str = Query("")
+):
+    """发送一个事件帧"""
+    try:
+        etype = EventType(event_type)
+        parsed = json.loads(data)
+    except (ValueError, json.JSONDecodeError) as e:
+        return {"ok": False, "error": str(e)}
+
+    builder = _session_flows.get(session_id)
+    if not builder:
+        builder = EventFlowBuilder(session_id=session_id)
+        _session_flows[session_id] = builder
+
+    frame = builder.emit(etype, parsed)
+    event_log.record(frame)
+    return {"ok": True, "event_id": frame.event_id, "sequence": frame.sequence}
+
+
+@app.get("/engine/v2/events/stream")
+def events_stream(
+    session_id: str = Query(""),
+    user_id: str = Query("")
+):
+    """获取事件流（JSON Lines）"""
+    builder = _session_flows.get(session_id)
+    if not builder:
+        return {"ok": False, "error": "Session not found"}
+    return {"ok": True, "events": builder.to_events_list(), "summary": builder.summary()}
+
+
+@app.get("/engine/v2/events/log")
+def events_log(
+    event_type: str = Query(""),
+    session_id: str = Query(""),
+    limit: int = Query(50),
+    user_id: str = Query("")
+):
+    """查询事件日志"""
+    etype = EventType(event_type) if event_type else None
+    results = event_log.query(event_type=etype, session_id=session_id, limit=limit)
+    return {"ok": True, "events": [e.to_dict() for e in results], "count": len(results)}
+
 
 # ==================== 启动时恢复Cron + 修复Stuck代理 ====================
 @app.on_event("startup")

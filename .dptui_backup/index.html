@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=40">
+    <link rel="stylesheet" href="./css/style.css?v=37">
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
     <!-- PPT/PPTX 解析 -->
@@ -30,7 +30,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=20260520dp"></script>
+<script defer src="./js/main.js?v=20260519av"></script>
 
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
@@ -212,17 +212,6 @@
         <!-- 聊天区域 -->
         <div id="chatBox" class="flex-1 overflow-y-auto">
             <div id="chatMessagesContainer" class="chat-messages-container">
-                <!-- 🧠 思考进度指示器 (Agent模式流式思考) -->
-                <div id="thinkingIndicator" class="thinking-indicator hidden">
-                    <div class="thinking-brain">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.2-1 4.2-2.5 5.5V17a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-2.5C5 13.2 4 11.2 4 9a7 7 0 0 1 7-7z"/><path d="M9 22h6"/><path d="M10 18v4"/><path d="M14 18v4"/></svg>
-                    </div>
-                    <div class="thinking-body">
-                        <div class="thinking-title"><span>思考中</span><div class="thinking-dots"><span></span><span></span><span></span></div></div>
-                        <div class="thinking-step" id="thinkingStep">分析问题...</div>
-                        <div class="thinking-todo" id="thinkingTodo"></div>
-                    </div>
-                </div>
                 <!-- 动态插入消息 -->
             </div>
             <!-- 回到底部按钮移到聊天区域内部 -->
