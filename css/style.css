@@ -2456,6 +2456,14 @@ html:not(.dark) #userInput {
   .dark\:text-white { color: #ffffff; }
 }
 
+/* ===== Agent 模式下侧边栏按钮禁用 ===== */
+.agent-active #sidebarToggle,
+.agent-active .header-menu-btn:first-child {
+    opacity: 0.4;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
 /* ===== Agent 模式切换按钮 ===== */
 .agent-toggle-btn {
     display: inline-flex;
@@ -3445,4 +3453,40 @@ html:not(.dark) #userInput {
 .dark .subagent-waiting {
     background: #1e1b4b;
     border-color: #3730a3;
+}
+
+/* ===================================================================
+   🌀 Compress Spinner (SVG animation)
+   =================================================================== */
+.compress-spinner {
+    display: flex;
+    justify-content: center;
+    padding: 8px;
+    margin: 4px 0;
+}
+.compress-spinner-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px 6px 12px;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 9999px;
+    font-size: 12px;
+    color: #4338ca;
+    animation: compress-fade-in 0.3s ease;
+}
+.dark .compress-spinner-inner {
+    background: #1e1b4b;
+    border-color: #3730a3;
+    color: #a5b4fc;
+}
+.compress-spinner-svg {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+}
+@keyframes compress-fade-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
 }

@@ -2056,6 +2056,198 @@ async def chat_progress(msg_id: str, user_id: str = Query("")):
     return store.get_progress(msg_id)
 
 
+# ==================== Agent 记忆/人格/身份/心跳 系统 ====================
+
+MEMORY_DIR = ENGINE_DIR / "memory"
+MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+def _get_memory_file(filename: str, user_id: str = "") -> Path:
+    """获取用户隔离的记忆文件路径"""
+    if user_id:
+        return MEMORY_DIR / f"user_{user_id}_{filename}"
+    return MEMORY_DIR / filename
+
+
+def _read_memory_json(filename: str, user_id: str = "") -> dict:
+    """读取记忆文件,返回 dict"""
+    fp = _get_memory_file(filename, user_id)
+    try:
+        return json.loads(fp.read_text(encoding="utf8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _write_memory_json(filename: str, data: dict, user_id: str = "") -> bool:
+    """原子写入记忆文件"""
+    fp = _get_memory_file(filename, user_id)
+    tmp = fp.with_suffix('.tmp')
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
+        tmp.replace(fp)
+        return True
+    except Exception as e:
+        print(f"[AgentMemory] 写入失败 {filename}: {e}")
+        return False
+
+
+# ── 人格 API ──────────────────────────────────────
+
+@app.post("/engine/agent/persona/save")
+async def agent_persona_save(request: Request, user_id: str = Query("")):
+    """保存 Agent 人格定义"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "无效的 JSON 请求体")
+    if not body or not isinstance(body, dict):
+        raise HTTPException(400, "body 必须为非空 JSON 对象")
+    body["updated_at"] = datetime.now().isoformat()
+    if not body.get("created_at"):
+        body["created_at"] = body["updated_at"]
+    ok = _write_memory_json("agent_persona.json", body, user_id)
+    return {"ok": ok, "updated_at": body["updated_at"]}
+
+
+@app.get("/engine/agent/persona/load")
+def agent_persona_load(user_id: str = Query("")):
+    """加载 Agent 人格定义"""
+    data = _read_memory_json("agent_persona.json", user_id)
+    if not data:
+        data = {"name": "AI助手", "style": "简洁、直接、实用", "preferences": {"language": "zh-CN", "response_style": "concise"}, "updated_at": ""}
+    return {"ok": True, "persona": data}
+
+
+# ── 记忆 API ──────────────────────────────────────
+
+@app.post("/engine/agent/memory/save")
+async def agent_memory_save(request: Request, user_id: str = Query("")):
+    """保存一条记忆条目"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "无效的 JSON 请求体")
+    if not body or not isinstance(body, dict):
+        raise HTTPException(400, "body 必须为非空 JSON 对象")
+    key = body.get("key", "")
+    content = body.get("content", "")
+    tags = body.get("tags", [])
+    if not key or not content:
+        raise HTTPException(400, "key 和 content 不能为空")
+    data = _read_memory_json("agent_memory.json", user_id)
+    if "entries" not in data:
+        data["entries"] = []
+    found = False
+    for entry in data["entries"]:
+        if entry.get("key") == key:
+            entry["content"] = content
+            entry["tags"] = tags if isinstance(tags, list) else []
+            entry["updated_at"] = datetime.now().isoformat()
+            found = True
+            break
+    if not found:
+        data["entries"].append({"key": key, "content": content, "tags": tags if isinstance(tags, list) else [], "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()})
+    data["updated_at"] = datetime.now().isoformat()
+    if not data.get("created_at"):
+        data["created_at"] = data["updated_at"]
+    data["version"] = data.get("version", 1)
+    ok = _write_memory_json("agent_memory.json", data, user_id)
+    return {"ok": ok, "key": key, "entries_count": len(data["entries"])}
+
+
+@app.get("/engine/agent/memory/load")
+def agent_memory_load(query: str = Query(""), user_id: str = Query("")):
+    """加载记忆,支持关键词模糊匹配"""
+    data = _read_memory_json("agent_memory.json", user_id)
+    entries = data.get("entries", [])
+    if query:
+        q = query.lower()
+        matched = [e for e in entries if q in e.get("key", "").lower() or q in e.get("content", "").lower() or any(q in (tag or "").lower() for tag in e.get("tags", []))]
+        return {"ok": True, "entries": matched, "total": len(matched), "query": query}
+    return {"ok": True, "entries": entries, "total": len(entries)}
+
+
+# ── 用户身份 API ──────────────────────────────────
+
+@app.post("/engine/agent/identity/save")
+async def agent_identity_save(request: Request, user_id: str = Query("")):
+    """保存用户身份信息"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "无效的 JSON 请求体")
+    if not body or not isinstance(body, dict):
+        raise HTTPException(400, "body 必须为非空 JSON 对象")
+    body["updated_at"] = datetime.now().isoformat()
+    if not body.get("created_at"):
+        body["created_at"] = body["updated_at"]
+    if not body.get("name") and user_id:
+        body["name"] = f"User({user_id[:12]})"
+    ok = _write_memory_json("agent_identity.json", body, user_id)
+    return {"ok": ok, "updated_at": body["updated_at"]}
+
+
+@app.get("/engine/agent/identity/load")
+def agent_identity_load(user_id: str = Query("")):
+    """加载用户身份信息"""
+    data = _read_memory_json("agent_identity.json", user_id)
+    if not data:
+        data = {"name": "", "timezone": "Asia/Shanghai", "language": "zh-CN", "notes": ""}
+    return {"ok": True, "identity": data}
+
+
+# ── 心跳 API ──────────────────────────────────────
+
+@app.post("/engine/agent/heartbeat")
+async def agent_heartbeat(request: Request, user_id: str = Query("")):
+    """更新 Agent 心跳状态"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    state = body.get("state", "active")
+    mood = body.get("mood", "neutral")
+    data = _read_memory_json("agent_heartbeat.json", user_id)
+    data["state"] = state
+    data["mood"] = mood
+    data["last_seen"] = time.time()
+    data["updated_at"] = datetime.now().isoformat()
+    data["conversation_count"] = data.get("conversation_count", 0) + (1 if state == "active" else 0)
+    if body.get("chat_id"):
+        data["last_active_chat"] = body["chat_id"]
+    if body.get("pending_tasks"):
+        data["pending_tasks"] = body["pending_tasks"]
+    ok = _write_memory_json("agent_heartbeat.json", data, user_id)
+    return {"ok": ok, "state": state, "last_seen": data["last_seen"]}
+
+
+@app.get("/engine/agent/heartbeat/status")
+def agent_heartbeat_status(user_id: str = Query("")):
+    """读取 Agent 心跳状态"""
+    data = _read_memory_json("agent_heartbeat.json", user_id)
+    if not data:
+        data = {"state": "idle", "last_seen": 0, "conversation_count": 0}
+    now = time.time()
+    last_seen = data.get("last_seen", 0)
+    if last_seen and (now - last_seen) > 300:
+        data["state"] = "idle"
+    data["_age_seconds"] = int(now - last_seen) if last_seen else -1
+    return {"ok": True, "heartbeat": data}
+
+
+@app.get("/engine/agent/memory/delete")
+def agent_memory_delete(key: str = Query(...), user_id: str = Query("")):
+    """删除一条记忆条目"""
+    data = _read_memory_json("agent_memory.json", user_id)
+    entries = data.get("entries", [])
+    before = len(entries)
+    data["entries"] = [e for e in entries if e.get("key") != key]
+    removed = before - len(data["entries"])
+    if removed > 0:
+        data["updated_at"] = datetime.now().isoformat()
+        _write_memory_json("agent_memory.json", data, user_id)
+    return {"ok": True, "removed": removed}
+
+
 if __name__ == "__main__":
     port = int(os.getenv("ENGINE_PORT", "8766"))
     print(f"[引擎] 启动 http://0.0.0.0:{port}")
