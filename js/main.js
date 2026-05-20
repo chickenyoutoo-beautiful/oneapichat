@@ -5364,20 +5364,39 @@ window._processAgentNotifyQueue = async function() {
         }
     }, 30000);
 
-    // ★ 收集属于当前批次的子代理(不限 groupId,所有在 _activeSubAgentGroup 里的都算)
+    // ★ 收集属于当前批次的子代理(所有在 _activeSubAgentGroup 里的都算)
+    // 但必须等 ALL active 代理都完成才能通知主代理
     var activeGroup = window._activeSubAgentGroup || [];
+    if (activeGroup.length === 0) {
+        window._agentNotifyProcessing = false;
+        return;  // 没有活跃组
+    }
+    
+    // 检查是否所有 active 代理都完成了
     var activeNames = activeGroup.map(function(item) { return item.name; });
+    var allDone = activeNames.every(function(name) {
+        var stored = (window._pendingSubAgentResultsData || {})[name];
+        if (!stored) return false;  // 还没收到通知
+        return stored.status === 'completed' || stored.status === 'failed';
+    });
+    
+    if (!allDone) {
+        // ★ 还有子代理在跑，暂不触发主代理，把通知放回队列等待
+        console.log('[AgentNotify] 还有活跃子代理未完成, 延迟处理', activeNames.length, '个');
+        // 放回队列
+        agents.forEach(function(n) { window._agentNotifyQueue.push({ agentName: n }); });
+        window._agentNotifyProcessing = false;
+        return;
+    }
 
     var agents = [];
     while (window._agentNotifyQueue.length > 0) {
         var item = window._agentNotifyQueue.shift();
-        // 只收录属于当前活跃批次的子代理通知
         if (item && item.agentName && agents.indexOf(item.agentName) === -1 && activeNames.indexOf(item.agentName) !== -1) {
             agents.push(item.agentName);
         }
     }
     if (agents.length === 0) {
-        // 没有活跃子代理的通知(可能是旧批次的),直接丢弃
         window._agentNotifyQueue = [];
         window._agentNotifyProcessing = false;
         return;
