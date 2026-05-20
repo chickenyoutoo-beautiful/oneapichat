@@ -7879,6 +7879,10 @@ function buildApiMessages(chatId) {
         apiMessages._useVisionModel = true;
     }
 
+    // ★ 最终安全过滤: 移除任何 content 为空/null/undefined 的消息
+    apiMessages = apiMessages.filter(function(m) {
+        return m && m.role && m.content !== undefined && m.content !== null && String(m.content).length > 0;
+    });
     return apiMessages;
 }
 
