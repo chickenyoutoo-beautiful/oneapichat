@@ -2480,8 +2480,14 @@ function _flushStreamRender(chatId, userScrolled) {
     } catch(e) {
         mb.textContent = text;
     }
+    // ★ 流式时始终跟随底部（除非用户明确滚走了）
+    if (typeof userScrolled !== 'boolean') userScrolled = false;
     if (!userScrolled && $.chatBox) {
-        $.chatBox.scrollTop = $.chatBox.scrollHeight;
+        var _dist = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
+        // 在底部附近（150px内）才跟随
+        if (_dist < 150) {
+            $.chatBox.scrollTop = $.chatBox.scrollHeight;
+        }
     }
 }
   // 流式期间锁定滚动跟随
@@ -9261,6 +9267,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     const input = $.userInput;
     let text = skipUserAdd ? userTextForRegen : input?.value.trim() || '';
     var files = skipUserAdd ? userFilesForRegen : pendingFiles;
+
+    // ★ 新消息: 重置滚动状态 + 滚动到底部
+    if (!skipUserAdd) { userScrolled = false; setTimeout(function() { if ($.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight; }, 30); }
 
     // ★ 内部触发时 (skipUserAdd=true): text 可能为 null/undefined, 统一降级
     if (!text && skipUserAdd) { text = ''; }
