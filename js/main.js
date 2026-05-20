@@ -2092,6 +2092,10 @@ const MAX_TOKENS_SAFETY_MARGIN = 1000;
 const STREAM_DELAY = 2;
 
 
+// ★ Agent 模式独立聊天 ID - 不混入普通历史记录
+const AGENT_CHAT_ID = '_agent_main';
+// 普通模式下最后打开的聊天 ID (切换 agent 时保存,切回时恢复)
+let lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
 
 const DEFAULT_CONFIG = {
     // 预置 oneapi API Key
@@ -3420,6 +3424,11 @@ window.closeAllSidebars = function () {
 };
 
 window.toggleSidebar = () => {
+    // ★ Agent 模式: 禁止展开侧边栏
+    if (isAgentToolsActive()) {
+        showToast('Agent 模式下侧边栏已折叠', 'info', 2000);
+        return;
+    }
     if (isMobile()) {
         if ($.sidebar?.classList.contains('mobile-open')) {
             $.sidebar.classList.remove('mobile-open');
@@ -3866,6 +3875,39 @@ function setAgentMode(mode) {
         // Agent/YOLO 模式开启时自动启用 Agent 专属工具
         var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'];
         _agentKeys.forEach(function(k) { window.setToolEnabled(k, true); });
+
+        // ★ Agent 模式: 自动收起左侧栏, 切换到 agent 独立聊天
+        var wasCollapsed = $.sidebar?.classList.contains('collapsed');
+        if (!wasCollapsed) {
+            $.sidebar?.classList.add('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+        }
+        // 保存当前普通聊天 ID, 切换到 agent 聊天
+        if (currentChatId && currentChatId !== AGENT_CHAT_ID) {
+            lastNormalChatId = currentChatId;
+            localStorage.setItem('lastNormalChatId', lastNormalChatId);
+        }
+        ensureAgentChat().then(function() {
+            if (currentChatId !== AGENT_CHAT_ID) {
+                // 检测当前聊天是否有非 system 消息
+                var hasMsgs = (chats[AGENT_CHAT_ID]?.messages || []).filter(function(m) { return m.role !== 'system' && !m._internal; }).length > 0;
+                loadChat(AGENT_CHAT_ID);
+            }
+        });
+    } else {
+        // ★ 普通模式: 恢复侧边栏
+        var wasCollapsed = $.sidebar?.classList.contains('collapsed');
+        if (wasCollapsed) {
+            $.sidebar?.classList.remove('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
+        }
+        // 切换到 agent 聊天时切回普通模式,恢复上次普通聊天
+        if (currentChatId === AGENT_CHAT_ID) {
+            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== AGENT_CHAT_ID; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
+            if (restoreId && chats[restoreId]) {
+                loadChat(restoreId);
+            }
+        }
     }
     // 模式切换不弹 toast（已有横幅和绿点提示）
     if (typeof renderToolPanel === 'function') renderToolPanel();
@@ -3911,7 +3953,265 @@ window.toggleAgentMode = function() {
     setAgentMode(newMode);
 };
 
+/** 确保 AGENT_CHAT_ID 聊天存在 */
+function ensureAgentChat() {
+    return new Promise(function(resolve) {
+        if (chats[AGENT_CHAT_ID]) {
+            resolve();
+            return;
+        }
+        var uid = localStorage.getItem('authUserId') || '';
+        // ★ 使用空的 agent 系统提示词,不填充当前普通 system prompt
+        var agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+        chats[AGENT_CHAT_ID] = {
+            title: 'Agent聊天',
+            userId: uid,
+            updated_at: Date.now(),
+            messages: [
+                { role: 'system', content: agentSys || 'You are an AI assistant in Agent mode.' }
+            ]
+        };
+        saveChats();
+        resolve();
+    });
+}
+
 // ==================== 代理面板控制 ====================
+// ==================== Agent 记忆/人格/身份/心跳 系统 ====================
+
+/** 获取引擎 API 基础 URL */
+function _agentEngineUrl() {
+    return window.location.origin + '/oneapichat/';
+}
+
+/** 获取当前 auth token */
+function _agentGetAuthToken() {
+    try { return localStorage.getItem('authToken') || ''; } catch(e) { return ''; }
+}
+
+/** 向引擎发送 POST 请求 */
+async function _agentApiPost(action, data) {
+    var token = _agentGetAuthToken();
+    var url = _agentEngineUrl() + 'engine_api.php?action=' + action;
+    if (token) url += '&auth_token=' + encodeURIComponent(token);
+    try {
+        var resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await resp.json();
+    } catch(e) {
+        console.warn('[AgentMemory] POST ' + action + ' failed:', e);
+        return { ok: false };
+    }
+}
+
+/** 向引擎发送 GET 请求 */
+async function _agentApiGet(action, params) {
+    var token = _agentGetAuthToken();
+    var url = _agentEngineUrl() + 'engine_api.php?action=' + action;
+    if (params) {
+        for (var k in params) {
+            url += '&' + k + '=' + encodeURIComponent(params[k]);
+        }
+    }
+    if (token) url += '&auth_token=' + encodeURIComponent(token);
+    try {
+        var resp = await fetch(url);
+        return await resp.json();
+    } catch(e) {
+        console.warn('[AgentMemory] GET ' + action + ' failed:', e);
+        return { ok: false };
+    }
+}
+
+// ── 人格 ──────────────────────────────────────────
+
+/** 保存 Agent 人格 */
+window.saveAgentPersona = async function(persona) {
+    if (!persona || typeof persona !== 'object') return { ok: false };
+    return await _agentApiPost('agent_persona_save', persona);
+};
+
+/** 加载 Agent 人格 */
+window.loadAgentPersona = async function() {
+    return await _agentApiGet('agent_persona_load');
+};
+
+// ── 记忆 ──────────────────────────────────────────
+
+/** 保存一条记忆 */
+window.saveAgentMemory = async function(key, content, tags) {
+    if (!key || !content) return { ok: false };
+    return await _agentApiPost('agent_memory_save', { key: key, content: content, tags: tags || [] });
+};
+
+/** 加载记忆(支持关键词搜索) */
+window.loadAgentMemory = async function(query) {
+    var params = {};
+    if (query) params.query = query;
+    return await _agentApiGet('agent_memory_load', params);
+};
+
+/** 删除记忆 */
+window.deleteAgentMemory = async function(key) {
+    return await _agentApiGet('agent_memory_delete', { key: key });
+};
+
+// ── 用户身份 ──────────────────────────────────────
+
+/** 保存用户身份 */
+window.saveAgentIdentity = async function(identity) {
+    if (!identity || typeof identity !== 'object') return { ok: false };
+    return await _agentApiPost('agent_identity_save', identity);
+};
+
+/** 加载用户身份 */
+window.loadAgentIdentity = async function() {
+    return await _agentApiGet('agent_identity_load');
+};
+
+// ── 心跳 ──────────────────────────────────────────
+
+/** 更新 Agent 心跳 */
+window.agentHeartbeat = async function(state, mood, chatId) {
+    var data = { state: state || 'active', mood: mood || 'neutral' };
+    if (chatId) data.chat_id = chatId;
+    return await _agentApiPost('agent_heartbeat', data);
+};
+
+/** 读取心跳状态 */
+window.agentHeartbeatStatus = async function() {
+    return await _agentApiGet('agent_heartbeat_status');
+};
+
+// ── System Prompt 注入 ────────────────────────────
+
+/** 
+ * 在 Agent 聊天加载时,从引擎加载记忆/人格/身份并注入 system prompt
+ */
+async function _injectAgentMemoryIntoSystem(chatId) {
+    if (chatId !== AGENT_CHAT_ID) return;
+    var chat = chats[chatId];
+    if (!chat || !chat.messages) return;
+
+    try {
+        // 并行加载记忆、人格、身份
+        var [personaRes, identityRes, memoryRes] = await Promise.all([
+            window.loadAgentPersona(),
+            window.loadAgentIdentity(),
+            window.loadAgentMemory()
+        ]);
+
+        // ★ 缓存到内存,供 API 调用时注入
+        window.__agentPersonaCache = null;
+        window.__agentIdentityCache = null;
+        window.__agentMemoryCache = null;
+
+        var sysIdx = chat.messages.findIndex(function(m) { return m.role === 'system'; });
+        var baseSys = '';
+
+        // 构建记忆注入块
+        var memoryBlock = '';
+
+        if (personaRes && personaRes.ok && personaRes.persona) {
+            window.__agentPersonaCache = personaRes.persona;
+            var p = personaRes.persona;
+            if (p.name) {
+                memoryBlock += '\n\n## 人格设定\n';
+                memoryBlock += '- AI名称: ' + (p.name || 'AI助手') + '\n';
+                if (p.style) memoryBlock += '- 风格: ' + p.style + '\n';
+                if (p.preferences) {
+                    var prefs = p.preferences;
+                    if (prefs.language) memoryBlock += '- 语言: ' + prefs.language + '\n';
+                    if (prefs.response_style) memoryBlock += '- 回复风格: ' + prefs.response_style + '\n';
+                }
+            }
+        }
+
+        if (identityRes && identityRes.ok && identityRes.identity) {
+            window.__agentIdentityCache = identityRes.identity;
+            var id = identityRes.identity;
+            if (id.name || id.notes) {
+                memoryBlock += '\n## 用户信息\n';
+                if (id.name) memoryBlock += '- 称呼: ' + id.name + '\n';
+                if (id.notes) memoryBlock += '- 备注: ' + id.notes + '\n';
+                memoryBlock += '- 时区: ' + (id.timezone || 'Asia/Shanghai') + '\n';
+                memoryBlock += '- 语言: ' + (id.language || 'zh-CN') + '\n';
+            }
+        }
+
+        if (memoryRes && memoryRes.ok && memoryRes.entries && memoryRes.entries.length > 0) {
+            window.__agentMemoryCache = memoryRes.entries;
+            memoryBlock += '\n## 长期记忆\n';
+            memoryBlock += '以下是你与用户的长期记忆(记住这些信息以便后续对话):\n';
+            var count = 0;
+            for (var i = 0; i < memoryRes.entries.length && count < 20; i++) {
+                var e = memoryRes.entries[i];
+                memoryBlock += '- [' + e.key + '] ' + e.content + '\n';
+                count++;
+            }
+            if (memoryRes.entries.length > 20) {
+                memoryBlock += '- ...(还有 ' + (memoryRes.entries.length - 20) + ' 条记忆)\n';
+            }
+        }
+
+        // 注入:替换或追加到第一条 system 消息
+        if (sysIdx !== -1) {
+            var existingContent = chat.messages[sysIdx].content;
+            // 移除旧的记忆注入块(如果有)
+            existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?## 用户信息[\s\S]*?## 长期记忆[\s\S]*?(?=\n## |$)/, '');
+            existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?## 长期记忆[\s\S]*?(?=\n## |$)/, '');
+            existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?(?=\n## |$)/, '');
+            existingContent = existingContent.trim();
+            if (memoryBlock) {
+                chat.messages[sysIdx].content = existingContent + memoryBlock;
+            }
+        }
+    } catch(e) {
+        console.warn('[AgentMemory] 注入失败:', e);
+    }
+}
+
+// ── Agent 心跳定时器 ────────────────────────────
+
+/** 启动 Agent 心跳定时器(每30秒上报一次) */
+var _agentHeartbeatTimer = null;
+
+function _startAgentHeartbeatIfNeeded() {
+    if (!isAgentToolsActive()) {
+        if (_agentHeartbeatTimer) {
+            clearInterval(_agentHeartbeatTimer);
+            _agentHeartbeatTimer = null;
+        }
+        return;
+    }
+    if (_agentHeartbeatTimer) return; // 已启动
+
+    // 首次立即上报
+    window.agentHeartbeat('active', 'neutral', currentChatId);
+
+    _agentHeartbeatTimer = setInterval(function() {
+        if (!isAgentToolsActive()) {
+            clearInterval(_agentHeartbeatTimer);
+            _agentHeartbeatTimer = null;
+            return;
+        }
+        window.agentHeartbeat('active', 'neutral', currentChatId);
+    }, 30000);
+}
+
+// 在 setAgentMode 后启动心跳
+(function() {
+    var origSetAgentMode = window.setAgentMode;
+    window.setAgentMode = function(mode) {
+        origSetAgentMode(mode);
+        _startAgentHeartbeatIfNeeded();
+    };
+})();
+
+
 window.openAgentPanel = function() {
     var ap = $.agentPanel || getEl('agentPanel');
     var cp = $.configPanel || getEl('configPanel');
@@ -4241,11 +4541,18 @@ function updateAgentUI() {
     if (configToggle) {
         configToggle.checked = isActive;
     }
+    // SVG 图标定义(不依赖 emoji)
+    var _svgIcons = {
+        'off': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>',
+        'plan': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
+        'agent': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="3"/></svg>',
+        'yolo': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L4 21h16L12 3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+    };
     // 聊天区 Agent 模式标签
     var agentLabel = getEl('agentModeLabel');
     if (agentLabel) {
-        var labels = { 'off': 'Agent ⚪', 'plan': 'Plan 🛡️', 'agent': 'Agent 🔄', 'yolo': 'YOLO ⚠️' };
-        agentLabel.textContent = labels[mode] || 'Agent ⚪';
+        var labelTexts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
+        agentLabel.innerHTML = _svgIcons[mode] + ' ' + (labelTexts[mode] || 'Agent');
     }
     // 输入框上方模式提示
     var banner = getEl('agentBanner');
@@ -4254,15 +4561,16 @@ function updateAgentUI() {
             banner.classList.add('hidden');
         } else {
             banner.classList.remove('hidden');
-            var tips = { 'plan': '🛡️ Plan 只读 · 仅搜索和读取', 'agent': '🔄 Agent 交互 · AI 可操作需审批', 'yolo': '⚠️ YOLO 自动 · 所有操作自动批准' };
-            banner.textContent = tips[mode] || '';
+            var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI 可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
+            var bannerIcons = { 'plan': _svgIcons['plan'], 'agent': _svgIcons['agent'], 'yolo': _svgIcons['yolo'] };
+            banner.innerHTML = bannerIcons[mode] + ' ' + (tips[mode] || '');
         }
     }
     // 更新 Agent 面板中的模式标识
     var modeDisplay = getEl('agentModeDisplay');
     if (modeDisplay) {
-        var modeSymbols = { 'off': '⚪', 'plan': '🛡️', 'agent': '🔄', 'yolo': '⚠️' };
-        modeDisplay.textContent = modeSymbols[mode] + ' ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+        var modeSymbolSvg = _svgIcons[mode] || _svgIcons['off'];
+        modeDisplay.innerHTML = modeSymbolSvg + ' ' + mode.charAt(0).toUpperCase() + mode.slice(1);
     }
     // ★ Agent/YOLO 模式下自动启用工具调用,隐藏工具调用开关
     var toolCallToggle = getEl('searchToolCallToggle');
@@ -5622,7 +5930,8 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('requestTimeout', getVal('requestTimeout') || '60');
     localStorage.setItem('compress', getChecked('compressToggle'));
     localStorage.setItem('threshold', getVal('compressThreshold') || '10');
-    localStorage.setItem('compressModel', getVal('compressModel') || '');
+    // compressModel 自动选择,不再手动设置
+    localStorage.removeItem('compressModel');
     localStorage.setItem('customParams', getVal('customParams') || '');
     localStorage.setItem('customEnabled', getChecked('customParamsToggle'));
     localStorage.setItem('lineHeight', getVal('lineHeight') || '1.1');
@@ -5764,15 +6073,23 @@ window.fetchModels = async function () {
             });
         }
 
-        ['compressModel', 'titleModel', 'searchModel', 'aiSearchJudgeModel'].forEach(id => {
+        ['titleModel', 'searchModel', 'aiSearchJudgeModel'].forEach(id => {
             const sel = getEl(id);
             if (!sel) return;
-            const placeholder = id === 'compressModel' ? '<option value="">默认</option>' : '<option value="">同主模型</option>';
+            const placeholder = '<option value="">同主模型</option>';
             sel.innerHTML = placeholder + modelOptions;
             const saved = localStorage.getItem(id);
             if (saved && models.some(m => m.id === saved)) sel.value = saved;
-            else if (models.length) sel.value = id === 'compressModel' ? models[0].id : 'deepseek-v4-flash'; // 默认 deepseek-v4-flash
+            else if (models.length) sel.value = 'deepseek-v4-flash';
         });
+        // ★ compressModel 设为自动选择只读
+        var compressSel = getEl('compressModel');
+        if (compressSel) {
+            compressSel.innerHTML = '<option value="auto">自动选择</option>';
+            compressSel.value = 'auto';
+            compressSel.disabled = true;
+            compressSel.title = '自动选择: 当前模型 context ≥ 128K 用自身, 否则用 deepseek-chat';
+        }
 
         models.forEach(function(m) {
             var ctx = m.context_length || 131072;
@@ -8771,17 +9088,47 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         }
     }
 
-    // ★ Agent 模式: 合并 agent 系统提示词
+    // ★ Agent 模式: 合并 agent 系统提示词 + 记忆/人格/身份信息
     if (isAgentToolsActive()) {
         var agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         if (agentPrompt) {
             // 追加到第一条 system 消息
             var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+            var sysContent = agentPrompt;
+            // 尝试从内存缓存获取人格/身份/记忆并注入
+            try {
+                var _cachedPersona = window.__agentPersonaCache;
+                var _cachedIdentity = window.__agentIdentityCache;
+                var _cachedMemories = window.__agentMemoryCache;
+                var _inject = '';
+                if (_cachedPersona && _cachedPersona.name) {
+                    _inject += '\n\n## 人格设定\n- AI名称: ' + _cachedPersona.name + '\n';
+                    if (_cachedPersona.style) _inject += '- 风格: ' + _cachedPersona.style + '\n';
+                }
+                if (_cachedIdentity && (_cachedIdentity.name || _cachedIdentity.notes)) {
+                    _inject += '\n## 用户信息\n';
+                    if (_cachedIdentity.name) _inject += '- 称呼: ' + _cachedIdentity.name + '\n';
+                    if (_cachedIdentity.notes) _inject += '- 备注: ' + _cachedIdentity.notes + '\n';
+                }
+                if (_cachedMemories && _cachedMemories.length > 0) {
+                    _inject += '\n## 长期记忆\n';
+                    var _mc = 0;
+                    for (var _mi = 0; _mi < _cachedMemories.length && _mc < 15; _mi++) {
+                        var _me = _cachedMemories[_mi];
+                        if (_me && _me.key) {
+                            _inject += '- [' + _me.key + '] ' + (_me.content || '') + '\n';
+                            _mc++;
+                        }
+                    }
+                }
+                if (_inject) sysContent += _inject;
+            } catch(e) {
+                console.warn('[AgentMemory] 注入缓存失败:', e);
+            }
             if (sysIdx !== -1) {
-                apiMessages[sysIdx].content = apiMessages[sysIdx].content + '\n\n' + agentPrompt;
+                apiMessages[sysIdx].content = apiMessages[sysIdx].content + '\n\n' + sysContent;
             } else {
-                // 没有 system 消息,在最前面插入
-                apiMessages.unshift({ role: 'system', content: agentPrompt });
+                apiMessages.unshift({ role: 'system', content: sysContent });
             }
         }
     }
@@ -10788,54 +11135,224 @@ async function restoreOngoingChats() {
     localStorage.removeItem('ongoingChats');
 }
 
-async function compressContextIfNeeded(chatId) {
-    if (chats[chatId]?._compressFailed) return;
-    const msgs = chats[chatId].messages;
-    const threshold = parseInt(getVal('compressThreshold')) || 10;
+/** 获取当前模型的 context 长度 */
+function getModelContextLength(modelName) {
+    if (!modelName) modelName = getVal('modelSelect') || DEFAULT_CONFIG.model;
+    var key = modelName.toLowerCase().trim();
+    var fromLocal = modelContextLength[key];
+    if (fromLocal && !isNaN(fromLocal)) return parseInt(fromLocal);
+    // 尝试从 models.js / MODEL_CONFIGS 获取
+    if (window.MODEL_CONFIGS && typeof window.MODEL_CONFIGS.getContext === 'function') {
+        try {
+            var ctx = window.MODEL_CONFIGS.getContext(modelName);
+            if (ctx && !isNaN(ctx)) return parseInt(ctx);
+        } catch(e) {}
+    }
+    // 默认 128K
+    return 131072;
+}
 
-    const sysMessages = msgs.filter(m => m.role === 'system' && !m.temporary);
-    const partial = msgs.filter(m => m.partial);
-    const nonPartial = msgs.filter(m => m.role !== 'system' && !m.partial && !m.temporary);
+/** 估算消息 token 数 (粗略,7bit/char) */
+function estimateTokenCount(text) {
+    if (!text) return 0;
+    // 英文 ~1 token/4 chars, 中文 ~1 token/2 chars
+    var en = (text.match(/[a-zA-Z0-9\s.,!?;:'"()\[\]{}\/\\@#$%^&*+=<>~`\-|_]/g) || []).length;
+    var cn = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
+    return Math.ceil(en / 4) + Math.ceil(cn / 1.5);
+}
 
-    if (nonPartial.length <= threshold) return;
+/** 计算消息数组的总 token 估算 */
+function estimateMessagesTokenCount(msgs) {
+    if (!msgs || !msgs.length) return 0;
+    var total = 0;
+    for (var i = 0; i < msgs.length; i++) {
+        var m = msgs[i];
+        total += estimateTokenCount(m.content || m.text || '');
+        // 角色标记开销
+        total += 4;
+        // system message 额外开销
+        if (m.role === 'system') total += 16;
+    }
+    // 格式开销 (role + metadata 等)
+    total += msgs.length * 8;
+    return total;
+}
 
-    const keep = Math.max(2, Math.floor(threshold / 2));
-    const toSummarize = nonPartial.slice(0, nonPartial.length - keep);
-    const toKeepNonPartial = nonPartial.slice(-keep);
+/**
+ * 智能选择压缩模型
+ * 如果当前模型 context >= 128K, 用模型自身压缩
+ * 否则使用 deepseek-chat
+ */
+function selectCompressModel() {
+    var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
+    var ctxLen = getModelContextLength(currentModel);
+    if (ctxLen >= 131072) {
+        return currentModel;
+    }
+    return 'deepseek-chat';
+}
 
-    let conv = '';
-    for (const m of toSummarize) {
-        if (m.role === 'user') {
-            conv += `用户: ${buildUserContent(m.text, m.files)}\n`;
-        } else {
-            conv += `助手: ${m.content}\n`;
+/**
+ * 显示/隐藏压缩进度 SVG spinner
+ */
+function showCompressSpinner() {
+    var el = document.getElementById('compressSpinner');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'compressSpinner';
+        el.className = 'compress-spinner';
+        var container = $.chatMessagesContainer || document.getElementById('chatMessagesContainer');
+        if (container) {
+            container.appendChild(el);
         }
     }
-    const prompt = `总结以下对话的核心内容:\n${conv}`;
-    const model = getVal('compressModel') || getVal('modelSelect') || DEFAULT_CONFIG.model;
+    el.innerHTML = '<div class="compress-spinner-inner">' +
+        '<svg class="compress-spinner-svg" viewBox="0 0 50 50" width="24" height="24">' +
+        '<circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" stroke-width="4"/>' +
+        '<circle cx="25" cy="25" r="20" fill="none" stroke="#6366f1" stroke-width="4" stroke-dasharray="90 150" stroke-linecap="round">' +
+        '<animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite"/>' +
+        '</circle></svg>' +
+        '<span>压缩上下文中...</span></div>';
+    el.style.display = '';
+}
+
+function hideCompressSpinner() {
+    var el = document.getElementById('compressSpinner');
+    if (el) el.style.display = 'none';
+}
+
+/**
+ * ★ 智能上下文压缩 (替换旧版):
+ * 1. 检测是否达到 context 80%
+ * 2. 自动选择压缩模型
+ * 3. 保留 system prompt + 第一条用户消息 + 最近 N 条消息
+ * 4. 显示 SVG spinner
+ */
+async function compressContextIfNeeded(chatId) {
+    if (chats[chatId]?._compressFailed) return;
+    if (!getChecked('compressToggle')) return;
+
+    const msgs = chats[chatId].messages;
+    var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
+    var contextLimit = getModelContextLength(currentModel);
+    var estimatedTokens = estimateMessagesTokenCount(msgs);
+    var thresholdPct = parseInt(getVal('compressThreshold')) || 10;
+
+    // 检测是否达到 context 的 80%
+    var limit80 = Math.floor(contextLimit * 0.8);
+    if (estimatedTokens < limit80) {
+        // 还没到 80%, 按原消息数量阈值检查
+        var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
+        var partial = msgs.filter(function(m) { return m.partial; });
+        var nonPartial = msgs.filter(function(m) { return m.role !== 'system' && !m.partial && !m.temporary; });
+        if (nonPartial.length <= thresholdPct) return;
+    }
+
+    showCompressSpinner();
 
     try {
-        const compressBody = { model, messages: [{ role: 'user', content: prompt }], temperature: 0.5, max_tokens: 500 };
-        compressBody.extra_body = { thinking: { type: "disabled" } };
-        const res = await fetch(`${getVal('baseUrl')}/chat/completions`, {
+        var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
+        var partial = msgs.filter(function(m) { return m.partial; });
+        var nonPartial = msgs.filter(function(m) { return m.role !== 'system' && !m.partial && !m.temporary; });
+
+        if (nonPartial.length <= thresholdPct && estimatedTokens < limit80) {
+            hideCompressSpinner();
+            return;
+        }
+
+        // ★ 智能压缩策略:
+        // 保留: system prompt + 第一条用户消息 + 最近 N 条消息
+        var firstUserIndex = -1;
+        for (var i = 0; i < nonPartial.length; i++) {
+            if (nonPartial[i].role === 'user') {
+                firstUserIndex = i;
+                break;
+            }
+        }
+
+        var keep = Math.max(4, Math.floor(thresholdPct / 2));
+        var toSummarize = [];
+        var toKeepNonPartial = [];
+
+        if (firstUserIndex >= 0) {
+            // 保留第一条用户消息
+            toKeepNonPartial.push(nonPartial[firstUserIndex]);
+            // 保留最近 keep 条
+            var recentStart = Math.max(firstUserIndex + 1, nonPartial.length - keep);
+            for (var j = recentStart; j < nonPartial.length; j++) {
+                toKeepNonPartial.push(nonPartial[j]);
+            }
+            // 中间的摘录
+            for (var k = firstUserIndex + 1; k < recentStart; k++) {
+                toSummarize.push(nonPartial[k]);
+            }
+        } else {
+            // 没有用户消息,保留最近 keep 条
+            toKeepNonPartial = nonPartial.slice(-keep);
+            toSummarize = nonPartial.slice(0, nonPartial.length - keep);
+        }
+
+        if (toSummarize.length === 0 && estimatedTokens < limit80) {
+            hideCompressSpinner();
+            return;
+        }
+
+        // 构建摘要
+        var conv = '';
+        for (var si = 0; si < toSummarize.length; si++) {
+            var m = toSummarize[si];
+            if (m.role === 'user') {
+                conv += '用户: ' + (m.text || m.content || '').substring(0, 2000) + '\n';
+            } else {
+                conv += '助手: ' + (m.content || '').substring(0, 2000) + '\n';
+            }
+        }
+
+        var compressPrompt = '总结以下对话的核心内容,保留关键信息和你作为助手的推理结论:\n' + conv;
+
+        // ★ 自动选择压缩模型
+        var compressModel = selectCompressModel();
+
+        var compressBody = {
+            model: compressModel,
+            messages: [{ role: 'user', content: compressPrompt }],
+            temperature: 0.3,
+            max_tokens: 800
+        };
+        compressBody.extra_body = { thinking: { type: 'disabled' } };
+
+        var res = await fetch(getVal('baseUrl') + '/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + getVal('apiKey')
+            },
             body: JSON.stringify(compressBody)
         });
-        const data = await res.json();
-        const summary = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || '';
+        var data = await res.json();
+        var summary = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || '';
 
-        const summaryMsg = { role: 'system', content: '[历史摘要] ' + summary };
-        const newMessages = [...sysMessages, summaryMsg, ...toKeepNonPartial, ...partial];
+        if (!summary) {
+            hideCompressSpinner();
+            if (chats[chatId]) chats[chatId]._compressFailed = true;
+            return;
+        }
+
+        var summaryMsg = { role: 'system', content: '[智能摘要] ' + summary, temporary: true };
+        var newMessages = sysMessages.concat([summaryMsg]).concat(toKeepNonPartial).concat(partial);
         chats[chatId].messages = newMessages;
         saveChats();
         if (currentChatId === chatId) loadChat(chatId);
-    } catch {
+
+        showToast('\u2705 \u5df2\u538b\u7f29\u4e0a\u4e0b\u6587 (\u4f7f\u7528 ' + compressModel + ')', 'success', 3000);
+    } catch (e) {
+        console.warn('[compressContext] \u538b\u7f29\u5931\u8d25:', e.message);
         if (chats[chatId]) chats[chatId]._compressFailed = true;
-        showToast('上下文压缩失败,已跳过。可尝试清理对话历史或增加阈值。', 'error', 5000);
+        showToast('\u4e0a\u4e0b\u6587\u538b\u7f29\u5931\u8d25,\u5df2\u8df3\u8fc7\u3002', 'error', 4000);
+    } finally {
+        hideCompressSpinner();
     }
 }
-
 async function autoGenerateTitle(chatId) {
     const msgs = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial);
     if (msgs.length < 2) return;
@@ -11036,6 +11553,8 @@ function renderChatHistory() {
     // ★ 登录用户只显示自己账号的聊天记录
     var _uid = localStorage.getItem('authUserId') || '';
     var _chatIds = Object.keys(chats).filter(function(id) {
+        // ★ 过滤: 排除 agent 独立聊天
+        if (id === AGENT_CHAT_ID) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
     // ★ 按更新时间排序,最新的在最上面
@@ -11136,6 +11655,11 @@ window.loadChat = function (id) {
     }
     // ★ 清理 localStorage,避免下次重复恢复
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+
+    // ★ Agent 模式: 加载记忆/人格/身份,注入 system prompt
+    if (id === AGENT_CHAT_ID) {
+        _injectAgentMemoryIntoSystem(id);
+    }
 
     // ★ 过滤显示:system 消息和内部消息不显示给用户
     const displayMsgs = chats[id].messages.filter(function(m) {
@@ -11537,7 +12061,13 @@ function initializeConfig() {
     setVal('requestTimeout', localStorage.getItem('requestTimeout') || DEFAULT_CONFIG.requestTimeout);
     setChecked('compressToggle', localStorage.getItem('compress') === 'true');
     setVal('compressThreshold', localStorage.getItem('threshold') || '10');
-    setVal('compressModel', localStorage.getItem('compressModel') || '');
+    // ★ compressModel 改为只读显示自动选择的模型
+    var compressSel = getEl('compressModel');
+    if (compressSel) {
+        compressSel.value = 'auto';
+        compressSel.disabled = true;
+        compressSel.title = '自动选择: 当前模型 context ≥ 128K 用自身, 否则用 deepseek-chat';
+    }
 
     const lh = parseFloat(localStorage.getItem('lineHeight') || DEFAULT_CONFIG.lineHeight);
     setVal('lineHeight', lh);
@@ -11746,40 +12276,56 @@ function setupEventListeners() {
 function loadInitialData() {
     // ★ 延迟加载模型列表,不阻塞首次渲染
     setTimeout(fetchModels, 500);
-    const last = localStorage.getItem('lastChatId');
-    if (last && chats[last]) {
-        loadChat(last);
+
+    // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
+    if (isAgentToolsActive()) {
+        ensureAgentChat().then(function() {
+            loadChat(AGENT_CHAT_ID);
+            // Agent 模式: 折叠侧边栏
+            $.sidebar?.classList.add('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+            renderChatHistory();
+        });
     } else {
-        // ★ 优先复用已有的空新对话,避免登录后反复创建
-        var emptyChatId = null;
-        for (var _cid in chats) {
-            var _chat = chats[_cid];
-            if (_chat.title === '新对话' && (!_chat.messages || _chat.messages.length <= 1)) {
-                emptyChatId = _cid;
-                break;
+        const last = localStorage.getItem('lastChatId');
+        if (last && chats[last]) {
+            loadChat(last);
+        } else {
+            // ★ 优先复用已有的空新对话,避免登录后反复创建
+            var emptyChatId = null;
+            for (var _cid in chats) {
+                var _chat = chats[_cid];
+                if (_chat.title === '新对话' && (!_chat.messages || _chat.messages.length <= 1)) {
+                    emptyChatId = _cid;
+                    break;
+                }
+            }
+            if (emptyChatId) {
+                loadChat(emptyChatId);
+            } else {
+                createNewChat();
             }
         }
-        if (emptyChatId) {
-            loadChat(emptyChatId);
-        } else {
-            createNewChat();
-        }
+        renderChatHistory();
     }
-    renderChatHistory();
+
     prevWidth = window.innerWidth;
     // 初始化配置面板状态
     if (isMobile()) {
-        $.sidebar?.classList.remove('mobile-open', 'collapsed');
+        $.sidebar?.classList.remove('mobile-open');
         $.configPanel?.classList.remove('mobile-open', 'hidden-panel');
         $.sidebarMask?.classList.remove('active');
         if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
         configPanelWasOpen = false; // 移动端默认不打开
     } else {
-        $.sidebar?.classList.remove('mobile-open', 'collapsed');
+        $.sidebar?.classList.remove('mobile-open');
         // 桌面端默认隐藏配置面板
         $.configPanel?.classList.add('hidden-panel');
         $.sidebarMask?.classList.remove('active');
-        if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
+        if (!isAgentToolsActive()) {
+            $.sidebar?.classList.remove('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
+        }
         configPanelWasOpen = false;
     }
 }
@@ -12647,6 +13193,26 @@ async function engineApiHandler(action, args) {
             var d = await r.json();
             if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
+        }
+        // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
+        var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
+        if (directActions.indexOf(action) >= 0) {
+            var _url = '/oneapichat/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
+            // 把 args 里的参数都拼到 URL
+            Object.keys(args || {}).forEach(function(k) {
+                var v = args[k];
+                if (v !== undefined && v !== null) {
+                    _url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(String(v));
+                }
+            });
+            try {
+                var _r = await fetch(_url);
+                var _d = await _r.json();
+                if (_d.error) return { error: _d.error };
+                return { result: typeof _d === 'string' ? _d : JSON.stringify(_d) };
+            } catch(_e) {
+                return { error: '引擎工具执行失败: ' + _e.message };
+            }
         }
         return { error: '未知操作: ' + action };
     } catch(e) {
