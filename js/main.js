@@ -461,6 +461,57 @@ const WEB_FETCH_TOOL_DEFINITION = {
     }
 };
 
+
+// ==================== 浏览器操控工具定义 ====================
+const BROWSER_NAVIGATE_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_navigate",
+        description: "在无头浏览器中打开指定网址。用于访问网页、查看内容、抓取信息。返回页面内容摘要。",
+        parameters: { type: "object", properties: { url: { type: "string", description: "要访问的网址(完整URL)" } }, required: ["url"] }
+    }
+};
+const BROWSER_SCREENSHOT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_screenshot",
+        description: "对无头浏览器当前页面截图。截图会自动在聊天界面显示。用于查看网页外观、表单状态等。",
+        parameters: { type: "object", properties: {} }
+    }
+};
+const BROWSER_CLICK_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_click",
+        description: "在无头浏览器中点击页面元素。用于操作表单、按钮、链接等。",
+        parameters: { type: "object", properties: { selector: { type: "string", description: "CSS选择器或文本匹配" } }, required: ["selector"] }
+    }
+};
+const BROWSER_TYPE_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_type",
+        description: "在无头浏览器的输入框中输入文字。用于填写表单、搜索框等。",
+        parameters: { type: "object", properties: { selector: { type: "string", description: "目标输入框CSS选择器" }, text: { type: "string", description: "要输入的文字" } }, required: ["selector","text"] }
+    }
+};
+const BROWSER_GET_CONTENT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_get_content",
+        description: "获取无头浏览器当前页面的纯文本内容。用于提取网页信息、分析页面。",
+        parameters: { type: "object", properties: {} }
+    }
+};
+const BROWSER_GET_SNAPSHOT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_get_snapshot",
+        description: "获取无头浏览器当前页面的结构快照(元素/文本/aria)。用于理解页面布局、定位元素。",
+        parameters: { type: "object", properties: {} }
+    }
+};
+
 // ==================== 服务器操控工具定义 ====================
 const SERVER_EXEC_TOOL = {
     type: "function",
@@ -1215,6 +1266,49 @@ var toolRegistry = (function() {
     isReadOnly: false,
     isAgentOnly: true,
     searchHint: '创建子代理',
+  }));
+  // ===== 浏览器工具注册 =====
+  toolRegistry.register('browser_navigate', buildToolMeta('browser_navigate', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '浏览器打开网页',
+  }));
+  toolRegistry.register('browser_screenshot', buildToolMeta('browser_screenshot', {
+    capabilities: [ToolCapability.READ_ONLY],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '浏览器截图',
+  }));
+  toolRegistry.register('browser_click', buildToolMeta('browser_click', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '浏览器点击元素',
+  }));
+  toolRegistry.register('browser_type', buildToolMeta('browser_type', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '浏览器输入文字',
+  }));
+  toolRegistry.register('browser_get_content', buildToolMeta('browser_get_content', {
+    capabilities: [ToolCapability.READ_ONLY],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '获取浏览器页面文本',
+  }));
+  toolRegistry.register('browser_get_snapshot', buildToolMeta('browser_get_snapshot', {
+    capabilities: [ToolCapability.READ_ONLY],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '获取浏览器页面结构',
   }));
   toolRegistry.register('engine_agent_status', buildToolMeta('engine_agent_status', {
     capabilities: [ToolCapability.AGENT_LIST],
@@ -3367,11 +3461,10 @@ var SLASH_COMMANDS = [
 
 function handleSlashInput(el) {
     var val = el.value;
-    // 只在以 / 开头且没有空格时显示（即正在输入命令名）
-    if (!val.startsWith('/') || val.includes(' ') || val.length === 1) {
-        updateSlashPopup(val.slice(1).toLowerCase());
-        return;
-    }
+    // ★ 只要以 / 开头就显示弹出（没有空格时）
+    if (!val.startsWith('/')) { hideSlashPopup(); return; }
+    if (val.includes(' ')) { hideSlashPopup(); return; }
+    // 从 / 后面取筛选词（可能为空,表示显示全部）
     updateSlashPopup(val.slice(1).toLowerCase());
 }
 
@@ -3965,7 +4058,7 @@ function setAgentMode(mode) {
     updateAgentUI();
     if (mode === 'agent' || mode === 'yolo') {
         // Agent/YOLO 模式开启时自动启用 Agent 专属工具
-        var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'];
+        var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
         _agentKeys.forEach(function(k) { window.setToolEnabled(k, true); });
 
         // ★ Agent 模式: 自动收起左侧栏, 切换到 agent 独立聊天
@@ -5582,6 +5675,7 @@ window.updateParam = (type, val) => {
 // 默认禁用列表(高危工具默认关)
 var _DANGEROUS_TOOLS = [
     'SERVER_EXEC_TOOL', 'SERVER_PYTHON_TOOL', 'SERVER_FILE_READ_TOOL', 'SERVER_FILE_WRITE_TOOL',
+    'BROWSER_NAVIGATE_TOOL', 'BROWSER_SCREENSHOT_TOOL', 'BROWSER_CLICK_TOOL', 'BROWSER_TYPE_TOOL', 'BROWSER_GET_CONTENT_TOOL', 'BROWSER_GET_SNAPSHOT_TOOL',
     'SERVER_DOCKER_TOOL', 'SERVER_DB_QUERY_TOOL', 'SERVER_FILE_OP_TOOL',
     'ENGINE_CRON_CREATE_TOOL', 'ENGINE_CRON_DELETE_TOOL', 'ENGINE_AGENT_DELETE_TOOL'
 ];
@@ -9452,6 +9546,13 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             tools.push(ENGINE_AGENT_DELETE_TOOL);
             tools.push(ENGINE_AGENT_ASK_TOOL);
             tools.push(ENGINE_PUSH_TOOL);
+            // ===== 浏览器工具(Agent模式) =====
+            tools.push(BROWSER_NAVIGATE_TOOL);
+            tools.push(BROWSER_SCREENSHOT_TOOL);
+            tools.push(BROWSER_CLICK_TOOL);
+            tools.push(BROWSER_TYPE_TOOL);
+            tools.push(BROWSER_GET_CONTENT_TOOL);
+            tools.push(BROWSER_GET_SNAPSHOT_TOOL);
             // web_fetch 已在 searchOn 分支添加,此处不再重复
         }
         
@@ -9536,7 +9637,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     if (window.isToolEnabled(_toggleKey)) {
                         // ★ Agent 模式关闭时,过滤掉 Agent 专属工具
                         var _agentOn = isAgentToolsActive();
-                        var _agentOnlyKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'];
+                        var _agentOnlyKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
                         if (!_agentOn && _agentOnlyKeys.indexOf(_toggleKey) >= 0) {
                             // Agent 未启用,跳过此工具
                         } else {
@@ -10251,6 +10352,34 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'engine_push') {
                         toolResult = await engineApiHandler('push', args);
+                    }
+                    // ===== 浏览器工具 =====
+                     else if (func.name === 'browser_navigate') {
+                        toolResult = await engineApiHandler('browser_navigate', args);
+                    }
+                     else if (func.name === 'browser_screenshot') {
+                        toolResult = await engineApiHandler('browser_screenshot', args);
+                        // ★ 截图自动追加为图片
+                        if (toolResult && toolResult.image && currentChatId === chatId) {
+                            var _img = document.createElement('img');
+                            _img.src = toolResult.image;
+                            _img.style.cssText = 'max-width:100%;border-radius:8px;margin-top:8px;cursor:pointer;';
+                            _img.onclick = function() { window.open(this.src, '_blank'); };
+                            var _b = activeBubbleMap[chatId];
+                            if (_b) { var _md = _b.querySelector('.markdown-body'); if (_md) _md.appendChild(_img); else _b.appendChild(_img); }
+                        }
+                    }
+                     else if (func.name === 'browser_click') {
+                        toolResult = await engineApiHandler('browser_click', args);
+                    }
+                     else if (func.name === 'browser_type') {
+                        toolResult = await engineApiHandler('browser_type', args);
+                    }
+                     else if (func.name === 'browser_get_content') {
+                        toolResult = await engineApiHandler('browser_get_content', args);
+                    }
+                     else if (func.name === 'browser_get_snapshot') {
+                        toolResult = await engineApiHandler('browser_get_snapshot', args);
                     }
                      else if (func.name === 'delegate_task') {
                         _hasCreatedSubAgent = true;
@@ -13404,6 +13533,35 @@ async function engineApiHandler(action, args) {
             var d = await r.json();
             if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
+        }
+        // ===== 浏览��工具 (无头浏览器操控) =====
+        var browserActions = ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot'];
+        if (browserActions.indexOf(action) >= 0) {
+            var _burl = '/oneapichat/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
+            // POST body 用于 navigate/click/type
+            var _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
+            if (_bmethod === 'POST') {
+                var _r = await fetch(_burl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(args || {}) });
+                var _d = await _r.json();
+                return _d.error ? { error: _d.error } : _d;
+            } else {
+                // GET: 拼参数到 URL
+                Object.keys(args || {}).forEach(function(k) {
+                    var v = args[k];
+                    if (k !== 'action' && k !== 'auth_token' && v !== undefined && v !== null) {
+                        _burl += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(String(v));
+                    }
+                });
+                var _r = await fetch(_burl);
+                var _d = await _r.json();
+                if (_d.error) return { error: _d.error };
+                // screenshot: 带 image base64
+                if (_d.image) return { result: '截图完成', image: _d.image };
+                if (_d.ok || _d.result) return _d;
+                if (_d.content) return { result: _d.content };
+                if (_d.snapshot) return { result: typeof _d.snapshot === 'string' ? _d.snapshot : JSON.stringify(_d.snapshot) };
+                return _d;
+            }
         }
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
         var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
