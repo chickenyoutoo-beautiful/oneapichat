@@ -334,6 +334,25 @@
                 触发主代理自主回复
             </button>
             <div id="agentReplyStatus" class="text-xs text-gray-400 mt-2 hidden"></div>
+            
+            <!-- 📊 任务进度 + 调用计数 -->
+            <div class="agent-task-panel" id="agentTaskPanel">
+                <div class="agent-task-panel-title">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+                    任务状态
+                </div>
+                <div id="agentTaskDetail" class="agent-task-detail">暂无活跃任务</div>
+            </div>
+            <div class="agent-stats-row" id="agentStatsRow">
+                <div class="agent-stat-item">
+                    <span class="agent-stat-val" id="agentToolCount">0</span>
+                    <span class="agent-stat-lbl">调用</span>
+                </div>
+                <div class="agent-stat-item">
+                    <span class="agent-stat-val" id="agentRoundCount">0</span>
+                    <span class="agent-stat-lbl">轮次</span>
+                </div>
+            </div>
         </div>
     </div>
 
