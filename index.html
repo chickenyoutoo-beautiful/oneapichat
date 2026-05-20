@@ -10,6 +10,16 @@
         document.documentElement.classList.add('dark');
     }
     </script>
+    <script>
+    // 清除浏览器 301 缓存造成的错误重定向
+    (function() {
+        var badHosts = ['xiaoxin.naujtrats.xyz'];
+        if (badHosts.indexOf(location.hostname) !== -1) {
+            localStorage.setItem('_301cleared', Date.now());
+            location.replace('https://naujtrats.xyz' + location.pathname + location.search + location.hash);
+        }
+    })();
+    </script>
     <style>:root{--bg:#ffffff}:is(html.dark){--bg:#111827}html,body{background:var(--bg)}</style>
     <link rel="icon" type="image/png" sizes="16x16" href="./src/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="./src/favicon-32x32.png">
