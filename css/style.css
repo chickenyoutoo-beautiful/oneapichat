@@ -3243,18 +3243,20 @@ html:not(.dark) #userInput {
     margin-bottom: 4px;
 }
 .dark .thinking-title { color: #a5b4fc; }
-.thinking-dots { display: flex; gap: 2px; }
+.thinking-dots { display: flex; gap: 3px; }
 .thinking-dots span {
-    width: 4px; height: 4px;
+    width: 5px; height: 5px;
     border-radius: 50%;
-    background: #6366f1;
-    animation: dot-bounce 1.4s infinite;
+    animation: dot-bounce 1.2s infinite;
 }
-.dark .thinking-dots span { background: #818cf8; }
-.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+.thinking-dots span:nth-child(1) { background: #6366f1; }
+.thinking-dots span:nth-child(2) { background: #8b5cf6; animation-delay: 0.15s; }
+.thinking-dots span:nth-child(3) { background: #a78bfa; animation-delay: 0.3s; }
+.dark .thinking-dots span:nth-child(1) { background: #818cf8; }
+.dark .thinking-dots span:nth-child(2) { background: #a78bfa; }
+.dark .thinking-dots span:nth-child(3) { background: #c4b5fd; }
 @keyframes dot-bounce {
-    0%,80%,100% { opacity: 0.2; transform: scale(0.6); }
+    0%,80%,100% { opacity: 0.3; transform: scale(0.5); }
     40% { opacity: 1; transform: scale(1); }
 }
 .thinking-step {
@@ -4082,31 +4084,4 @@ html:not(.dark) #userInput {
 @keyframes blink {
     0%,100% { opacity: 1; }
     50% { opacity: 0; }
-}
-
-/* ================================================================
-   ✨ Smooth Streaming Text (textContent mode)
-   ================================================================ */
-.markdown-body.streaming {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-main, #374151);
-}
-.dark .markdown-body.streaming {
-    color: #d1d5db;
-}
-/* 流式时淡入单词 (CSS animation on first paint) */
-.markdown-body.streaming::after {
-    content: '';
-    display: inline-block;
-    width: 6px;
-    height: 14px;
-    background: #6366f1;
-    border-radius: 1px;
-    animation: blink 0.7s infinite;
-    vertical-align: text-bottom;
-    margin-left: 2px;
 }
