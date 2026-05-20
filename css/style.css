@@ -4018,3 +4018,29 @@ html:not(.dark) #userInput {
     letter-spacing: 0.5px;
     margin-top: 2px;
 }
+
+/* ================================================================
+   ✨ Smooth Stream Rendering
+   ================================================================ */
+.markdown-body {
+    transition: opacity 0.1s ease;
+    will-change: contents;
+}
+.bubble.assistant.typing .markdown-body {
+    /* 打字中微闪烁光标 */
+}
+.bubble.assistant.typing::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 14px;
+    background: #6366f1;
+    border-radius: 1px;
+    animation: blink 0.8s infinite;
+    vertical-align: text-bottom;
+    margin-left: 2px;
+}
+@keyframes blink {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0; }
+}
