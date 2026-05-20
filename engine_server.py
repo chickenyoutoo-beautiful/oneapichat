@@ -955,7 +955,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         finally:
             _lock.release()
 
-        MAX_EXECUTION_SECONDS = 1800  # 30分钟强制超时
+        MAX_EXECUTION_SECONDS = 600  # 30分钟强制超时
         try:
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=120)
             messages = [{"role": "user", "content": agent.get("prompt", "")}]
