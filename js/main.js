@@ -9306,18 +9306,26 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolCallStats.record(tc.function.name);
                     }
                 });
-                // Feature 6: YOLO 模式下显示进度
+                // Feature 6: YOLO 模式下显示进度 — 精简 SVG 进度条
                 var _yoloMode = getAgentMode() === 'yolo';
                 if (_yoloMode && currentChatId === chatId) {
                     var _bubble = activeBubbleMap[chatId];
                     if (_bubble) {
-                        var _yoloStatus = _bubble.querySelector('.yolo-progress');
-                        if (!_yoloStatus) {
-                            _yoloStatus = document.createElement('div');
-                            _yoloStatus.className = 'yolo-progress';
-                            _bubble.querySelector('.markdown-body')?.appendChild(_yoloStatus);
+                        var _yoloBar = _bubble.querySelector('.yolo-progress');
+                        var pct = Math.min(100, Math.round((toolCallCount / Math.max(maxToolCalls, 1)) * 100));
+                        var color = pct > 80 ? '#f59e0b' : '#6366f1';
+                        if (!_yoloBar) {
+                            _yoloBar = document.createElement('div');
+                            _yoloBar.className = 'yolo-progress';
+                            var md = _bubble.querySelector('.markdown-body');
+                            if (md) md.appendChild(_yoloBar); else _bubble.appendChild(_yoloBar);
                         }
-                        _yoloStatus.textContent = '🤖 YOLO 自动执行中... 第 ' + toolCallCount + '/' + maxToolCalls + ' 轮';
+                        _yoloBar.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#6366f1;">' +
+                            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" style="flex-shrink:0;animation:spin 0.6s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>' +
+                            '<span style="font-weight:500;">正在执行</span>' +
+                            '<span style="color:#9ca3af;">' + toolCallCount + '/' + maxToolCalls + '</span>' +
+                            '<svg width="100" height="4" style="flex-shrink:0;border-radius:2px;"><rect width="100" height="4" rx="2" fill="#e5e7eb"/><rect width="' + pct + '" height="4" rx="2" fill="' + color + '"/></svg>' +
+                            '<span style="color:#9ca3af;font-size:10px;">' + pct + '%</span></div>';
                     }
                 }
                 if (toolCallCount > maxToolCalls) {
