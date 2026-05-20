@@ -4847,9 +4847,11 @@ function updateAgentUI() {
             banner.classList.add('hidden');
         } else {
             banner.classList.remove('hidden');
-            var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI 可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
-            var bannerIcons = { 'plan': _svgIcons['plan'], 'agent': _svgIcons['agent'], 'yolo': _svgIcons['yolo'] };
-            banner.innerHTML = bannerIcons[mode] + ' ' + (tips[mode] || '');
+            var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
+            var bannerClasses = { 'plan': 'banner-plan', 'agent': 'banner-agent', 'yolo': 'banner-yolo' };
+            banner.className = 'agent-banner ' + (bannerClasses[mode] || '');
+            banner.innerHTML = '<span class="agent-banner-icon">' + _svgIcons[mode] + '</span>' +
+                '<span class="agent-banner-text">' + (tips[mode] || '') + '</span>';
         }
     }
     // 更新 Agent 面板中的模式标识
