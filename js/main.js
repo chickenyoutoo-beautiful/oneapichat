@@ -13253,7 +13253,13 @@ async function engineApiHandler(action, args) {
                 var _r = await fetch(_url);
                 var _d = await _r.json();
                 if (_d.error) return { error: _d.error };
-                return { result: typeof _d === 'string' ? _d : JSON.stringify(_d) };
+                // 引擎返回的是对象 (如 {ok:true, stdout:"..."}), 直接返回
+                if (_d.ok || _d.result) return _d;
+                // stdout 格式: 提取关键输出
+                if (_d.stdout) return { result: _d.stdout, stderr: _d.stderr, exitCode: _d.exit_code };
+                // files 格式
+                if (_d.files) return { result: _d.files.join('\n'), files: _d.files, total: _d.total };
+                return _d;
             } catch(_e) {
                 return { error: '引擎工具执行失败: ' + _e.message };
             }

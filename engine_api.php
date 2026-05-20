@@ -216,8 +216,8 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/disk' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'docker':
-        $action = $_GET['action'] ?? 'ps';
-        echo @file_get_contents($engine_url . '/engine/docker?action=' . urlencode($action) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        $docker_action = isset($_GET['docker_action']) ? $_GET['docker_action'] : (isset($_GET['cmd']) ? $_GET['cmd'] : 'ps');
+        echo @file_get_contents($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'db_query':
         $sql = $_GET['sql'] ?? '';
@@ -225,8 +225,8 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/db_query?sql=' . urlencode($sql) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'network':
-        $target = $_GET['target'] ?? '';
-        $action_n = $_GET['action_n'] ?? 'ping';
+        $target = $_GET['target'] ?? $_GET['host'] ?? '';
+        $action_n = $_GET['net_action'] ?? $_GET['cmd'] ?? 'ping';
         $timeout_n = intval($_GET['timeout'] ?? 10);
         if (!$target) { echo json_encode(['error' => '缺少target']); exit; }
         echo @file_get_contents($engine_url . '/engine/network?target=' . urlencode($target) . '&action=' . urlencode($action_n) . '&timeout=' . $timeout_n . $userParam) ?: json_encode(['error' => 'unreachable']);
@@ -238,7 +238,7 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_op':
-        $action_f = $_GET['action'] ?? '';
+        $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? '';
         $src = $_GET['src'] ?? '';
         $dst = $_GET['dst'] ?? '';
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
