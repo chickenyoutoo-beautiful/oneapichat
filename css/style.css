@@ -327,6 +327,9 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
 .welcome-container {
     display: flex; flex-direction: column; align-items: center;
     justify-content: center; height: 100%; color: #9ca3af;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
 }
 .dark .welcome-container { color: #6b7280; }
 .welcome-container .brand {
