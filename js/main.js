@@ -333,7 +333,7 @@ window.quickSetupOneAPIChat = function() {
         key: 'KEY_REMOVED',
         url: 'https://oneapi.naujtrats.xyz/v1',
         model: 'deepseek-v4-flash',
-        visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
+        visionApiUrl: window.location.origin + '/mcp',
         visionApiKey: 'test-key',
         visionModel: 'MiniMax-VL-01'
     };
@@ -1795,7 +1795,7 @@ function getDefaultConfig() {
         baseUrl: 'https://oneapi.naujtrats.xyz/v1',
         model: 'deepseek-v4-flash',
         visionModel: 'MiniMax-VL-01',
-        visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
+        visionApiUrl: window.location.origin + '/mcp',
         visionApiKey: '',
         imageModel: 'image-01',
         imageBaseUrl: 'https://api.minimaxi.com/v1',
