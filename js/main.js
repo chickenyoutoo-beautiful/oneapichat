@@ -14201,5 +14201,5 @@ window.appendAgentSystemMessage = function(text, source) {
     // ★ 不再调用 appendMessage 显示在聊天界面
 };
 
-window.startAgentNotificationPolling();
+// 已移至 restoreUserData 完成后延迟启动
 
