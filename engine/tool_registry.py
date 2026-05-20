@@ -245,7 +245,81 @@ def _default_tools() -> list[ToolDef]:
     ]
 
 
-# ── 工具注册表 ────────────────────────────────────────
+def register_browser_tools(registry):
+    """注册浏览器工具到指定注册表"""
+    from engine.tool_registry import ToolDef, Capability, ApprovalKind
+    browser_tools = [
+        ToolDef(
+            name="browser_navigate",
+            description="在浏览器中打开一个网页。会替换当前页面内容。用于查看网页、登录页面、查看实时内容等。",
+            capabilities={Capability.Network, Capability.RequiresApproval},
+            approval=ApprovalKind.REQUIRED,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要打开的完整 URL，如 https://example.com"},
+                },
+                "required": ["url"],
+            },
+            tags=["浏览器", "导航"],
+        ),
+        ToolDef(
+            name="browser_screenshot",
+            description="对当前浏览器页面截图，返回一张图片。用于查看页面视觉状态。",
+            capabilities={Capability.ReadOnly},
+            approval=ApprovalKind.AUTO,
+            parameters={"type": "object", "properties": {}},
+            tags=["浏览器", "截图"],
+        ),
+        ToolDef(
+            name="browser_click",
+            description="在浏览器页面中点击指定选择器的元素。必须先 browser_navigate 打开页面再操作。",
+            capabilities={Capability.RequiresApproval},
+            approval=ApprovalKind.REQUIRED,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS 选择器，如 'button'、'#submit-btn'、'a.login-link'"},
+                },
+                "required": ["selector"],
+            },
+            tags=["浏览器", "点击"],
+        ),
+        ToolDef(
+            name="browser_type",
+            description="在浏览器页面的输入框中输入文字。会清空再输入。必须先 browser_navigate 打开页面再操作。",
+            capabilities={Capability.RequiresApproval},
+            approval=ApprovalKind.REQUIRED,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "输入框的 CSS 选择器"},
+                    "text": {"type": "string", "description": "要输入的文字内容"},
+                },
+                "required": ["selector", "text"],
+            },
+            tags=["浏览器", "输入"],
+        ),
+        ToolDef(
+            name="browser_get_content",
+            description="获取当前浏览器页面的可见文本内容。用于阅读文章、查看搜索结果等。最多返回50000字符。",
+            capabilities={Capability.ReadOnly},
+            approval=ApprovalKind.AUTO,
+            parameters={"type": "object", "properties": {}},
+            tags=["浏览器", "读取"],
+        ),
+        ToolDef(
+            name="browser_get_snapshot",
+            description="获取当前浏览器页面的可访问性结构树(类似于页面元素大纲)。用于理解页面布局、按钮位置等。",
+            capabilities={Capability.ReadOnly},
+            approval=ApprovalKind.AUTO,
+            parameters={"type": "object", "properties": {}},
+            tags=["浏览器", "结构"],
+        ),
+    ]
+    for t in browser_tools:
+        registry.register(t)
+
 
 class ToolRegistry:
     """统一工具注册表
