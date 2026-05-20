@@ -3431,3 +3431,18 @@ html:not(.dark) #userInput {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+/* ===================================================================
+   ⏳ Subagent Waiting Card
+   =================================================================== */
+.subagent-waiting {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 10px 0;
+}
+.dark .subagent-waiting {
+    background: #1e1b4b;
+    border-color: #3730a3;
+}
