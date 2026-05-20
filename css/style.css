@@ -3717,3 +3717,102 @@ html:not(.dark) #userInput {
     background: #4f46e5;
     box-shadow: 0 4px 12px rgba(99,102,241,0.3);
 }
+
+/* ================================================================
+   ⌨️ Slash Command Popup
+   ================================================================ */
+.slash-popup {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 12px;
+    right: 12px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+    z-index: 50000;
+    padding: 4px 0;
+}
+.dark .slash-popup {
+    background: #1f2937;
+    border-color: #374151;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+.slash-popup.hidden { display: none; }
+
+.slash-popup-group {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #9ca3af;
+    padding: 6px 14px 2px;
+}
+.dark .slash-popup-group { color: #6b7280; }
+
+.slash-popup-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 13px;
+}
+.slash-popup-item:hover,
+.slash-popup-item.slash-item-highlight {
+    background: #f3f4f6;
+}
+.dark .slash-popup-item:hover,
+.dark .slash-popup-item.slash-item-highlight {
+    background: #374151;
+}
+
+.slash-item-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: #eff6ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6366f1;
+}
+.dark .slash-item-icon {
+    background: #1e3a5f;
+    color: #818cf8;
+}
+
+.slash-item-cmd {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-weight: 600;
+    color: #6366f1;
+    font-size: 12px;
+    white-space: nowrap;
+}
+.dark .slash-item-cmd { color: #818cf8; }
+
+.slash-item-hint {
+    color: #9ca3af;
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slash-popup-footer {
+    font-size: 9px;
+    color: #d1d5db;
+    text-align: center;
+    padding: 6px 14px;
+    border-top: 1px solid #f3f4f6;
+    margin-top: 4px;
+}
+.dark .slash-popup-footer {
+    border-color: #374151;
+    color: #6b7280;
+}

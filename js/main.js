@@ -3331,14 +3331,14 @@ window.hideThinking = function() {
 };
 
 function showToast(msg, type = 'info', dur = 3000) {
-    let container = getEl('toast-container');
+    var container = getEl('toast-container');
     if (!container) {
         container = document.createElement('div');
         container.id = 'toast-container';
         container.className = 'toast-container';
         document.body.appendChild(container);
     }
-    const toast = document.createElement('div');
+    var toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.innerHTML = `
         <div class="toast-icon">${ { success: '✓', error: '✕', warning: '⚠', info: 'i' }[type] }</div>
@@ -3348,6 +3348,95 @@ function showToast(msg, type = 'info', dur = 3000) {
     toast.querySelector('.toast-close').onclick = () => toast.remove();
     setTimeout(() => toast.remove(), dur);
     container.appendChild(toast);
+}
+
+// ============================================================
+// ⌨️ Slash Command Popup
+// ============================================================
+var SLASH_COMMANDS = [
+    { cmd: 'search', hint: '强制联网搜索', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>', group: '搜索' },
+    { cmd: 'news', hint: '搜索新闻', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>', group: '搜索' },
+    { cmd: 'image', hint: '搜索图片', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>', group: '搜索' },
+    { cmd: 'mode', hint: '切换工作模式 (plan/agent/yolo/off)', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>', group: 'Agent' },
+    { cmd: 'model', hint: '切换 AI 模型', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>', group: 'Agent' },
+    { cmd: 'clear', hint: '清空当前对话', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>', group: '对话' },
+    { cmd: 'compact', hint: '压缩上下文以节省 token', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>', group: '对话' },
+    { cmd: 'new', hint: '新建对话', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>', group: '对话' },
+    { cmd: 'help', hint: '显示所有命令', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', group: '帮助' }
+];
+
+function handleSlashInput(el) {
+    var val = el.value;
+    // 只在以 / 开头且没有空格时显示（即正在输入命令名）
+    if (!val.startsWith('/') || val.includes(' ') || val.length === 1) {
+        updateSlashPopup(val.slice(1).toLowerCase());
+        return;
+    }
+    updateSlashPopup(val.slice(1).toLowerCase());
+}
+
+function updateSlashPopup(query) {
+    var popup = getEl('slashPopup');
+    if (!popup) {
+        popup = document.createElement('div');
+        popup.id = 'slashPopup';
+        popup.className = 'slash-popup hidden';
+        var wrap = document.getElementById('userInput')?.closest('.input-wrapper') || document.querySelector('.input-wrapper');
+        if (wrap) wrap.appendChild(popup);
+        else document.body.appendChild(popup);
+    }
+    if (!query) { return hideSlashPopup(); }
+    var matches = SLASH_COMMANDS.filter(function(c) { return c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
+    if (matches.length === 0) { hideSlashPopup(); return; }
+    // 按 group 分组
+    var groups = {};
+    matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
+    var html = '';
+    var idx = 0;
+    Object.keys(groups).forEach(function(g) {
+        html += '<div class="slash-popup-group">' + escapeHtml(g) + '</div>';
+        groups[g].forEach(function(m, i) {
+            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-group="' + escapeHtml(g) + '" onclick="selectSlashCommand(\'' + escapeHtml(m.cmd) + '\')">' +
+                '<span class="slash-item-icon">' + m.icon + '</span>' +
+                '<span class="slash-item-cmd">/' + m.cmd + '</span>' +
+                '<span class="slash-item-hint">' + m.hint + '</span>' +
+            '</div>';
+            idx++;
+        });
+    });
+    html += '<div class="slash-popup-footer">↑↓ 导航 · Tab/Enter 选择 · Esc 关闭</div>';
+    popup.innerHTML = html;
+    popup.classList.remove('hidden');
+    
+    // 重新绑定点击事件（因为 innerHTML 覆盖了 onclick）
+    popup.querySelectorAll('.slash-popup-item').forEach(function(item) {
+        item.addEventListener('click', function() {
+            selectSlashCommand(this.dataset.cmd);
+        });
+    });
+}
+
+function navigateSlashPopup(dir) {
+    var popup = getEl('slashPopup');
+    if (!popup || popup.classList.contains('hidden')) return;
+    var items = popup.querySelectorAll('.slash-popup-item');
+    if (items.length === 0) return;
+    var cur = popup.querySelector('.slash-item-highlight');
+    var idx = cur ? Array.from(items).indexOf(cur) : -1;
+    if (cur) cur.classList.remove('slash-item-highlight');
+    idx = (idx + dir + items.length) % items.length;
+    items[idx].classList.add('slash-item-highlight');
+    items[idx].scrollIntoView({ block: 'nearest' });
+}
+
+function selectSlashCommand(cmd) {
+    var input = $.userInput;
+    if (input) { input.value = '/' + cmd + ' '; hideSlashPopup(); window.autoResize(input); input.focus(); }
+}
+
+function hideSlashPopup() {
+    var popup = getEl('slashPopup');
+    if (popup) popup.classList.add('hidden');
 }
 
 // 自动滚动到底部(用于AI回复等场景)
@@ -12336,12 +12425,38 @@ function setupEventListeners() {
     if ($.userInput) {
         $.userInput.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey) {
+                var _popup = getEl('slashPopup');
+                if (_popup && !_popup.classList.contains('hidden')) {
+                    // 选择当前高亮的命令
+                    var _sel = _popup.querySelector('.slash-item-highlight');
+                    if (_sel) { e.preventDefault(); _sel.click(); return; }
+                }
                 e.preventDefault();
                 sendMessage();
             }
+            // Arrow keys for popup navigation
+            ['ArrowUp','ArrowDown'].forEach(function(k) {
+                if (e.key === k) {
+                    var _popup = getEl('slashPopup');
+                    if (_popup && !_popup.classList.contains('hidden')) {
+                        e.preventDefault();
+                        navigateSlashPopup(k === 'ArrowDown' ? 1 : -1);
+                    }
+                }
+            });
+            // Escape to close popup
+            if (e.key === 'Escape') return hideSlashPopup();
+            if (e.key === 'Tab') {
+                var _popup = getEl('slashPopup');
+                if (_popup && !_popup.classList.contains('hidden')) {
+                    e.preventDefault();
+                    var _sel = _popup.querySelector('.slash-item-highlight');
+                    if (_sel) { var _t = _sel.dataset.cmd; if (_t) { $.userInput.value = '/' + _t + ' '; hideSlashPopup(); window.autoResize($.userInput); $.userInput.focus(); } }
+                }
+            }
         });
         window.autoResize($.userInput);
-        $.userInput.addEventListener('input', function () { window.autoResize(this); });
+        $.userInput.addEventListener('input', function () { window.autoResize(this); handleSlashInput(this); });
         window.addEventListener('resize', debounce(() => window.autoResize($.userInput), 100));
     }
 
