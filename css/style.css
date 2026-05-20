@@ -2511,15 +2511,17 @@ html:not(.dark) #userInput {
 }
 .agent-banner {
     display: none;
-    padding: 5px 12px;
-    margin-top: 4px;
-    border-radius: 8px;
+    padding: 6px 16px;
+    margin: 4px auto 0;
+    border-radius: 9999px;
     font-size: 11px;
     position: relative;
     z-index: 1;
     display: flex;
     align-items: center;
     gap: 8px;
+    max-width: 400px;
+    width: fit-content;
 }
 .agent-banner.banner-plan {
     background: #eff6ff;
