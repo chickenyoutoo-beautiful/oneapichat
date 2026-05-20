@@ -4783,13 +4783,15 @@ window._processAgentNotifyQueue = async function() {
     var agentCount = agents.length;
     var summaryLine = agentCount === 1 ? '1 个子代理已完成' : agentCount + ' 个子代理已完成';
 
-    // ★ 核心:合并后的上下文,一次注入
-    var ctx = '## ⚡ 子代理完成报告(' + summaryLine + ')\n' +
-        '以下子代理已完成,请整合这些信息备用:\n' + results.join('\n---\n') + '\n\n' +
-        '### 🔒 硬性规则\n' +
-        '1. 绝对禁止调用 agent_create / agent_run / delegate_task 等任何创建子代理的工具。\n' +
-        '2. 这条消息是系统通知,不需要回复用户,只需要静默记录结果。\n' +
-        '3. 如用户提问涉及这些子代理的结果,可以直接引用回答,无需重复调用子代理。';
+    // ★ 核心:子代理结果不推送到聊天界面,仅注入为系统上下文
+    // 主代理静默整合结果后,由 sendMessage 自动回复用户
+    var ctx = '## 📥 子代理完成报告(' + summaryLine + ')\n' +
+        '以下子代理已完成任务,请阅读结果并整合:\n' + results.join('\n---\n') + '\n\n' +
+        '### 🔒 规则\n' +
+        '1. 【禁止】调用 delegate_task / agent_create / agent_run 等任何创建新子代理的工具\n' +
+        '2. 整合子代理结果后,用简洁的语言告知用户进展\n' +
+        '3. 如子代理结果是错误/空的,诚实告知用户并建议重试\n' +
+        '4. 这条消息是系统级上下文,不要在回复中提及"系统通知""子代理报告"等内部术语';
 
     window._pendingNotifyExecId = null;  // 清除待处理标记
 
@@ -10476,33 +10478,53 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ Agent 模式下:如果本轮创建了子代理,立即停止递归循环
-                // ★ Agent 模式下:检测是否创建了子代理
+                // ★ Agent 模式下:如果创建了子代理,立即停止主代理并给出优雅等待提示
                 if (_hasCreatedSubAgent) {
                     // ★ 防御性检查 validToolCalls 是否存在
                     if (!validToolCalls || !Array.isArray(validToolCalls)) {
-                        console.log('[Agent] 已创建子代理,但validToolCalls不可用,直接继续');
+                        console.log('[Agent] 已创建子代理,跳过等待逻辑');
                     } else {
-                    // 检查本轮是否只有 delegate_task/agent_create 工具调用(没有搜索、fetch等)
                     var onlyCreatedSubAgents = validToolCalls.every(function(tc) {
                         return tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create');
                     });
                     if (onlyCreatedSubAgents) {
-                        // 本轮只创建了子代理,模型还没开始搜索/分析
-                        // 给模型一次机会继续思考:是否需要创建更多子代理,或开始实际工作
-                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),允许继续');
+                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),允许模型继续规划');
                     } else {
-                        // 本轮既有子代理创建又有实际工作(搜索/分析)
-                        // 停止递归,等待子代理完成
-                        console.log('[Agent] 已创建子代理+执行任务,停止递归等待完成');
+                        // ★ 核心改动: 主代理创建子代理后,立即停止递归,附加优雅状态提示
+                        console.log('[Agent] 已创建子代理,停止主代理,等待子代理完成');
+                        // 清理临时流式状态
                         delete pendingMsg.partial;
                         streamingScrollLock = false;
                         try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                         if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                         pendingMsg.time = Date.now() - startTime;
                         pendingMsg.usage = usage;
+                        // ★ 收集本轮创建的子代理名称
+                        var _createdNames = [];
+                        validToolCalls.forEach(function(tc) {
+                            if (tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create')) {
+                                try {
+                                    var _args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {});
+                                    var _n = _args.name || _args.agent_name || _args.role || 'worker';
+                                    if (_createdNames.indexOf(_n) === -1) _createdNames.push(_n);
+                                } catch(e) {}
+                            }
+                        });
+                        // ★ 生成优雅等待提示 (SVG spinner + agent names)
+                        var _waitHtml = '<div class="subagent-waiting">' +
+                            '<div style="display:flex;align-items:center;gap:10px;">' +
+                            '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" style="animation:spin 0.7s linear infinite;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>' +
+                            '<span style="font-weight:600;color:#6366f1;font-size:13px;">已委派 ' + _createdNames.length + ' 个子代理</span></div>' +
+                            '<div style="margin-top:8px;font-size:11px;color:#6b7280;line-height:1.6;">' +
+                            _createdNames.map(function(n,i) { return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;"><span style="width:6px;height:6px;border-radius:50%;background:' + ['#6366f1','#8b5cf6','#a78bfa'][i%3] + ';"></span>' + escapeHtml(n) + '</span>'; }).join('') +
+                            '</div>' +
+                            '<div style="margin-top:6px;font-size:10px;color:#9ca3af;">子代理完成后将自动通知我,请稍候...</div></div>';
+                        // 追加等待提示到助手消息
+                        if (pendingMsg.content) {
+                            pendingMsg.content += '\n\n' + _waitHtml;
+                        }
                         saveChats();
-                        // ★ 修复: 不调用 loadChat(全量重渲染会摧毁流式气泡),仅更新现有气泡内容
+                        // 更新活跃气泡
                         if (currentChatId === chatId) {
                             var _bubble = activeBubbleMap[chatId];
                             if (_bubble) {
@@ -10512,15 +10534,10 @@ window.useAlternativeVisionModel = function() {
                                     _triggerPostRender(_md);
                                     _bubble.classList.remove('typing');
                                 }
-                                var _status = _bubble.querySelector('.search-status');
-                                if (!_status && _bubble) {
-                                    _status = document.createElement('div');
-                                    _status.className = 'search-status';
-                                    _bubble.appendChild(_status);
-                                }
-                                if (_status) _status.textContent = '🤖 子代理工作中...';
                             }
                         }
+                        // ★ 不再把子代理结果注入用户可见的聊天界面
+                        // 子代理完成后 triggerAgentAutoReplyForSubAgent 会自动触发主代理静默回复
                         return;
                     }
                     }
