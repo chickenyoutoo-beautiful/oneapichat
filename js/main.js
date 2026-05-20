@@ -2466,30 +2466,25 @@ function _flushStreamRender(chatId, userScrolled) {
     if (!mb) return;
     var lastLen = _streamLastRender[chatId] || 0;
     var delta = text.length - lastLen;
-    if (delta < 20 && lastLen > 0) return;
+    // ★ 流式期间跳过快照渲染，等流结束一次性加载
+    // 但如果用户强制刷新（userScrolled为false时不做优化）跳过
+    if (delta < 30 && lastLen > 0) return;
     _streamLastRender[chatId] = text.length;
     try {
         var html = _renderMarkdownWithMath(autoLinkURLs(text));
-        mb.style.opacity = '0.97';
         mb.innerHTML = html;
-        requestAnimationFrame(function() { mb.style.opacity = '1'; });
         setTimeout(function() {
             if (!window.hljs) return;
             mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
                 try { hljs.highlightElement(b); } catch(e) {}
             });
-        }, 100);
+        }, 200);
     } catch(e) {
         mb.textContent = text;
     }
-    // ★ 流式时始终跟随底部（除非用户明确滚走了）
     if (typeof userScrolled !== 'boolean') userScrolled = false;
     if (!userScrolled && $.chatBox) {
-        var _dist = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
-        // 在底部附近（150px内）才跟随
-        if (_dist < 150) {
-            $.chatBox.scrollTop = $.chatBox.scrollHeight;
-        }
+        $.chatBox.scrollTop = $.chatBox.scrollHeight;
     }
 }
   // 流式期间锁定滚动跟随
