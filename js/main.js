@@ -7236,6 +7236,8 @@ function buildApiMessages(chatId) {
     const msgs = chats[chatId].messages;
     for (let i = 0; i < msgs.length; i++) {
         const msg = msgs[i];
+        // ★ 跳过内部消息(不发送给 API,仅用于内部逻辑)
+        if (msg._internal) continue;
         if (msg.role === 'system') continue;
         if (msg.role === 'user') {
             const files = msg.files;
@@ -10478,9 +10480,8 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ Agent 模式下:如果创建了子代理,立即停止主代理并给出优雅等待提示
+                // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (_hasCreatedSubAgent) {
-                    // ★ 防御性检查 validToolCalls 是否存在
                     if (!validToolCalls || !Array.isArray(validToolCalls)) {
                         console.log('[Agent] 已创建子代理,跳过等待逻辑');
                     } else {
@@ -10488,18 +10489,11 @@ window.useAlternativeVisionModel = function() {
                         return tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create');
                     });
                     if (onlyCreatedSubAgents) {
-                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),允许模型继续规划');
+                        // 本轮只创建了子代理,允许模型继续规划(可能还要创建更多)
+                        console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),允许继续');
                     } else {
-                        // ★ 核心改动: 主代理创建子代理后,立即停止递归,附加优雅状态提示
-                        console.log('[Agent] 已创建子代理,停止主代理,等待子代理完成');
-                        // 清理临时流式状态
-                        delete pendingMsg.partial;
-                        streamingScrollLock = false;
-                        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-                        if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
-                        pendingMsg.time = Date.now() - startTime;
-                        pendingMsg.usage = usage;
-                        // ★ 收集本轮创建的子代理名称
+                        // ★ 优雅方式: 不暴力截断,而是给模型注入一个"总结提示"让它自己在下一轮自然结束
+                        // 通过修改 pendingMsg.content 末尾追加提示,让模型在下一轮 API 调用时自主收尾
                         var _createdNames = [];
                         validToolCalls.forEach(function(tc) {
                             if (tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create')) {
@@ -10510,38 +10504,34 @@ window.useAlternativeVisionModel = function() {
                                 } catch(e) {}
                             }
                         });
-                        // ★ 生成优雅等待提示 (SVG spinner + agent names)
-                        var _waitHtml = '<div class="subagent-waiting">' +
-                            '<div style="display:flex;align-items:center;gap:10px;">' +
-                            '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" style="animation:spin 0.7s linear infinite;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>' +
-                            '<span style="font-weight:600;color:#6366f1;font-size:13px;">已委派 ' + _createdNames.length + ' 个子代理</span></div>' +
-                            '<div style="margin-top:8px;font-size:11px;color:#6b7280;line-height:1.6;">' +
-                            _createdNames.map(function(n,i) { return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;"><span style="width:6px;height:6px;border-radius:50%;background:' + ['#6366f1','#8b5cf6','#a78bfa'][i%3] + ';"></span>' + escapeHtml(n) + '</span>'; }).join('') +
-                            '</div>' +
-                            '<div style="margin-top:6px;font-size:10px;color:#9ca3af;">子代理完成后将自动通知我,请稍候...</div></div>';
-                        // 追加等待提示到助手消息
-                        if (pendingMsg.content) {
-                            pendingMsg.content += '\n\n' + _waitHtml;
-                        }
+                        // ★ 给模型注入"请总结"的隐式信号,让它在下一轮自己结束
+                        // 实际做法: 不强制 stop,而是在 assistant 消息末尾附加一条 user-role hint
+                        // 模型会在下次 API 调用时看到这条 hint 并自动总结
+                        console.log('[Agent] 子代理已创建(' + _createdNames.length + '个),允许模型在下一轮自然总结');
+                        // 保存当前消息
+                        delete pendingMsg.partial;
+                        streamingScrollLock = false;
+                        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                        if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+                        pendingMsg.time = Date.now() - startTime;
+                        pendingMsg.usage = usage;
                         saveChats();
-                        // 更新活跃气泡
-                        if (currentChatId === chatId) {
-                            var _bubble = activeBubbleMap[chatId];
-                            if (_bubble) {
-                                var _md = _bubble.querySelector('.markdown-body');
-                                if (_md && pendingMsg.content) {
-                                    _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
-                                    _triggerPostRender(_md);
-                                    _bubble.classList.remove('typing');
-                                }
-                            }
-                        }
-                        // ★ 不再把子代理结果注入用户可见的聊天界面
-                        // 子代理完成后 triggerAgentAutoReplyForSubAgent 会自动触发主代理静默回复
-                        return;
+                        // ★ 追加一条 user hint 到消息历史,作为模型的"自然引导"
+                        // 模型下一次 API 调用时会读到这条,然后自主决定: 继续操作 / 总结等待
+                        var _namesStr = _createdNames.join(', ');
+                        var _hintMsg = '已委派子代理: ' + _namesStr + '。' +
+                            '请用一句话总结当前进度,告知用户已委派的任务,然后等待子代理完成。' +
+                            '子代理完成后系统会自动通知你整合结果。';
+                        chats[chatId].messages.push({
+                            role: 'user',
+                            text: _hintMsg,
+                            _internal: true  // 标记为内部消息,不渲染到界面
+                        });
+                        // ★ 继续递归,让模型看到 hint 后自主总结
+                        // 不 return,继续 attemptRequestWithFreshAbort
                     }
                     }
-                    }
+                }
 
                 // 重置 AbortController 和 timeout 以便下一个请求使用
                 const newAbortCtrl = new AbortController();
@@ -11129,8 +11119,9 @@ window.loadChat = function (id) {
     // ★ 清理 localStorage,避免下次重复恢复
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
 
-    // ★ 过滤显示:system 消息不显示给用户
+    // ★ 过滤显示:system 消息和内部消息不显示给用户
     const displayMsgs = chats[id].messages.filter(function(m) {
+        if (m._internal) return false;
         return m.role !== 'system';
     });
     if (!displayMsgs.length) {
