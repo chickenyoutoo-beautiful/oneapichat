@@ -5386,8 +5386,10 @@ window._processAgentNotifyQueue = async function() {
         agents.forEach(function(name) {
             var stored = (window._pendingSubAgentResultsData || {})[name];
             if (stored) {
-                var preview = (stored.result || stored.error || '').substring(0, 1000);
-                results.push('「' + name + '」状态=' + (stored.status || 'completed') + (preview ? '\n结果预览: ' + preview : ''));
+                var status = stored.status || 'completed';
+                var statusLabel = status === 'completed' ? '✅完成' : (status === 'failed' ? '❌失败' : '🔄运行中');
+                var detail = (stored.error || stored.result || '').substring(0, 1500);
+                results.push(statusLabel + ' ' + name + '\n' + detail);
             } else {
                 // 降级:用 agent_list 查询
                 results.push('「' + name + '」状态未知(尝试查询...)');
