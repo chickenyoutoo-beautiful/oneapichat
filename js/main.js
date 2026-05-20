@@ -5481,6 +5481,15 @@ window.triggerAgentAutoReplyForSubAgent = function(agentName) {
     }
 
     // 添加到队列并处理
+    // ★ 检查这个代理是否还存在 (可能已被删除)
+    var _agentList = window._agentListCache || {};
+    if (Object.keys(_agentList).length === 0 || !_agentList[agentName]) {
+        // 代理不存在或已被删除, 清理其通知
+        var _rIdx = window._pendingSubAgentResults.indexOf(agentName);
+        if (_rIdx !== -1) window._pendingSubAgentResults.splice(_rIdx, 1);
+        if (window._pendingSubAgentResultsData) delete window._pendingSubAgentResultsData[agentName];
+        return;
+    }
     window._agentNotifyQueue.push({ agentName: agentName });
     window._processAgentNotifyQueue();
 };
@@ -5567,20 +5576,30 @@ window.deleteAgent = async function(name) {
     if (!name) return;
     var confirmed = await showConfirmDialog('删除子代理', '确定要删除子代理 "' + name + '" 吗?此操作不可撤销。\n\n同时会删除该代理的聊天记录。', '删除');
     if (!confirmed) return;
-    // ★ 立即清理本地 + 刷新 UI (不等待网络)
+    // ★ 立即清理本地状态 + 停止该代理的自动通知
     var key = 'agent_chat_' + name;
     localStorage.removeItem(key);
     if (_selectedAgentName === name) { _selectedAgentName = null; }
+    // 清理队列中该代理的通知
+    if (window._agentNotifyQueue) {
+        window._agentNotifyQueue = window._agentNotifyQueue.filter(function(item) { return item.agentName !== name; });
+    }
+    if (window._pendingSubAgentResults) {
+        var _idx = window._pendingSubAgentResults.indexOf(name);
+        if (_idx !== -1) window._pendingSubAgentResults.splice(_idx, 1);
+    }
+    if (window._pendingSubAgentResultsData) {
+        delete window._pendingSubAgentResultsData[name];
+    }
     window._refreshAllAgentLists();
     try {
         var token = getAuthToken();
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + token + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(10000) });
-        var d = await r.json();
-        if (!d.ok) console.warn('[deleteAgent] 服务端删除失败:', d.error);
+        // ★ 先发删除请求, 再发 mark 清理通知
+        await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + token + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(10000) });
+        await fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function(){});
         window._refreshAllAgentLists();
     } catch(e) {
         console.warn('[deleteAgent] 网络请求失败:', e.message);
-        // 网络失败不弹 alert, 本地已清理
     }
 };
 
