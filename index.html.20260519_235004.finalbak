@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=40">
+    <link rel="stylesheet" href="./css/style.css?v=25">
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
     <!-- PPT/PPTX 解析 -->
@@ -30,7 +30,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=20260520dp"></script>
+<script defer src="./js/main.js?v=20260519af"></script>
 
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
@@ -152,28 +152,16 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
                     </svg>
                 </button>
-                <!-- Agent 模式按钮 + 悬停模式选择 -->
-                <div class="agent-split-btn" id="agentSplitBtn">
-                    <div class="agent-mode-wrapper">
-                        <button onclick="window.toggleAgentMode()" class="agent-main-btn" title="Agent 模式">
-                            <span class="agent-dot"></span>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
-                        </button>
-                        <div class="agent-mode-popup" id="agentModePopup">
-                            <button data-mode="plan" onclick="setAgentMode('plan')" title="Plan 只读">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            </button>
-                            <button data-mode="agent" onclick="setAgentMode('agent')" title="Agent 交互">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
-                            </button>
-                            <button data-mode="yolo" onclick="setAgentMode('yolo')" title="YOLO 自动">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
-                            </button>
-                        </div>
-                    </div>
+                <!-- Agent 模式开关（双功能融合按钮）-->
+                <div class="agent-split-btn" id="agentSplitBtn" title="左:Agent模式 | 右:代理聊天室">
+                    <button onclick="window.toggleAgentMode()" class="agent-split-left">
+                        <span class="agent-dot"></span>
+                        <span style="display:inline-flex;align-items:center;gap:4px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+                    </button>
                     <div class="agent-split-divider"></div>
-                    <button onclick="window.toggleAgentPanel()" class="agent-split-right" title="代理聊天室">
+                    <button onclick="window.toggleAgentPanel()" class="agent-split-right">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                        <span class="agent-notif-dot" id="agentNotifDot"></span>
                     </button>
                 </div>
                 <div class="flex items-center gap-1">
@@ -212,17 +200,6 @@
         <!-- 聊天区域 -->
         <div id="chatBox" class="flex-1 overflow-y-auto">
             <div id="chatMessagesContainer" class="chat-messages-container">
-                <!-- 🧠 思考进度指示器 (Agent模式流式思考) -->
-                <div id="thinkingIndicator" class="thinking-indicator hidden">
-                    <div class="thinking-brain">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.2-1 4.2-2.5 5.5V17a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-2.5C5 13.2 4 11.2 4 9a7 7 0 0 1 7-7z"/><path d="M9 22h6"/><path d="M10 18v4"/><path d="M14 18v4"/></svg>
-                    </div>
-                    <div class="thinking-body">
-                        <div class="thinking-title"><span>思考中</span><div class="thinking-dots"><span></span><span></span><span></span></div></div>
-                        <div class="thinking-step" id="thinkingStep">分析问题...</div>
-                        <div class="thinking-todo" id="thinkingTodo"></div>
-                    </div>
-                </div>
                 <!-- 动态插入消息 -->
             </div>
             <!-- 回到底部按钮移到聊天区域内部 -->
@@ -235,8 +212,8 @@
 
         <!-- 输入区 -->
         <div class="input-area">
-            <!-- Agent 模式提示 -->
-            <div id="agentBanner" class="agent-banner hidden"></div>
+            <!-- Agent 模式横幅 -->
+            <div id="agentBanner" class="agent-banner"><span style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M12 6v4m0 2v6" stroke="currentColor" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>Agent 模式已启用 · AI 具备主动工具调用、后台任务调度能力</span></div>
             <div id="filePreviewContainer" class="file-preview-container hidden"></div>
             <div class="input-wrapper">
                 <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition" style="overflow:hidden;">
