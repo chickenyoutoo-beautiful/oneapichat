@@ -4833,26 +4833,48 @@ function requestToolApproval(toolName, args) {
           toolHint = toolRegistry.getSearchHint(toolName);
         }
         
-        // 创建审批弹窗 (增强版: 支持 '始终允许此类型')
+        // 创建审批弹窗 (现代化居中弹出 + SVG 图标)
         var overlay = document.createElement('div');
         overlay.className = 'approval-overlay';
-        overlay.innerHTML = '<div class="approval-modal v2">' +
-            '<div class="approval-title">🔐 操作审批</div>' +
-            (extraWarning ? '<div class="approval-warning">' + extraWarning + '</div>' : '') +
-            '<div class="approval-tool"><span class="approval-tool-label">工具:</span> <span class="approval-tool-name">' + escapeHtml(toolName) + '</span>' +
-            (toolHint ? '<span class="approval-tool-hint">' + escapeHtml(toolHint) + '</span>' : '') +
+        overlay.innerHTML = '<div class="approval-modal-v2">' +
+            '<div class="approval-modal-header">' +
+                '<div class="approval-modal-icon">' +
+                    '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+                '</div>' +
+                '<div class="approval-modal-title">操作审批</div>' +
+                '<div class="approval-modal-subtitle">确认允许执行此操作</div>' +
             '</div>' +
-            '<div class="approval-args"><span class="approval-tool-label">参数:</span><pre class="approval-args-preview">' + escapeHtml(argsPreview) + '</pre></div>' +
-            '<div class="approval-options">' +
-            '<label class="approval-option"><input type="checkbox" id="approvalRememberCheck"> 本次会话记住此决定</label>' +
-            '<label class="approval-option"><input type="checkbox" id="approvalAlwaysAllowCheck"> 始终允许此类型</label>' +
+            '<div class="approval-modal-body">' +
+                (extraWarning ? '<div class="approval-warning"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> ' + extraWarning + '</div>' : '') +
+                '<div class="approval-tool-row">' +
+                    '<span class="approval-tool-tag">' + escapeHtml(toolName) + '</span>' +
+                    (toolHint ? '<span class="approval-tool-hint">' + escapeHtml(toolHint) + '</span>' : '') +
+                '</div>' +
+                '<details class="approval-args-details">' +
+                    '<summary class="approval-args-summary">' +
+                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg> 参数详情' +
+                    '</summary>' +
+                    '<pre class="approval-args-pre">' + escapeHtml(argsPreview) + '</pre>' +
+                '</details>' +
             '</div>' +
-            '<div class="approval-buttons">' +
-            '<button class="approval-reject" id="approvalRejectBtn">❌ 拒绝</button>' +
-            '<button class="approval-confirm" id="approvalConfirmBtn">✅ 批准</button>' +
+            '<div class="approval-modal-options">' +
+                '<label class="approval-option"><input type="checkbox" id="approvalRememberCheck"><span class="approval-checkmark"></span> 本次会话记住</label>' +
+                '<label class="approval-option"><input type="checkbox" id="approvalAlwaysAllowCheck"><span class="approval-checkmark"></span> 始终允许此类型</label>' +
+            '</div>' +
+            '<div class="approval-modal-actions">' +
+                '<button class="approval-btn-deny" id="approvalRejectBtn">' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 拒绝' +
+                '</button>' +
+                '<button class="approval-btn-allow" id="approvalConfirmBtn">' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 批准' +
+                '</button>' +
             '</div>' +
             '</div>';
         document.body.appendChild(overlay);
+        
+        // 弹窗动画: 先出场再交互
+        requestAnimationFrame(function() { overlay.classList.add('active'); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); resolve(false); } });
         
         
         // 按钮事件
