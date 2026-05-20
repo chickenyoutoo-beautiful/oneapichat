@@ -7895,10 +7895,17 @@ function buildApiMessages(chatId) {
         apiMessagesUnfiltered._useVisionModel = true;
     }
 
-    // ★ 最终安全过滤: 移除任何 content 为空/null/undefined 的消息
-    var apiMessages = apiMessagesUnfiltered.filter(function(m) {
-        return m && m.role && m.content !== undefined && m.content !== null && String(m.content).length > 0;
-    });
+    // ★ 最终安全过滤: 移除任何 content 为空/null/undefined/非字符串 的消息
+    var filtered = {};
+    var apiMessages = [];
+    for (var _fi = 0; _fi < apiMessagesUnfiltered.length; _fi++) {
+        var _m = apiMessagesUnfiltered[_fi];
+        if (!_m || !_m.role) { console.log('[buildApiMessages] 跳过无效消息', _fi, _m); continue; }
+        if (_m.content === undefined || _m.content === null) { console.log('[buildApiMessages] 跳过空content', _fi, _m.role); continue; }
+        // content 可能是字符串或数组 (多模态)
+        if (typeof _m.content === 'string' && _m.content.length === 0) { console.log('[buildApiMessages] 跳过空字符串', _fi, _m.role); continue; }
+        apiMessages.push(_m);
+    }
     return apiMessages;
 }
 
