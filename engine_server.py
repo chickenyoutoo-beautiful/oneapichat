@@ -1215,9 +1215,9 @@ def engine_file_op(action: str = Query(...), src: str = Query(...), dst: str = Q
             return any(p.startswith(pre) for pre in allowed)
         if not safe(src) or (dst and not safe(dst)):
             return {"error": f"只允许操作 {TEMP_DIR} 和 {PROJECT_ROOT} 目录"}
-        if action == "cp":
+        if action in ("cp", "copy"):
             shutil.copy2(src, dst)
-        elif action == "mv":
+        elif action in ("mv", "move"):
             shutil.move(src, dst)
         elif action == "rm":
             if _os.path.isdir(src):
