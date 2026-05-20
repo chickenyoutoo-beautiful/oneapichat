@@ -11152,16 +11152,16 @@ window.useAlternativeVisionModel = function() {
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, true);
                     
                     const toolResult = await executeToolCallForRetry(tc);
-                    const resultContent = toolResult.error || toolResult.result;
+                    const resultContent = toolResult.error || toolResult.result || '(empty)';
 
                     // 确保content是字符串
-                    const contentStr = typeof resultContent === 'string'
+                    var contentStr = typeof resultContent === 'string'
                         ? resultContent
-                        : JSON.stringify(resultContent);
+                        : (resultContent ? JSON.stringify(resultContent) : '(empty)');
 
                     body.messages.push({
                         role: 'tool',
-                        tool_call_id: tc.id,
+                        tool_call_id: tc.id || 'tc_' + Date.now(),
                         content: contentStr
                     });
 
