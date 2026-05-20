@@ -3277,6 +3277,41 @@ window.autoResize = function (el) {
     el.style.height = Math.min(el.scrollHeight, max) + 'px';
 };
 
+// ==================== 🧠 Thinking Indicator API ====================
+// 参考 DeepSeek-TUI 的思考进度指示器
+window.showThinking = function(step, todoItems) {
+    var el = getEl('thinkingIndicator');
+    if (!el) return;
+    el.classList.add('active');
+    var stepEl = getEl('thinkingStep');
+    var todoEl = getEl('thinkingTodo');
+    if (stepEl && step) stepEl.textContent = step;
+    if (todoEl && todoItems) {
+        todoEl.innerHTML = todoItems.map(function(item) {
+            var cls = item.done ? 'done' : item.active ? 'active' : 'pending';
+            var icon = item.done ? '✅' : item.active ? '🔄' : '⏳';
+            return '<div class="thinking-todo-item ' + cls + '">' + icon + ' ' + escapeHtml(item.text) + '</div>';
+        }).join('');
+    }
+};
+window.updateThinkingStep = function(step) {
+    var stepEl = getEl('thinkingStep');
+    if (stepEl) stepEl.textContent = step;
+};
+window.updateThinkingTodo = function(items) {
+    var todoEl = getEl('thinkingTodo');
+    if (!todoEl) return;
+    todoEl.innerHTML = items.map(function(item) {
+        var cls = item.done ? 'done' : item.active ? 'active' : 'pending';
+        var icon = item.done ? '✅' : item.active ? '🔄' : '⏳';
+        return '<div class="thinking-todo-item ' + cls + '">' + icon + ' ' + escapeHtml(item.text) + '</div>';
+    }).join('');
+};
+window.hideThinking = function() {
+    var el = getEl('thinkingIndicator');
+    if (el) el.classList.remove('active');
+};
+
 function showToast(msg, type = 'info', dur = 3000) {
     let container = getEl('toast-container');
     if (!container) {
