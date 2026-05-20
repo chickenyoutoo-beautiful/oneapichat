@@ -13577,6 +13577,8 @@ async function engineApiHandler(action, args) {
         // ===== 浏览��工具 (无头浏览器操控) =====
         var browserActions = ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot'];
         if (browserActions.indexOf(action) >= 0) {
+            // ★ PHP 期望的 action 名 (去掉 browser_ 前缀的变化)
+            var _phpAction = action.replace('browser_', 'browser_');  // keep as-is
             var _burl = '/oneapichat/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
             // POST body 用于 navigate/click/type
             var _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
@@ -13628,6 +13630,7 @@ async function engineApiHandler(action, args) {
                 if (_d.files) return { result: _d.files.join('\n'), files: _d.files, total: _d.total };
                 return _d;
             } catch(_e) {
+                console.error('[engineApiHandler] action=' + action + ' url=' + _url + ' error:', _e.message, _e.stack);
                 return { error: '引擎工具执行失败: ' + _e.message };
             }
         }

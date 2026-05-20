@@ -299,7 +299,9 @@ switch ($action) {
 
     // ==================== 浏览器工具 ====================
     case 'browser_navigate':
-        $browserUrl = $_GET['url'] ?? '';
+        $rawBody = file_get_contents('php://input');
+        $body = $rawBody ? json_decode($rawBody, true) : [];
+        $browserUrl = $body['url'] ?? $_GET['url'] ?? '';
         if (!$browserUrl) { echo json_encode(['ok' => false, 'error' => '缺少url']); exit; }
         $postData = json_encode(['url' => $browserUrl]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
@@ -312,7 +314,9 @@ switch ($action) {
         break;
 
     case 'browser_click':
-        $browserSel = $_GET['selector'] ?? '';
+        $rawBody = file_get_contents('php://input');
+        $body = $rawBody ? json_decode($rawBody, true) : [];
+        $browserSel = $body['selector'] ?? $_GET['selector'] ?? '';
         if (!$browserSel) { echo json_encode(['ok' => false, 'error' => '缺少selector']); exit; }
         $postData = json_encode(['selector' => $browserSel]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
@@ -321,20 +325,22 @@ switch ($action) {
         break;
 
     case 'browser_type':
-        $browserSel = $_GET['selector'] ?? '';
-        $browserText = $_GET['text'] ?? '';
-        if (!$browserSel) { echo json_encode(['ok' => false, 'error' => '缺少selector']); exit; }
+        $rawBody = file_get_contents('php://input');
+        $body = $rawBody ? json_decode($rawBody, true) : [];
+        $browserSel = $body['selector'] ?? $_GET['selector'] ?? '';
+        $browserText = $body['text'] ?? $_GET['text'] ?? '';
+        if (!$browserSel || !$browserText) { echo json_encode(['ok' => false, 'error' => '缺少selector或text']); exit; }
         $postData = json_encode(['selector' => $browserSel, 'text' => $browserText]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
         echo @file_get_contents($engine_url . '/engine/browser/type', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
-    case 'browser_content':
+    case 'browser_get_content':
         echo @file_get_contents($engine_url . '/engine/browser/content') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
-    case 'browser_snapshot':
+    case 'browser_get_snapshot':
         echo @file_get_contents($engine_url . '/engine/browser/snapshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
