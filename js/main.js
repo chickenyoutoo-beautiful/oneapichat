@@ -4594,6 +4594,8 @@ function updateAgentUI() {
             toolCallRow.title = '';
         }
     }
+    // 更新 body class 用于 CSS 控制
+    document.body.classList.toggle('agent-active', isActive);
 }
 
 /** 更新三模式选择器的 UI 状态 */
@@ -6039,7 +6041,7 @@ window.updateMarkdownConfig = () => {
 window.fetchModels = async function () {
     const key = getVal('apiKey');
     const url = getVal('baseUrl');
-    const selects = ['modelSelect', 'compressModel', 'titleModel', 'searchModel', 'aiSearchJudgeModel'];
+    const selects = ['modelSelect', 'titleModel', 'searchModel', 'aiSearchJudgeModel'];
 
     selects.forEach(id => {
         const el = getEl(id);
@@ -11873,7 +11875,7 @@ function resetConfig() {
     const configKeys = [
         'apiKey', 'baseUrl', 'systemPrompt', 'model', 'temp', 'tokens',
         'stream', 'requestTimeout',
-        'compress', 'threshold', 'compressModel', 'customParams', 'customEnabled',
+        'compress', 'threshold', 'customParams', 'customEnabled',
         'lineHeight', 'paragraphMargin',
         'markdownGFM', 'markdownBreaks', 'titleModel',
         'enableSearch', 'aiSearchJudge', 'aiSearchJudgeModel', 'aiSearchJudgePrompt',

@@ -244,4 +244,56 @@ switch ($action) {
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
         echo @file_get_contents($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
+
+    // ==================== Agent 记忆/人格/身份/心跳 系统 ====================
+    case 'agent_persona_load':
+        echo @file_get_contents($engine_url . '/engine/agent/persona/load?' . $userParam) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_persona_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/agent/persona/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_memory_load':
+        $query = isset($_GET['query']) ? '&query=' . urlencode($_GET['query']) : '';
+        echo @file_get_contents($engine_url . '/engine/agent/memory/load?' . $userParam . $query) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_memory_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/agent/memory/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_memory_delete':
+        $key = $_GET['key'] ?? '';
+        if (!$key) { echo json_encode(['error' => '缺少key']); exit; }
+        echo @file_get_contents($engine_url . '/engine/agent/memory/delete?key=' . urlencode($key) . $userParam) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_identity_load':
+        echo @file_get_contents($engine_url . '/engine/agent/identity/load?' . $userParam) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_identity_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/agent/identity/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_heartbeat':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/agent/heartbeat?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'agent_heartbeat_status':
+        echo @file_get_contents($engine_url . '/engine/agent/heartbeat/status?' . $userParam) ?: json_encode(['ok' => false]);
+        break;
 }
