@@ -5581,33 +5581,33 @@ function showConfirmDialog(title, message, confirmText) {
  */
 window.deleteAgent = async function(name) {
     if (!name) return;
-    var confirmed = await showConfirmDialog('删除子代理', '确定要删除子代理 "' + name + '" 吗?此操作不可撤销。\n\n同时会删除该代理的聊天记录。', '删除');
-    if (!confirmed) return;
-    // ★ 立即清理本地状态 + 停止该代理的自动通知
+    // ★ 先清缓存避免瞬间闪烁
+    if (_selectedAgentName === name) { _selectedAgentName = null; }
+    // 立即从本地列表移除
+    if (window._agentListCache && window._agentListCache[name]) {
+        delete window._agentListCache[name];
+    }
+    // 清理所有相关状态
     var key = 'agent_chat_' + name;
     localStorage.removeItem(key);
-    if (_selectedAgentName === name) { _selectedAgentName = null; }
-    // 清理队列中该代理的通知
-    if (window._agentNotifyQueue) {
-        window._agentNotifyQueue = window._agentNotifyQueue.filter(function(item) { return item.agentName !== name; });
-    }
-    if (window._pendingSubAgentResults) {
-        var _idx = window._pendingSubAgentResults.indexOf(name);
-        if (_idx !== -1) window._pendingSubAgentResults.splice(_idx, 1);
-    }
-    if (window._pendingSubAgentResultsData) {
-        delete window._pendingSubAgentResultsData[name];
-    }
-    window._refreshAllAgentLists();
-    try {
-        var token = getAuthToken();
-        // ★ 先发删除请求, 再发 mark 清理通知
-        await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + token + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(10000) });
-        await fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function(){});
-        window._refreshAllAgentLists();
-    } catch(e) {
-        console.warn('[deleteAgent] 网络请求失败:', e.message);
-    }
+    ['_agentNotifyQueue','_pendingSubAgentResults'].forEach(function(arr) {
+        if (window[arr] && Array.isArray(window[arr])) {
+            window[arr] = window[arr].filter(function(item) { return (item.agentName || item) !== name; });
+        }
+    });
+    if (window._pendingSubAgentResultsData) { delete window._pendingSubAgentResultsData[name]; }
+    // 立即更新 UI
+    window._renderAgentList(window._agentListCache || {}, getEl('agentSubList'));
+    window._renderAgentList(window._agentListCache || {}, getEl('engineAgentList'));
+    // 异步删除 (不阻塞 UI)
+    var token = getAuthToken();
+    if (!token) return;
+    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(8000) })
+        .then(function() {
+            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
+        })
+        .then(function() { window._refreshAllAgentLists(); })
+        .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
 };
 
 /**
