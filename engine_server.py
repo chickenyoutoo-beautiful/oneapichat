@@ -921,6 +921,24 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 return f"浏览器获取结构失败: {str(e)}"
+        # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
+        elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
+            try:
+                _engine_url = "http://127.0.0.1:8766/engine/" + {
+                    "server_exec": "exec", "server_python": "python", "server_file_read": "file/read",
+                    "server_file_write": "file/write", "server_file_search": "file_search",
+                    "server_sys_info": "sys/info", "server_ps": "ps", "server_disk": "disk",
+                    "server_network": "network", "server_docker": "docker", "server_db_query": "db_query",
+                    "server_file_op": "file_op", "server_file_append": "file_append",
+                    "engine_push": "agent/heartbeat"
+                }.get(tool_name, tool_name)
+                _params = {};
+                for _k, _v in args.items(): _params[_k] = str(_v);
+                _r = requests.get(_engine_url, params=_params, timeout=30);
+                _d = _r.json();
+                return json.dumps(_d, ensure_ascii=False)
+            except Exception as _e:
+                return f"工具执行失败: {str(_e)}"
         return "未知工具"
 
     def _run():
