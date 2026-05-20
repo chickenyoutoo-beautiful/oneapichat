@@ -2434,13 +2434,12 @@ var _streamPendingText = {};
 var _streamSilent = {};
 var _streamRafId = {};
 var _streamLastRender = {};
-var _streamTextMode = {};  // 流式期间纯文本模式
 function applyStreamRender(chatId, fullText, userScrolled, force) {
     _streamPendingText[chatId] = fullText;
     if (force) {
         if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
         if (_streamRafId[chatId]) { cancelAnimationFrame(_streamRafId[chatId]); _streamRafId[chatId] = null; }
-        _flushStreamRender(chatId, userScrolled, true);
+        _flushStreamRender(chatId, userScrolled);
         return;
     }
     if (_streamRenderTimer[chatId]) return;
@@ -2449,52 +2448,44 @@ function applyStreamRender(chatId, fullText, userScrolled, force) {
         if (!_streamRafId[chatId]) {
             _streamRafId[chatId] = requestAnimationFrame(function() {
                 _streamRafId[chatId] = null;
-                _flushStreamRender(chatId, userScrolled, false);
+                _flushStreamRender(chatId, userScrolled);
             });
         }
-    }, 50);
+    }, 60);
 }
 
-function _flushStreamRender(chatId, userScrolled, isLast) {
+function _flushStreamRender(chatId, userScrolled) {
     if (_streamSilent[chatId]) return;
     var text = _streamPendingText[chatId];
     if (!text) return;
     var currentBubble = activeBubbleMap[chatId];
     if (!currentBubble) return;
     var mb = currentBubble.querySelector('.markdown-body');
-    if (!mb) {
-        mb = document.createElement('div');
-        mb.className = 'markdown-body streaming';
-        currentBubble.appendChild(mb);
-    }
-    if (isLast) {
-        // 最后一帧: markdown 渲染
-        try {
-            mb.classList.remove('streaming');
-            var html = _renderMarkdownWithMath(autoLinkURLs(text));
-            mb.innerHTML = html;
-            setTimeout(function() {
-                if (!window.hljs) return;
-                mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
-                    try { hljs.highlightElement(b); } catch(e) {}
-                });
-            }, 150);
-        } catch(e) { mb.textContent = text; }
-        _streamLastRender[chatId] = 0;
-    } else {
-        // ★ 流式期间: textContent 纯文本 (极快, 无卡顿)
-        var lastLen = _streamLastRender[chatId] || 0;
-        var delta = text.length - lastLen;
-        if (delta < 8 && lastLen > 0) return;
-        _streamLastRender[chatId] = text.length;
+    if (!mb) return;
+    var lastLen = _streamLastRender[chatId] || 0;
+    var delta = text.length - lastLen;
+    if (delta < 20 && lastLen > 0) return;
+    _streamLastRender[chatId] = text.length;
+    try {
+        var html = _renderMarkdownWithMath(autoLinkURLs(text));
+        mb.style.opacity = '0.97';
+        mb.innerHTML = html;
+        requestAnimationFrame(function() { mb.style.opacity = '1'; });
+        setTimeout(function() {
+            if (!window.hljs) return;
+            mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
+                try { hljs.highlightElement(b); } catch(e) {}
+            });
+        }, 100);
+    } catch(e) {
         mb.textContent = text;
-        mb.classList.add('streaming');
     }
-    // 跟随滚动
+    // ★ 流式时始终跟随底部（除非用户明确滚走了）
     if (typeof userScrolled !== 'boolean') userScrolled = false;
     if (!userScrolled && $.chatBox) {
         var _dist = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
-        if (_dist < 200) {
+        // 在底部附近（150px内）才跟随
+        if (_dist < 150) {
             $.chatBox.scrollTop = $.chatBox.scrollHeight;
         }
     }
