@@ -1008,11 +1008,15 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     tool_name = tc.function.name
                     tool_args = json.loads(tc.function.arguments)
                     result = _execute_tool(tool_name, tool_args)
-                    # ★ 全局净化：移除控制字符和null字节，防止JSON序列化崩溃
+                    # ★ 全局净化：移除所有控制字符和 unicode surrogate
                     if isinstance(result, str):
-                        result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', result)
-                    result_parts.append(f"[工具: {tool_name}] {result}")
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                        result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', result)
+                        if len(result) > 8000:
+                            result = result[:8000] + '...(截断)'
+                    result_parts.append(f"[工具: {tool_name}] {str(result)[:500]}")
+                    # ★ put 结果时再做一次安全包装
+                    safe_content = str(result) if result else '(empty)'
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": safe_content})
                     # ★ 实时写入 partial result(带锁+重读,防止覆盖其他代理)
                     _lock.acquire()
                     try:
