@@ -216,7 +216,7 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/disk' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'docker':
-        $docker_action = isset($_GET['docker_action']) ? $_GET['docker_action'] : (isset($_GET['cmd']) ? $_GET['cmd'] : 'ps');
+        $docker_action = $_GET['docker_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ps';
         echo @file_get_contents($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'db_query':
@@ -225,8 +225,8 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/db_query?sql=' . urlencode($sql) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'network':
-        $target = $_GET['target'] ?? $_GET['host'] ?? '';
-        $action_n = $_GET['net_action'] ?? $_GET['cmd'] ?? 'ping';
+        $target = $_GET['target'] ?? $_GET['host'] ?? $_GET['address'] ?? $_GET['url'] ?? '';
+        $action_n = $_GET['net_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ping';
         $timeout_n = intval($_GET['timeout'] ?? 10);
         if (!$target) { echo json_encode(['error' => '缺少target']); exit; }
         echo @file_get_contents($engine_url . '/engine/network?target=' . urlencode($target) . '&action=' . urlencode($action_n) . '&timeout=' . $timeout_n . $userParam) ?: json_encode(['error' => 'unreachable']);
@@ -238,9 +238,9 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_op':
-        $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? '';
-        $src = $_GET['src'] ?? '';
-        $dst = $_GET['dst'] ?? '';
+        $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? '';
+        $src = $_GET['src'] ?? $_GET['source'] ?? $_GET['path'] ?? '';
+        $dst = $_GET['dst'] ?? $_GET['dest'] ?? $_GET['destination'] ?? '';
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
         echo @file_get_contents($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
@@ -295,5 +295,57 @@ switch ($action) {
 
     case 'agent_heartbeat_status':
         echo @file_get_contents($engine_url . '/engine/agent/heartbeat/status?' . $userParam) ?: json_encode(['ok' => false]);
+        break;
+
+    // ==================== 浏览器工具 ====================
+    case 'browser_navigate':
+        $browserUrl = $_GET['url'] ?? '';
+        if (!$browserUrl) { echo json_encode(['ok' => false, 'error' => '缺少url']); exit; }
+        $postData = json_encode(['url' => $browserUrl]);
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/browser/navigate', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_screenshot':
+        echo @file_get_contents($engine_url . '/engine/browser/screenshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_click':
+        $browserSel = $_GET['selector'] ?? '';
+        if (!$browserSel) { echo json_encode(['ok' => false, 'error' => '缺少selector']); exit; }
+        $postData = json_encode(['selector' => $browserSel]);
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/browser/click', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_type':
+        $browserSel = $_GET['selector'] ?? '';
+        $browserText = $_GET['text'] ?? '';
+        if (!$browserSel) { echo json_encode(['ok' => false, 'error' => '缺少selector']); exit; }
+        $postData = json_encode(['selector' => $browserSel, 'text' => $browserText]);
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/browser/type', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_content':
+        echo @file_get_contents($engine_url . '/engine/browser/content') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_snapshot':
+        echo @file_get_contents($engine_url . '/engine/browser/snapshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'browser_js':
+        $browserCode = file_get_contents('php://input');
+        $input = json_decode($browserCode ?: '{}', true);
+        $code = $input['code'] ?? ($_GET['code'] ?? '');
+        if (!$code) { echo json_encode(['ok' => false, 'error' => '缺少code']); exit; }
+        $postData = json_encode(['code' => $code]);
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
+        $ctx = stream_context_create($opts);
+        echo @file_get_contents($engine_url . '/engine/browser/js', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 }

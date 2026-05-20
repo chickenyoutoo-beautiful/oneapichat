@@ -814,6 +814,80 @@ const ENGINE_PUSH_TOOL = {
         }
     }
 };
+
+// ==================== 浏览器工具定义 ====================
+const BROWSER_NAVIGATE_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_navigate",
+        description: "在浏览器中打开一个网页。用于查看网页内容、登录页面、查看实时数据等。",
+        parameters: {
+            type: "object",
+            properties: {
+                url: { type: "string", description: "要打开的完整 URL" }
+            },
+            required: ["url"]
+        }
+    }
+};
+
+const BROWSER_SCREENSHOT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_screenshot",
+        description: "对当前浏览器页面截图,返回一张图片。用于查看页面视觉状态、验证操作结果。",
+        parameters: { type: "object", properties: {} }
+    }
+};
+
+const BROWSER_CLICK_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_click",
+        description: "在浏览器页面中点击指定选择器的元素(按钮、链接等)。必须先 browser_navigate 打开页面再操作。",
+        parameters: {
+            type: "object",
+            properties: {
+                selector: { type: "string", description: "CSS 选择器,如 'button'、'#submit-btn'、'a.login-link'" }
+            },
+            required: ["selector"]
+        }
+    }
+};
+
+const BROWSER_TYPE_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_type",
+        description: "在浏览器页面的输入框中输入文字。会自动清空原有内容再输入。必须先 browser_navigate 打开页面再操作。",
+        parameters: {
+            type: "object",
+            properties: {
+                selector: { type: "string", description: "输入框的 CSS 选择器" },
+                text: { type: "string", description: "要输入的文字内容" }
+            },
+            required: ["selector", "text"]
+        }
+    }
+};
+
+const BROWSER_CONTENT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_get_content",
+        description: "获取当前浏览器页面的可见文本内容。用于阅读文章、查看搜索结果、读取页面信息等。",
+        parameters: { type: "object", properties: {} }
+    }
+};
+
+const BROWSER_SNAPSHOT_TOOL = {
+    type: "function",
+    function: {
+        name: "browser_get_snapshot",
+        description: "获取当前浏览器页面的可访问性结构树(类似页面元素大纲)。用于理解页面布局、按钮位置、链接等。",
+        parameters: { type: "object", properties: {} }
+    }
+};
 // ==================== 搜索工具定义 (Tool Calling) ====================
 const RAG_SEARCH_TOOL_DEFINITION = {
     type: "function",
@@ -1563,7 +1637,19 @@ const DEFAULT_CONFIG = {
 - ⚠️ 强制规则:收到子代理报告时**禁止创建任何新的子代理**。只记录结果,不要行动
 - 子代理运行期间,**不要向用户汇报进度**,用户只需要看到最终的综合回答
 - 当所有子代理都完成后,如果用户还在等待,自然整合结果回复一条。否则保持静默
-- 子代理失败也静默,用户不问就不提`
+- 子代理失败也静默,用户不问就不提
+## ★ 浏览器工具(可用于操控无头浏览器)
+- browser_navigate(url) — 打开网页,需要用户审批
+- browser_screenshot() — 对当前页面截图,返回图片(自动批准)
+- browser_click(selector) — 点击页面上指定选择器的元素,需要审批
+- browser_type(selector, text) — 在输入框中输入文字,需要审批
+- browser_get_content() — 读取页面可见文本(自动批准),用于阅读文章内容
+- browser_get_snapshot() — 读取页面结构(自动批准),用于理解页面布局
+## ★ 浏览器使用建议
+- 先 browser_navigate 打开页面,然后用 browser_get_content 或 browser_get_snapshot 查看结构
+- 需要验证视觉效果时用 browser_screenshot 截图发给用户
+- 需要交互时: browser_get_snapshot → 确定选择器 → browser_click / browser_type
+- 适用于查看网页内容、网页交互、验证UI状态、登录操作等场景`
 };
 
 // ==================== 全局变量 ====================
@@ -3806,7 +3892,9 @@ window.loadToolToggleStates = function() {
         'SERVER_DOCKER_TOOL', 'SERVER_DB_QUERY_TOOL', 'SERVER_FILE_SEARCH_TOOL', 'SERVER_FILE_OP_TOOL',
         'ENGINE_CRON_LIST_TOOL', 'ENGINE_CRON_CREATE_TOOL', 'ENGINE_CRON_DELETE_TOOL',
         'DELEGATE_TASK_TOOL', 'ENGINE_AGENT_STATUS_TOOL', 'ENGINE_AGENT_LIST_TOOL',
-        'ENGINE_AGENT_DELETE_TOOL', 'ENGINE_PUSH_TOOL'
+        'ENGINE_AGENT_DELETE_TOOL', 'ENGINE_PUSH_TOOL',
+        'BROWSER_NAVIGATE_TOOL', 'BROWSER_SCREENSHOT_TOOL', 'BROWSER_CLICK_TOOL', 'BROWSER_TYPE_TOOL',
+        'BROWSER_CONTENT_TOOL', 'BROWSER_SNAPSHOT_TOOL'
     ];
     // 加载自定义技能勾选状态
     var customSkills = window.getCustomSkills();
@@ -7161,6 +7249,13 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             tools.push(ENGINE_AGENT_LIST_TOOL);
             tools.push(ENGINE_AGENT_DELETE_TOOL);
             tools.push(ENGINE_PUSH_TOOL);
+            // 浏览器工具
+            tools.push(BROWSER_NAVIGATE_TOOL);
+            tools.push(BROWSER_SCREENSHOT_TOOL);
+            tools.push(BROWSER_CLICK_TOOL);
+            tools.push(BROWSER_TYPE_TOOL);
+            tools.push(BROWSER_CONTENT_TOOL);
+            tools.push(BROWSER_SNAPSHOT_TOOL);
             // web_fetch 已在 searchOn 分支添加,此处不再重复
         }
         tools = tools.concat(imageTools);
@@ -7232,7 +7327,13 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'engine_agent_list': 'ENGINE_AGENT_LIST_TOOL',
                 'engine_agent_delete': 'ENGINE_AGENT_DELETE_TOOL',
                 'engine_agent_ask': 'ENGINE_AGENT_DELETE_TOOL',
-                'engine_push': 'ENGINE_PUSH_TOOL'
+                'engine_push': 'ENGINE_PUSH_TOOL',
+                'browser_navigate': 'BROWSER_NAVIGATE_TOOL',
+                'browser_screenshot': 'BROWSER_SCREENSHOT_TOOL',
+                'browser_click': 'BROWSER_CLICK_TOOL',
+                'browser_type': 'BROWSER_TYPE_TOOL',
+                'browser_get_content': 'BROWSER_CONTENT_TOOL',
+                'browser_get_snapshot': 'BROWSER_SNAPSHOT_TOOL'
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
@@ -7861,6 +7962,24 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'engine_agent_stop') {
                         toolResult = await engineApiHandler('agent_stop', args);
+                    }
+                     else if (func.name === 'browser_navigate') {
+                        toolResult = await engineApiHandler('browser_navigate', args);
+                    }
+                     else if (func.name === 'browser_screenshot') {
+                        toolResult = await engineApiHandler('browser_screenshot', args);
+                    }
+                     else if (func.name === 'browser_click') {
+                        toolResult = await engineApiHandler('browser_click', args);
+                    }
+                     else if (func.name === 'browser_type') {
+                        toolResult = await engineApiHandler('browser_type', args);
+                    }
+                     else if (func.name === 'browser_get_content') {
+                        toolResult = await engineApiHandler('browser_content', args);
+                    }
+                     else if (func.name === 'browser_get_snapshot') {
+                        toolResult = await engineApiHandler('browser_snapshot', args);
                     }
                      else if (func.name === 'engine_push') {
                         toolResult = await engineApiHandler('push', args);
@@ -10649,6 +10768,52 @@ async function engineApiHandler(action, args) {
             var d = await r.json();
             if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
+        }
+        // ==================== 浏览器工具 ====================
+        if (action === 'browser_navigate') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_navigate&url=' + encodeURIComponent(args.url) + authSuffix);
+            var d = await r.json();
+            if (d.ok) return { result: '✅ 已导航到 ' + d.title + '\nURL: ' + d.url };
+            return { error: d.error || '导航失败' };
+        }
+        if (action === 'browser_screenshot') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_screenshot' + authSuffix);
+            var d = await r.json();
+            if (d.ok && d.image) {
+                // 返回图片消息
+                return { result: '![页面截图](' + d.image + ')\n📄 ' + (d.title || '') + '\n' + (d.url || '') };
+            }
+            return { error: d.error || '截图失败' };
+        }
+        if (action === 'browser_click') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_click&selector=' + encodeURIComponent(args.selector) + authSuffix);
+            var d = await r.json();
+            if (d.ok) return { result: '✅ 已点击: ' + args.selector };
+            return { error: d.error || '点击失败' };
+        }
+        if (action === 'browser_type') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_type&selector=' + encodeURIComponent(args.selector) + '&text=' + encodeURIComponent(args.text) + authSuffix);
+            var d = await r.json();
+            if (d.ok) return { result: '✅ 已输入 ' + (args.text ? args.text.length + ' 字符到 "' + args.selector + '"' : '到 "' + args.selector + '"') };
+            return { error: d.error || '输入失败' };
+        }
+        if (action === 'browser_content') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_content' + authSuffix);
+            var d = await r.json();
+            if (d.ok) {
+                var msg = '📄 ' + (d.title || '') + '\nURL: ' + (d.url || '') + '\n\n' + (d.content || '');
+                if (msg.length > 6000) msg = msg.substring(0, 6000) + '\n\n...(截断, 共' + d.length + '字符)';
+                return { result: msg };
+            }
+            return { error: d.error || '获取内容失败' };
+        }
+        if (action === 'browser_snapshot') {
+            var r = await fetch('/oneapichat/engine_api.php?action=browser_snapshot' + authSuffix);
+            var d = await r.json();
+            if (d.ok && d.snapshot) {
+                return { result: '📋 页面结构(' + (d.title || '') + '):\n' + JSON.stringify(d.snapshot, null, 2).substring(0, 4000) };
+            }
+            return { error: d.error || '获取结构失败' };
         }
         return { error: '未知操作: ' + action };
     } catch(e) {
