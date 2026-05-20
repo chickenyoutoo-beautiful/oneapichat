@@ -1,6 +1,6 @@
 {
   "name": "oneapichat",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "OneAPIChat - 多模型AI聊天客户端",
   "main": "electron_main.js",
   "scripts": {
