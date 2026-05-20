@@ -3956,3 +3956,65 @@ html:not(.dark) #userInput {
     white-space: nowrap;
 }
 .dark .tool-call-line-arg { color: #9ca3af; }
+
+/* ================================================================
+   📊 Agent Task Panel + Stats
+   ================================================================ */
+.agent-task-panel {
+    margin-top: 12px;
+    padding: 10px;
+    background: #f9fafb;
+    border: 1px solid #f3f4f6;
+    border-radius: 8px;
+}
+.dark .agent-task-panel {
+    background: #111827;
+    border-color: #1f2937;
+}
+.agent-task-panel-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.agent-task-detail {
+    font-size: 11px;
+    color: #6b7280;
+    line-height: 1.5;
+    min-height: 20px;
+}
+.dark .agent-task-detail { color: #9ca3af; }
+
+.agent-stats-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.agent-stat-item {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    background: #f3f4f6;
+    border-radius: 6px;
+}
+.dark .agent-stat-item {
+    background: #1f2937;
+}
+.agent-stat-val {
+    font-size: 18px;
+    font-weight: 700;
+    color: #6366f1;
+    display: block;
+}
+.agent-stat-lbl {
+    font-size: 9px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}

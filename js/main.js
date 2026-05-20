@@ -4548,7 +4548,7 @@ function startAgentPanelRefresh() {
         window.refreshAgentPanel();
         // 如果选中了代理,同步刷新聊天内容
         if (_selectedAgentName) {
-            // 实时拉取引擎数据,不依赖 localStorage
+            // ★ 保持选中状态，只更新内容（不覆盖已渲染的聊天历史）
             var token = getAuthToken();
             if (token) {
                 fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
@@ -4557,29 +4557,33 @@ function startAgentPanelRefresh() {
                         var a = agents[_selectedAgentName];
                         var msgArea = getEl('agentChatMessages');
                         if (!msgArea) return;
-                        if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400 p-2">代理不存在</div>'; return; }
+                        if (!a) { return; }
+                        // ★ 只在 agent 状态变化时更新，避免闪烁
+                        var prevStatus = msgArea.getAttribute('data-status') || '';
+                        if (a.status === prevStatus && prevStatus === 'completed') return;
+                        msgArea.setAttribute('data-status', a.status || '');
                         if (a.status === 'running') {
-                            msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-green-500 font-medium">🟢 正在运行中...</div></div>';
-                            return;
+                            var partial = a.result || '';
+                            if (partial) {
+                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
+                                    '<div class="text-xs text-green-500 font-medium mb-1">运行中</div>' +
+                                    '<div class="text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300" style="font-size:11px;max-height:200px;overflow-y:auto;">' + escapeHtml(partial.substring(0, 2000)) + '</div></div>';
+                            } else {
+                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-green-500 font-medium">运行中...</div></div>';
+                            }
+                        } else if (a.result) {
+                            if (prevStatus !== 'completed') {
+                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
+                                    '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(_selectedAgentName) + '</div>' +
+                                    '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div></div>';
+                                var key = 'agent_chat_' + _selectedAgentName;
+                                localStorage.setItem(key, JSON.stringify([{ role: 'assistant', content: a.result, time: Date.now() }]));
+                            }
                         }
-                        if (a.result) {
-                            msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                                '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(_selectedAgentName) + '</div>' +
-                                '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div></div>';
-                            // 保存到 localStorage
-                            var key = 'agent_chat_' + _selectedAgentName;
-                            localStorage.setItem(key, JSON.stringify([{ role: 'assistant', content: a.result, time: Date.now() }]));
-                        } else if (a.error) {
-                            msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-red-500">❌ ' + escapeHtml(a.error) + '</div></div>';
-                        }
-                    }).catch(function(err) {
-                        var msgArea = getEl('agentChatMessages');
-                        if (msgArea && _selectedAgentName) {
-                            msgArea.innerHTML = '<div class="text-xs text-orange-400 p-2">连接引擎失败: ' + escapeHtml(err.message) + '</div>';
-                        }
-                    });
+                    }).catch(function() { /* 静默 */ });
             }
         }
+
     }, 5000);
 }
 
@@ -10052,6 +10056,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             // 处理工具调用
             if (toolCalls.length > 0) {
                 toolCallCount++;
+                setTimeout(function() {
+                    var _tEl = getEl("agentToolCount"); if (_tEl) _tEl.textContent = toolCallCount;
+                    var _rEl = getEl("agentRoundCount"); if (_rEl) _rEl.textContent = toolCallCount;
+                }, 100);
                 sessionUsage.toolCalls += toolCalls.length;
                 // Feature 6: 工具调用预判 — 标记所有调用的工具为已记录
                 toolCalls.forEach(function(tc) {
