@@ -3816,3 +3816,68 @@ html:not(.dark) #userInput {
     border-color: #374151;
     color: #6b7280;
 }
+
+/* ================================================================
+   🔄 Tool Status Bar (floating, always visible during execution)
+   ================================================================ */
+.tool-status-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+    border-bottom: 1px solid #c7d2fe;
+    padding: 6px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    min-height: 32px;
+    transition: opacity 0.15s;
+}
+.tool-status-bar.hidden { display: none; }
+.dark .tool-status-bar {
+    background: linear-gradient(135deg, #1e1b4b, #312e81);
+    border-color: #4338ca;
+}
+.tool-status-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #4338ca;
+    font-weight: 600;
+}
+.dark .tool-status-content { color: #a5b4fc; }
+.tool-status-spinner {
+    animation: spin 0.6s linear infinite;
+    flex-shrink: 0;
+}
+.tool-status-arg {
+    font-weight: 400;
+    color: #6b7280;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+.dark .tool-status-arg { color: #9ca3af; }
+
+.tool-mini-progress {
+    width: 80px;
+    height: 3px;
+    background: #c7d2fe;
+    border-radius: 2px;
+    overflow: hidden;
+}
+.tool-mini-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: #6366f1;
+    width: 0%;
+    transition: width 0.3s;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

@@ -3424,6 +3424,22 @@ window.hideThinking = function() {
     if (el) el.classList.remove('active');
 };
 
+// ==================== 🔄 工具执行状态浮条 API ====================
+// 参考 Claude Code 的 ToolUseLoader + DeepSeek-TUI 的实时工具显示
+window.showToolStatus = function(toolName, argPreview, isRunning) {
+    var bar = getEl('toolStatusBar');
+    if (!bar) return;
+    if (isRunning) {
+        var nameEl = getEl('toolStatusName');
+        var argEl = getEl('toolStatusArg');
+        if (nameEl) nameEl.textContent = toolName || '...';
+        if (argEl) argEl.textContent = argPreview ? ': ' + argPreview.substring(0, 60) : '';
+        bar.classList.remove('hidden');
+    } else {
+        bar.classList.add('hidden');
+    }
+};
+
 function showToast(msg, type = 'info', dur = 3000) {
     var container = getEl('toast-container');
     if (!container) {
@@ -11117,6 +11133,17 @@ window.useAlternativeVisionModel = function() {
 
 // 执行每个工具调用并添加结果(只对有有效内容的tool call执行)
                 for (const tc of validToolCalls) {
+                    // ★ 实时显示工具执行状态
+                    var _argPreview = '';
+                    try {
+                        if (tc.function && tc.function.arguments) {
+                            var _a = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
+                            var _keys = Object.keys(_a || {});
+                            _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
+                        }
+                    } catch(e) {}
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, true);
+                    
                     const toolResult = await executeToolCallForRetry(tc);
                     const resultContent = toolResult.error || toolResult.result;
 
@@ -11161,6 +11188,9 @@ window.useAlternativeVisionModel = function() {
                         }
                     }
                 }
+
+                // ★ 工具执行循环结束,隐藏状态浮条
+                if (typeof showToolStatus === 'function') showToolStatus(null, null, false);
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (_hasCreatedSubAgent) {
