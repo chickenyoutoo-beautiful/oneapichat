@@ -2326,6 +2326,7 @@ let streamingScrollLock = false;
 // ★ 流式渲染节流: buffer 收拢内容,每 60~100ms 渲染一次,避免每帧都重绘
 var _streamRenderTimer = {};
 var _streamPendingText = {};
+var _streamSilent = {};  // ★ 静默思考标志: 内部触发时不渲染到界面
 function applyStreamRender(chatId, fullText, userScrolled, force) {
     _streamPendingText[chatId] = fullText;
     if (force) {
@@ -2340,6 +2341,8 @@ function applyStreamRender(chatId, fullText, userScrolled, force) {
 }
 function _flushStreamRender(chatId, userScrolled) {
     _streamRenderTimer[chatId] = null;
+    // ★ 静默思考模式: 内部触发时不渲染到界面
+    if (_streamSilent[chatId]) return;
     var text = _streamPendingText[chatId];
     if (!text) return;
     var currentBubble = activeBubbleMap[chatId];
@@ -5129,9 +5132,24 @@ window._processAgentNotifyQueue = async function() {
 
     if (typeof window.sendMessage === 'function') {
         window.__internalAgentContext = ctx;
-        // 等待 sendMessage 彻底完成(包括流式响应全部返回)再解锁
-        // 用 .finally 而非 setTimeout,保证锁跟随 sendMessage 生命周期
+        // ★ 静默思考: 内部触发时不渲染到界面,让主代理安静处理
+        _streamSilent[currentChatId] = true;
         window.sendMessage(true, '').finally(function() {
+            // 思考完成,解除静默,将最终结果渲染
+            _streamSilent[currentChatId] = false;
+            // 最后一次渲染: 把完整内容刷新到气泡
+            if (currentChatId) {
+                var _b = activeBubbleMap[currentChatId];
+                if (_b) {
+                    var _md = _b.querySelector('.markdown-body');
+                    var _pending = chats[currentChatId]?.messages?.find(function(m) { return m.partial; });
+                    if (_md && _pending && _pending.content) {
+                        _md.innerHTML = _renderMarkdownWithMath(_pending.content);
+                        _triggerPostRender(_md);
+                        _b.classList.remove('typing');
+                    }
+                }
+            }
             // 所有流式响应结束后,解锁并检查是否有新批次在等待
             window._agentNotifyProcessing = false;
             var nextExecId = window._pendingNotifyExecId;
@@ -8871,8 +8889,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
 
     const input = $.userInput;
     let text = skipUserAdd ? userTextForRegen : input?.value.trim() || '';
-    let files = skipUserAdd ? userFilesForRegen : pendingFiles;
+    var files = skipUserAdd ? userFilesForRegen : pendingFiles;
 
+    // ★ 内部触发时 (skipUserAdd=true): text 可能为 null/undefined, 统一降级
+    if (!text && skipUserAdd) { text = ''; }
     if (!skipUserAdd && !text && !files.length) {
         stopGenerationForChat(chatId);
         if ($.sendBtn) $.sendBtn.classList.remove('hidden');
