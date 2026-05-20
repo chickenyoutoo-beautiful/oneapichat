@@ -2431,40 +2431,56 @@ let streamingScrollLock = false;
 // ★ 流式渲染节流: buffer 收拢内容,每 60~100ms 渲染一次,避免每帧都重绘
 var _streamRenderTimer = {};
 var _streamPendingText = {};
-var _streamSilent = {};  // ★ 静默思考标志: 内部触发时不渲染到界面
+var _streamSilent = {};
+var _streamRafId = {};
+var _streamLastRender = {};
 function applyStreamRender(chatId, fullText, userScrolled, force) {
     _streamPendingText[chatId] = fullText;
     if (force) {
-        // 立即渲染
-        if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); }
+        if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
+        if (_streamRafId[chatId]) { cancelAnimationFrame(_streamRafId[chatId]); _streamRafId[chatId] = null; }
         _flushStreamRender(chatId, userScrolled);
-    } else if (!_streamRenderTimer[chatId]) {
-        _streamRenderTimer[chatId] = setTimeout(function() {
-            _flushStreamRender(chatId);
-        }, 80);
+        return;
     }
+    if (_streamRenderTimer[chatId]) return;
+    _streamRenderTimer[chatId] = setTimeout(function() {
+        _streamRenderTimer[chatId] = null;
+        if (!_streamRafId[chatId]) {
+            _streamRafId[chatId] = requestAnimationFrame(function() {
+                _streamRafId[chatId] = null;
+                _flushStreamRender(chatId, userScrolled);
+            });
+        }
+    }, 60);
 }
+
 function _flushStreamRender(chatId, userScrolled) {
-    _streamRenderTimer[chatId] = null;
-    // ★ 静默思考模式: 内部触发时不渲染到界面
     if (_streamSilent[chatId]) return;
     var text = _streamPendingText[chatId];
     if (!text) return;
     var currentBubble = activeBubbleMap[chatId];
-    if (currentBubble && window.marked) {
-        var mb = currentBubble.querySelector('.markdown-body');
-        if (mb) {
-            try {
-                const html = _renderMarkdownWithMath(autoLinkURLs(text));
-                mb.innerHTML = html;
-                if (window.hljs) {
-                    mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
-                        try { hljs.highlightElement(b); } catch(e) {} });
-                }
-            } catch(e) { mb.textContent = text; }
-        }
+    if (!currentBubble) return;
+    var mb = currentBubble.querySelector('.markdown-body');
+    if (!mb) return;
+    var lastLen = _streamLastRender[chatId] || 0;
+    var delta = text.length - lastLen;
+    if (delta < 20 && lastLen > 0) return;
+    _streamLastRender[chatId] = text.length;
+    try {
+        var html = _renderMarkdownWithMath(autoLinkURLs(text));
+        mb.style.opacity = '0.97';
+        mb.innerHTML = html;
+        requestAnimationFrame(function() { mb.style.opacity = '1'; });
+        setTimeout(function() {
+            if (!window.hljs) return;
+            mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
+                try { hljs.highlightElement(b); } catch(e) {}
+            });
+        }, 100);
+    } catch(e) {
+        mb.textContent = text;
     }
-    if (currentBubble && !userScrolled) {
+    if (!userScrolled && $.chatBox) {
         $.chatBox.scrollTop = $.chatBox.scrollHeight;
     }
 }
