@@ -5354,6 +5354,13 @@ window._processAgentNotifyQueue = async function() {
     }
     window._pendingNotifyExecId = execId;
     window._agentNotifyProcessing = true;
+    // ★ 超时保护: 30s 后强制解锁，防止锁死
+    setTimeout(function() {
+        if (window._agentNotifyProcessing && window._pendingNotifyExecId === execId) {
+            console.warn('[AgentNotify] 锁超时，强制释放');
+            window._agentNotifyProcessing = false;
+        }
+    }, 30000);
 
     // ★ 收集属于当前批次的子代理(不限 groupId,所有在 _activeSubAgentGroup 里的都算)
     var activeGroup = window._activeSubAgentGroup || [];
