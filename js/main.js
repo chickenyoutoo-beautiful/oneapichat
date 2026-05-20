@@ -2453,7 +2453,7 @@ function applyStreamRender(chatId, fullText, userScrolled, force) {
                 _flushStreamRender(chatId, userScrolled);
             });
         }
-    }, 60);
+    }, 120);
 }
 
 function _flushStreamRender(chatId, userScrolled) {
@@ -2468,7 +2468,7 @@ function _flushStreamRender(chatId, userScrolled) {
     var delta = text.length - lastLen;
     // ★ 流式期间跳过快照渲染，等流结束一次性加载
     // 但如果用户强制刷新（userScrolled为false时不做优化）跳过
-    if (delta < 30 && lastLen > 0) return;
+    if (delta < 50 && lastLen > 0) return;
     _streamLastRender[chatId] = text.length;
     try {
         var html = _renderMarkdownWithMath(autoLinkURLs(text));
