@@ -9876,6 +9876,20 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 }
             }
 
+            // ★ 发送前验证所有消息 content 字段
+            if (body.messages) {
+                for (var _viFix = 0; _viFix < body.messages.length; _viFix++) {
+                    var _mFix = body.messages[_viFix];
+                    if (!_mFix.content && _mFix.content !== 0) {
+                        console.warn('[FIX] messages[' + _viFix + '] missing content, role=' + _mFix.role);
+                        _mFix.content = '(empty)';
+                    }
+                    if (_mFix.role === 'tool' && !_mFix.tool_call_id) {
+                        _mFix.tool_call_id = 'tc_' + Date.now();
+                    }
+                }
+            }
+
             const res = await fetch(_reqUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
