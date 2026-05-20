@@ -3418,3 +3418,16 @@ html:not(.dark) #userInput {
     background: linear-gradient(90deg,#6366f1,#8b5cf6);
     transition: width 0.3s;
 }
+
+/* ===================================================================
+   🔄 YOLO Progress Bar (inline SVG, clean)
+   =================================================================== */
+.yolo-progress {
+    margin: 8px 0;
+    padding: 0;
+    opacity: 0.9;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
