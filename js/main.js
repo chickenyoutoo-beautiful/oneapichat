@@ -7639,8 +7639,14 @@ function handleSlashCommand(cmd) {
         var cid = currentChatId;
         if (cid && chats[cid]) {
             chats[cid].messages = [{ role: 'system', content: getVal('systemPrompt') || DEFAULT_CONFIG.system }];
-            saveChats(); loadChat(cid);
-            appendMessage('system', '对话已清空');
+            saveChats();
+            // ★ 直接渲染欢迎页,不重新加载空消息列表
+            var container = $.chatMessagesContainer;
+            if (container) {
+                container.innerHTML = '';
+                showWelcome();
+            }
+            renderChatHistory();
         }
     } else if (cmd.cmd === 'new_chat') {
         createNewChat();
