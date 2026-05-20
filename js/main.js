@@ -7384,18 +7384,61 @@ function createTemporaryTimestampIfNeeded(text) {
 }
 
 function parseCommand(text) {
-    const parts = text.split(' ');
-    const cmd = parts[0].toLowerCase();
-    if (cmd === '/search' || cmd === '/s') {
-        return { force: true, type: 'web', query: parts.slice(1).join(' ').trim() };
+    if (!text) return null;
+    var parts = text.split(/\s+/);
+    var cmd = parts[0].toLowerCase();
+    var rest = parts.slice(1).join(' ').trim();
+    // 搜索类
+    if (cmd === '/search' || cmd === '/s') return { type: 'command', cmd: 'force_search', query: rest, kind: 'web' };
+    if (cmd === '/news') return { type: 'command', cmd: 'force_search', query: rest, kind: 'news' };
+    if (cmd === '/image') return { type: 'command', cmd: 'force_search', query: rest, kind: 'images' };
+    // 模式切换
+    if (cmd === '/mode' || cmd === '/agent') {
+        var m = (rest || 'agent').toLowerCase();
+        if (['off','plan','agent','yolo'].indexOf(m) === -1) m = 'agent';
+        return { type: 'command', cmd: 'set_mode', mode: m };
     }
-    if (cmd === '/news') {
-        return { force: true, type: 'news', query: parts.slice(1).join(' ').trim() };
-    }
-    if (cmd === '/image') {
-        return { force: true, type: 'images', query: parts.slice(1).join(' ').trim() };
-    }
+    // 模型切换
+    if (cmd === '/model') return { type: 'command', cmd: 'set_model', model: rest };
+    // 对话管理
+    if (cmd === '/clear') return { type: 'command', cmd: 'clear_chat' };
+    if (cmd === '/compact') return { type: 'command', cmd: 'compact' };
+    if (cmd === '/new') return { type: 'command', cmd: 'new_chat' };
+    // 帮助
+    if (cmd === '/help' || cmd === '/?') return { type: 'command', cmd: 'show_help' };
     return null;
+}
+
+// ★ 处理 /slash 命令
+function handleSlashCommand(cmd) {
+    var modeLabels = { off:'已关闭', plan:'Plan 只读模式', agent:'Agent 交互模式', yolo:'YOLO 自动模式' };
+    if (cmd.cmd === 'set_mode') {
+        setAgentMode(cmd.mode);
+        appendMessage('system', '已切换到 ' + (modeLabels[cmd.mode] || cmd.mode));
+    } else if (cmd.cmd === 'set_model') {
+        var sel = document.getElementById('modelSelect');
+        if (sel && cmd.model) {
+            var found = false;
+            Array.from(sel.options).forEach(function(o) {
+                if (o.value.toLowerCase().includes(cmd.model.toLowerCase()) || o.text.toLowerCase().includes(cmd.model.toLowerCase())) { sel.value = o.value; found = true; }
+            });
+            if (found) { localStorage.setItem('model', sel.value); localStorage.setItem('modelSelect', sel.value); appendMessage('system', '已切换到模型: ' + sel.options[sel.selectedIndex].text); }
+            else appendMessage('system', '未找到模型: ' + cmd.model);
+        }
+    } else if (cmd.cmd === 'clear_chat') {
+        var cid = currentChatId;
+        if (cid && chats[cid]) {
+            chats[cid].messages = [{ role: 'system', content: getVal('systemPrompt') || DEFAULT_CONFIG.system }];
+            saveChats(); loadChat(cid);
+            appendMessage('system', '对话已清空');
+        }
+    } else if (cmd.cmd === 'new_chat') {
+        createNewChat();
+    } else if (cmd.cmd === 'compact') {
+        compressContextIfNeeded();
+    } else if (cmd.cmd === 'show_help') {
+        appendMessage('system', '/search /news /image — 强制搜索\n/mode [plan|agent|yolo|off] — 切换模式\n/model <name> — 切换模型\n/clear — 清空当前对话\n/compact — 压缩上下文\n/new — 新建对话\n/help — 显示此帮助');
+    }
 }
 
 function getSmartSearchKeywords() {
@@ -8927,10 +8970,17 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     if ($.stopBtn) $.stopBtn.classList.add('visible');
 
     // 处理命令
-    const command = parseCommand(text);
-    const forceSearch = !!command;
-    let queryText = command ? command.query : text;
-    const forcedType = command ? command.type : null;
+    var command = parseCommand(text);
+    if (command && command.type === 'command') {
+        isTypingMap[chatId] = false;
+        if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+        if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        handleSlashCommand(command);
+        return;
+    }
+    var forceSearch = !!command;
+    var queryText = command ? command.query : text;
+    var forcedType = command ? command.kind : null;
 
     // 构建历史摘要
     const historySummary = buildHistorySummary(chatId);
@@ -13244,9 +13294,11 @@ async function engineApiHandler(action, args) {
         var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
             var _url = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat') + '/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
-            // 把 args 里的参数都拼到 URL
+            // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
+            var _skipKeys = ['action', 'action_cmd', 'auth_token'];
             Object.keys(args || {}).forEach(function(k) {
                 var v = args[k];
+                if (_skipKeys.indexOf(k) >= 0) return;
                 if (v !== undefined && v !== null) {
                     _url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(String(v));
                 }

@@ -385,35 +385,35 @@ AGENT_ROLES = {
     "explorer": {
         "label": "🔍 搜索专员",
         "desc": "只读搜索,适合查资料、抓网页。不可修改文件或执行命令",
-        "tools": ["web_search", "web_fetch", "engine_push"],
+        "tools": ["web_search", "web_fetch", "engine_push", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "cheap",
         "max_rounds": 10
     },
     "planner": {
         "label": "📐 规划师",
         "desc": "制定方案、分析策略。不做执行,只出方案",
-        "tools": ["web_search", "engine_push"],
+        "tools": ["web_search", "engine_push", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 8
     },
     "developer": {
         "label": "⚡ 开发者",
-        "desc": "读写文件、执行命令、搜索。全能执行角色",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append"],
+        "desc": "读写文件、执行命令、搜索、浏览器操控。全能执行角色",
+        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 30
     },
     "verifier": {
         "label": "✅ 验证者",
         "desc": "检查结果、找问题。只读,不可修改",
-        "tools": ["web_search", "web_fetch", "server_file_read", "engine_push"],
+        "tools": ["web_search", "web_fetch", "server_file_read", "engine_push", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 15
     },
     "general": {
         "label": "🌐 全能代理",
         "desc": "所有工具可用(默认角色)",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "server_sys_info"],
+        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "server_sys_info", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 30
     }
@@ -545,6 +545,73 @@ def _filter_tools_by_role(role: str) -> list:
                     },
                     "required": ["script"]
                 }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_navigate",
+                "description": "在浏览器中打开一个网页。会替换当前页面内容。用于查看网页、登录页面、查看实时内容等。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "要打开的完整 URL"}
+                    },
+                    "required": ["url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_screenshot",
+                "description": "对当前浏览器页面截图，返回一张图片。用于查看页面视觉状态。",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_click",
+                "description": "在浏览器页面中点击指定选择器的元素。必须先 browser_navigate 打开页面再操作。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS 选择器"}
+                    },
+                    "required": ["selector"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_type",
+                "description": "在浏览器页面的输入框中输入文字。会清空再输入。必须先 browser_navigate 打开页面再操作。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "输入框的 CSS 选择器"},
+                        "text": {"type": "string", "description": "要输入的文字内容"}
+                    },
+                    "required": ["selector", "text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_get_content",
+                "description": "获取当前浏览器页面的可见文本内容。用于阅读文章、查看搜索结果等。最多返回50000字符。",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_get_snapshot",
+                "description": "获取当前浏览器页面的可访问性结构树(类似于页面元素大纲)。用于理解页面布局、按钮位置等。",
+                "parameters": {"type": "object", "properties": {}}
             }
         }
     ]
@@ -800,6 +867,60 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return f"{path} 的内容 ({len(content)} 字符):\n\n{content}"
             except Exception as e:
                 return f"读取失败: {str(e)}"
+        elif tool_name == "browser_navigate":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.navigate(args.get("url", "")))
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器导航失败: {str(e)}"
+        elif tool_name == "browser_screenshot":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.screenshot())
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器截图失败: {str(e)}"
+        elif tool_name == "browser_click":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.click(args.get("selector", "")))
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器点击失败: {str(e)}"
+        elif tool_name == "browser_type":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.type_text(args.get("selector", ""), args.get("text", "")))
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器输入失败: {str(e)}"
+        elif tool_name == "browser_get_content":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.get_content())
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器获取内容失败: {str(e)}"
+        elif tool_name == "browser_get_snapshot":
+            try:
+                import asyncio
+                from engine.browser import ensure_browser_connected
+                bm = asyncio.run(ensure_browser_connected())
+                result = asyncio.run(bm.get_snapshot())
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                return f"浏览器获取结构失败: {str(e)}"
         return "未知工具"
 
     def _run():
@@ -2246,6 +2367,130 @@ def agent_memory_delete(key: str = Query(...), user_id: str = Query("")):
         data["updated_at"] = datetime.now().isoformat()
         _write_memory_json("agent_memory.json", data, user_id)
     return {"ok": True, "removed": removed}
+
+
+# ==================== 浏览器工具 ====================
+
+@app.on_event("startup")
+async def _startup_browser():
+    """启动时初始化浏览器连接并注册浏览器工具"""
+    # 注册浏览器工具到全局注册表
+    try:
+        from engine.tool_registry import register_browser_tools
+        register_browser_tools(tool_registry)
+        print("[引擎] 浏览器工具已注册")
+    except Exception as e:
+        print(f"[引擎] 浏览器工具注册失败: {e}")
+    # 连接浏览器
+    try:
+        from engine.browser import get_browser_manager
+        bm = get_browser_manager()
+        await bm.connect()
+        print("[引擎] 浏览器管理器已初始化")
+    except Exception as e:
+        print(f"[引擎] 浏览器管理器初始化失败(可忽略): {e}")
+
+
+@app.get("/engine/browser/status")
+async def browser_status():
+    """浏览器连接状态"""
+    from engine.browser import get_browser_manager
+    bm = get_browser_manager()
+    try:
+        if not bm._connected:
+            await bm.connect()
+        return {"ok": True, "connected": True, "cdp": bm.cdp_url}
+    except Exception as e:
+        return {"ok": False, "connected": False, "error": str(e)}
+
+
+@app.post("/engine/browser/navigate")
+async def browser_navigate(request: Request):
+    body = await request.json()
+    url = body.get("url", "")
+    if not url:
+        return {"ok": False, "error": "缺少 url 参数"}
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.navigate(url)
+    return result
+
+
+@app.get("/engine/browser/screenshot")
+async def browser_screenshot():
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.screenshot()
+    return result
+
+
+@app.post("/engine/browser/click")
+async def browser_click(request: Request):
+    body = await request.json()
+    selector = body.get("selector", "")
+    if not selector:
+        return {"ok": False, "error": "缺少 selector 参数"}
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.click(selector)
+    return result
+
+
+@app.post("/engine/browser/type")
+async def browser_type(request: Request):
+    body = await request.json()
+    selector = body.get("selector", "")
+    text = body.get("text", "")
+    if not selector:
+        return {"ok": False, "error": "缺少 selector 参数"}
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.type_text(selector, text)
+    return result
+
+
+@app.get("/engine/browser/content")
+async def browser_content():
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.get_content()
+    return result
+
+
+@app.get("/engine/browser/snapshot")
+async def browser_snapshot():
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.get_snapshot()
+    return result
+
+
+@app.post("/engine/browser/js")
+async def browser_js(request: Request):
+    body = await request.json()
+    code = body.get("code", "")
+    if not code:
+        return {"ok": False, "error": "缺少 code 参数"}
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.execute_js(code)
+    return result
+
+
+@app.post("/engine/browser/page/new")
+async def browser_page_new():
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.new_page()
+    return result
+
+
+@app.post("/engine/browser/page/close")
+async def browser_page_close():
+    from engine.browser import ensure_browser_connected
+    bm = await ensure_browser_connected()
+    result = await bm.close_page()
+    return result
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from engine.speculation import SpeculationEngine, create_speculation_engine, Spe
 from engine.retry import RetryEngine, RetryStatus, with_retry, create_retry_engine
 from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind, get_global_registry, create_tool_registry
 from engine.event_frame import EventFlowBuilder, EventType, EventFrame, EventLog, create_event_flow, create_event_log
+from engine.browser import BrowserManager, get_browser_manager, ensure_browser_connected
 
 __all__ = [
     "ExecPolicy", "ExecDecision", "Priority", "create_exec_policy",
@@ -20,4 +21,5 @@ __all__ = [
     "RetryEngine", "RetryStatus", "with_retry", "create_retry_engine",
     "ToolRegistry", "ToolDef", "Capability", "ApprovalKind", "get_global_registry", "create_tool_registry",
     "EventFlowBuilder", "EventType", "EventFrame", "EventLog", "create_event_flow", "create_event_log",
+    "BrowserManager", "get_browser_manager", "ensure_browser_connected",
 ]
