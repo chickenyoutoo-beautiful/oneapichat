@@ -2511,14 +2511,16 @@ html:not(.dark) #userInput {
 }
 .agent-banner {
     display: none;
-    padding: 6px 14px;
-    margin-bottom: 6px;
+    padding: 4px 12px;
+    margin-top: 6px;
     background: #eff6ff;
     border: 1px solid #bfdbfe;
     color: #1d4ed8;
-    font-size: 11px;
-    border-radius: 9999px;
+    font-size: 10px;
+    border-radius: 8px;
     text-align: center;
+    position: relative;
+    z-index: 1;
 }
 
 /* ===== Agent 模式悬停下拉菜单 ===== */
