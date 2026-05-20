@@ -2150,6 +2150,8 @@ async function restoreUserData() {
 
 
     console.log('[restoreUserData] 恢复完成');
+    // ★ 延迟启动 Agent 通知轮询, 避免和主数据加载竞争 abort
+    setTimeout(function() { window.startAgentNotificationPolling(); }, 2000);
 }
 
 // ★ 登出前保存:确保当前账号的配置和聊天存到服务器
@@ -4573,7 +4575,7 @@ function startAgentPanelRefresh() {
             // ★ 保持选中状态，只更新内容（不覆盖已渲染的聊天历史）
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
+                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
                     .then(function(r) { return r.json(); })
                     .then(function(agents) {
                         var a = agents[_selectedAgentName];
@@ -4668,7 +4670,7 @@ window._refreshAllAgentLists = async function() {
     var token = getAuthToken();
     if (!token) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) });
         var agents = await r.json();
         // 验证返回的数据是有效对象
         if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
@@ -4736,7 +4738,7 @@ window.selectAgentChat = function(agentName) {
         var token = getAuthToken();
         if (!token) { msgArea.innerHTML = '<div class="text-xs text-gray-400">请先登录</div>'; return; }
         msgArea.innerHTML = '<div class="text-xs text-gray-400">获取中...</div>';
-        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
+        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
@@ -4787,7 +4789,7 @@ window.mainAgentReply = function() {
     }
     var token = getAuthToken();
     if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(5000) })
+    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) {
@@ -5283,7 +5285,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(12000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -5298,7 +5300,7 @@ window.deleteCron = async function(name) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(5000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(12000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -5463,7 +5465,7 @@ window._processAgentNotifyQueue = async function() {
             }
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function() {});
+                fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(12000) }).catch(function() {});
             }
             if (nextExecId !== null && nextExecId !== execId) {
                 window._pendingNotifyExecId = null;
@@ -5642,7 +5644,7 @@ window.deleteAgent = async function(name) {
     if (!token) return;
     fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(8000) })
         .then(function() {
-            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) });
+            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(12000) });
         })
         .then(function() { window._refreshAllAgentLists(); })
         .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
@@ -5705,7 +5707,7 @@ window.refreshEngineStatus = async function() {
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(5000) });
+            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(12000) });
             var cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
@@ -5731,7 +5733,7 @@ window.refreshEngineStatus = async function() {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
         try {
-            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(5000) });
+            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(12000) });
             var agentData = await agentResp.json();
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
@@ -13994,7 +13996,7 @@ var _lastAgentListJson = '';
  */
 window.startAgentRealtimeUpdates = function() {
     // 启动现有轮询(15s)
-    window.startAgentNotificationPolling();
+    // 延迟到 restoreUserData 完成后启动
     
     // 新增: 3秒快速轮询代理列表
     if (!_agentPanelRefreshTimer) {
