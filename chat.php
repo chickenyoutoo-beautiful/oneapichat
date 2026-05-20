@@ -55,7 +55,23 @@ if (!is_writable($dataDir)) {
 $method = $_SERVER['REQUEST_METHOD'];
 
 // 优先使用 auth_token，其次使用 device_id
-$authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+// ★ 优先从 HTTP Header 读取 (避免 URL 明文传输)
+$authHeader = '';
+if (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    if ($authHeader && strpos($authHeader, 'Bearer ') === 0) $authHeader = substr($authHeader, 7);
+} elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    $authHeader = str_replace('Bearer ', '', $_SERVER['HTTP_AUTHORIZATION']);
+} elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    $authHeader = str_replace('Bearer ', '', $_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+}
+$authToken = '';
+if (!empty($authHeader) && preg_match('/^[a-f0-9]{32,}$/', $authHeader)) {
+    $authToken = $authHeader;
+} else {
+    $authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+}
 $userId = null;
 if (!empty($authToken)) {
     $userId = verifyAuthToken($authToken);

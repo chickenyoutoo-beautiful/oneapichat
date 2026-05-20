@@ -26,7 +26,26 @@ function _engine_verifyAuthToken($token) {
 $action = $_GET['action'] ?? '';
 $engine_url = 'http://127.0.0.1:8766';
 
-$authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+// ★ 优先从 HTTP Header 读取 auth_token (避免 URL 明文传输)
+$authHeader = '';
+if (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    if ($authHeader && strpos($authHeader, 'Bearer ') === 0) {
+        $authHeader = substr($authHeader, 7);
+    }
+} elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    $authHeader = str_replace('Bearer ', '', $_SERVER['HTTP_AUTHORIZATION']);
+} elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    $authHeader = str_replace('Bearer ', '', $_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+}
+$authToken = '';
+// Header 优先, 回退到 GET param (兼容旧版)
+if (!empty($authHeader) && preg_match('/^[a-f0-9]{32,}$/', $authHeader)) {
+    $authToken = $authHeader;
+} elseif (isset($_GET['auth_token'])) {
+    $authToken = preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']);
+}
 $userId = '';
 if (!empty($authToken)) {
     $uid = _engine_verifyAuthToken($authToken);
