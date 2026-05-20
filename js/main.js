@@ -7855,7 +7855,7 @@ function buildApiMessages(chatId) {
             apiMessages.push({ role: 'user', content: buildUserContent(msg.text, files) });
             window._forceVisionFormat = prev;
         } else if (msg.role === 'assistant' && !msg.partial) {
-            apiMessages.push({ role: 'assistant', content: cleanObjectObject(msg.content) });
+            apiMessages.push({ role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' });
         } else if (msg.temporary) {
             // ★ 模型适配: 部分模型不支持过多 system 消息,将临时消息合并到最近的非 system 消息
             // MiniMax/QwQ 等:系统消息支持有限
@@ -7864,13 +7864,12 @@ function buildApiMessages(chatId) {
                 // 找到前面最近的非 system 消息,追加内容
                 let lastIdx = apiMessages.length - 1;
                 if (lastIdx >= 0 && apiMessages[lastIdx].role !== 'system') {
-                    apiMessages[lastIdx].content += '\n\n' + cleanObjectObject(msg.content);
+                    apiMessages[lastIdx].content += '\n\n' + (cleanObjectObject(msg.content) || '');
                 } else {
-                    // 没找到合适位置,作为 user 消息追加(不存 system role)
-                    apiMessages.push({ role: 'user', content: cleanObjectObject(msg.content) });
+                    apiMessages.push({ role: 'user', content: cleanObjectObject(msg.content) || '(empty)' });
                 }
             } else {
-                apiMessages.push({ role: msg.role, content: cleanObjectObject(msg.content) });
+                apiMessages.push({ role: msg.role, content: cleanObjectObject(msg.content) || '(empty)' });
             }
         }
     }
