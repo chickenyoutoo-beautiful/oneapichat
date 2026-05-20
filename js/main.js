@@ -5381,55 +5381,48 @@ window._processAgentNotifyQueue = async function() {
         '以下子代理已完成任务,请阅读结果并整合:\n' + results.join('\n---\n') + '\n\n' +
         '### 🔒 规则\n' +
         '1. 【禁止】调用 delegate_task / agent_create / agent_run 等任何创建新子代理的工具\n' +
-        '2. 整合子代理结果后,用简洁的语言告知用户进展\n' +
-        '3. 如子代理结果是错误/空的,诚实告知用户并建议重试\n' +
-        '4. 这条消息是系统级上下文,不要在回复中提及"系统通知""子代理报告"等内部术语';
+        '2. 仔细阅读子代理结果,用简洁的语言告知用户进展和结论\n' +
+        '3. 如果子代理结果是错误/空的,诚实告知用户并建议重试\n' +
+        '4. 【重要】你现在正在和用户对话,请直接回复用户,不要调用任何工具\n' +
+        '5. 这条消息是系统级上下文,不要在回复中提及"系统通知""子代理报告"等内部术语';
 
-    window._pendingNotifyExecId = null;  // 清除待处理标记
+    window._pendingNotifyExecId = null;
 
     if (typeof window.sendMessage === 'function') {
-        window.__internalAgentContext = ctx;
-        // ★ 静默思考: 内部触发时不渲染到界面,让主代理安静处理
-        _streamSilent[currentChatId] = true;
-        window.sendMessage(true, '').finally(function() {
-            // 思考完成,解除静默,将最终结果渲染
-            _streamSilent[currentChatId] = false;
-            // 最后一次渲染: 把完整内容刷新到气泡
-            if (currentChatId) {
-                var _b = activeBubbleMap[currentChatId];
-                if (_b) {
-                    var _md = _b.querySelector('.markdown-body');
-                    var _pending = chats[currentChatId]?.messages?.find(function(m) { return m.partial; });
-                    if (_md && _pending && _pending.content) {
-                        _md.innerHTML = _renderMarkdownWithMath(_pending.content);
-                        _triggerPostRender(_md);
-                        _b.classList.remove('typing');
-                    }
-                }
-            }
-            // 所有流式响应结束后,解锁并检查是否有新批次在等待
+        // ★ 直接用已有的聊天 messages 追加 user hint，触发模型总结
+        // 不再用 sendMessage(true, '') 空字符串，改为追加一条 user 消息并触发 re-send
+        var chatId = currentChatId;
+        if (chatId && chats[chatId]) {
+            // 追加系统上下文到消息历史
+            chats[chatId].messages.push({
+                role: 'system',
+                content: ctx,
+                _internal: false,
+                temporary: true
+            });
+            saveChats();
+            // ★ 用真实 user 消息激活主代理总结
+            window.__internalAgentContext = null;
+            window.sendMessage(true, '请整合子代理结果并告知用户进展');
+        }
+
+        // 异步清理：标记已处理并解锁
+        setTimeout(function() {
             window._agentNotifyProcessing = false;
             var nextExecId = window._pendingNotifyExecId;
-
-            // 处理完成后,清理本次批次的数据并 mark 已处理
             if (agents && agents.length > 0 && typeof window._pendingSubAgentResultsData === 'object') {
-                agents.forEach(function(name) {
-                    delete window._pendingSubAgentResultsData[name];
-                });
+                agents.forEach(function(name) { delete window._pendingSubAgentResultsData[name]; });
             }
-            // 清理 _pendingSubAgentResults(只清理本次批次的)
             if (agents && Array.isArray(window._pendingSubAgentResults)) {
                 agents.forEach(function(name) {
                     var idx = window._pendingSubAgentResults.indexOf(name);
                     if (idx !== -1) window._pendingSubAgentResults.splice(idx, 1);
                 });
             }
-            // 通知引擎标记已处理
             var token = getAuthToken();
             if (token) {
                 fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(5000) }).catch(function() {});
             }
-
             if (nextExecId !== null && nextExecId !== execId) {
                 window._pendingNotifyExecId = null;
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
@@ -5437,7 +5430,7 @@ window._processAgentNotifyQueue = async function() {
                 window._hasPendingSubAgentNotify = false;
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 200);
             }
-        });
+        }, 2000);
     } else {
         // sendMessage 不可用,直接解锁
         window._agentNotifyProcessing = false;
@@ -10066,28 +10059,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolCallStats.record(tc.function.name);
                     }
                 });
-                // Feature 6: YOLO 模式下显示进度 — 精简 SVG 进度条
-                var _yoloMode = getAgentMode() === 'yolo';
-                if (_yoloMode && currentChatId === chatId) {
-                    var _bubble = activeBubbleMap[chatId];
-                    if (_bubble) {
-                        var _yoloBar = _bubble.querySelector('.yolo-progress');
-                        var pct = Math.min(100, Math.round((toolCallCount / Math.max(maxToolCalls, 1)) * 100));
-                        var color = pct > 80 ? '#f59e0b' : '#6366f1';
-                        if (!_yoloBar) {
-                            _yoloBar = document.createElement('div');
-                            _yoloBar.className = 'yolo-progress';
-                            var md = _bubble.querySelector('.markdown-body');
-                            if (md) md.appendChild(_yoloBar); else _bubble.appendChild(_yoloBar);
-                        }
-                        _yoloBar.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#6366f1;">' +
-                            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" style="flex-shrink:0;animation:spin 0.6s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>' +
-                            '<span style="font-weight:500;">正在执行</span>' +
-                            '<span style="color:#9ca3af;">' + toolCallCount + '/' + maxToolCalls + '</span>' +
-                            '<svg width="100" height="4" style="flex-shrink:0;border-radius:2px;"><rect width="100" height="4" rx="2" fill="#e5e7eb"/><rect width="' + pct + '" height="4" rx="2" fill="' + color + '"/></svg>' +
-                            '<span style="color:#9ca3af;font-size:10px;">' + pct + '%</span></div>';
-                    }
-                }
+
                 if (toolCallCount > maxToolCalls) {
                     throw new Error('工具调用次数过多,可能存在循环,已停止');
                 }
