@@ -1676,7 +1676,7 @@ async function saveChatsToServer() {
         var mergedChats = JSON.parse(JSON.stringify(chats));
         // ★ 保留完整图片数据(不压缩,服务器备份需要完整 base64)
         console.log('[save] 本地聊天数:', Object.keys(mergedChats).length);
-        var serverChats = {};  // 用于防误覆盖检查
+        var _serverChats = {};  // 用于防误覆盖检查
         var _getOk = false;    // GET是否成功
         try {
             var getUrl = url + '&chat_id=all';
@@ -1686,13 +1686,13 @@ async function saveChatsToServer() {
             _getOk = getResp.ok;
             if (getResp.ok) {
                 var serverData = await getResp.json();
-                serverChats = serverData.chats || {};
+                _serverChats = serverData.chats || {};
                 console.log('[save] 已删IDs:', Object.keys(_deletedChatIds).join(','));
-                console.log('[save] 服务器聊天数:', Object.keys(serverChats).length);
+                console.log('[save] 服务器聊天数:', Object.keys(_serverChats).length);
                 var added = 0;
-                for (var scid in serverChats) {
+                for (var scid in _serverChats) {
                     if (!mergedChats[scid] && !_deletedChatIds[scid]) {
-                        mergedChats[scid] = serverChats[scid];
+                        mergedChats[scid] = _serverChats[scid];
                         added++;
                     }
                 }
@@ -1707,8 +1707,8 @@ async function saveChatsToServer() {
             console.warn('[save] GET失败,跳过保存防止覆盖');
             return false;
         }
-        if (Object.keys(serverChats).length >= 3 && _localCount <= 2) {
-            console.warn('[save] 本地仅'+_localCount+'条,服务器有'+Object.keys(serverChats).length+'条,跳过保存');
+        if (Object.keys(_serverChats).length >= 3 && _localCount <= 2) {
+            console.warn('[save] 本地仅'+_localCount+'条,服务器有'+Object.keys(_serverChats).length+'条,跳过保存');
             return false;
         }
 
@@ -1902,20 +1902,21 @@ async function restoreUserData() {
 
     // ★ 并行加载配置和聊天记录
     console.log('[restoreUserData] 并行加载配置和聊天记录...');
+    var _serverChats = null;
     await Promise.all([
         (async function() {
             try { await loadConfigFromServer(); } catch(e) { console.warn('[restoreUserData] 配置加载失败:', e.message); }
         })(),
         (async function() {
             try {
-                var serverChats = await loadChatsFromServer();
-                if (serverChats && typeof serverChats === 'object' && Object.keys(serverChats).length > 0) {
+                _serverChats = await loadChatsFromServer();
+                if (_serverChats && typeof _serverChats === 'object' && Object.keys(_serverChats).length > 0) {
                     // ★ 合并:本地优先(最新数据),服务器补充缺失项
                     var merged = JSON.parse(JSON.stringify(chats));
                     var added = 0;
-                    for (var _scid in serverChats) {
+                    for (var _scid in _serverChats) {
                         if (_deletedChatIds && _deletedChatIds[_scid]) continue; // 跳过已删除
-                        var _sc = serverChats[_scid];
+                        var _sc = _serverChats[_scid];
                         if (!merged[_scid]) {
                             merged[_scid] = _sc;
                             added++;
@@ -2001,8 +2002,17 @@ async function restoreUserData() {
         }
         localStorage.setItem('noToolModels', JSON.stringify(_existingNoTool));
     } catch(e) { console.warn('[ModelCfg] 初始化 no-tool 列表失败:', e.message); }
-    // ★ 如果没有任何聊天记录,自动新建一个对话
+    // ★ 核心逻辑: 只在真正没有任何对话时才新建
     var chatKeys = Object.keys(chats);
+    if (chatKeys.length === 0 && _serverChats && typeof _serverChats === 'object' && Object.keys(_serverChats).length > 0) {
+        // 服务器有数据但本地被清空了,用服务器数据恢复
+        console.log('[restoreUserData] 本地无记录,从服务器恢复', Object.keys(_serverChats).length, '个对话');
+        chats = JSON.parse(JSON.stringify(_serverChats));
+        try { slimSaveChats(); } catch(e) {}
+        renderChatHistory();
+        chatKeys = Object.keys(chats);
+    }
+    // ★ 双重检查: 合并后仍然为空才新建
     if (chatKeys.length === 0) {
         console.log('[restoreUserData] 无聊天记录,自动新建');
         createNewChat();
@@ -2012,7 +2022,8 @@ async function restoreUserData() {
         if (lastId && chats[lastId]) {
             loadChat(lastId);
         } else {
-            loadChat(chatKeys[chatKeys.length - 1]);
+            var firstKey = chatKeys.sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
+            loadChat(firstKey || chatKeys[0]);
         }
     }
     // ★ 恢复刷新前输入框中的文本
