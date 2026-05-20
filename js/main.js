@@ -6799,7 +6799,9 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     copyBtn.onclick = (e) => {
         e.stopPropagation();
-        copyMessageContent(text);
+        // ★ 修复: 动态读取气泡当前文本,而非闭包里初始的 text 变量
+        var _bubbleText = bubble.querySelector('.markdown-body')?.textContent || bubble.textContent || text;
+        copyMessageContent(_bubbleText);
         copyBtn.style.background = '#bbf7d0';
         setTimeout(() => copyBtn.style.background = '', 300);
     };
@@ -13241,7 +13243,7 @@ async function engineApiHandler(action, args) {
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
         var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
-            var _url = '/oneapichat/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
+            var _url = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat') + '/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL
             Object.keys(args || {}).forEach(function(k) {
                 var v = args[k];
