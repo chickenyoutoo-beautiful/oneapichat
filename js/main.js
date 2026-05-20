@@ -10059,6 +10059,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 setTimeout(function() {
                     var _tEl = getEl("agentToolCount"); if (_tEl) _tEl.textContent = toolCallCount;
                     var _rEl = getEl("agentRoundCount"); if (_rEl) _rEl.textContent = toolCallCount;
+                    var _mEl = getEl("agentMaxCount"); if (_mEl) _mEl.textContent = maxToolCalls;
+                    var _pBar = getEl("agentProgressBar");
+                    var _pFill = getEl("agentProgressFill");
+                    if (_pBar && _pFill) {
+                        var _pct = Math.min(100, Math.round((toolCallCount / Math.max(maxToolCalls, 1)) * 100));
+                        _pBar.style.display = 'block';
+                        _pFill.setAttribute('width', _pct + '%');
+                    }
                 }, 100);
                 sessionUsage.toolCalls += toolCalls.length;
                 // Feature 6: 工具调用预判 — 标记所有调用的工具为已记录
