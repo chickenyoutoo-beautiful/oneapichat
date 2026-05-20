@@ -7930,10 +7930,21 @@ function buildApiMessages(chatId) {
         }
 
         if (apiMessagesUnfiltered.length === 0) {
-            const defaultSystemContent = getVal('systemPrompt') || DEFAULT_CONFIG.system;
+            var defaultSystemContent = getVal('systemPrompt') || DEFAULT_CONFIG.system;
             apiMessagesUnfiltered.push({ role: 'system', content: defaultSystemContent });
             if (!chats[chatId].messages.some(m => m.role === 'system' && !m.temporary)) {
                 chats[chatId].messages.unshift({ role: 'system', content: defaultSystemContent });
+            }
+        }
+        
+        // ★ 注入子代理推送消息到 system context (不显示在聊天界面)
+        if (chats[chatId]._agentMessages && chats[chatId]._agentMessages.length > 0) {
+            var _agentCtx = '## 子代理推送消息\n' + chats[chatId]._agentMessages.slice(-10).map(function(m) {
+                return '[' + new Date(m.time).toLocaleTimeString('zh-CN') + '] ' + (m.source ? '(' + m.source + ') ' : '') + m.text;
+            }).join('\n');
+            var sysIdx = apiMessagesUnfiltered.findIndex(function(m) { return m.role === 'system'; });
+            if (sysIdx >= 0) {
+                apiMessagesUnfiltered[sysIdx].content = apiMessagesUnfiltered[sysIdx].content + '\n\n' + _agentCtx;
             }
         }
     }
@@ -14151,28 +14162,16 @@ window.showAgentNotification = function(type, message) {
 };
 
 window.appendAgentSystemMessage = function(text, source) {
-    if (!text) return;
-    // ★ 如果没有活跃对话,自动创建一个
-    if (!currentChatId) {
-        createNewChat();
-        if (!currentChatId) return;
-    }
+    if (!text || !currentChatId) return;
+    // ★ 只注入主代理上下文,不显示在聊天界面
+    // 保存到主代理聊天数据中供 system prompt 读取
     var chatId = currentChatId;
-    chats[chatId].messages.push({ role: 'assistant', content: text, agent: source || 'Agent' });
-    appendMessage('assistant', text, null, null, null, 0, true, null, null);
-    if (!isAutoScrolling) {
-        var b = getEl('agent-new-msg-badge') || (function() {
-            var el = document.createElement('div');
-            el.id = 'agent-new-msg-badge';
-            el.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);padding:8px 16px;background:#3b82f6;color:#fff;border-radius:9999px;font-size:12px;cursor:pointer;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
-            el.onclick = function() { scrollToBottom(); b.remove(); };
-            document.body.appendChild(el);
-            return el;
-        })();
-        b.textContent = '📩 Agent 新消息 - 点击查看';
-        clearTimeout(b._t);
-        b._t = setTimeout(function() { var x = getEl('agent-new-msg-badge'); if (x) x.remove(); }, 15000);
+    if (chats[chatId]) {
+        if (!chats[chatId]._agentMessages) chats[chatId]._agentMessages = [];
+        chats[chatId]._agentMessages.push({ text: text, time: Date.now(), source: source });
+        if (chats[chatId]._agentMessages.length > 20) chats[chatId]._agentMessages = chats[chatId]._agentMessages.slice(-20);
     }
+    // ★ 不再调用 appendMessage 显示在聊天界面
 };
 
 window.startAgentNotificationPolling();
