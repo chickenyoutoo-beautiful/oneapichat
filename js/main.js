@@ -5502,28 +5502,23 @@ function fetchWithRetry(url, options, maxRetries) {
     maxRetries = maxRetries || 3;
     return new Promise(function(resolve, reject) {
         var attempt = 0;
+        var timeoutMs = (options && options.timeout) || 15000;
         function tryFetch() {
             attempt++;
-            var signal = (options && options.signal) || null;
-            // 为每次重试创建新的 AbortController (如果原signal未超时)
             var ctrl = new AbortController();
-            var mergedSignal = null;
-            if (signal) {
-                // 合并信号
-                mergedSignal = signal;
-            } else {
-                mergedSignal = ctrl.signal;
-            }
-            var opts = Object.assign({}, options, { signal: mergedSignal });
+            var timeoutId = setTimeout(function() { ctrl.abort(); }, timeoutMs);
+            var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
+            delete opts.timeout;
             
             fetch(url, opts).then(function(resp) {
+                clearTimeout(timeoutId);
                 resolve(resp);
             }).catch(function(err) {
-                if (attempt >= maxRetries) {
+                clearTimeout(timeoutId);
+                if (attempt >= maxRetries || err.name === 'AbortError') {
                     reject(err);
                     return;
                 }
-                // 指数退避: 1s, 2s, 4s, 8s...
                 var delay = Math.pow(2, attempt) * 500;
                 console.log('[fetchWithRetry] 重试', attempt, '/', maxRetries, '延迟', delay + 'ms:', err.message);
                 setTimeout(tryFetch, delay);
@@ -5569,21 +5564,23 @@ function showConfirmDialog(title, message, confirmText) {
  * 清理确认对话框 + 子代理聊天记录清理
  */
 window.deleteAgent = async function(name) {
+    if (!name) return;
     var confirmed = await showConfirmDialog('删除子代理', '确定要删除子代理 "' + name + '" 吗?此操作不可撤销。\n\n同时会删除该代理的聊天记录。', '删除');
     if (!confirmed) return;
+    // ★ 立即清理本地 + 刷新 UI (不等待网络)
+    var key = 'agent_chat_' + name;
+    localStorage.removeItem(key);
+    if (_selectedAgentName === name) { _selectedAgentName = null; }
+    window._refreshAllAgentLists();
     try {
-        var r = await fetchWithRetry('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name));
+        var token = getAuthToken();
+        var r = await fetch('/oneapichat/engine_api.php?action=agent_delete&auth_token=' + token + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(10000) });
         var d = await r.json();
-        if (d.ok) {
-            // 清理本地聊天记录
-            var key = 'agent_chat_' + name;
-            localStorage.removeItem(key);
-            window.refreshEngineStatus();
-        } else {
-            alert('删除失败: ' + (d.error || '未知错误'));
-        }
+        if (!d.ok) console.warn('[deleteAgent] 服务端删除失败:', d.error);
+        window._refreshAllAgentLists();
     } catch(e) {
-        alert('删除请求失败: ' + e.message);
+        console.warn('[deleteAgent] 网络请求失败:', e.message);
+        // 网络失败不弹 alert, 本地已清理
     }
 };
 
