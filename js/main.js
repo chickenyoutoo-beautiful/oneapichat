@@ -3665,6 +3665,7 @@ function updateSlashPopup(query) {
     popup.innerHTML = html;
     window._slashIdx = 0;
     window._slashVisible = true;
+    popup.style.pointerEvents = 'auto';
     popup.querySelectorAll('.slash-popup-item').forEach(function(item) {
         item.addEventListener('click', function() { selectSlashCommand(this.dataset.cmd, this.dataset.args); });
         item.addEventListener('touchend', function(e) { e.preventDefault(); selectSlashCommand(this.dataset.cmd, this.dataset.args); });
@@ -3712,6 +3713,7 @@ function hideSlashPopup() {
         window._slashVisible = false;
         popup.style.opacity = '0';
         popup.style.transform = 'translateY(8px)';
+        popup.style.pointerEvents = 'none';
     }
 }
 
