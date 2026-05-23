@@ -4678,3 +4678,12 @@ details[open] .src-chevron { transform: rotate(180deg); }
     35%  { opacity: 1; transform: scale(1); }
     100% { opacity: 0; transform: scale(1.2); letter-spacing: 4px; }
 }
+
+/* Agent专属工具禁用态 */
+.tool-toggle-row.tool-disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+.tool-toggle-row.tool-disabled .switch input {
+    cursor: not-allowed;
+}

@@ -4312,7 +4312,10 @@ function setAgentMode(mode) {
             }
         });
     } else if (mode === 'off') {
-        // ★ 普通模式: 恢复侧边栏
+        // ★ 普通模式: 关闭所有 Agent 专属工具
+        var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
+        _agentKeys.forEach(function(k) { window.setToolEnabled(k, false); });
+        // 恢复侧边栏
         var wasCollapsed = $.sidebar?.classList.contains('collapsed');
         if (wasCollapsed) {
             $.sidebar?.classList.remove('collapsed');
@@ -4327,6 +4330,10 @@ function setAgentMode(mode) {
         }
     }
     // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
+    if (mode === 'plan') {
+        var _agentKeys2 = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
+        _agentKeys2.forEach(function(k) { window.setToolEnabled(k, false); });
+    }
     // 模式切换不弹 toast(已有横幅和绿点提示)
     if (typeof renderToolPanel === 'function') renderToolPanel();
 }
