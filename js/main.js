@@ -4274,7 +4274,16 @@ function getAgentMode() {
 /** 设置 Agent 模式并更新 UI */
 function setAgentMode(mode) {
     if (['off','plan','agent','yolo'].indexOf(mode) === -1) mode = 'off';
+    var prevMode = getAgentMode();
     localStorage.setItem('agentMode', mode);
+    
+    // ★ 整页转场动效
+    if (mode === 'agent' || mode === 'yolo') {
+        playAgentEnterEffect();
+    } else if (prevMode === 'agent' || prevMode === 'yolo') {
+        playAgentExitEffect();
+    }
+    
     updateAgentUI();
     if (mode === 'agent' || mode === 'yolo') {
         // Agent/YOLO 模式开启时自动启用 Agent 专属工具
@@ -4349,6 +4358,30 @@ function isYoloMode() {
 /** 判断是否 Plan 只读模式 */
 function isPlanMode() {
     return getAgentMode() === 'plan';
+}
+
+// ★ Agent 模式整页转场动效
+function playAgentEnterEffect() {
+    var overlay = document.createElement('div');
+    overlay.className = 'agent-transition-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
+    overlay.innerHTML = '' +
+        '<div class="agent-transition-ring" style="position:absolute;inset:0;border:2px solid rgba(99,102,241,0.2);border-radius:0;animation:agent-ring-in 0.5s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
+        '<div class="agent-transition-scan" style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(99,102,241,0.6),rgba(168,85,247,0.4),transparent);animation:agent-scan 0.5s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
+        '<div class="agent-transition-grid" style="position:absolute;inset:0;opacity:0;background-image:radial-gradient(rgba(99,102,241,0.06) 1px,transparent 1px);background-size:24px 24px;animation:agent-grid-in 0.5s 0.1s ease forwards;"></div>' +
+        '<div class="agent-transition-text" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:28px;font-weight:800;letter-spacing:4px;color:rgba(99,102,241,0.15);opacity:0;animation:agent-text-in 0.5s 0.15s ease forwards;pointer-events:none;">AGENT MODE</div>';
+    document.body.appendChild(overlay);
+    setTimeout(function() { overlay.remove(); }, 700);
+}
+function playAgentExitEffect() {
+    var overlay = document.createElement('div');
+    overlay.className = 'agent-transition-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
+    overlay.innerHTML = '' +
+        '<div class="agent-transition-fade" style="position:absolute;inset:0;background:radial-gradient(ellipse at center, rgba(99,102,241,0.08) 0%, transparent 70%);animation:agent-fade-out 0.4s ease forwards;"></div>' +
+        '<div class="agent-transition-text" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:20px;font-weight:600;letter-spacing:4px;color:rgba(107,114,128,0.2);opacity:0;animation:agent-text-out 0.4s 0.05s ease forwards;pointer-events:none;">NORMAL MODE</div>';
+    document.body.appendChild(overlay);
+    setTimeout(function() { overlay.remove(); }, 600);
 }
 
 // 兼容旧版 toggleAgentMode

@@ -4555,3 +4555,43 @@ details[open] .src-chevron { transform: rotate(180deg); }
 .toast-close:hover { background: rgba(0,0,0,0.08); color: #4b5563; }
 .dark .toast-close { background: rgba(255,255,255,0.06); color: #6b7280; }
 .dark .toast-close:hover { background: rgba(255,255,255,0.1); color: #d1d5db; }
+
+/* ================================================================
+   ⚡ Agent 模式整页转场动效
+   ================================================================ */
+.agent-transition-overlay {
+    animation: agent-overlay-fade 0.7s ease forwards;
+}
+@keyframes agent-overlay-fade {
+    0%   { opacity: 1; }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+@keyframes agent-ring-in {
+    from { clip-path: circle(0% at 50% 50%); border-color: rgba(99,102,241,0.5); }
+    60%  { clip-path: circle(80% at 50% 50%); border-color: rgba(99,102,241,0.15); }
+    to   { clip-path: circle(120% at 50% 50%); border-color: transparent; }
+}
+@keyframes agent-scan {
+    from { top: -10%; opacity: 1; }
+    to   { top: 110%; opacity: 0; }
+}
+@keyframes agent-grid-in {
+    from { opacity: 0; background-size: 40px 40px; }
+    50%  { opacity: 0.8; }
+    to   { opacity: 0; background-size: 20px 20px; }
+}
+@keyframes agent-text-in {
+    from { opacity: 0; transform: translate(-50%,-50%) scale(0.8); letter-spacing: 10px; }
+    50%  { opacity: 1; transform: translate(-50%,-50%) scale(1.05); }
+    to   { opacity: 0; transform: translate(-50%,-50%) scale(1); letter-spacing: 4px; }
+}
+@keyframes agent-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+@keyframes agent-text-out {
+    from { opacity: 0; transform: translate(-50%,-50%) scale(1.2); }
+    30%  { opacity: 1; }
+    to   { opacity: 0; transform: translate(-50%,-50%) scale(0.9); }
+}
