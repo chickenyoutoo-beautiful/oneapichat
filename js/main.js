@@ -2933,7 +2933,7 @@ window.onProviderChange = function() {
     var cleanKey = '';
     if (savedKey) { var dk = decrypt(savedKey); cleanKey = (dk && dk !== 'not-needed') ? dk : ''; }
     setVal('apiKey', cleanKey);
-    // ★ 不覆盖 apiKey —— 它由 saveConfig 管理，只更新输入框
+    localStorage.setItem('apiKey', cleanKey);
     localStorage.setItem('baseUrlProvider', provider);
     
     // 4. UI
@@ -6396,8 +6396,9 @@ function saveConfig(showFeedback = false) {
         const mainKey = getVal('apiKey') || '';
         var _provider = getEl('baseUrlProvider')?.value || 'custom';
         var _pCfg = API_PROVIDERS[_provider] || API_PROVIDERS.custom;
-        // ★ 写独立厂商 key，apiKey 始终存当前值
+        // ★ 写独立厂商 key + 通用 apiKey（两者同步）
         localStorage.setItem(_pCfg.keyLS, mainKey === 'not-needed' ? '' : encrypt(mainKey));
+        localStorage.setItem('apiKey', mainKey);
         localStorage.setItem('baseUrl', getVal('baseUrl') || '');
         if (_provider === 'custom') localStorage.setItem('baseUrlCustom', getVal('baseUrl') || '');
         localStorage.setItem('baseUrlProvider', _provider);
