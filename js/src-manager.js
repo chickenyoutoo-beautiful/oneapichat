@@ -410,9 +410,14 @@
         return String(n);
     }
 
+    var _lastDashboardData = null;
     function updateDashboard(data) {
         var c = $el('srcDashboard'); if (!c) return;
         var res = data.resources || {};
+        // ★ 数据没变时跳过重绘, 避免闪烁
+        var _hash = JSON.stringify(res);
+        if (_hash === _lastDashboardData) return;
+        _lastDashboardData = _hash;
         c.innerHTML = RESOURCES.map(function(r) {
             var val = (res[r.key] || {}).value || 0;
             var total = (res[r.key] || {}).total;
