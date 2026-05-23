@@ -3884,6 +3884,13 @@ html:not(.dark) #userInput {
     text-align: center;
     flex-shrink: 0;
 }
+.slash-item-icon-svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    color: #6366f1;
+}
+.dark .slash-item-icon-svg { color: #a5b4fc; }
 
 .slash-item-cmd {
     font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
