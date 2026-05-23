@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>NAUJTRATS · 个人版</title>
+    <!-- PWA -->
+    <link rel="manifest" href="/oneapichat/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="NAUJTRATS">
+    <link rel="apple-touch-icon" href="/oneapichat/resource/icon-192.png">
     <script>
     // 暗色模式最优先初始化（必须在所有 CSS 之前执行）
     if (localStorage.getItem('dark') === 'true') {
@@ -1125,5 +1132,11 @@ window.addEventListener('pageshow', function(e) {
 
 
 
+    <!-- PWA Service Worker -->
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/oneapichat/sw.js').catch(function() {});
+    }
+    </script>
 </body>
 </html>
