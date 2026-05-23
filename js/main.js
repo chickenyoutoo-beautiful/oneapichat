@@ -1673,91 +1673,23 @@ async function _srcApi(path, opts) {
 }
 
 const SRC_TOOLS = [
-    {
-        type: "function",
-        function: {
-            name: "src_status",
-            description: "查询SRC(星穹铁道自动化)的运行状态。返回是否存活、运行模式、当前任务等信息。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_start",
-            description: "启动SRC服务运行星穹铁道自动化。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_stop",
-            description: "停止SRC服务。安全停止当前运行的所有任务。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_get_config",
-            description: "读取SRC的运行配置。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_set_config",
-            description: "修改SRC的一项配置。",
-            parameters: {
-                type: "object",
-                properties: {
-                    path: { type: "string", description: "配置路径" },
-                    value: { type: "string", description: "新值" }
-                },
-                required: ["path", "value"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_get_logs",
-            description: "获取SRC最近的运行日志。",
-            parameters: {
-                type: "object",
-                properties: {
-                    lines: { type: "number", description: "行数,默认50" }
-                },
-                required: []
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_get_tasks",
-            description: "获取SRC任务列表和完成进度。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_check_upgrade",
-            description: "检查SRC更新。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "src_do_upgrade",
-            description: "执行SRC升级(git pull+pip install+重启)。",
-            parameters: { type: "object", properties: {}, required: [] }
-        }
-    }
+    // ── 状态与健康 ──
+    { type: "function", function: { name: "src_status", description: "查询SRC服务存活状态、运行模式、state_label(stopped/running/error)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_dashboard", description: "获取星穹铁道游戏资源面板(体力/星琼/信用点/燃料/沉浸器/大月卡进度等实时数据)", parameters: { type: "object", properties: {}, required: [] } } },
+    // ── 生命周期 ──
+    { type: "function", function: { name: "src_start", description: "启动SRC完整调度器(Alas任务)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_stop", description: "安全停止SRC所有运行中的任务", parameters: { type: "object", properties: {}, required: [] } } },
+    // ── 任务管理 ──
+    { type: "function", function: { name: "src_get_tasks", description: "获取所有任务列表(含分组:日常/周本/副本/工具,各任务的启用状态和下次运行时间)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_toggle_task", description: "启用/禁用单个任务(副本/周本/模拟宇宙/派遣等),enable=true启用false禁用", parameters: { type: "object", properties: { name: { type: "string", description: "任务名,如 Dungeon/Weekly/Rogue/Ornament/Daemon" }, enable: { type: "boolean", description: "true=启用,false=禁用" } }, required: ["name","enable"] } } },
+    // ── 配置 ──
+    { type: "function", function: { name: "src_get_config", description: "读取SRC完整运行配置(模拟器/游戏/副本/遗器/周本/委托/优化等全部配置项)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_set_config", description: "修改SRC一项配置。可改模拟器类型、刷取副本名、队伍编号、是否用燃料、截图方式等。path用点分隔。", parameters: { type: "object", properties: { path: { type: "string", description: "配置路径,如 Dungeon.Dungeon.Name / Alas.Emulator.Serial / Rogue.RogueWorld.World" }, value: { type: "string", description: "新值" } }, required: ["path","value"] } } },
+    // ── 日志与诊断 ──
+    { type: "function", function: { name: "src_get_logs", description: "获取SRC运行日志(用于诊断启动失败/运行错误)", parameters: { type: "object", properties: { lines: { type: "number", description: "行数,默认50" } }, required: [] } } },
+    // ── 升级维护 ──
+    { type: "function", function: { name: "src_check_upgrade", description: "检查SRC代码是否有更新(git behind数)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_do_upgrade", description: "执行SRC升级(git pull+pip install+重启,需确认)", parameters: { type: "object", properties: {}, required: [] } } },
 ];
 
 // 在工具注册表注册
@@ -6454,7 +6386,7 @@ const _TOOL_CATEGORIES = [
     { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'], agentOnly: true },
     { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'], agentOnly: true },
     { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] },
-    { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_GET_TASKS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] }
+    { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] }
 ];
 
 // ── 工具显示名映射 ──
@@ -6474,9 +6406,9 @@ const _TOOL_LABELS = {
     'DELEGATE_TASK_TOOL': '子代理任务', 'ENGINE_AGENT_STATUS_TOOL': '子代理状态', 'ENGINE_AGENT_LIST_TOOL': '子代理列表',
     'ENGINE_AGENT_DELETE_TOOL': '删除子代理', 'ENGINE_PUSH_TOOL': '推送通知',
     'ASK_AGENT_TOOL': '请求 Agent 模式', 'AUTONOMOUS_MODE_TOOL': '自主模式开关',
-    'SRC_STATUS_TOOL': 'SRC状态', 'SRC_START_TOOL': 'SRC启动', 'SRC_STOP_TOOL': 'SRC停止',
+    'SRC_STATUS_TOOL': 'SRC状态', 'SRC_DASHBOARD_TOOL': 'SRC资源面板', 'SRC_START_TOOL': 'SRC启动', 'SRC_STOP_TOOL': 'SRC停止',
     'SRC_GET_CONFIG_TOOL': 'SRC读配置', 'SRC_SET_CONFIG_TOOL': 'SRC改配置',
-    'SRC_GET_LOGS_TOOL': 'SRC日志', 'SRC_GET_TASKS_TOOL': 'SRC任务',
+    'SRC_GET_LOGS_TOOL': 'SRC日志', 'SRC_GET_TASKS_TOOL': 'SRC任务', 'SRC_TOGGLE_TASK_TOOL': 'SRC开关任务',
     'SRC_CHECK_UPGRADE_TOOL': 'SRC检查更新', 'SRC_DO_UPGRADE_TOOL': 'SRC执行升级'
 };
 
@@ -10618,12 +10550,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'ask_agent': 'ASK_AGENT_TOOL',
                 'autonomous_mode': 'AUTONOMOUS_MODE_TOOL',
                 'src_status': 'SRC_STATUS_TOOL',
+                'src_dashboard': 'SRC_DASHBOARD_TOOL',
                 'src_start': 'SRC_START_TOOL',
                 'src_stop': 'SRC_STOP_TOOL',
                 'src_get_config': 'SRC_GET_CONFIG_TOOL',
                 'src_set_config': 'SRC_SET_CONFIG_TOOL',
                 'src_get_logs': 'SRC_GET_LOGS_TOOL',
                 'src_get_tasks': 'SRC_GET_TASKS_TOOL',
+                'src_toggle_task': 'SRC_TOGGLE_TASK_TOOL',
                 'src_check_upgrade': 'SRC_CHECK_UPGRADE_TOOL',
                 'src_do_upgrade': 'SRC_DO_UPGRADE_TOOL'
             };
@@ -11375,10 +11309,22 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'engine_push') {
                         toolResult = await engineApiHandler('push', args);
                     }
-                    // ===== SRC 星穹铁道工具 =====
+                    // ===== SRC 星穹铁道工具 (完整版) =====
                      else if (func.name === 'src_status') {
                         var r = await _srcApi('/status?config_name=src');
-                        toolResult = r.ok ? { result: (r.alive ? '✅ 运行中' : '❌ ' + (r.state_label || '已停止')) + '\n' + JSON.stringify(r, null, 2) } : { error: r.error || '获取状态失败' };
+                        toolResult = r.ok ? { result: (r.alive ? '✅ 运行中' : '❌ ' + (r.state_label || '已停止')) + ' | state=' + (r.state||'') } : { error: r.error || '获取状态失败' };
+                    }
+                     else if (func.name === 'src_dashboard') {
+                        var r = await _srcApi('/dashboard?config_name=src');
+                        if (r.ok && r.resources) {
+                            var res = r.resources;
+                            var lines = [];
+                            var fmts = { trailblaze_power: '⚡体力', reserved_power: '💾后备体力', fuel: '⛽燃料', stellar_jade: '💎星琼', credit: '💰信用点', immersifier: '📿沉浸器', battle_pass_level: '📊大月卡', daily_activity: '📋活跃度', simulated_universe: '🌌模拟宇宙分', echo_of_war: '⚔️历战余响', relic: '📦遗器碎片' };
+                            Object.keys(fmts).forEach(function(k) {
+                                if (res[k]) lines.push(fmts[k] + ': ' + (res[k].value||0) + '/' + (res[k].total||'∞') + (res[k].time ? ' (' + res[k].time + ')' : ''));
+                            });
+                            toolResult = { result: '📊 资源面板:\n' + lines.join('\n') + '\n\n更新: ' + (r.updated_at || '') };
+                        } else { toolResult = { error: r.error || '获取失败' }; }
                     }
                      else if (func.name === 'src_start') {
                         var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: 'Alas' }) });
@@ -11387,6 +11333,26 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'src_stop') {
                         var r = await _srcApi('/stop', { method: 'POST', body: JSON.stringify({ config_name: 'src' }) });
                         toolResult = r.ok ? { result: '✅ SRC 已停止' } : { error: r.error || '停止失败' };
+                    }
+                     else if (func.name === 'src_get_tasks') {
+                        var r = await _srcApi('/tasks?config_name=src');
+                        if (r.ok && r.tasks) {
+                            var lines = r.tasks.map(function(t) {
+                                return (t.enable ? '✅' : '⏸️') + ' ' + t.name + ': ' + (t.description||'') + (t.next_run ? ' → ' + t.next_run : '');
+                            });
+                            toolResult = { result: '📋 任务列表:\n' + lines.join('\n') };
+                        } else { toolResult = { error: r.error || '获取失败' }; }
+                    }
+                     else if (func.name === 'src_toggle_task') {
+                        // 通过配置路径修改任务启用状态
+                        var taskName = args.name;
+                        var taskPathMap = { Dungeon: 'Dungeon.Scheduler.Enable', Weekly: 'Weekly.Scheduler.Enable', Rogue: 'Rogue.Scheduler.Enable', Ornament: 'Ornament.Scheduler.Enable', Daemon: 'Daemon.Scheduler.Enable', DailyQuest: 'DailyQuest.Scheduler.Enable', BattlePass: 'BattlePass.Scheduler.Enable', Assignment: 'Assignment.Scheduler.Enable', Freebies: 'Freebies.Scheduler.Enable', PlannerScan: 'PlannerScan.Scheduler.Enable' };
+                        var path = taskPathMap[taskName];
+                        if (!path) { toolResult = { error: '未知任务: ' + taskName + ', 可选: ' + Object.keys(taskPathMap).join(', ') }; }
+                        else {
+                            var r = await _srcApi('/config/src', { method: 'PUT', body: JSON.stringify({ path: path, value: !!args.enable }) });
+                            toolResult = r.ok ? { result: (args.enable ? '✅' : '⏸️') + ' ' + taskName + '已' + (args.enable ? '启用' : '禁用') } : { error: r.error || '操作失败' };
+                        }
                     }
                      else if (func.name === 'src_get_config') {
                         var r = await _srcApi('/config/src');
@@ -11404,16 +11370,15 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'src_get_logs') {
                         var lines = Math.min(args.lines || 50, 200);
                         var r = await _srcApi('/logs?config_name=src&limit=' + lines);
-                        toolResult = r.ok ? { result: (r.lines || r.logs || []).join('\n') } : { error: r.error || '获取日志失败' };
-                    }
-                     else if (func.name === 'src_get_tasks') {
-                        var r = await _srcApi('/tasks?config_name=src');
-                        toolResult = r.ok ? { result: JSON.stringify(r, null, 2) } : { error: r.error || '获取任务失败' };
+                        var logLines = r.lines || r.logs || [];
+                        // 过滤掉 rich.table.Table 对象
+                        var filtered = logLines.filter(function(l) { return typeof l === 'string' && l.indexOf('<rich.table.Table') === -1; });
+                        toolResult = r.ok ? { result: filtered.join('\n') || '(日志为空)' } : { error: r.error || '获取失败' };
                     }
                      else if (func.name === 'src_check_upgrade') {
                         var r = await fetch('/oneapichat/src_upgrade.php?action=check');
                         var d = await r.json();
-                        toolResult = d.ok ? { result: '当前: ' + d.current + ', 落后 ' + d.behind + ' 个commit, ' + (d.need_update ? '需要更新' : '已是最新') } : { error: d.error || '检查失败' };
+                        toolResult = d.ok ? { result: '当前: ' + d.current + ', 落后 ' + d.behind + ' commit, ' + (d.need_update ? '🔔需要更新' : '✅已是最新') } : { error: d.error || '检查失败' };
                     }
                      else if (func.name === 'src_do_upgrade') {
                         if (!confirm('⚠️ AI请求SRC升级\n\ngit pull + pip install + 重启\n\n确认?')) {
