@@ -4415,14 +4415,14 @@ function playAgentEnterEffect(mode) {
         // 9. 中心艺术字（自身带模糊背景，不被背景干扰）
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">' +
             '<div style="padding:20px 60px;border-radius:24px;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);background:rgba(255,255,255,0.03);opacity:0;animation:agent-mask-in 0.4s 0.12s ease forwards;">' +
-                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;text-align:center;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
                     titleWord.split('').map(function(letter, i) {
                         var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
                         var shadow = 'filter:drop-shadow(0 0 ' + (25+i*4) + 'px ' + glow + '0.4));';
                         return '<span style="' + grad + shadow + '">' + letter + '</span>';
                     }).join('') +
                 '</div>' +
-                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;text-align:center;">' + subtitle + '</div>' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;text-align:center;width:100%;">' + subtitle + '</div>' +
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
