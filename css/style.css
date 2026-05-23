@@ -4641,7 +4641,7 @@ details[open] .src-chevron { transform: rotate(180deg); }
 }
 @keyframes agent-subtitle-in {
     from { opacity: 0; letter-spacing: 24px; transform: translateY(16px); }
-    60%  { opacity: 1; }
+    60%  { opacity: 1; transform: translateY(0); }
     to   { opacity: 1; letter-spacing: 16px; transform: translateY(0); }
 }
 
@@ -4674,7 +4674,7 @@ details[open] .src-chevron { transform: rotate(180deg); }
     to   { width: 0; height: 0; opacity: 0; border-width: 8px; }
 }
 @keyframes agent-exit-text {
-    0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); letter-spacing: 12px; }
-    35%  { opacity: 1; transform: translate(-50%,-50%) scale(1); }
-    100% { opacity: 0; transform: translate(-50%,-50%) scale(1.2); letter-spacing: 4px; }
+    0%   { opacity: 0; transform: scale(0.6); letter-spacing: 12px; }
+    35%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.2); letter-spacing: 4px; }
 }

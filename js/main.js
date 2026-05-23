@@ -4411,7 +4411,7 @@ function playAgentEnterEffect(mode) {
             }).join('') +
         '</div>' +
         // 8. 中心艺术字
-        '<div style="position:absolute;top:43%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
+        '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">' +
             '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
                 titleWord.split('').map(function(letter, i) {
                     var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
@@ -4460,7 +4460,7 @@ function playAgentExitEffect(mode) {
         '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:2px solid ' + glow + '0.12);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
         '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:1px solid ' + glow2 + '0.08);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s 0.05s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
         // 文字
-        '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
+        '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
             '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:52px;font-weight:800;letter-spacing:8px;background:linear-gradient(135deg,' + glow + '0.2),' + glow2 + '0.1));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
