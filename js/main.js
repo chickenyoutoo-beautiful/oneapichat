@@ -3618,19 +3618,19 @@ function showToast(msg, type = 'info', dur = 3000) {
 // ⌨️ Slash Command Popup
 // ============================================================
 var SLASH_COMMANDS = [
-    { cmd: 'search', hint: '强制联网搜索', args: '[query]', icon: '🔍', group: '搜索' },
-    { cmd: 'news', hint: '搜索新闻', args: '[query]', icon: '📰', group: '搜索' },
-    { cmd: 'image', hint: '搜索图片', args: '[query]', icon: '🖼️', group: '搜索' },
-    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', icon: '⚙️', group: 'Agent' },
-    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', icon: '🧠', group: 'Agent' },
-    { cmd: 'retry', hint: '重新生成上一条回复', icon: '🔄', group: '对话' },
-    { cmd: 'clear', hint: '清空当前对话', icon: '🗑️', group: '对话' },
-    { cmd: 'compact', hint: '压缩对话上下文', icon: '📦', group: '对话' },
-    { cmd: 'new', hint: '新建对话', icon: '✨', group: '对话' },
-    { cmd: 'export', hint: '导出聊天记录', icon: '📥', group: '对话' },
-    { cmd: 'config', hint: '打开配置面板', icon: '🔧', group: '系统' },
-    { cmd: 'logout', hint: '退出登录', icon: '🚪', group: '系统' },
-    { cmd: 'help', hint: '显示所有命令', icon: '❓', group: '帮助' }
+    { cmd: 'search', hint: '强制联网搜索', args: '[query]', icon: 'search', group: '搜索' },
+    { cmd: 'news', hint: '搜索新闻', args: '[query]', icon: 'news', group: '搜索' },
+    { cmd: 'image', hint: '搜索图片', args: '[query]', icon: 'image', group: '搜索' },
+    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', icon: 'mode', group: 'Agent' },
+    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', icon: 'model', group: 'Agent' },
+    { cmd: 'retry', hint: '重新生成上一条回复', icon: 'retry', group: '对话' },
+    { cmd: 'clear', hint: '清空当前对话', icon: 'clear', group: '对话' },
+    { cmd: 'compact', hint: '压缩对话上下文', icon: 'compact', group: '对话' },
+    { cmd: 'new', hint: '新建对话', icon: 'new', group: '对话' },
+    { cmd: 'export', hint: '导出聊天记录', icon: 'export', group: '对话' },
+    { cmd: 'config', hint: '打开配置面板', icon: 'config', group: '系统' },
+    { cmd: 'logout', hint: '退出登录', icon: 'logout', group: '系统' },
+    { cmd: 'help', hint: '显示所有命令', icon: 'help', group: '帮助' }
 ];
 
 window._slashIdx = -1;
@@ -3665,10 +3665,10 @@ function updateSlashPopup(query) {
     Object.keys(groups).forEach(function(g) {
         html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
         groups[g].forEach(function(m) {
-            var icon = m.icon || '';
+            var iconSvg = m.icon ? '<svg class="slash-item-icon-svg"><use href="#cmd-icon-' + m.icon + '"/></svg>' : '';
             var argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
             html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '">' +
-                '<span class=slash-item-icon>' + icon + '</span>' +
+                iconSvg +
                 '<span class=slash-item-cmd>/' + m.cmd + '</span>' + argTag +
                 '<span class=slash-item-hint>' + m.hint + '</span>' +
             '</div>';
@@ -8077,7 +8077,7 @@ function handleSlashCommand(cmd) {
         compressContextIfNeeded();
     } else if (cmd.cmd === 'show_help') {
         var helpText = SLASH_COMMANDS.map(function(c) {
-            return (c.icon||'') + ' `/' + c.cmd + '`' + (c.args ? ' *' + c.args + '*' : '') + ' — ' + c.hint;
+            return ' `/' + c.cmd + '`' + (c.args ? ' *' + c.args + '*' : '') + ' — ' + c.hint;
         }).join('\n');
         appendMessage('system', '## ⌨️ 命令列表\n' + helpText + '\n\n> 输入 `/` 可随时唤出命令面板');
     } else if (cmd.cmd === 'open_config') {
