@@ -9449,10 +9449,32 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     }
 
     // 检查模型是否还在加载
-    const modelVal = getVal('modelSelect');
+    var modelVal = getVal('modelSelect');
     if (!modelVal || modelVal === '加载中...') {
-        showToast('模型列表加载中,请稍后再试', 'warning');
-        return;
+        // ★ 等待模型列表加载完成，最多等6秒
+        var _waitModelStart = Date.now();
+        var _modelLoaded = false;
+        await new Promise(function(resolve) {
+            var _check = function() {
+                var _mv = getVal('modelSelect');
+                if (_mv && _mv !== '加载中...') {
+                    _modelLoaded = true;
+                    resolve();
+                    return;
+                }
+                if (Date.now() - _waitModelStart > 6000) {
+                    resolve();
+                    return;
+                }
+                setTimeout(_check, 200);
+            };
+            _check();
+        });
+        if (!_modelLoaded) {
+            showToast('模型列表加载超时,请检查网络或API Key后重试', 'error', 5000);
+            return;
+        }
+        modelVal = getVal('modelSelect');
     }
 
     const chatId = currentChatId;
