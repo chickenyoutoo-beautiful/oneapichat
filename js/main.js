@@ -6637,6 +6637,8 @@ window.refreshModels = async function (e) {
         btn.disabled = true;
         btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
     }
+    // ★ 最低显示旋转动画 600ms，避免一闪而过
+    var _spinStart = Date.now();
     try {
         await window.fetchModels(true);
         // ★ 延迟显示 toast，避免与模型列表更新同时触发视觉变化
@@ -6648,10 +6650,15 @@ window.refreshModels = async function (e) {
         else if (_em.includes('timeout') || _em.includes('Failed to fetch')) showToast('无法连接', 'error');
         else showToast('刷新失败', 'error');
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
-        }
+        // ★ 确保旋转动画至少显示了 600ms
+        var _elapsed = Date.now() - _spinStart;
+        var _minDelay = Math.max(0, 600 - _elapsed);
+        setTimeout(function() {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+            }
+        }, _minDelay);
     }
 };
 
