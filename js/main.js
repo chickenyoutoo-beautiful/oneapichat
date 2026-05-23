@@ -4422,7 +4422,7 @@ function playAgentEnterEffect(mode) {
                         return '<span style="' + grad + shadow + '">' + letter + '</span>';
                     }).join('') +
                 '</div>' +
-                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;">' + subtitle + '</div>' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;text-align:center;">' + subtitle + '</div>' +
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
