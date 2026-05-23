@@ -315,7 +315,7 @@ def _run_cron_job(name, interval, action, user_id):
             break
         try:
             result = subprocess.run(
-                action, shell=True, capture_output=True, text=True, timeout=300
+                action, shell=True, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='replace'
             )
             log_entry = {
                 "time": datetime.now().isoformat(),
