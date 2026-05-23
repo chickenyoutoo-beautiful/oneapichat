@@ -3628,6 +3628,7 @@ var SLASH_COMMANDS = [
     { cmd: 'compact', hint: '压缩对话上下文', icon: 'compact', group: '对话' },
     { cmd: 'new', hint: '新建对话', icon: 'new', group: '对话' },
     { cmd: 'export', hint: '导出聊天记录', icon: 'export', group: '对话' },
+    { cmd: 'remember', hint: '保存/查看记忆', args: '[key: content]', icon: 'config', group: '对话' },
     { cmd: 'config', hint: '打开配置面板', icon: 'config', group: '系统' },
     { cmd: 'logout', hint: '退出登录', icon: 'logout', group: '系统' },
     { cmd: 'help', hint: '显示所有命令', icon: 'help', group: '帮助' }
@@ -4752,6 +4753,93 @@ window.clearAllMemories = async function() {
         showToast('已清空 ' + memories.length + ' 条记忆', 'success');
         window.refreshMemoryList();
     } catch(e) { showToast('清空失败', 'error'); }
+};
+
+// ── AI 自主记忆保存 ───────────────────────────
+
+/** 对话结束后自动提取重要信息保存为记忆 */
+window._autoSaveMemoriesFromChat = async function(chatId) {
+    var token = localStorage.getItem('authToken');
+    if (!token || !chatId || !chats[chatId]) return;
+    var msgs = chats[chatId].messages;
+    if (msgs.length < 3) return; // 太短的对话不提取
+    
+    // 取最后5条非system消息作为分析素材
+    var recent = msgs.filter(function(m) { return m.role !== 'system' && !m.temporary && !m._internal; }).slice(-6);
+    if (recent.length < 2) return;
+    
+    var conversation = recent.map(function(m) {
+        return (m.role === 'user' ? '用户: ' : 'AI: ') + (m.text || m.content || '').substring(0, 200);
+    }).join('\n');
+    
+    // 用本地小模型判断是否需要保存记忆
+    var key = localStorage.getItem('apiKey') || '';
+    var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
+    var model = 'deepseek-chat'; // 用廉价模型
+    if (!key) return;
+    
+    try {
+        var resp = await fetch(baseUrl + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            body: JSON.stringify({
+                model: model,
+                messages: [
+                    { role: 'system', content: '你是记忆提取助手。分析对话，提取值得长期记住的信息。\n\n规则:\n1. 只提取用户明确告知的偏好、个人信息、决策、计划\n2. 忽略闲聊、问时间天气、临时问答\n3. 用JSON格式输出: [{"key":"简短英文键","content":"中文内容"}]\n4. 如果没有任何值得记住的，输出空数组 []\n5. 每个content不超过80字\n6. 最多提取3条' },
+                    { role: 'user', content: '请从以下对话提取值得长期记住的信息:\n' + conversation }
+                ],
+                temperature: 0.1,
+                max_tokens: 300
+            })
+        });
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var text = data.choices?.[0]?.message?.content || '';
+        // 提取JSON
+        var jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) return;
+        var items = JSON.parse(jsonMatch[0]);
+        if (!Array.isArray(items) || items.length === 0) return;
+        
+        // 保存每条记忆
+        var saved = 0;
+        for (var i = 0; i < items.length; i++) {
+            if (!items[i].key || !items[i].content) continue;
+            await fetch('/oneapichat/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: items[i].key, content: items[i].content })
+            });
+            saved++;
+        }
+        if (saved > 0) {
+            console.log('[自动记忆] 已保存 ' + saved + ' 条');
+            window._loadCloudMemories();
+        }
+    } catch(e) { console.warn('[自动记忆] 失败:', e.message); }
+};
+
+// ── AI 自主询问身份 ───────────────────────────
+
+/** 检查并自动在Agent聊天中询问身份 */
+window._autoAskIdentity = async function() {
+    var token = localStorage.getItem('authToken');
+    if (!token) return;
+    // 检查是否已有身份信息
+    try {
+        var resp = await fetch('/oneapichat/memory_api.php?action=search_memories&q=identity_user_name&token=' + encodeURIComponent(token));
+        var data = await resp.json();
+        var hasIdentity = data.memories && data.memories.some(function(m) { return m.key === 'identity_user_name'; });
+        if (hasIdentity) return; // 已有身份,不需要问
+    } catch(e) { return; }
+    
+    // 在Agent聊天中注入身份询问消息
+    if (isAgentToolsActive() && currentChatId === AGENT_CHAT_ID) {
+        window.__autoIdentityAsked = true;
+        setTimeout(function() {
+            appendMessage('system', '👋 欢迎!我注意到还没有设置身份信息。\n\n请告诉我:\n- 你希望我如何称呼你?\n- 你希望我以什么风格/身份与你对话?\n\n例如: "我叫奕侨,喜欢简洁直接的回复"');
+        }, 1000);
+    }
 };
 
 /**
@@ -8161,12 +8249,16 @@ function parseCommand(text) {
     if (cmd === '/retry') return { type: 'command', cmd: 'retry' };
     // 导出
     if (cmd === '/export') return { type: 'command', cmd: 'export_chat' };
+    // 记忆
+    if (cmd === '/remember') return { type: 'command', cmd: 'remember', content: rest };
     return null;
 }
 
 // ★ 处理 /slash 命令
 function handleSlashCommand(cmd) {
     var modeLabels = { off:'已关闭', plan:'Plan 只读模式', agent:'Agent 交互模式', yolo:'YOLO 自动模式' };
+    // ★ 异步包装 async 分支
+    var _async = (async function() {
     if (cmd.cmd === 'set_mode') {
         setAgentMode(cmd.mode);
         showToast('已切换到 ' + (modeLabels[cmd.mode] || cmd.mode), 'success', 3000);
@@ -8268,7 +8360,49 @@ function handleSlashCommand(cmd) {
         a.click();
         URL.revokeObjectURL(url);
         showToast('已导出为 Markdown', 'success', 2000);
+    } else if (cmd.cmd === 'remember') {
+        // /remember key: content
+        var parts = (cmd.content || '').split(':');
+        if (parts.length >= 2) {
+            var key = parts[0].trim();
+            var content = parts.slice(1).join(':').trim();
+            if (key && content) {
+                var token = localStorage.getItem('authToken');
+                try {
+                    var resp = await fetch('/oneapichat/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: key, content: content })
+                    });
+                    var data = await resp.json();
+                    if (data.success) {
+                        window._loadCloudMemories();
+                        showToast('已记住: ' + key, 'success', 2000);
+                    } else {
+                        showToast('保存失败', 'error');
+                    }
+                } catch(e) { showToast('保存失败', 'error'); }
+            } else {
+                appendMessage('system', '用法: /remember 键: 内容\n例: /remember user_name: 向奕侨');
+            }
+        } else {
+            // 无参数: 显示已保存的记忆
+            window.refreshMemoryList?.();
+            var token2 = localStorage.getItem('authToken');
+            try {
+                var resp2 = await fetch('/oneapichat/memory_api.php?action=get_memories&token=' + encodeURIComponent(token2));
+                var data2 = await resp2.json();
+                if (data2.success && data2.memories.length > 0) {
+                    var list = data2.memories.map(function(m) { return '- `' + m.key + '`: ' + m.content; }).join('\n');
+                    appendMessage('system', '📝 已保存的记忆:\n' + list);
+                } else {
+                    appendMessage('system', '📝 暂无保存的记忆');
+                }
+            } catch(e) {}
+            showToast('用法: /remember 键: 内容', 'info', 3000);
+        }
     }
+    })(); // end async wrapper
 }
 
 function getSmartSearchKeywords() {
@@ -12184,6 +12318,14 @@ window.useAlternativeVisionModel = function() {
             if ($.stopBtn) $.stopBtn.classList.remove('visible');
         }
         if (currentChatId === chatId) loadChat(chatId);
+        // ★ AI 自主记忆: 对话结束后自动提取重要信息
+        if (!window.__autoMemoryPending) {
+            window.__autoMemoryPending = true;
+            setTimeout(function() {
+                window._autoSaveMemoriesFromChat(chatId);
+                window.__autoMemoryPending = false;
+            }, 2000);
+        }
         if (Object.keys(isTypingMap).length === 0) localStorage.removeItem('ongoingChats');
         else saveOngoingChatsSnapshot();
     }
@@ -13556,6 +13698,10 @@ function initializeApp() {
                         // ★ 登录成功,预加载云端记忆和身份
                         if (typeof window._loadCloudMemories === 'function') window._loadCloudMemories();
                         if (typeof window._loadCloudIdentity === 'function') window._loadCloudIdentity();
+                        // ★ AI 自主询问身份: 如果没有身份信息,自动在 Agent 聊天中询问
+                        setTimeout(function() {
+                            if (typeof window._autoAskIdentity === 'function') window._autoAskIdentity();
+                        }, 3000);
                     }
                 } catch(e) {}
             })();
