@@ -12967,6 +12967,8 @@ function setupEventListeners() {
     var _panel = $.configPanel || getEl('configPanel');
     if (_panel) {
         _panel.querySelectorAll('input, select, textarea').forEach(function(el) {
+            // ★ baseUrlProvider 有独立的 onProviderChange handler，不在此触发 saveConfig
+            if (el.id === 'baseUrlProvider') return;
             el.addEventListener('change', function() { saveConfig(); });
             if (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio') {
                 // API Key 和 Base URL 只在失焦时保存,打字过程不触发
