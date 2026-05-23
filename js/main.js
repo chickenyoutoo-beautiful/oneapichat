@@ -4364,54 +4364,80 @@ function isPlanMode() {
 function playAgentEnterEffect() {
     var isDark = document.documentElement.classList.contains('dark');
     var accent = 'rgba(99,102,241,'; var accent2 = 'rgba(168,85,247,';
+    // 预载艺术字
+    if (!document.getElementById('agent-font-link')) {
+        var fl = document.createElement('link');
+        fl.id = 'agent-font-link';
+        fl.rel = 'stylesheet';
+        fl.href = 'https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&display=swap';
+        document.head.appendChild(fl);
+    }
     var overlay = document.createElement('div');
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 背景闪烁
-        '<div style="position:absolute;inset:0;background:' + (isDark ? '#0f172a' : '#fff') + ';opacity:0;animation:agent-bg-flash 0.6s ease-out forwards;"></div>' +
-        // 六边形网格图案
-        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="rgba(99,102,241,0.08)" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 0.8s 0.1s ease forwards;"></div>' +
-        // 多层环形扩散
-        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + accent + '0.4),0 0 0 0 ' + accent + '0.2),0 0 0 0 ' + accent + '0.1);animation:agent-pulse-rings 0.8s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
+        // 模糊遮罩层
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(20px) saturate(200%);-webkit-backdrop-filter:blur(20px) saturate(200%);background:rgba(15,23,42,0.6);opacity:0;animation:agent-mask-in 0.5s ease forwards;"></div>' +
+        // 边缘暗角
+        '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.4) 100%);opacity:0;animation:agent-vignette-in 0.5s 0.1s ease forwards;"></div>' +
+        // 六边形网格
+        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="rgba(99,102,241,0.12)" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 1s 0.15s ease forwards;"></div>' +
+        // 多层光环
+        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + accent + '0.5),0 0 0 0 ' + accent + '0.3),0 0 0 0 ' + accent + '0.15);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
         // 粒子线
         '<div style="position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;">' +
-            Array.from({length: 6}, function(_, i) {
-                return '<div style="position:absolute;top:' + (15 + i*15) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + accent + '0.5),' + accent2 + '0.3),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' ' + (0.5+i*0.06) + 's ' + (0.05+i*0.04) + 's ease forwards;"></div>';
+            Array.from({length: 8}, function(_, i) {
+                return '<div style="position:absolute;top:' + (10 + i*12) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + accent + '0.6),' + accent2 + '0.4),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' ' + (0.5+i*0.07) + 's ' + (0.08+i*0.05) + 's ease forwards;"></div>';
             }).join('') +
         '</div>' +
-        // 中心文字 - 大号科技字体
-        '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
-            '<div style="font-family:\'Inter\',system-ui,sans-serif;font-size:72px;font-weight:900;letter-spacing:-2px;line-height:1;background:linear-gradient(135deg,#6366f1 0%,#a855f7 40%,#ec4899 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-title-in 0.6s 0.12s cubic-bezier(0.16,1,0.3,1) forwards;filter:drop-shadow(0 0 30px rgba(99,102,241,0.3));">AGENT</div>' +
-            '<div style="font-family:\'Inter\',system-ui,sans-serif;font-size:28px;font-weight:300;letter-spacing:12px;color:' + (isDark ? 'rgba(148,163,184,0.6)' : 'rgba(100,116,139,0.5)') + ';opacity:0;animation:agent-subtitle-in 0.6s 0.22s ease forwards;margin-top:4px;">ENHANCED</div>' +
+        // 数字雨效果(背景装饰)
+        '<div style="position:absolute;inset:0;overflow:hidden;opacity:0;animation:agent-mask-in 0.4s 0.15s ease forwards;">' +
+            Array.from({length: 12}, function() {
+                return '<div style="position:absolute;font-family:monospace;font-size:14px;color:rgba(99,102,241,0.08);top:' + (Math.random()*100) + '%;left:' + (Math.random()*100) + '%;animation:agent-float-up ' + (2+Math.random()*3) + 's ' + (Math.random()*2) + 's linear infinite;">' + Math.random().toString(2).substr(2,6) + '</div>';
+            }).join('') +
+        '</div>' +
+        // 中心艺术字 - Orbits 字体
+        '<div style="position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
+            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:8px;line-height:1;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
+                '<span style="background:linear-gradient(135deg,#6366f1 0%,#a855f7 30%,#ec4899 60%,#f43f5e 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(99,102,241,0.5)) drop-shadow(0 0 80px rgba(168,85,247,0.3));">A</span>' +
+                '<span style="background:linear-gradient(135deg,#a855f7 0%,#ec4899 40%,#f43f5e 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(168,85,247,0.5));">G</span>' +
+                '<span style="background:linear-gradient(135deg,#ec4899 0%,#f43f5e 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(236,72,153,0.5));">E</span>' +
+                '<span style="background:linear-gradient(135deg,#6366f1 0%,#a855f7 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(99,102,241,0.5));">N</span>' +
+                '<span style="background:linear-gradient(135deg,#6366f1 0%,#ec4899 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(168,85,247,0.5));">T</span>' +
+            '</div>' +
+            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:22px;font-weight:600;letter-spacing:16px;color:rgba(168,85,247,0.6);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:12px;text-shadow:0 0 20px rgba(168,85,247,0.3);">ENHANCED</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; setTimeout(function() { overlay.remove(); }, 300); }, 1200);
+    // 添加淡出
+    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.4s ease'; setTimeout(function() { overlay.remove(); }, 400); }, 1500);
 }
+
 function playAgentExitEffect() {
     var isDark = document.documentElement.classList.contains('dark');
     var overlay = document.createElement('div');
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
+        // 模糊遮罩
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(16px) saturate(200%);-webkit-backdrop-filter:blur(16px) saturate(200%);background:rgba(15,23,42,0.5);opacity:0;animation:agent-mask-in 0.3s ease forwards;"></div>' +
         // 粒子回收
         '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.5s ease forwards;">' +
-            Array.from({length: 20}, function(_, i) {
-                var x = 20 + Math.random() * 60;
-                var y = 20 + Math.random() * 60;
-                var size = 2 + Math.random() * 4;
-                var dur = 0.3 + Math.random() * 0.3;
-                return '<div style="position:absolute;left:' + x + '%;top:' + y + '%;width:' + size + 'px;height:' + size + 'px;background:rgba(99,102,241,0.6);border-radius:50%;animation:agent-particle-shrink ' + dur + 's ' + (Math.random()*0.1) + 's ease forwards;"></div>';
+            Array.from({length: 30}, function(_, i) {
+                var x = 15 + Math.random() * 70;
+                var y = 15 + Math.random() * 70;
+                var size = 2 + Math.random() * 5;
+                var dur = 0.3 + Math.random() * 0.4;
+                return '<div style="position:absolute;left:' + x + '%;top:' + y + '%;width:' + size + 'px;height:' + size + 'px;background:linear-gradient(135deg,rgba(99,102,241,0.7),rgba(168,85,247,0.5));border-radius:50%;animation:agent-particle-shrink ' + dur + 's ' + (Math.random()*0.15) + 's ease forwards;"></div>';
             }).join('') +
         '</div>' +
         // 收缩环
         '<div style="position:absolute;top:50%;left:50%;width:300vw;height:300vw;border-radius:50%;border:2px solid rgba(99,102,241,0.15);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.5s cubic-bezier(0.6,0,1,1) forwards;"></div>' +
-        // 快速文字
+        // 文字
         '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
-            '<div style="font-family:\'Inter\',system-ui,sans-serif;font-size:48px;font-weight:800;letter-spacing:4px;color:' + (isDark ? 'rgba(148,163,184,0.15)' : 'rgba(100,116,139,0.12)') + ';opacity:0;animation:agent-exit-text 0.4s ease forwards;">COMPLETE</div>' +
+            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:56px;font-weight:800;letter-spacing:6px;background:linear-gradient(135deg,rgba(148,163,184,0.3),rgba(99,102,241,0.2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;text-shadow:0 0 30px rgba(99,102,241,0.1);">COMPLETE</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.2s'; setTimeout(function() { overlay.remove(); }, 200); }, 600);
+    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; setTimeout(function() { overlay.remove(); }, 300); }, 700);
 }
 
 // 兼容旧版 toggleAgentMode

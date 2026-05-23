@@ -4560,7 +4560,7 @@ details[open] .src-chevron { transform: rotate(180deg); }
    ⚡ Agent 模式整页转场动效 — 增强版
    ================================================================ */
 .agent-transition-overlay {
-    animation: agent-overlay-fade 1.5s ease forwards;
+    animation: agent-overlay-fade 1.9s ease forwards;
 }
 @keyframes agent-overlay-fade {
     0%   { opacity: 1; }
@@ -4568,22 +4568,25 @@ details[open] .src-chevron { transform: rotate(180deg); }
     100% { opacity: 0; }
 }
 
-/* 进入: 背景闪烁 */
-@keyframes agent-bg-flash {
-    0%   { opacity: 0; }
-    15%  { opacity: 0.85; }
-    100% { opacity: 0; }
+/* 模糊遮罩入 */
+@keyframes agent-mask-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+/* 暗角 */
+@keyframes agent-vignette-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
-/* 进入: 六边形网格浮现 */
+/* 六边形网格 */
 @keyframes agent-hex-in {
-    from { opacity: 0; transform: scale(1.3); }
-    30%  { opacity: 0.6; }
-    70%  { opacity: 0.3; }
+    from { opacity: 0; transform: scale(1.4); }
+    40%  { opacity: 0.6; }
     to   { opacity: 0; transform: scale(1); }
 }
 
-/* 进入: 多层脉冲环 */
+/* 多层脉冲环 */
 @keyframes agent-pulse-rings {
     from {
         width: 0; height: 0;
@@ -4598,14 +4601,14 @@ details[open] .src-chevron { transform: rotate(180deg); }
         width: 200vw; height: 200vw;
         margin-left: -100vw; margin-top: -100vw;
         box-shadow:
-            0 0 0 60px rgba(99,102,241,0),
-            0 0 0 120px rgba(99,102,241,0),
-            0 0 0 180px rgba(99,102,241,0);
+            0 0 0 80px rgba(99,102,241,0),
+            0 0 0 160px rgba(99,102,241,0),
+            0 0 0 240px rgba(99,102,241,0);
         opacity: 0;
     }
 }
 
-/* 进入: 横向光线 */
+/* 光线 */
 @keyframes agent-line-right {
     from { transform: translateX(-100%); opacity: 1; }
     to   { transform: translateX(100%); opacity: 0; }
@@ -4615,47 +4618,42 @@ details[open] .src-chevron { transform: rotate(180deg); }
     to   { transform: translateX(-100%); opacity: 0; }
 }
 
-/* 进入: 标题大字 */
-@keyframes agent-title-in {
-    from { opacity: 0; transform: translateY(30px); filter: blur(12px); }
-    40%  { opacity: 1; transform: translateY(-5px); filter: blur(0); }
-    60%  { opacity: 1; transform: translateY(2px); }
-    100% { opacity: 1; transform: translateY(0); }
-}
-@keyframes agent-subtitle-in {
-    from { opacity: 0; letter-spacing: 16px; transform: translateY(10px); }
-    50%  { opacity: 1; }
-    to   { opacity: 1; letter-spacing: 12px; transform: translateY(0); }
+/* 数字雨上浮 */
+@keyframes agent-float-up {
+    from { transform: translateY(20px); opacity: 0; }
+    20%  { opacity: 1; }
+    to   { transform: translateY(-40px); opacity: 0; }
 }
 
-/* 退出: 粒子缩向中心 */
+/* 标题 - 每个字母依次弹入 */
+@keyframes agent-title-in {
+    from { opacity: 0; transform: translateY(40px) scale(0.7); filter: blur(16px); }
+    50%  { opacity: 1; transform: translateY(-8px) scale(1.02); filter: blur(0); }
+    65%  { transform: translateY(3px) scale(0.99); }
+    100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes agent-subtitle-in {
+    from { opacity: 0; letter-spacing: 24px; transform: translateY(16px); }
+    60%  { opacity: 1; }
+    to   { opacity: 1; letter-spacing: 16px; transform: translateY(0); }
+}
+
+/* 退出 */
 @keyframes agent-particle-shrink {
     from { transform: scale(1); opacity: 1; }
     to   { transform: scale(0); opacity: 0; }
 }
 @keyframes agent-exit-particles {
     0%   { opacity: 0; }
-    40%  { opacity: 1; }
+    30%  { opacity: 1; }
     100% { opacity: 0; }
 }
-
-/* 退出: 环收缩 */
 @keyframes agent-ring-collapse {
-    from {
-        width: 300vw; height: 300vw;
-        opacity: 1;
-        border-width: 2px;
-    }
-    to {
-        width: 0; height: 0;
-        opacity: 0;
-        border-width: 5px;
-    }
+    from { width: 300vw; height: 300vw; opacity: 1; border-width: 2px; }
+    to   { width: 0; height: 0; opacity: 0; border-width: 6px; }
 }
-
-/* 退出: 文字 */
 @keyframes agent-exit-text {
-    0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.7); letter-spacing: 8px; }
-    30%  { opacity: 1; }
-    100% { opacity: 0; transform: translate(-50%,-50%) scale(1.1); letter-spacing: 4px; }
+    0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); letter-spacing: 12px; }
+    40%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%,-50%) scale(1.2); letter-spacing: 4px; }
 }
