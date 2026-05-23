@@ -5883,8 +5883,8 @@ window._pendingSubAgentResultsData = {};  // {agentName: {status, result, error}
 window._subAgentCooldownActive = false;
 window._lastSubAgentReportTime = 0;
 
-// 30秒冷却,防止子代理完成→创建新子代理的无限循环
-const SUB_AGENT_COOLDOWN_MS = 30000;
+// 10秒冷却,防止子代理完成→创建新子代理的无限循环
+const SUB_AGENT_COOLDOWN_MS = 10000;
 
 window._processAgentNotifyQueue = async function() {
     // ★ 防御性初始化
@@ -6072,6 +6072,13 @@ window.triggerAgentAutoReplyForSubAgent = function(agentName) {
         var exists = window._agentNotifyQueue.some(function(item) { return item.agentName === agentName; });
         if (!exists) {
             window._agentNotifyQueue.push({ agentName: agentName });
+        }
+        // ★ 冷却期也设置延迟触发
+        if (!window._cooldownTimer) {
+            window._cooldownTimer = setTimeout(function() {
+                window._cooldownTimer = null;
+                window._processAgentNotifyQueue();
+            }, SUB_AGENT_COOLDOWN_MS);
         }
         return;
     }
@@ -12580,6 +12587,11 @@ window.useAlternativeVisionModel = function() {
         delete activeBubbleMap[chatId];
         delete userAbortMap[chatId];  // 清理用户中止标记
         window._agentNotifyProcessing = false;
+        // ★ 主动检查是否有积压的子代理通知需要处理
+        if (window._hasPendingSubAgentNotify || (Array.isArray(window._agentNotifyQueue) && window._agentNotifyQueue.length > 0)) {
+            window._hasPendingSubAgentNotify = false;
+            setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
+        }
         if (currentChatId === chatId) {
             if ($.sendBtn) $.sendBtn.classList.remove('hidden');
             if ($.stopBtn) $.stopBtn.classList.remove('visible');
@@ -13147,11 +13159,11 @@ window.loadChat = function (id) {
     // ★ 标记待恢复:仅当流式确实在进行中(有内容且最近)才触发自动续生
     if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
         var _age = Date.now() - (savedPartial.time || 0);
-        var _hasContent = (savedPartial.content && savedPartial.content.length > 10) || (savedPartial.reasoning && savedPartial.reasoning.length > 10);
-        if (_hasContent && _age < 30000) {
+        var _hasContent = (savedPartial.content && savedPartial.content.length > 0) || (savedPartial.reasoning && savedPartial.reasoning.length > 0);
+        if (_hasContent && _age < 120000) {
             window._pendingRecovery = savedPartial;
         } else {
-            console.log('[loadChat] 跳过过期或不完整的partial恢复');
+            console.log('[loadChat] 跳过过期或不完整的partial恢复, age=' + (_age/1000).toFixed(1) + 's');
         }
     }
     // ★ 清理 localStorage,避免下次重复恢复
@@ -14046,11 +14058,11 @@ function initializeApp() {
                 if (window._backendRecovered) { window._pendingRecovery = null; return; }
                 var _rec = window._pendingRecovery;
                 window._pendingRecovery = null;
-                // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<30秒)
+                // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<120秒)
                 var _age = Date.now() - (_rec.time || 0);
-                var _hasRealContent = (_rec.content && _rec.content.length > 10) || (_rec.reasoning && _rec.reasoning.length > 10);
-                if (!_hasRealContent || _age > 30000) {
-                    console.log('[AutoRecover] 跳过: 内容不足或超30秒');
+                var _hasRealContent = (_rec.content && _rec.content.length > 0) || (_rec.reasoning && _rec.reasoning.length > 0);
+                if (!_hasRealContent || _age > 120000) {
+                    console.log('[AutoRecover] 跳过: 内容不足或超120秒, age=' + (_age/1000).toFixed(1) + 's');
                     return;
                 }
                 setTimeout(function() {
