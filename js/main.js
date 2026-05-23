@@ -3601,8 +3601,16 @@ function showToast(msg, type = 'info', dur = 3000) {
         <div class="toast-message">${escapeHtml(msg)}</div>
         <button class="toast-close">&times;</button>
     `;
-    toast.querySelector('.toast-close').onclick = () => toast.remove();
-    setTimeout(() => toast.remove(), dur);
+    toast.querySelector('.toast-close').onclick = () => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(function() { toast.remove(); }, 200);
+    };
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(function() { toast.remove(); }, 200);
+    }, dur);
     container.appendChild(toast);
 }
 
@@ -3610,15 +3618,19 @@ function showToast(msg, type = 'info', dur = 3000) {
 // ⌨️ Slash Command Popup
 // ============================================================
 var SLASH_COMMANDS = [
-    { cmd: 'search', hint: '强制联网搜索', args: '[query]', group: '搜索' },
-    { cmd: 'news', hint: '搜索新闻', args: '[query]', group: '搜索' },
-    { cmd: 'image', hint: '搜索图片', args: '[query]', group: '搜索' },
-    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', group: 'Agent' },
-    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', group: 'Agent' },
-    { cmd: 'clear', hint: '清空当前对话', group: '对话' },
-    { cmd: 'compact', hint: '压缩上下文', group: '对话' },
-    { cmd: 'new', hint: '新建对话', group: '对话' },
-    { cmd: 'help', hint: '显示所有命令', group: '帮助' }
+    { cmd: 'search', hint: '强制联网搜索', args: '[query]', icon: '🔍', group: '搜索' },
+    { cmd: 'news', hint: '搜索新闻', args: '[query]', icon: '📰', group: '搜索' },
+    { cmd: 'image', hint: '搜索图片', args: '[query]', icon: '🖼️', group: '搜索' },
+    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', icon: '⚙️', group: 'Agent' },
+    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', icon: '🧠', group: 'Agent' },
+    { cmd: 'retry', hint: '重新生成上一条回复', icon: '🔄', group: '对话' },
+    { cmd: 'clear', hint: '清空当前对话', icon: '🗑️', group: '对话' },
+    { cmd: 'compact', hint: '压缩对话上下文', icon: '📦', group: '对话' },
+    { cmd: 'new', hint: '新建对话', icon: '✨', group: '对话' },
+    { cmd: 'export', hint: '导出聊天记录', icon: '📥', group: '对话' },
+    { cmd: 'config', hint: '打开配置面板', icon: '🔧', group: '系统' },
+    { cmd: 'logout', hint: '退出登录', icon: '🚪', group: '系统' },
+    { cmd: 'help', hint: '显示所有命令', icon: '❓', group: '帮助' }
 ];
 
 window._slashIdx = -1;
@@ -3649,19 +3661,20 @@ function updateSlashPopup(query) {
     var groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
     var html = '';
-    var idx = 0;
     Object.keys(groups).forEach(function(g) {
         html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
         groups[g].forEach(function(m) {
+            var icon = m.icon || '';
             var argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
             html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '">' +
+                '<span class=slash-item-icon>' + icon + '</span>' +
                 '<span class=slash-item-cmd>/' + m.cmd + '</span>' + argTag +
                 '<span class=slash-item-hint>' + m.hint + '</span>' +
             '</div>';
             idx++;
         });
     });
-    html += '<div class=slash-popup-footer>↑↓ 导航 · Enter 选择 · Esc 关闭 · 点击选择</div>';
+    html += '<div class=slash-popup-footer>↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
     popup.innerHTML = html;
     window._slashIdx = 0;
     window._slashVisible = true;
@@ -7881,6 +7894,13 @@ function parseCommand(text) {
     if (cmd === '/new') return { type: 'command', cmd: 'new_chat' };
     // 帮助
     if (cmd === '/help' || cmd === '/?') return { type: 'command', cmd: 'show_help' };
+    // 系统
+    if (cmd === '/config') return { type: 'command', cmd: 'open_config' };
+    if (cmd === '/logout') return { type: 'command', cmd: 'logout' };
+    // 重试
+    if (cmd === '/retry') return { type: 'command', cmd: 'retry' };
+    // 导出
+    if (cmd === '/export') return { type: 'command', cmd: 'export_chat' };
     return null;
 }
 
@@ -7940,7 +7960,54 @@ function handleSlashCommand(cmd) {
     } else if (cmd.cmd === 'compact') {
         compressContextIfNeeded();
     } else if (cmd.cmd === 'show_help') {
-        appendMessage('system', '/search /news /image — 强制搜索\n/mode [plan|agent|yolo|off] — 切换模式\n/model <name> — 切换模型\n/clear — 清空当前对话\n/compact — 压缩上下文\n/new — 新建对话\n/help — 显示此帮助');
+        var helpText = SLASH_COMMANDS.map(function(c) {
+            return (c.icon||'') + ' `/' + c.cmd + '`' + (c.args ? ' *' + c.args + '*' : '') + ' — ' + c.hint;
+        }).join('\n');
+        appendMessage('system', '## ⌨️ 命令列表\n' + helpText + '\n\n> 输入 `/` 可随时唤出命令面板');
+    } else if (cmd.cmd === 'open_config') {
+        toggleConfigPanel();
+        showToast('已打开配置面板', 'info', 2000);
+    } else if (cmd.cmd === 'logout') {
+        if (confirm('确定退出登录？')) { logout(); }
+    } else if (cmd.cmd === 'retry') {
+        var cid = currentChatId;
+        if (!cid || !chats[cid]) return;
+        var msgs = chats[cid].messages;
+        // 找到最后一条 assistant 消息,删除它,然后重新发送上一条 user 消息
+        var lastAssistIdx = -1;
+        for (var i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'assistant' && !msgs[i].partial) { lastAssistIdx = i; break; }
+        }
+        if (lastAssistIdx >= 0) {
+            // 找到这条 assistant 前面的最后一条 user
+            var lastUserIdx = -1;
+            for (var i = lastAssistIdx - 1; i >= 0; i--) {
+                if (msgs[i].role === 'user') { lastUserIdx = i; break; }
+            }
+            if (lastUserIdx >= 0) {
+                var userMsg = msgs[lastUserIdx];
+                msgs.splice(lastAssistIdx);
+                saveChats();
+                renderChatHistory();
+                sendMessage(true, userMsg.text, userMsg.files);
+            }
+        }
+    } else if (cmd.cmd === 'export_chat') {
+        var cid = currentChatId;
+        if (!cid || !chats[cid]) return;
+        var msgs = chats[cid].messages;
+        var md = '# ' + (chats[cid].title || '对话') + '\n\n' + msgs.filter(function(m) { return m.role !== 'system' && !m.temporary && !m._internal; }).map(function(m) {
+            var role = m.role === 'user' ? '🧑 用户' : '🤖 AI';
+            return '## ' + role + '\n' + (m.text || m.content || '');
+        }).join('\n\n---\n\n');
+        var blob = new Blob([md], { type: 'text/markdown' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = (chats[cid].title || 'chat') + '.md';
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('已导出为 Markdown', 'success', 2000);
     }
 }
 
