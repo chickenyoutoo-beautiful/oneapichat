@@ -1144,8 +1144,8 @@ def engine_exec(
         return {
             "ok": True,
             "exit_code": result.returncode,
-            "stdout": result.stdout[-5000:] if result.stdout else "",
-            "stderr": result.stderr[-5000:] if result.stderr else ""
+            "stdout": result.stdout[:8000] if result.stdout else "",
+            "stderr": result.stderr[:2000] if result.stderr else ""
         }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"命令超时({timeout}秒)", "exit_code": -1}
@@ -1171,8 +1171,8 @@ def engine_python(
         return {
             "ok": True,
             "exit_code": result.returncode,
-            "stdout": result.stdout[-5000:] if result.stdout else "",
-            "stderr": result.stderr[-5000:] if result.stderr else ""
+            "stdout": result.stdout[:8000] if result.stdout else "",
+            "stderr": result.stderr[:2000] if result.stderr else ""
         }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"脚本超时({timeout}秒)", "exit_code": -1}
