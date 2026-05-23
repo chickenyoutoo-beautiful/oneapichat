@@ -1685,7 +1685,7 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_start",
-            description: "启动SRC服务开始运行。启动后自动开始自动化刷遗器/模拟宇宙等任务。",
+            description: "启动SRC服务运行星穹铁道自动化。",
             parameters: { type: "object", properties: {}, required: [] }
         }
     },
@@ -1701,7 +1701,7 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_get_config",
-            description: "读取SRC的运行配置。返回所有配置项(游戏设置、刷取目标、优化选项等)。",
+            description: "读取SRC的运行配置。",
             parameters: { type: "object", properties: {}, required: [] }
         }
     },
@@ -1709,12 +1709,12 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_set_config",
-            description: "修改SRC的一项配置。可用于调整刷取目标、切换副本、修改游戏参数等。",
+            description: "修改SRC的一项配置。",
             parameters: {
                 type: "object",
                 properties: {
-                    path: { type: "string", description: "配置路径,如 'Alas.Optimization.WhenTaskQueueEmpty'" },
-                    value: { type: "string", description: "新值,如 'GotoMain', 'True', 'False', 数字等" }
+                    path: { type: "string", description: "配置路径" },
+                    value: { type: "string", description: "新值" }
                 },
                 required: ["path", "value"]
             }
@@ -1724,11 +1724,11 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_get_logs",
-            description: "获取SRC最近的运行日志。用于诊断错误、查看当前进度等。",
+            description: "获取SRC最近的运行日志。",
             parameters: {
                 type: "object",
                 properties: {
-                    lines: { type: "number", description: "返回行数,默认50,最大200" }
+                    lines: { type: "number", description: "行数,默认50" }
                 },
                 required: []
             }
@@ -1738,7 +1738,7 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_get_tasks",
-            description: "获取SRC当前的任务列表和完成状态。显示各个任务的进度。",
+            description: "获取SRC任务列表和完成进度。",
             parameters: { type: "object", properties: {}, required: [] }
         }
     },
@@ -1746,7 +1746,7 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_check_upgrade",
-            description: "检查SRC是否有新版本可更新。返回当前版本和落后commit数。",
+            description: "检查SRC更新。",
             parameters: { type: "object", properties: {}, required: [] }
         }
     },
@@ -1754,7 +1754,7 @@ const SRC_TOOLS = [
         type: "function",
         function: {
             name: "src_do_upgrade",
-            description: "执行SRC升级。会执行 git pull、pip install、重启服务。需谨慎确认后进行。",
+            description: "执行SRC升级(git pull+pip install+重启)。",
             parameters: { type: "object", properties: {}, required: [] }
         }
     }
@@ -11377,16 +11377,16 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                     // ===== SRC 星穹铁道工具 =====
                      else if (func.name === 'src_status') {
-                        var r = await _srcApi('/status');
-                        toolResult = r.ok ? { result: JSON.stringify(r, null, 2) } : { error: r.error || '获取状态失败' };
+                        var r = await _srcApi('/status?config_name=src');
+                        toolResult = r.ok ? { result: (r.alive ? '✅ 运行中' : '❌ ' + (r.state_label || '已停止')) + '\n' + JSON.stringify(r, null, 2) } : { error: r.error || '获取状态失败' };
                     }
                      else if (func.name === 'src_start') {
-                        var r = await _srcApi('/start', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: 'Alas' }) });
-                        toolResult = r.ok ? { result: '✅ SRC已启动' } : { error: r.error || '启动失败' };
+                        var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: 'Alas' }) });
+                        toolResult = r.ok ? { result: '✅ SRC 启动命令已发送' } : { error: r.error || '启动失败' };
                     }
                      else if (func.name === 'src_stop') {
                         var r = await _srcApi('/stop', { method: 'POST', body: JSON.stringify({ config_name: 'src' }) });
-                        toolResult = r.ok ? { result: '✅ SRC已停止' } : { error: r.error || '停止失败' };
+                        toolResult = r.ok ? { result: '✅ SRC 已停止' } : { error: r.error || '停止失败' };
                     }
                      else if (func.name === 'src_get_config') {
                         var r = await _srcApi('/config/src');
@@ -11394,7 +11394,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'src_set_config') {
                         var path = args.path, val = args.value;
-                        // 智能类型转换
                         if (val === 'true' || val === 'True') val = true;
                         else if (val === 'false' || val === 'False') val = false;
                         else if (/^\d+$/.test(val)) val = parseInt(val);
@@ -11404,11 +11403,11 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'src_get_logs') {
                         var lines = Math.min(args.lines || 50, 200);
-                        var r = await _srcApi('/logs?lines=' + lines);
-                        toolResult = r.ok ? { result: r.logs || '(无日志)' } : { error: r.error || '获取日志失败' };
+                        var r = await _srcApi('/logs?config_name=src&limit=' + lines);
+                        toolResult = r.ok ? { result: (r.lines || r.logs || []).join('\n') } : { error: r.error || '获取日志失败' };
                     }
                      else if (func.name === 'src_get_tasks') {
-                        var r = await _srcApi('/tasks');
+                        var r = await _srcApi('/tasks?config_name=src');
                         toolResult = r.ok ? { result: JSON.stringify(r, null, 2) } : { error: r.error || '获取任务失败' };
                     }
                      else if (func.name === 'src_check_upgrade') {
@@ -11417,9 +11416,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = d.ok ? { result: '当前: ' + d.current + ', 落后 ' + d.behind + ' 个commit, ' + (d.need_update ? '需要更新' : '已是最新') } : { error: d.error || '检查失败' };
                     }
                      else if (func.name === 'src_do_upgrade') {
-                        // 危险操作,需confirm
-                        if (!confirm('⚠️ AI请求执行SRC升级\n\n将执行: git pull + pip install + 重启\n\n确认升级?')) {
-                            toolResult = { result: '❌ 用户取消了升级操作' };
+                        if (!confirm('⚠️ AI请求SRC升级\n\ngit pull + pip install + 重启\n\n确认?')) {
+                            toolResult = { result: '❌ 取消升级' };
                         } else {
                             var r = await fetch('/oneapichat/src_upgrade.php?action=upgrade');
                             var d = await r.json();
