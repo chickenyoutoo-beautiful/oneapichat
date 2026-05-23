@@ -1,0 +1,22 @@
+{
+  "name": "NAUJTRATS · 个人版",
+  "short_name": "NAUJTRATS",
+  "description": "AI 聊天助手 · 超星刷课 · 星穹铁道管理",
+  "start_url": "/oneapichat/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/oneapichat/resource/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/oneapichat/resource/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
