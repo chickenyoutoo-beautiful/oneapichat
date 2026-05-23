@@ -1710,7 +1710,7 @@ const WIN_TOOLS = [
     { type: "function", function: { name: "win_info", description: "获取Windows宿主机系统信息(Windows版本/内存/CPU/磁盘等)", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "win_processes", description: "列出Windows运行的进程,可按名称筛选", parameters: { type: "object", properties: { filter: { type: "string", description: "进程名关键词筛选,如 'StarRail'" } }, required: [] } } },
     { type: "function", function: { name: "win_kill", description: "结束Windows上的指定进程(按名称或PID)", parameters: { type: "object", properties: { target: { type: "string", description: "进程名或PID" } }, required: ["target"] } } },
-    { type: "function", function: { name: "win_start", description: "启动Windows上的程序。path=可执行文件路径, app=开始菜单中的应用名(如'7-Zip File Manager')。二者任选其一。", parameters: { type: "object", properties: { path: { type: "string", description: "可执行文件路径,如 C:\\Program Files\\app.exe" }, app: { type: "string", description: "开始菜单应用名,如 '崩坏：星穹铁道' 或 '7-Zip File Manager'" } }, required: [] } } },
+    { type: "function", function: { name: "win_start", description: "启动Windows上的程序。path=可执行文件路径, app=开始菜单中的应用名(如'7-Zip File Manager')。二者任选其一。", parameters: { type: "object", properties: { path: { type: "string", description: "可执行文件路径,如 C:\\Program Files\\app.exe" }, app: { type: "string", description: "开始菜单应用名,如 '崩坏:星穹铁道' 或 '7-Zip File Manager'" } }, required: [] } } },
     { type: "function", function: { name: "win_restart", description: "重启Windows程序(先kill再start)。name=进程名(如StarRail.exe), path/app=重启后启动方式(二选一)", parameters: { type: "object", properties: { name: { type: "string", description: "要终止的进程名,如 'StarRail.exe'" }, path: { type: "string", description: "重启时启动的可执行文件路径(可选)" }, app: { type: "string", description: "重启时启动的开始菜单应用名(可选)" } }, required: ["name"] } } },
     { type: "function", function: { name: "win_file", description: "列出Windows上的目录或读取文件内容(通过WSL /mnt/c/路径)", parameters: { type: "object", properties: { action: { type: "string", description: "list=列目录, read=读文件" }, path: { type: "string", description: "WSL路径如 /mnt/c/Users/AS/Desktop" } }, required: ["action","path"] } } },
     { type: "function", function: { name: "win_screenshot", description: "截取Windows桌面当前画面,返回base64图片。用于查看模拟器/游戏是否正常运行、确认操作结果。", parameters: { type: "object", properties: { format: { type: "string", description: "图片格式 png 或 jpg,默认png" } }, required: [] } } },
@@ -3762,8 +3762,17 @@ function updateSlashPopup(query) {
     window._slashVisible = true;
     popup.style.pointerEvents = 'auto';
     popup.querySelectorAll('.slash-popup-item').forEach(function(item) {
+        var _touchStartY = 0;
         item.addEventListener('click', function() { selectSlashCommand(this.dataset.cmd, this.dataset.args); });
-        item.addEventListener('touchend', function(e) { e.preventDefault(); selectSlashCommand(this.dataset.cmd, this.dataset.args); });
+        item.addEventListener('touchstart', function(e) { _touchStartY = e.touches[0].clientY; });
+        item.addEventListener('touchend', function(e) {
+            var _dy = Math.abs(e.changedTouches[0].clientY - _touchStartY);
+            // ★ 仅当滑动距离<8px时视为点击,否则是滚动
+            if (_dy < 8) {
+                e.preventDefault();
+                selectSlashCommand(this.dataset.cmd, this.dataset.args);
+            }
+        });
     });
     requestAnimationFrame(function() {
         popup.style.opacity = '1';
@@ -4477,8 +4486,8 @@ function playAgentEnterEffect(mode) {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 1. 透亮模糊遮罩(浅色,不黑)
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(18px) saturate(120%);-webkit-backdrop-filter:blur(18px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.25)' : 'rgba(238,242,255,0.25)') + ';opacity:0;animation:agent-mask-in 0.45s ease forwards;"></div>' +
+        // 1. 透亮模糊遮罩（浅色，不黑）
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(18px) saturate(120%);-webkit-backdrop-filter:blur(18px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.25)' : 'rgba(238,242,255,0.25)') + ';opacity:0;animation:agent-mask-in 0.45s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
         // 2. 电路板线条图案
         '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.1s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><g fill="none" stroke="rgba(99,102,241,0.06)" stroke-width="0.8"><rect x="0" y="0" width="30" height="30" rx="4"/><rect x="50" y="50" width="30" height="30" rx="4"/><circle cx="15" cy="15" r="3" fill="rgba(99,102,241,0.08)"/><circle cx="65" cy="65" r="3" fill="rgba(99,102,241,0.08)"/><path d="M30 15h20v30h-20z" opacity="0.3"/><path d="M50 15h20" opacity="0.3"/><path d="M15 30v20" opacity="0.3"/><path d="M65 30v20h-15" opacity="0.3"/></g></svg>') + '\');background-size:80px 80px;"></div>' +
         // 3. 叠加噪点纹理层
@@ -4486,9 +4495,9 @@ function playAgentEnterEffect(mode) {
         // 4. 微妙的边缘光晕(替代暗角,改用浅色)
         '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,' + glow + '0.06) 70%,transparent 100%);opacity:0;animation:agent-mask-in 0.5s 0.08s ease forwards;"></div>' +
         // 5. 六边形网格
-        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="' + hexStroke + '" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 1s 0.15s ease forwards;"></div>' +
+        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="' + hexStroke + '" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 1s 0.15s ease forwards;will-change:transform;"></div>' +
         // 6. 多层光环
-        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.4),0 0 0 0 ' + glow + '0.2),0 0 0 0 ' + glow + '0.08),0 0 0 0 ' + glow2 + '0.06);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
+        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.4),0 0 0 0 ' + glow + '0.2),0 0 0 0 ' + glow + '0.08),0 0 0 0 ' + glow2 + '0.06);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;will-change:transform;"></div>' +
         // 7. 光线
         '<div style="position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;">' +
             Array.from({length: 6}, function(_, i) {
@@ -4503,7 +4512,7 @@ function playAgentEnterEffect(mode) {
         '</div>' +
         // 9. 中心艺术字(自身带模糊背景,不被背景干扰)
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">' +
-            '<div style="padding:20px 60px;border-radius:24px;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);background:rgba(255,255,255,0.03);opacity:0;animation:agent-mask-in 0.4s 0.12s ease forwards;">' +
+            '<div style="padding:20px 60px;border-radius:24px;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);background:rgba(255,255,255,0.03);opacity:0;animation:agent-mask-in 0.4s 0.12s ease forwards;will-change:opacity;">' +
                 '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;text-align:center;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
                     titleWord.split('').map(function(letter, i) {
                         var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
@@ -4532,7 +4541,7 @@ function playAgentExitEffect(mode) {
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
         // 透亮模糊遮罩
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(10px) saturate(120%);-webkit-backdrop-filter:blur(10px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.2)' : 'rgba(238,242,255,0.2)') + ';animation:agent-exit-mask 0.5s ease forwards;"></div>' +
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(10px) saturate(120%);-webkit-backdrop-filter:blur(10px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.2)' : 'rgba(238,242,255,0.2)') + ';animation:agent-exit-mask 0.5s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
         // 光点向中心聚集
         '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.6s ease forwards;">' +
             Array.from({length: 40}, function(_, i) {
@@ -4823,7 +4832,7 @@ window.deleteMemoryEntry = async function(key) {
 };
 
 window.clearAllMemories = async function() {
-    if (!confirm('确定清空所有记忆？此操作不可撤销！')) return;
+    if (!confirm('确定清空所有记忆?此操作不可撤销!')) return;
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
@@ -4850,21 +4859,21 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     if (!token || !chatId || !chats[chatId]) return;
     var msgs = chats[chatId].messages;
     if (msgs.length < 3) return; // 太短的对话不提取
-    
+
     // 取最后5条非system消息作为分析素材
     var recent = msgs.filter(function(m) { return m.role !== 'system' && !m.temporary && !m._internal; }).slice(-6);
     if (recent.length < 2) return;
-    
+
     var conversation = recent.map(function(m) {
         return (m.role === 'user' ? '用户: ' : 'AI: ') + (m.text || m.content || '').substring(0, 200);
     }).join('\n');
-    
+
     // 用本地小模型判断是否需要保存记忆
     var key = localStorage.getItem('apiKey') || '';
     var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
     var model = 'deepseek-chat'; // 用廉价模型
     if (!key) return;
-    
+
     try {
         var resp = await fetch(baseUrl + '/chat/completions', {
             method: 'POST',
@@ -4872,7 +4881,7 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
             body: JSON.stringify({
                 model: model,
                 messages: [
-                    { role: 'system', content: '你是记忆提取助手。分析对话，提取值得长期记住的信息。\n\n规则:\n1. 只提取用户明确告知的偏好、个人信息、决策、计划\n2. 忽略闲聊、问时间天气、临时问答\n3. 用JSON格式输出: [{"key":"简短英文键","content":"中文内容"}]\n4. 如果没有任何值得记住的，输出空数组 []\n5. 每个content不超过80字\n6. 最多提取3条' },
+                    { role: 'system', content: '你是记忆提取助手。分析对话,提取值得长期记住的信息。\n\n规则:\n1. 只提取用户明确告知的偏好、个人信息、决策、计划\n2. 忽略闲聊、问时间天气、临时问答\n3. 用JSON格式输出: [{"key":"简短英文键","content":"中文内容"}]\n4. 如果没有任何值得记住的,输出空数组 []\n5. 每个content不超过80字\n6. 最多提取3条' },
                     { role: 'user', content: '请从以下对话提取值得长期记住的信息:\n' + conversation }
                 ],
                 temperature: 0.1,
@@ -4887,7 +4896,7 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
         if (!jsonMatch) return;
         var items = JSON.parse(jsonMatch[0]);
         if (!Array.isArray(items) || items.length === 0) return;
-        
+
         // 保存每条记忆
         var saved = 0;
         for (var i = 0; i < items.length; i++) {
@@ -4919,7 +4928,7 @@ window._autoAskIdentity = async function() {
         var hasIdentity = data.memories && data.memories.some(function(m) { return m.key === 'identity_user_name'; });
         if (hasIdentity) return; // 已有身份,不需要问
     } catch(e) { return; }
-    
+
     // 在Agent聊天中注入身份询问消息
     if (isAgentToolsActive() && currentChatId === AGENT_CHAT_ID) {
         window.__autoIdentityAsked = true;
@@ -11504,7 +11513,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         if (fmt !== 'png' && fmt !== 'jpg') fmt = 'png';
                         var _ts = Date.now();
                         var _outPath = '/mnt/c/Windows/Temp/screenshot_' + _ts + '.' + fmt;
-                        // ★ 截图保存到 WSL2 可访问路径，不通过 base64 传输（避免截断）
+                        // ★ 截图保存到 WSL2 可访问路径,不通过 base64 传输(避免截断)
                         var ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save(\"' + _outPath.replace(/\\/g, '\\\\') + '\", [System.Drawing.Imaging.ImageFormat]::' + (fmt === 'png' ? 'Png' : 'Jpeg') + '); $b.Dispose(); $g.Dispose(); Write-Output done"';
                         var r = await engineApiHandler('exec', { cmd: ssCmd, timeout: 15 });
                         // 返回可访问的 URL
