@@ -1710,8 +1710,8 @@ const WIN_TOOLS = [
     { type: "function", function: { name: "win_info", description: "获取Windows宿主机系统信息(Windows版本/内存/CPU/磁盘等)", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "win_processes", description: "列出Windows运行的进程,可按名称筛选", parameters: { type: "object", properties: { filter: { type: "string", description: "进程名关键词筛选,如 'StarRail'" } }, required: [] } } },
     { type: "function", function: { name: "win_kill", description: "结束Windows上的指定进程(按名称或PID)", parameters: { type: "object", properties: { target: { type: "string", description: "进程名或PID" } }, required: ["target"] } } },
-    { type: "function", function: { name: "win_start", description: "启动Windows上的程序", parameters: { type: "object", properties: { path: { type: "string", description: "程序路径或可执行文件名" } }, required: ["path"] } } },
-    { type: "function", function: { name: "win_restart", description: "重启Windows服务/程序(先kill再start)", parameters: { type: "object", properties: { name: { type: "string", description: "进程名,如 'StarRail.exe'" }, path: { type: "string", description: "启动路径" } }, required: ["name"] } } },
+    { type: "function", function: { name: "win_start", description: "启动Windows上的程序。path=可执行文件路径, app=开始菜单中的应用名(如'7-Zip File Manager')。二者任选其一。", parameters: { type: "object", properties: { path: { type: "string", description: "可执行文件路径,如 C:\\Program Files\\app.exe" }, app: { type: "string", description: "开始菜单应用名,如 '崩坏：星穹铁道' 或 '7-Zip File Manager'" } }, required: [] } } },
+    { type: "function", function: { name: "win_restart", description: "重启Windows程序(先kill再start)。name=进程名(如StarRail.exe), path/app=重启后启动方式(二选一)", parameters: { type: "object", properties: { name: { type: "string", description: "要终止的进程名,如 'StarRail.exe'" }, path: { type: "string", description: "重启时启动的可执行文件路径(可选)" }, app: { type: "string", description: "重启时启动的开始菜单应用名(可选)" } }, required: ["name"] } } },
     { type: "function", function: { name: "win_file", description: "列出Windows上的目录或读取文件内容(通过WSL /mnt/c/路径)", parameters: { type: "object", properties: { action: { type: "string", description: "list=列目录, read=读文件" }, path: { type: "string", description: "WSL路径如 /mnt/c/Users/AS/Desktop" } }, required: ["action","path"] } } },
 ];
 
@@ -11452,13 +11452,25 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'win_start') {
                         var path = (args.path || '').replace(/'/g, '');
-                        var startCmd = WIN_POWERSHELL + ' -Command "Start-Process \"' + path + '\"; Write-Output started"';
-                        toolResult = await engineApiHandler('exec', { cmd: startCmd, timeout: 10 });
+                        var app = (args.app || '').replace(/[^a-zA-Z0-9 ._-]/g, '');
+                        var startCmd;
+                        if (app) {
+                            startCmd = WIN_POWERSHELL + ' -Command "Start-Process shell:AppsFolder\\' + app + '; Write-Output started"';
+                        } else if (path) {
+                            startCmd = WIN_POWERSHELL + ' -Command "Start-Process \"' + path + '\"; Write-Output started"';
+                        } else {
+                            toolResult = { error: '请提供 path(程序路径) 或 app(应用名)' };
+                        }
+                        if (startCmd) toolResult = await engineApiHandler('exec', { cmd: startCmd, timeout: 10 });
                     }
                      else if (func.name === 'win_restart') {
                         var name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
                         var path2 = (args.path || '').replace(/'/g, '');
-                        var restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2' + (path2 ? '; Start-Process \"' + path2 + '\"' : '') + '; Write-Output restarted"';
+                        var app2 = (args.app || '').replace(/[^a-zA-Z0-9 ._-]/g, '');
+                        var restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2';
+                        if (app2) restartCmd += '; Start-Process shell:AppsFolder\\' + app2;
+                        else if (path2) restartCmd += '; Start-Process \"' + path2 + '\"';
+                        restartCmd += '; Write-Output restarted"';
                         toolResult = await engineApiHandler('exec', { cmd: restartCmd, timeout: 15 });
                     }
                      else if (func.name === 'win_file') {
