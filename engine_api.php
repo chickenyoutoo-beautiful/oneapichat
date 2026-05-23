@@ -229,10 +229,10 @@ switch ($action) {
         echo json_encode(['error' => 'unknown action']);
 
     case 'ps':
-        echo @file_get_contents($engine_url . '/engine/ps' . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo @file_get_contents($engine_url . '/engine/ps?' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'disk':
-        echo @file_get_contents($engine_url . '/engine/disk' . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo @file_get_contents($engine_url . '/engine/disk?' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'docker':
         $docker_action = $_GET['docker_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ps';
@@ -257,7 +257,7 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_op':
-        $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? '';
+        $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? $_GET['action'] ?? '';
         $src = $_GET['src'] ?? $_GET['source'] ?? $_GET['path'] ?? '';
         $dst = $_GET['dst'] ?? $_GET['dest'] ?? $_GET['destination'] ?? '';
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }

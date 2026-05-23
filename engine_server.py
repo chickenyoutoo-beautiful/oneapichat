@@ -1291,7 +1291,7 @@ def engine_docker(action: str = Query("ps"), user_id: str = Query("")):
             cmd = ["docker", "stats", "--no-stream"]
         else:
             return {"error": f"Unknown action: {action}"}
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(["sudo"] + cmd, capture_output=True, text=True, timeout=15)
         return {"ok": True, "stdout": result.stdout, "stderr": result.stderr}
     except FileNotFoundError:
         return {"error": "Docker not available"}
@@ -1304,7 +1304,7 @@ def engine_db_query(sql: str = Query(...), user_id: str = Query("")):
     """执行数据库查询"""
     import sqlite3
     try:
-        db_path = str(TEMP_DIR / "AutomaticCB" / "api" / "learning_records.db")
+        db_path = str(Path(PROJECT_ROOT) / "api" / "learning_records.db")
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute(sql)

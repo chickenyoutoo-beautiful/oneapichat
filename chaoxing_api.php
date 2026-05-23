@@ -136,10 +136,9 @@ function userCoursesCachePath($userId) {
 function ensureUserConfig($userId) {
     $path = userConfigPath($userId);
     if (!file_exists($path)) {
-        $template = CHAOXING_DIR . '/config.ini.template';
+        $template = APP_ROOT . '/config.ini.template';
         if (!file_exists($template)) {
-            // fallback: 用当前 shared config 作为模板
-            $template = CHAOXING_DIR . '/config.ini';
+            $template = APP_ROOT . '/config.ini';
         }
         $dir = dirname($path);
         if (!is_dir($dir)) {

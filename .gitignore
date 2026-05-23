@@ -10,3 +10,31 @@ users/*.json
 .engine/
 cache.json
 .vs/
+
+# 调试/修改临时文件
+auth.php.debug
+auth.php.modified
+chaoxing_api.php.bak3
+test_php.php
+
+# 多余文件
+undefined
+3
+
+# 备份文件也排除（已有的规则 *.bak 已覆盖）
+# 但 *.bak. 没覆盖到，显式加
+*.bak.*
+
+# 上传目录（运行时数据，不提交到git）
+uploads/
+
+# SRC 管理（单独页面，暂不发布）
+src_routes.py
+src_upgrade.php
+manager.html
+manager_api.php
+memory_api.php
+css/src-console.css
+js/src-manager.js
+__pycache__/
+backups/
