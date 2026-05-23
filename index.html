@@ -33,6 +33,7 @@
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
     <link rel="stylesheet" href="./css/style.css?v=1779382300">
+    <link rel="stylesheet" href="./css/src-console.css?v=4">
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
     <!-- PPT/PPTX 解析 -->
@@ -696,6 +697,28 @@
                 <div style="margin-top:8px;">
                     <label class="config-label" style="display:block;margin-bottom:4px;">代理系统提示词</label>
                     <textarea id="agentSystemPrompt" rows="5" class="config-textarea" style="font-size:11px;" placeholder="Agent 模式专用系统提示词..."></textarea>
+                </div>
+
+                <!-- 记忆系统面板 -->
+                <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb;" class="dark:border-gray-700">
+                    <div class="config-section-title" style="margin-bottom:8px;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                        记忆系统
+                    </div>
+                    <!-- 记忆条目列表 -->
+                    <div id="memoryList" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">
+                        <div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">加载中...</div>
+                    </div>
+                    <!-- 添加记忆 -->
+                    <div style="display:flex;gap:4px;margin-bottom:6px;">
+                        <input type="text" id="memoryKeyInput" class="config-input" placeholder="键 (如: user_name)" style="flex:1;font-size:11px;padding:6px 8px;">
+                        <input type="text" id="memoryContentInput" class="config-input" placeholder="内容" style="flex:2;font-size:11px;padding:6px 8px;">
+                    </div>
+                    <div style="display:flex;gap:4px;">
+                        <button onclick="window.addMemoryEntry()" class="config-btn" style="flex:1;padding:6px;font-size:11px;">💾 保存记忆</button>
+                        <button onclick="window.refreshMemoryList()" class="config-btn" style="padding:6px 12px;font-size:11px;">🔄 刷新</button>
+                        <button onclick="window.clearAllMemories()" class="config-btn" style="padding:6px 12px;font-size:11px;color:#ef4444;">🗑 清空</button>
+                    </div>
                 </div>
 
                 <!-- 引擎状态面板 -->
