@@ -2601,7 +2601,7 @@ html:not(.dark) #userInput {
 .agent-banner-text {
     flex: 1;
     text-align: center;
-    font-weight: 600;
+    font-weight: 400;
     letter-spacing: 0.3px;
     z-index: 1;
 }
@@ -4643,14 +4643,28 @@ details[open] .src-chevron { transform: rotate(180deg); }
     from { transform: scale(1); opacity: 1; }
     to   { transform: scale(0); opacity: 0; }
 }
+@keyframes agent-particle-implode {
+    from { transform: translate(0, 0) scale(1); opacity: 1; }
+    50%  { opacity: 1; }
+    to   { transform: translate(calc(50vw - 50%), calc(50vh - 50%)) scale(0.3); opacity: 0; }
+}
+@keyframes agent-exit-mask {
+    0%   { opacity: 1; }
+    60%  { opacity: 0.6; }
+    100% { opacity: 0; }
+}
+@keyframes agent-hex-out {
+    0%   { opacity: 0.5; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.8); }
+}
 @keyframes agent-exit-particles {
     0%   { opacity: 0; }
-    30%  { opacity: 1; }
+    25%  { opacity: 1; }
     100% { opacity: 0; }
 }
 @keyframes agent-ring-collapse {
-    from { width: 300vw; height: 300vw; opacity: 1; border-width: 2px; }
-    to   { width: 0; height: 0; opacity: 0; border-width: 6px; }
+    from { width: 250vw; height: 250vw; opacity: 1; border-width: 2px; }
+    to   { width: 0; height: 0; opacity: 0; border-width: 8px; }
 }
 @keyframes agent-exit-text {
     0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); letter-spacing: 12px; }

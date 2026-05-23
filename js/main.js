@@ -3661,6 +3661,7 @@ function updateSlashPopup(query) {
     var groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
     var html = '';
+    var idx = 0;
     Object.keys(groups).forEach(function(g) {
         html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
         groups[g].forEach(function(m) {
@@ -4418,26 +4419,32 @@ function playAgentExitEffect() {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 模糊遮罩
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(16px) saturate(200%);-webkit-backdrop-filter:blur(16px) saturate(200%);background:rgba(15,23,42,0.5);opacity:0;animation:agent-mask-in 0.3s ease forwards;"></div>' +
-        // 粒子回收
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.5s ease forwards;">' +
-            Array.from({length: 30}, function(_, i) {
-                var x = 15 + Math.random() * 70;
-                var y = 15 + Math.random() * 70;
-                var size = 2 + Math.random() * 5;
-                var dur = 0.3 + Math.random() * 0.4;
-                return '<div style="position:absolute;left:' + x + '%;top:' + y + '%;width:' + size + 'px;height:' + size + 'px;background:linear-gradient(135deg,rgba(99,102,241,0.7),rgba(168,85,247,0.5));border-radius:50%;animation:agent-particle-shrink ' + dur + 's ' + (Math.random()*0.15) + 's ease forwards;"></div>';
+        // 模糊遮罩短暂出现
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(12px) saturate(150%);-webkit-backdrop-filter:blur(12px) saturate(150%);background:rgba(15,23,42,0.35);animation:agent-exit-mask 0.5s ease forwards;"></div>' +
+        // 光点向中心聚集
+        '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.6s ease forwards;">' +
+            Array.from({length: 40}, function(_, i) {
+                var angle = Math.random() * 360;
+                var r = 30 + Math.random() * 60;
+                var x = 50 + Math.cos(angle * Math.PI / 180) * r;
+                var y = 50 + Math.sin(angle * Math.PI / 180) * r;
+                var size = 2 + Math.random() * 4;
+                var dur = 0.35 + Math.random() * 0.35;
+                var delay = Math.random() * 0.15;
+                return '<div style="position:absolute;left:' + x + '%;top:' + y + '%;width:' + size + 'px;height:' + size + 'px;background:linear-gradient(135deg,rgba(99,102,241,0.8),rgba(168,85,247,0.6));border-radius:50%;animation:agent-particle-implode ' + dur + 's ' + delay + 's ease forwards;"></div>';
             }).join('') +
         '</div>' +
-        // 收缩环
-        '<div style="position:absolute;top:50%;left:50%;width:300vw;height:300vw;border-radius:50%;border:2px solid rgba(99,102,241,0.15);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.5s cubic-bezier(0.6,0,1,1) forwards;"></div>' +
+        // 六边形网格反向缩放
+        '<div style="position:absolute;inset:0;opacity:0;animation:agent-hex-out 0.5s 0.05s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="rgba(99,102,241,0.1)" stroke-width="1"/></svg>') + '\');background-size:60px 52px;"></div>' +
+        // 多重收缩环
+        '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:2px solid rgba(99,102,241,0.12);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
+        '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:1px solid rgba(168,85,247,0.08);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s 0.05s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
         // 文字
         '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">' +
-            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:56px;font-weight:800;letter-spacing:6px;background:linear-gradient(135deg,rgba(148,163,184,0.3),rgba(99,102,241,0.2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;text-shadow:0 0 30px rgba(99,102,241,0.1);">COMPLETE</div>' +
+            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:52px;font-weight:800;letter-spacing:8px;background:linear-gradient(135deg,rgba(148,163,184,0.25),rgba(99,102,241,0.15));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;">COMPLETE</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; setTimeout(function() { overlay.remove(); }, 300); }, 700);
+    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; setTimeout(function() { overlay.remove(); }, 300); }, 800);
 }
 
 // 兼容旧版 toggleAgentMode
