@@ -1713,6 +1713,7 @@ const WIN_TOOLS = [
     { type: "function", function: { name: "win_start", description: "启动Windows上的程序。path=可执行文件路径, app=开始菜单中的应用名(如'7-Zip File Manager')。二者任选其一。", parameters: { type: "object", properties: { path: { type: "string", description: "可执行文件路径,如 C:\\Program Files\\app.exe" }, app: { type: "string", description: "开始菜单应用名,如 '崩坏：星穹铁道' 或 '7-Zip File Manager'" } }, required: [] } } },
     { type: "function", function: { name: "win_restart", description: "重启Windows程序(先kill再start)。name=进程名(如StarRail.exe), path/app=重启后启动方式(二选一)", parameters: { type: "object", properties: { name: { type: "string", description: "要终止的进程名,如 'StarRail.exe'" }, path: { type: "string", description: "重启时启动的可执行文件路径(可选)" }, app: { type: "string", description: "重启时启动的开始菜单应用名(可选)" } }, required: ["name"] } } },
     { type: "function", function: { name: "win_file", description: "列出Windows上的目录或读取文件内容(通过WSL /mnt/c/路径)", parameters: { type: "object", properties: { action: { type: "string", description: "list=列目录, read=读文件" }, path: { type: "string", description: "WSL路径如 /mnt/c/Users/AS/Desktop" } }, required: ["action","path"] } } },
+    { type: "function", function: { name: "win_screenshot", description: "截取Windows桌面当前画面,返回base64图片。用于查看模拟器/游戏是否正常运行、确认操作结果。", parameters: { type: "object", properties: { format: { type: "string", description: "图片格式 png 或 jpg,默认png" } }, required: [] } } },
 ];
 
 // 注册
@@ -6421,7 +6422,7 @@ const _TOOL_CATEGORIES = [
     { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'], agentOnly: true },
     { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] },
     { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] },
-    { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL'], agentOnly: true }
+    { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL','WIN_SCREENSHOT_TOOL'], agentOnly: true }
 ];
 
 // ── 工具显示名映射 ──
@@ -6446,7 +6447,8 @@ const _TOOL_LABELS = {
     'SRC_GET_LOGS_TOOL': 'SRC日志', 'SRC_GET_TASKS_TOOL': 'SRC任务', 'SRC_TOGGLE_TASK_TOOL': 'SRC开关任务',
     'SRC_CHECK_UPGRADE_TOOL': 'SRC检查更新', 'SRC_DO_UPGRADE_TOOL': 'SRC执行升级',
     'WIN_INFO_TOOL': 'Win系统信息', 'WIN_PROCESSES_TOOL': 'Win进程列表', 'WIN_KILL_TOOL': 'Win结束进程',
-    'WIN_START_TOOL': 'Win启动程序', 'WIN_RESTART_TOOL': 'Win重启程序', 'WIN_FILE_TOOL': 'Win文件操作'
+    'WIN_START_TOOL': 'Win启动程序', 'WIN_RESTART_TOOL': 'Win重启程序', 'WIN_FILE_TOOL': 'Win文件操作',
+    'WIN_SCREENSHOT_TOOL': 'Win截图'
 };
 
 // ── 动态渲染工具面板 ──
@@ -10603,7 +10605,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'win_kill': 'WIN_KILL_TOOL',
                 'win_start': 'WIN_START_TOOL',
                 'win_restart': 'WIN_RESTART_TOOL',
-                'win_file': 'WIN_FILE_TOOL'
+                'win_file': 'WIN_FILE_TOOL',
+                'win_screenshot': 'WIN_SCREENSHOT_TOOL'
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
@@ -11482,6 +11485,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         } else if (action === 'read') {
                             toolResult = await engineApiHandler('exec', { cmd: 'cat "' + wslPath + '" 2>&1 | head -200', timeout: 5 });
                         } else { toolResult = { error: 'action 仅支持 list/read' }; }
+                    }
+                     else if (func.name === 'win_screenshot') {
+                        var fmt = (args.format || 'png').replace(/[^a-z]/g, '');
+                        if (fmt !== 'png' && fmt !== 'jpg') fmt = 'png';
+                        var ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $ms = New-Object System.IO.MemoryStream; $b.Save($ms, [System.Drawing.Imaging.ImageFormat]::' + (fmt === 'png' ? 'Png' : 'Jpeg') + '); [Convert]::ToBase64String($ms.ToArray()); $b.Dispose(); $g.Dispose(); $ms.Dispose()"';
+                        toolResult = await engineApiHandler('exec', { cmd: ssCmd, timeout: 15 });
                     }
 // ===== 浏览器工具 =====
                      else if (func.name === 'browser_navigate') {
