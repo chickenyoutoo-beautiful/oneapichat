@@ -4668,6 +4668,6 @@ details[open] .src-chevron { transform: rotate(180deg); }
 }
 @keyframes agent-exit-text {
     0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); letter-spacing: 12px; }
-    40%  { opacity: 1; }
+    35%  { opacity: 1; transform: translate(-50%,-50%) scale(1); }
     100% { opacity: 0; transform: translate(-50%,-50%) scale(1.2); letter-spacing: 4px; }
 }
