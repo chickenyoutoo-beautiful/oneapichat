@@ -4284,7 +4284,7 @@ function setAgentMode(mode) {
                 loadChat(AGENT_CHAT_ID);
             }
         });
-    } else {
+    } else if (mode === 'off') {
         // ★ 普通模式: 恢复侧边栏
         var wasCollapsed = $.sidebar?.classList.contains('collapsed');
         if (wasCollapsed) {
@@ -4299,6 +4299,7 @@ function setAgentMode(mode) {
             }
         }
     }
+    // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
     // 模式切换不弹 toast（已有横幅和绿点提示）
     if (typeof renderToolPanel === 'function') renderToolPanel();
 }
