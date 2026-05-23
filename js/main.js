@@ -6555,13 +6555,19 @@ window.fetchModels = async function (silent) {
             var _p = getEl('baseUrlProvider')?.value || 'custom';
             var _storedModel = localStorage.getItem('model_' + _p) || localStorage.getItem('model') || '';
             mainSelect.value = (_storedModel && models.some(function(m) { return m.id === _storedModel; })) ? _storedModel : (models.length ? models[0].id : '');
-            mainSelect.addEventListener('change', function() {
-                var val = this.value;
-                localStorage.setItem('model', val);
-                var _p2 = getEl('baseUrlProvider')?.value || 'custom';
-                localStorage.setItem('model_' + _p2, val);
-                saveConfigToServer();
-            });
+            // ★ 更新后立即失焦，防止 select 展开触发视觉变化
+            mainSelect.blur();
+            // 避免重复绑定 change 事件
+            if (!mainSelect._modelChangeBound) {
+                mainSelect._modelChangeBound = true;
+                mainSelect.addEventListener('change', function() {
+                    var val = this.value;
+                    localStorage.setItem('model', val);
+                    var _p2 = getEl('baseUrlProvider')?.value || 'custom';
+                    localStorage.setItem('model_' + _p2, val);
+                    saveConfigToServer();
+                });
+            }
         }
 
         ['titleModel', 'searchModel', 'aiSearchJudgeModel'].forEach(id => {
@@ -6633,7 +6639,8 @@ window.refreshModels = async function (e) {
     }
     try {
         await window.fetchModels(true);
-        showToast('模型列表已刷新', 'success');
+        // ★ 延迟显示 toast，避免与模型列表更新同时触发视觉变化
+        setTimeout(function() { showToast('模型列表已刷新', 'success'); }, 100);
     } catch (e) {
         var _em = (e && e.message) ? e.message : '';
         if (_em.includes('401') || _em.includes('403')) showToast('API Key 无效 (401)', 'error');
