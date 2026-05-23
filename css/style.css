@@ -3760,76 +3760,91 @@ html:not(.dark) #userInput {
    ================================================================ */
 .slash-popup {
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 8px);
     left: 12px;
     right: 12px;
-    max-height: 260px;
+    max-height: 300px;
     overflow-y: auto;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
     z-index: 50000;
-    padding: 4px 0;
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    padding: 8px 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
     -webkit-overflow-scrolling: touch;
 }
 .dark .slash-popup {
-    background: #1f2937;
-    border-color: #374151;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    background: rgba(30,41,59,0.95);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-color: rgba(255,255,255,0.08);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
 }
 
 .slash-popup-group {
-    font-size: 9px;
-    font-weight: 700;
+    font-size: 10px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #9ca3af;
-    padding: 6px 14px 2px;
+    letter-spacing: 1px;
+    color: #a1a1aa;
+    padding: 8px 16px 4px;
 }
-.dark .slash-popup-group { color: #6b7280; }
+.dark .slash-popup-group { color: #71717a; }
 
 .slash-popup-item {
     display: flex;
     align-items: center;
-    gap: 0;
-    padding: 9px 14px;
+    gap: 8px;
+    padding: 10px 16px;
     cursor: pointer;
-    transition: background 0.12s;
+    transition: background 0.1s;
     font-size: 13px;
+    border-radius: 0;
+    margin: 0 4px;
 }
 .slash-popup-item:hover,
 .slash-popup-item.slash-item-highlight {
-    background: #f3f4f6;
+    background: rgba(99,102,241,0.08);
 }
 .dark .slash-popup-item:hover,
 .dark .slash-popup-item.slash-item-highlight {
-    background: #374151;
+    background: rgba(99,102,241,0.15);
+}
+
+.slash-item-icon {
+    font-size: 15px;
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
 }
 
 .slash-item-cmd {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
     font-weight: 600;
     color: #6366f1;
-    font-size: 13px;
+    font-size: 12.5px;
     white-space: nowrap;
     flex-shrink: 0;
-    min-width: 80px;
+    background: rgba(99,102,241,0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
 }
-.dark .slash-item-cmd { color: #818cf8; }
+.dark .slash-item-cmd { color: #a5b4fc; background: rgba(99,102,241,0.15); }
 
 .slash-item-args {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 11px;
     color: #a1a1aa;
-    margin-left: 4px;
+    margin-left: 2px;
     white-space: nowrap;
 }
 .dark .slash-item-args { color: #71717a; }
 
 .slash-item-hint {
-    color: #9ca3af;
+    color: #71717a;
     font-size: 12px;
     flex: 1;
     overflow: hidden;
@@ -3838,18 +3853,19 @@ html:not(.dark) #userInput {
     text-align: right;
     margin-left: auto;
 }
+.dark .slash-item-hint { color: #9ca3af; }
 
 .slash-popup-footer {
-    font-size: 9px;
-    color: #d1d5db;
+    font-size: 10px;
+    color: #c4c4cf;
     text-align: center;
-    padding: 6px 14px;
-    border-top: 1px solid #f3f4f6;
+    padding: 8px 16px 2px;
+    border-top: 1px solid rgba(0,0,0,0.05);
     margin-top: 4px;
 }
 .dark .slash-popup-footer {
-    border-color: #374151;
-    color: #6b7280;
+    border-color: rgba(255,255,255,0.06);
+    color: #52525b;
 }
 
 /* ================================================================
@@ -4408,3 +4424,70 @@ details[open] .src-chevron { transform: rotate(180deg); }
 
 /* Task toggle click feedback */
 .src-task-row:active { transform: scale(0.98); }
+
+/* ================================================================
+   🍞 Toast 通知
+   ================================================================ */
+.toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    max-width: 360px;
+}
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.06);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+    font-size: 13px;
+    color: #1f2937;
+    pointer-events: auto;
+    animation: toast-in 0.25s ease;
+    transition: opacity 0.2s, transform 0.2s;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+.dark .toast {
+    background: rgba(30,41,59,0.95);
+    border-color: rgba(255,255,255,0.08);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.06);
+    color: #e2e8f0;
+}
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.toast-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+}
+.toast-success .toast-icon { background: #ecfdf5; color: #059669; }
+.dark .toast-success .toast-icon { background: rgba(16,185,129,0.15); color: #34d399; }
+.toast-error .toast-icon { background: #fef2f2; color: #dc2626; }
+.dark .toast-error .toast-icon { background: rgba(239,68,68,0.15); color: #f87171; }
+.toast-warning .toast-icon { background: #fffbeb; color: #d97706; }
+.dark .toast-warning .toast-icon { background: rgba(245,158,11,0.15); color: #fbbf24; }
+.toast-info .toast-icon { background: #eff6ff; color: #2563eb; }
+.dark .toast-info .toast-icon { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.toast-message { flex: 1; font-weight: 500; line-height: 1.4; }
+.toast-close {
+    flex-shrink: 0; width: 22px; height: 22px; border: none;
+    background: rgba(0,0,0,0.04); border-radius: 6px; cursor: pointer;
+    font-size: 14px; color: #9ca3af;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s; padding: 0; line-height: 0;
+}
+.toast-close:hover { background: rgba(0,0,0,0.08); color: #4b5563; }
+.dark .toast-close { background: rgba(255,255,255,0.06); color: #6b7280; }
+.dark .toast-close:hover { background: rgba(255,255,255,0.1); color: #d1d5db; }
