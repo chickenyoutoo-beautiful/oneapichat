@@ -11462,10 +11462,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                     }
                      else if (func.name === 'win_start') {
                         var path = (args.path || '').replace(/'/g, '');
-                        var app = (args.app || '').replace(/[^a-zA-Z0-9 ._-]/g, '');
+                        var app = (args.app || '').replace(/['"\\]/g, '');
                         var startCmd;
                         if (app) {
-                            startCmd = WIN_POWERSHELL + ' -Command "Start-Process shell:AppsFolder\\' + app + '; Write-Output started"';
+                            // ★ 中文应用名用 base64 编码防止编码问题
+                            var _encodedApp = btoa(unescape(encodeURIComponent(app)));
+                            startCmd = WIN_POWERSHELL + ' -Command "$n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\'' + _encodedApp + '\')); Start-Process \"shell:AppsFolder\\$n\"; Write-Output started"';
                         } else if (path) {
                             startCmd = WIN_POWERSHELL + ' -Command "Start-Process \"' + path + '\"; Write-Output started"';
                         } else {
@@ -11476,9 +11478,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'win_restart') {
                         var name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
                         var path2 = (args.path || '').replace(/'/g, '');
-                        var app2 = (args.app || '').replace(/[^a-zA-Z0-9 ._-]/g, '');
+                        var app2 = (args.app || '').replace(/['"\\]/g, '');
                         var restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2';
-                        if (app2) restartCmd += '; Start-Process shell:AppsFolder\\' + app2;
+                        if (app2) {
+                            var _encodedApp2 = btoa(unescape(encodeURIComponent(app2)));
+                            restartCmd += '; $n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\'' + _encodedApp2 + '\')); Start-Process \"shell:AppsFolder\\$n\"';
+                        }
                         else if (path2) restartCmd += '; Start-Process \"' + path2 + '\"';
                         restartCmd += '; Write-Output restarted"';
                         toolResult = await engineApiHandler('exec', { cmd: restartCmd, timeout: 15 });
