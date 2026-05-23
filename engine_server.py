@@ -1139,7 +1139,8 @@ def engine_exec(
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
             timeout=min(timeout, 300),
-            cwd=cwd or None
+            cwd=cwd or None,
+            encoding='utf-8', errors='replace'
         )
         return {
             "ok": True,
