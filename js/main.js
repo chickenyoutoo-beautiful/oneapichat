@@ -10378,8 +10378,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         // 文件读取/搜索(基础操作,不限制)
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
-        // ask_agent: AI可通过此工具请求用户启用Agent模式
-        tools.push(ASK_AGENT_TOOL);
+        // ask_agent: AI可通过此工具请求用户启用Agent模式(yolo模式下不需要)
+        if (!isYoloMode()) {
+            tools.push(ASK_AGENT_TOOL);
+        }
 
         // ===== B 类工具: Agent 模式启用后额外可用 =====
         if (agentModeActive) {
@@ -10433,8 +10435,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         tools.push(CHAOXING_EXAM_STATUS_TOOL);
         tools.push(CHAOXING_EXAM_STOP_TOOL);
 
-        // ===== C 类工具: 始终在列表中,由 ask_agent 控制是否启用 =====
-        tools.push(AUTONOMOUS_MODE_TOOL);
+        // ===== C 类工具: 始终在列表中,由 ask_agent 控制是否启用(yolo模式不需要) =====
+        if (!isYoloMode()) {
+            tools.push(AUTONOMOUS_MODE_TOOL);
+        }
         // ★ 添加自定义技能到工具列表
         (function() {
             var _customSkills = [];
@@ -11210,18 +11214,26 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         } else { toolResult = await engineApiHandler('file_op', args); }
                     }
                      else if (func.name === 'ask_agent') {
-                        var reason = args.reason || '执行高级操作';
-                        if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
-                            setAgentMode('agent');
-                            toolResult = { result: '✅ Agent 模式已启用,现在可以执行文件操作和命令了。' };
+                        if (isYoloMode()) {
+                            toolResult = { result: '✅ 当前已是 YOLO 自主模式,无需再次请求。' };
                         } else {
-                            toolResult = { result: '❌ 用户拒绝了 Agent 模式请求,继续普通模式。' };
+                            var reason = args.reason || '执行高级操作';
+                            if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
+                                setAgentMode('agent');
+                                toolResult = { result: '✅ Agent 模式已启用,现在可以执行文件操作和命令了。' };
+                            } else {
+                                toolResult = { result: '❌ 用户拒绝了 Agent 模式请求,继续普通模式。' };
+                            }
                         }
                     }
                      else if (func.name === 'autonomous_mode') {
-                        var enabled = args.enabled !== false;
-                        localStorage.setItem('agentProactive', enabled ? 'true' : 'false');
-                        toolResult = { result: enabled ? '✅ 自主模式已启用,AI可以自主决定使用工具。' : '🔒 自主模式已禁用,AI将每次请求用户确认。' };
+                        if (isYoloMode()) {
+                            toolResult = { result: '✅ 当前已是 YOLO 自主模式,所有操作自动批准。' };
+                        } else {
+                            var enabled = args.enabled !== false;
+                            localStorage.setItem('agentProactive', enabled ? 'true' : 'false');
+                            toolResult = { result: enabled ? '✅ 自主模式已启用,AI可以自主决定使用工具。' : '🔒 自主模式已禁用,AI将每次请求用户确认。' };
+                        }
                     }
                      else if (func.name === 'engine_agent_ask') {
                         toolResult = await engineApiHandler('agent_ask', args);
