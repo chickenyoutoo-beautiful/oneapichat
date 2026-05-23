@@ -13078,9 +13078,15 @@ window.loadChat = function (id) {
             });
         }
     } catch(e) {}
-    // ★ 标记待恢复,供 init 触发自动续生
+    // ★ 标记待恢复:仅当流式确实在进行中(有内容且最近)才触发自动续生
     if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
-        window._pendingRecovery = savedPartial;
+        var _age = Date.now() - (savedPartial.time || 0);
+        var _hasContent = (savedPartial.content && savedPartial.content.length > 10) || (savedPartial.reasoning && savedPartial.reasoning.length > 10);
+        if (_hasContent && _age < 30000) {
+            window._pendingRecovery = savedPartial;
+        } else {
+            console.log('[loadChat] 跳过过期或不完整的partial恢复');
+        }
     }
     // ★ 清理 localStorage,避免下次重复恢复
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
@@ -13974,6 +13980,13 @@ function initializeApp() {
                 if (window._backendRecovered) { window._pendingRecovery = null; return; }
                 var _rec = window._pendingRecovery;
                 window._pendingRecovery = null;
+                // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<30秒)
+                var _age = Date.now() - (_rec.time || 0);
+                var _hasRealContent = (_rec.content && _rec.content.length > 10) || (_rec.reasoning && _rec.reasoning.length > 10);
+                if (!_hasRealContent || _age > 30000) {
+                    console.log('[AutoRecover] 跳过: 内容不足或超30秒');
+                    return;
+                }
                 setTimeout(function() {
                     if (!chats[_rec.chatId]) return;
                     // 找到用户最后一条消息
