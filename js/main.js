@@ -11502,8 +11502,13 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'win_screenshot') {
                         var fmt = (args.format || 'png').replace(/[^a-z]/g, '');
                         if (fmt !== 'png' && fmt !== 'jpg') fmt = 'png';
-                        var ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $ms = New-Object System.IO.MemoryStream; $b.Save($ms, [System.Drawing.Imaging.ImageFormat]::' + (fmt === 'png' ? 'Png' : 'Jpeg') + '); [Convert]::ToBase64String($ms.ToArray()); $b.Dispose(); $g.Dispose(); $ms.Dispose()"';
-                        toolResult = await engineApiHandler('exec', { cmd: ssCmd, timeout: 15 });
+                        var _ts = Date.now();
+                        var _outPath = '/mnt/c/Windows/Temp/screenshot_' + _ts + '.' + fmt;
+                        // ★ 截图保存到 WSL2 可访问路径，不通过 base64 传输（避免截断）
+                        var ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save(\"' + _outPath.replace(/\\/g, '\\\\') + '\", [System.Drawing.Imaging.ImageFormat]::' + (fmt === 'png' ? 'Png' : 'Jpeg') + '); $b.Dispose(); $g.Dispose(); Write-Output done"';
+                        var r = await engineApiHandler('exec', { cmd: ssCmd, timeout: 15 });
+                        // 返回可访问的 URL
+                        toolResult = { result: '✅ 截图已保存: ' + _outPath + '\n可通过 server_file_read 读取或直接在浏览器打开: /file?path=' + encodeURIComponent(_outPath) };
                     }
 // ===== 浏览器工具 =====
                      else if (func.name === 'browser_navigate') {
