@@ -1677,7 +1677,7 @@ const SRC_TOOLS = [
     { type: "function", function: { name: "src_status", description: "查询SRC服务存活状态、运行模式、state_label(stopped/running/error)", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "src_dashboard", description: "获取星穹铁道游戏资源面板(体力/星琼/信用点/燃料/沉浸器/大月卡进度等实时数据)", parameters: { type: "object", properties: {}, required: [] } } },
     // ── 生命周期 ──
-    { type: "function", function: { name: "src_start", description: "启动SRC完整调度器(Alas任务)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "src_start", description: "启动SRC任务。task=任务名(Alas=完整调度器, Weekly=周本, Dungeon=副本, Ornament=遗器, Rogue=模拟宇宙, DailyQuest=日常)。默认Alas。", parameters: { type: "object", properties: { task: { type: "string", description: "任务名: Alas/Weekly/Dungeon/Ornament/Rogue/DailyQuest/Freebies/Assignment/BattlePass/Restart/Daemon/PlannerScan, 默认Alas" } }, required: [] } } },
     { type: "function", function: { name: "src_stop", description: "安全停止SRC所有运行中的任务", parameters: { type: "object", properties: {}, required: [] } } },
     // ── 任务管理 ──
     { type: "function", function: { name: "src_get_tasks", description: "获取所有任务列表(含分组:日常/周本/副本/工具,各任务的启用状态和下次运行时间)", parameters: { type: "object", properties: {}, required: [] } } },
@@ -11381,8 +11381,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         } else { toolResult = { error: r.error || '获取失败' }; }
                     }
                      else if (func.name === 'src_start') {
-                        var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: 'Alas' }) });
-                        toolResult = r.ok ? { result: '✅ SRC 启动命令已发送' } : { error: r.error || '启动失败' };
+                        var task = args.task || 'Alas';
+                        var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: task }) });
+                        toolResult = r.ok ? { result: '✅ ' + task + ' 已启动' } : { error: r.error || '启动失败(可能已在运行,需先停止)' };
                     }
                      else if (func.name === 'src_stop') {
                         var r = await _srcApi('/stop', { method: 'POST', body: JSON.stringify({ config_name: 'src' }) });
