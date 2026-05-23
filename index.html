@@ -54,8 +54,7 @@
             </div>
             <div class="auth-tabs">
                 <button class="auth-tab active" id="authTabLogin" onclick="switchAuthTab('login')">登录</button>
-                <!-- 注册暂未开放 -->
-                <button class="auth-tab" id="authTabRegister" onclick="switchAuthTab('register')" style="display:none;">注册</button>
+                <button class="auth-tab" id="authTabRegister" onclick="showToast('注册暂未开放,请使用已有账号登录', 'warning', 3000)" style="opacity:0.5;cursor:not-allowed;">注册（暂未开放）</button>
             </div>
             <div id="authError" class="auth-error hidden"></div>
             <div id="authLoginForm" class="auth-form" autocomplete="off">
