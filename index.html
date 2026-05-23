@@ -13,7 +13,7 @@
     <script>
     // 清除浏览器 301 缓存造成的错误重定向
     (function() {
-        var badHosts = ['xiaoxin.naujtrats.xyz'];
+        var badHosts = [];
         if (badHosts.indexOf(location.hostname) !== -1) {
             localStorage.setItem('_301cleared', Date.now());
             location.replace('https://naujtrats.xyz' + location.pathname + location.search + location.hash);
@@ -32,7 +32,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=1779282234">
+    <link rel="stylesheet" href="./css/style.css?v=1779382300">
     <!-- 模型配置 — 独立适配文件 -->
     <script defer src="./js/models.js?v=4"></script>
     <!-- PPT/PPTX 解析 -->
@@ -40,7 +40,8 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=1779283420"></script>
+<script defer src="./js/main.js?v=1779382301"></script>
+<script defer src="./js/src-manager.js?v=4"></script>
 
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
@@ -210,6 +211,11 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                 </a>
+                <button id="srcHeaderBtn" onclick="window.srcManager ? srcManager.toggle() : console.log('srcManager not loaded')" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition" title="SRC 星穹铁道控制台">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h4l3-9 4 18 3-9h4"/>
+                    </svg>
+                </button>
                 <button onclick="window.toggleConfigPanel()" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:scale-105 transition">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
@@ -335,7 +341,7 @@
             </button>
             <div id="agentReplyStatus" class="text-xs text-gray-400 mt-2 hidden"></div>
             
-            <!-- 📊 任务进度 + 调用计数 -->
+            <!-- 任务进度条 -->
             <div class="agent-task-panel" id="agentTaskPanel">
                 <div class="agent-task-panel-title">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
@@ -343,10 +349,26 @@
                 </div>
                 <div id="agentTaskDetail" class="agent-task-detail">暂无活跃任务</div>
             </div>
+        </div>
+
+        <!-- 工具调用统计 -->
+        <div class="agent-section">
+            <div class="agent-section-label">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                工具调用统计
+            </div>
             <div class="agent-stats-row" id="agentStatsRow">
                 <div class="agent-stat-item">
                     <span class="agent-stat-val" id="agentToolCount">0</span>
                     <span class="agent-stat-lbl">调用</span>
+                </div>
+                <div class="agent-stat-item">
+                    <span class="agent-stat-val" id="agentSuccessCount" style="color:#22c55e">0</span>
+                    <span class="agent-stat-lbl">成功</span>
+                </div>
+                <div class="agent-stat-item">
+                    <span class="agent-stat-val" id="agentErrorCount" style="color:#ef4444">0</span>
+                    <span class="agent-stat-lbl">失败</span>
                 </div>
                 <div class="agent-stat-item">
                     <span class="agent-stat-val" id="agentRoundCount">0</span>
@@ -379,12 +401,30 @@
                 聊天模型
             </div>
             <div class="config-field">
-                <label class="config-label">API Key</label>
-                <input type="text" id="apiKey" autocomplete="off" class="config-input masked-key" placeholder="输入 API Key">
+                <label class="config-label">提供商</label>
+                <select id="baseUrlProvider" class="config-input config-select">
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="xai">xAI (Grok)</option>
+                    <option value="antthropic">Anthropic (Claude)</option>
+                    <option value="minimax">MiniMax</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="zhipu">智谱 (GLM)</option>
+                    <option value="qwen">阿里通义千问</option>
+                    <option value="moonshot">月之暗面 (Kimi)</option>
+                    <option value="doubao">字节豆包 (火山引擎)</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="opencode">OpenCode</option>
+                    <option value="custom">✎ 自定义</option>
+                </select>
+            </div>
+            <div class="config-field">
+                <label class="config-label" id="apiKeyLabel">API Key (DeepSeek)</label>
+                <input type="text" id="apiKey" autocomplete="off" class="config-input masked-key" placeholder="DeepSeek API Key">
             </div>
             <div class="config-field">
                 <label class="config-label">Base URL</label>
-                <input type="text" id="baseUrl" placeholder="如: https://oneapi.naujtrats.xyz/v1" class="config-input">
+                <input type="text" id="baseUrl" placeholder="如: https://api.deepseek.com" class="config-input">
             </div>
             <div class="config-field">
                 <label class="config-label">视觉理解模型</label>
