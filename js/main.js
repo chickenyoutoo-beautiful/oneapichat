@@ -4442,8 +4442,8 @@ function playAgentExitEffect(mode) {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 模糊遮罩
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(12px) saturate(150%);-webkit-backdrop-filter:blur(12px) saturate(150%);background:' + (isYolo ? 'rgba(69,10,10,0.35)' : 'rgba(15,23,42,0.35)') + ';animation:agent-exit-mask 0.5s ease forwards;"></div>' +
+        // 透亮模糊遮罩
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(10px) saturate(120%);-webkit-backdrop-filter:blur(10px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.2)' : 'rgba(238,242,255,0.2)') + ';animation:agent-exit-mask 0.5s ease forwards;"></div>' +
         // 光点向中心聚集
         '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.6s ease forwards;">' +
             Array.from({length: 40}, function(_, i) {
