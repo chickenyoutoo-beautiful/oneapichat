@@ -75,6 +75,17 @@ if (!empty($authHeader) && preg_match('/^[a-f0-9]{32,}$/', $authHeader)) {
 $userId = null;
 if (!empty($authToken)) {
     $userId = verifyAuthToken($authToken);
+    // ★ 更新最后活跃时间
+    if ($userId) {
+        $uf = __DIR__ . '/users/users.json';
+        if (file_exists($uf)) {
+            $ud = @json_decode(@file_get_contents($uf), true);
+            if (is_array($ud) && isset($ud[$userId])) {
+                $ud[$userId]['last_active'] = date('c');
+                @file_put_contents($uf, json_encode($ud, JSON_UNESCAPED_UNICODE), LOCK_EX);
+            }
+        }
+    }
 }
 
 // ★ user_id GET 参数：强制指定 namespace（解决新注册账号 bfcache 残留问题）
