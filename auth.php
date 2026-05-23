@@ -8,7 +8,6 @@
 // ---- 动态 CORS（允许所有可信域名 + 允许 credentials）----
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowedOrigins = [
-    'https://xiaoxin.naujtrats.xyz',
     'https://naujtrats.xyz',
     'https://www.naujtrats.xyz',
     'https://aliyun.naujtrats.xyz',

@@ -448,6 +448,25 @@ const SEARCH_PROXY = 'https://search.naujtrats.xyz'; // GCP代理（国内绕过
 const FETCH_PROXY = '/oneapichat/fetch.php';  // ★ 网页内容抓取代理
 const ENCRYPTION_KEY = 'naujtrats-secret';
 
+window.onProviderChange = function(){};
+
+const API_PROVIDERS = {
+    deepseek:  { label: 'DeepSeek',       baseUrl: 'https://api.deepseek.com',                      keyLS: 'apiKeyDeepseek', baseKey: 'apiKeyDeepseek' },
+    openai:    { label: 'OpenAI',         baseUrl: 'https://api.openai.com/v1',                      keyLS: 'apiKeyOpenAI',   baseKey: 'apiKeyOpenAI' },
+    xai:       { label: 'xAI (Grok)',     baseUrl: 'https://api.x.ai/v1',                            keyLS: 'apiKeyXAI',      baseKey: 'apiKeyXAI' },
+    antthropic:{ label: 'Anthropic',      baseUrl: 'https://api.anthropic.com/v1',                   keyLS: 'apiKeyAnth',     baseKey: 'apiKeyAnth' },
+    minimax:   { label: 'MiniMax',        baseUrl: 'https://api.minimaxi.com/v1',                    keyLS: 'apiKeyMiniMax',  baseKey: 'apiKeyMiniMax' },
+    gemini:    { label: 'Google Gemini',  baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyLS: 'apiKeyGemini', baseKey: 'apiKeyGemini' },
+    zhipu:     { label: '智谱 (GLM)',    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',            keyLS: 'apiKeyZhipu',    baseKey: 'apiKeyZhipu' },
+    qwen:      { label: '通义千问',       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', keyLS: 'apiKeyQwen',  baseKey: 'apiKeyQwen' },
+    moonshot:  { label: '月之暗面 (Kimi)', baseUrl: 'https://api.moonshot.cn/v1',                    keyLS: 'apiKeyMoonshot', baseKey: 'apiKeyMoonshot' },
+    doubao:    { label: '字节豆包',       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',        keyLS: 'apiKeyDoubao',   baseKey: 'apiKeyDoubao' },
+    openrouter:{ label: 'OpenRouter',     baseUrl: 'https://openrouter.ai/api/v1',                  keyLS: 'apiKeyOpenRouter', baseKey: 'apiKeyOpenRouter' },
+    opencode:  { label: 'OpenCode',       baseUrl: 'https://api.opencode.ai/v1',                      keyLS: 'apiKeyOpenCode',  baseKey: 'apiKeyOpenCode' },
+    custom:    { label: '自定义',         baseUrl: '',                                                 keyLS: 'apiKeyCustom',  baseKey: 'apiKeyCustom' },
+};
+let _currentProvider = '';
+
 // ===================== 网页抓取工具定义 ====================
 const WEB_FETCH_TOOL_DEFINITION = {
     type: "function",
@@ -1942,7 +1961,8 @@ async function loadConfigFromServer() {
         }
         // 静默写入所有键,只在出错时记录
         for (var k in config) {
-            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') {
+            var _skipKeys = ['baseUrlProvider','apiKey','baseUrl'];
+            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && _skipKeys.indexOf(k) === -1) {
                 try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
         }
@@ -2891,6 +2911,50 @@ const getChecked = id => getEl(id)?.checked || false;
 const setVal = (id, val) => { const el = getEl(id); if (el) el.value = (val === undefined || val === null) ? '' : val; };
 const setChecked = (id, val) => { const el = getEl(id); if (el) el.checked = val; };
 
+window.onProviderChange = function() {
+    var provider = getEl('baseUrlProvider')?.value || 'custom';
+    var cfg = API_PROVIDERS[provider] || API_PROVIDERS.custom;
+    
+    // 1. 保存当前 Key 到旧厂商（永远存到独立 key，不碰 apiKey）
+    var curKey = getVal('apiKey') || '';
+    var oldP = localStorage.getItem('baseUrlProvider') || '';
+    if (oldP && oldP !== provider && curKey) {
+        var oldCfg = API_PROVIDERS[oldP] || {};
+        // ★ 存到旧厂商的独立 key，不覆盖 apiKey
+        if (oldCfg.keyLS) localStorage.setItem(oldCfg.keyLS, encrypt(curKey));
+    }
+    
+    // 2. Base URL
+    if (provider === 'custom') setVal('baseUrl', localStorage.getItem('baseUrlCustom') || '');
+    else setVal('baseUrl', cfg.baseUrl || '');
+    
+    // 3. API Key 从新厂商加载
+    var savedKey = localStorage.getItem(cfg.keyLS);
+    var cleanKey = '';
+    if (savedKey) { var dk = decrypt(savedKey); cleanKey = (dk && dk !== 'not-needed') ? dk : ''; }
+    setVal('apiKey', cleanKey);
+    // ★ 不覆盖 apiKey —— 它由 saveConfig 管理，只更新输入框
+    localStorage.setItem('baseUrlProvider', provider);
+    
+    // 4. UI
+    var label = getEl('apiKeyLabel'); if (label) label.textContent = 'API Key (' + cfg.label + ')';
+    var input = getEl('apiKey'); if (input) input.placeholder = provider === 'custom' ? '自定 URL 和 Key' : cfg.label + ' API Key';
+    
+    // 5. 模型
+    var sm = localStorage.getItem('model_' + provider) || '';
+    if (sm) { setVal('modelSelect', sm); localStorage.setItem('model', sm); }
+    else { setVal('modelSelect', ''); localStorage.setItem('model', ''); }
+    
+    _currentProvider = provider;
+    console.log('[PROVIDER] ->' + provider + ' key:' + (cleanKey ? '***' : 'empty') + ' url:' + getVal('baseUrl'));
+    console.log('[PROVIDER] localStorage apiKey:', localStorage.getItem('apiKey') ? 'SET' : 'EMPTY');
+    console.log('[PROVIDER] input apiKey.value:', getEl('apiKey')?.value ? 'SET' : 'EMPTY');
+};
+function getCurrentApiKeyLSKey() {
+    var p = getEl('baseUrlProvider')?.value || 'custom';
+    return (API_PROVIDERS[p] || API_PROVIDERS.custom).keyLS;
+}
+
 function logDebug(...args) {
 }
 
@@ -3459,63 +3523,67 @@ window.hideThinking = function() {
 // 下一个工具调用时自动追加新行，旧行向上滚动（单向滚动，不闪烁）
 window._toolCallLines = [];
 
-window.showToolStatus = function(toolName, argPreview, isRunning) {
+// ==================== 工具调用状态行 (独立, 完成后3秒淡出) ====================
+window.showToolStatus = function(toolName, argPreview, status) {
     if (!currentChatId) return;
     var bubble = activeBubbleMap[currentChatId];
     if (!bubble) return;
     
-    // 查找或创建工具调用行容器
     var tcContainer = bubble.querySelector('.tool-call-lines');
     if (!tcContainer) {
         tcContainer = document.createElement('div');
         tcContainer.className = 'tool-call-lines';
-        bubble.appendChild(tcContainer);
+        var reasoning = bubble.querySelector('details');
+        var md = bubble.querySelector('.markdown-body');
+        if (reasoning && md) reasoning.after(tcContainer);
+        else if (md) md.before(tcContainer);
+        else bubble.appendChild(tcContainer);
     }
     
-    if (!isRunning) {
-        // 所有工具完成：3 秒后淡出整个容器
-        setTimeout(function() {
-            if (tcContainer && tcContainer.parentNode) {
-                tcContainer.style.opacity = '0';
-                tcContainer.style.maxHeight = '0';
-                setTimeout(function() { if (tcContainer.parentNode) tcContainer.remove(); }, 400);
-            }
-        }, 3000);
-        return;
-    }
+    if (status === null) return;
     
-    // 为新工具调用追加一行
+    // ★ 旧行推出 - 用 opacity + margin-top 压缩
+    tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
+        old.style.transition = 'all 0.15s ease';
+        old.style.opacity = '0';
+        old.style.marginTop = '-28px';
+        setTimeout(function() { if (old.parentNode) old.remove(); }, 180);
+    });
+    
     var line = document.createElement('div');
-    line.className = 'tool-call-line';
-    line.innerHTML = 
-        '<svg class="tool-call-line-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2">' +
-            '<path d="M5 12a7 7 0 0 1 7-7"/>' +
-        '</svg>' +
-        '<span class="tool-call-line-name">' + escapeHtml(toolName) + '</span>' +
-        (argPreview ? '<span class="tool-call-line-arg">' + escapeHtml(argPreview.substring(0, 80)) + '</span>' : '');
     
-    // 标记上一个完成的工具调用
-    var prevRunning = tcContainer.querySelector('.tool-call-line-running');
-    if (prevRunning) prevRunning.classList.replace('tool-call-line-running', 'tool-call-line-done');
+    var iconHtml = '';
+    if (status === 'running') {
+        iconHtml = '<svg class=tool-call-spin width=18 height=18 viewBox="0 0 24 24" fill=none stroke=#6366f1 stroke-width=3 stroke-linecap=round><path d="M12 2a10 10 0 0 1 0 20"/></svg>';
+    } else if (status === 'success') {
+        iconHtml = '<svg class=tool-call-check width=18 height=18 viewBox="0 0 24 24" fill=none stroke=#22c55e stroke-width=3 stroke-linecap=round stroke-linejoin=round><path d="M4 12l6 6L20 6"/></svg>';
+    } else if (status === 'error') {
+        iconHtml = '<svg class=tool-call-x width=16 height=16 viewBox="0 0 24 24" fill=none stroke=#dc2626 stroke-width=3 stroke-linecap=round><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>';
+    }
     
-    // 新行标记为 running
-    line.classList.add('tool-call-line-running');
+    line.innerHTML = '<span class=tool-c…wrap>' + iconHtml + '</span>' +
+        '<span class="tool-call-name">' + escapeHtml(toolName) + '</span>' +
+        (argPreview ? '<span class="tool-call-arg">' + escapeHtml((argPreview||'').substring(0, 40)) + '</span>' : '');
+    
+    var cls = 'tool-call-line';
+    if (status === 'running') cls += ' tool-call-running';
+    else if (status === 'success') { cls += ' tool-call-success'; try { navigator.vibrate && navigator.vibrate([15]); } catch(e){} }
+    else if (status === 'error') { cls += ' tool-call-error'; try { navigator.vibrate && navigator.vibrate([30,50,30]); } catch(e){} }
+    line.className = cls;
+    line.dataset.tcStatus = status;
+    line.dataset.tcName = toolName;
     tcContainer.appendChild(line);
     
-    // 滚动到最新行
-    tcContainer.scrollTop = tcContainer.scrollHeight;
-    
-    // 限制最多保留 6 行，溢出时移除最早的
-    var lines = tcContainer.querySelectorAll('.tool-call-line');
-    while (lines.length > 6) {
-        var first = lines[0];
-        first.style.maxHeight = '0';
-        first.style.opacity = '0';
-        setTimeout(function() { if (first.parentNode) first.remove(); }, 300);
-        lines = tcContainer.querySelectorAll('.tool-call-line');
+    // 完成后 3 秒淡出
+    if (status === 'success' || status === 'error') {
+        var self = line;
+        setTimeout(function() {
+            if (!self.parentNode) return;
+            self.style.transition = 'all 0.35s ease';
+            self.style.maxHeight = '0'; self.style.opacity = '0'; self.style.padding = '0'; self.style.margin = '0'; self.style.borderWidth = '0';
+            setTimeout(function() { if (self.parentNode) self.remove(); }, 400);
+        }, 3000);
     }
-    
-    window._toolCallLines.push({ name: toolName, arg: argPreview });
 };
 
 function showToast(msg, type = 'info', dur = 3000) {
@@ -3542,24 +3610,26 @@ function showToast(msg, type = 'info', dur = 3000) {
 // ⌨️ Slash Command Popup
 // ============================================================
 var SLASH_COMMANDS = [
-    { cmd: 'search', hint: '强制联网搜索', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>', group: '搜索' },
-    { cmd: 'news', hint: '搜索新闻', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>', group: '搜索' },
-    { cmd: 'image', hint: '搜索图片', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>', group: '搜索' },
-    { cmd: 'mode', hint: '切换工作模式 (plan/agent/yolo/off)', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>', group: 'Agent' },
-    { cmd: 'model', hint: '切换 AI 模型', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>', group: 'Agent' },
-    { cmd: 'clear', hint: '清空当前对话', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>', group: '对话' },
-    { cmd: 'compact', hint: '压缩上下文以节省 token', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>', group: '对话' },
-    { cmd: 'new', hint: '新建对话', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>', group: '对话' },
-    { cmd: 'help', hint: '显示所有命令', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', group: '帮助' }
+    { cmd: 'search', hint: '强制联网搜索', args: '[query]', group: '搜索' },
+    { cmd: 'news', hint: '搜索新闻', args: '[query]', group: '搜索' },
+    { cmd: 'image', hint: '搜索图片', args: '[query]', group: '搜索' },
+    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', group: 'Agent' },
+    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', group: 'Agent' },
+    { cmd: 'clear', hint: '清空当前对话', group: '对话' },
+    { cmd: 'compact', hint: '压缩上下文', group: '对话' },
+    { cmd: 'new', hint: '新建对话', group: '对话' },
+    { cmd: 'help', hint: '显示所有命令', group: '帮助' }
 ];
+
+window._slashIdx = -1;
+window._slashVisible = false;
 
 function handleSlashInput(el) {
     var val = el.value;
-    // ★ 只要以 / 开头就显示弹出（没有空格时）
     if (!val.startsWith('/')) { hideSlashPopup(); return; }
-    if (val.includes(' ')) { hideSlashPopup(); return; }
-    // 从 / 后面取筛选词（可能为空,表示显示全部）
-    updateSlashPopup(val.slice(1).toLowerCase());
+    var query = val.slice(1);
+    if (query.includes(' ')) { hideSlashPopup(); return; }
+    updateSlashPopup(query.toLowerCase());
 }
 
 function updateSlashPopup(query) {
@@ -3567,64 +3637,85 @@ function updateSlashPopup(query) {
     if (!popup) {
         popup = document.createElement('div');
         popup.id = 'slashPopup';
-        popup.className = 'slash-popup hidden';
+        popup.className = 'slash-popup';
+        popup.style.opacity = '0';
+        popup.style.transform = 'translateY(8px)';
         var wrap = document.getElementById('userInput')?.closest('.input-wrapper') || document.querySelector('.input-wrapper');
         if (wrap) wrap.appendChild(popup);
         else document.body.appendChild(popup);
     }
-    if (!query) { return hideSlashPopup(); }
-    var matches = SLASH_COMMANDS.filter(function(c) { return c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
+    var matches = SLASH_COMMANDS.filter(function(c) { return !query || c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
     if (matches.length === 0) { hideSlashPopup(); return; }
-    // 按 group 分组
     var groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
     var html = '';
     var idx = 0;
     Object.keys(groups).forEach(function(g) {
-        html += '<div class="slash-popup-group">' + escapeHtml(g) + '</div>';
-        groups[g].forEach(function(m, i) {
-            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-group="' + escapeHtml(g) + '" onclick="selectSlashCommand(\'' + escapeHtml(m.cmd) + '\')">' +
-                '<span class="slash-item-icon">' + m.icon + '</span>' +
-                '<span class="slash-item-cmd">/' + m.cmd + '</span>' +
-                '<span class="slash-item-hint">' + m.hint + '</span>' +
+        html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
+        groups[g].forEach(function(m) {
+            var argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
+            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '">' +
+                '<span class=slash-item-cmd>/' + m.cmd + '</span>' + argTag +
+                '<span class=slash-item-hint>' + m.hint + '</span>' +
             '</div>';
             idx++;
         });
     });
-    html += '<div class="slash-popup-footer">↑↓ 导航 · Tab/Enter 选择 · Esc 关闭</div>';
+    html += '<div class=slash-popup-footer>↑↓ 导航 · Enter 选择 · Esc 关闭 · 点击选择</div>';
     popup.innerHTML = html;
-    popup.classList.remove('hidden');
-    
-    // 重新绑定点击事件（因为 innerHTML 覆盖了 onclick）
+    window._slashIdx = 0;
+    window._slashVisible = true;
     popup.querySelectorAll('.slash-popup-item').forEach(function(item) {
-        item.addEventListener('click', function() {
-            selectSlashCommand(this.dataset.cmd);
-        });
+        item.addEventListener('click', function() { selectSlashCommand(this.dataset.cmd, this.dataset.args); });
+        item.addEventListener('touchend', function(e) { e.preventDefault(); selectSlashCommand(this.dataset.cmd, this.dataset.args); });
+    });
+    requestAnimationFrame(function() {
+        popup.style.opacity = '1';
+        popup.style.transform = 'translateY(0)';
     });
 }
 
 function navigateSlashPopup(dir) {
     var popup = getEl('slashPopup');
-    if (!popup || popup.classList.contains('hidden')) return;
+    if (!popup || !window._slashVisible) return;
     var items = popup.querySelectorAll('.slash-popup-item');
     if (items.length === 0) return;
     var cur = popup.querySelector('.slash-item-highlight');
-    var idx = cur ? Array.from(items).indexOf(cur) : -1;
     if (cur) cur.classList.remove('slash-item-highlight');
-    idx = (idx + dir + items.length) % items.length;
-    items[idx].classList.add('slash-item-highlight');
-    items[idx].scrollIntoView({ block: 'nearest' });
+    window._slashIdx = (window._slashIdx + dir + items.length) % items.length;
+    var target = items[window._slashIdx];
+    target.classList.add('slash-item-highlight');
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-function selectSlashCommand(cmd) {
+function selectSlashCommand(cmd, args) {
     var input = $.userInput;
-    if (input) { input.value = '/' + cmd + ' '; hideSlashPopup(); window.autoResize(input); input.focus(); }
+    if (!input) return;
+    if (args) {
+        input.value = '/' + cmd + ' ';
+        input.setSelectionRange(input.value.length, input.value.length);
+    } else {
+        input.value = '/' + cmd + ' ';
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        sendMessage();
+        input.value = '';
+        return;
+    }
+    hideSlashPopup();
+    window.autoResize(input);
+    input.focus();
 }
 
 function hideSlashPopup() {
     var popup = getEl('slashPopup');
-    if (popup) popup.classList.add('hidden');
+    if (popup) {
+        window._slashVisible = false;
+        popup.style.opacity = '0';
+        popup.style.transform = 'translateY(8px)';
+    }
 }
+
+// 自动滚动到底部(用于AI回复等场景)
 
 // 自动滚动到底部(用于AI回复等场景)
 function autoScrollToBottom(reason) {
@@ -3747,6 +3838,13 @@ window.toggleConfigPanel = () => {
         }
     } else {
         const isOpening = $.configPanel?.classList.contains('hidden-panel');
+        // Close SRC panel when opening config panel
+        if (isOpening) {
+            var sp = document.getElementById("srcPanel");
+            if (sp && !sp.classList.contains("hidden-panel")) {
+                sp.classList.add("hidden-panel");
+            }
+        }
         $.configPanel?.classList.toggle('hidden-panel');
         document.querySelector(".flex-1.flex-col")?.classList.toggle("config-open", isOpening);
         // 打开时保存配置快照,关闭时清除
@@ -4064,19 +4162,32 @@ var sessionUsage = { promptTokens: 0, completionTokens: 0, totalCost: 0, prefixC
 // ==================== 增强用量追踪 ====================
 /** 按工具分类统计调用次数 */
 var toolCallStats = (function() {
-  var _stats = {};
+  var _stats = {}; // { toolName: { total: n, success: n, error: n, errors: [{msg,time}] } }
   return {
-    record: function(toolName) {
-      _stats[toolName] = (_stats[toolName] || 0) + 1;
+    record: function(toolName, isError, errorMsg) {
+      if (!_stats[toolName]) _stats[toolName] = { total: 0, success: 0, error: 0, errors: [] };
+      _stats[toolName].total++;
+      if (isError) {
+        _stats[toolName].error++;
+        if (errorMsg) _stats[toolName].errors.push({ msg: errorMsg, time: Date.now() });
+      } else {
+        _stats[toolName].success++;
+      }
     },
-    get: function(toolName) { return _stats[toolName] || 0; },
+    get: function(toolName) { var s = _stats[toolName]; return s ? s.total : 0; },
     getAll: function() { return JSON.parse(JSON.stringify(_stats)); },
     reset: function() { _stats = {}; },
-    getTopTools: function(n) {
-      n = n || 5;
-      var entries = Object.entries(_stats);
-      entries.sort(function(a, b) { return b[1] - a[1]; });
-      return entries.slice(0, n);
+    getSummary: function() {
+      var total = 0, success = 0, error = 0, failedTools = [];
+      Object.keys(_stats).forEach(function(k) {
+        total += _stats[k].total;
+        success += _stats[k].success;
+        error += _stats[k].error;
+        if (_stats[k].error > 0) {
+          failedTools.push({ name: k, errors: _stats[k].errors.slice(-3) });
+        }
+      });
+      return { total: total, success: success, error: error, failedTools: failedTools };
     }
   };
 })();
@@ -6280,12 +6391,17 @@ window.clearSkillPreview = function() {
 
 function saveConfig(showFeedback = false) {
     console.log('[saveConfig] apiKey:', (getVal('apiKey')||'') ? '✅' : '❌');
-    const oldApiKey = localStorage.getItem('apiKey');
-    const oldBaseUrl = localStorage.getItem('baseUrl');
     try {
-        // ★ 不保存 "not-needed" 占位值
         const mainKey = getVal('apiKey') || '';
-        localStorage.setItem('apiKey', mainKey === 'not-needed' ? '' : encrypt(mainKey));
+        var _provider = getEl('baseUrlProvider')?.value || 'custom';
+        var _pCfg = API_PROVIDERS[_provider] || API_PROVIDERS.custom;
+        // ★ 写独立厂商 key，apiKey 始终存当前值
+        localStorage.setItem(_pCfg.keyLS, mainKey === 'not-needed' ? '' : encrypt(mainKey));
+        localStorage.setItem('baseUrl', getVal('baseUrl') || '');
+        if (_provider === 'custom') localStorage.setItem('baseUrlCustom', getVal('baseUrl') || '');
+        localStorage.setItem('baseUrlProvider', _provider);
+        var _curModel = getVal('modelSelect') || '';
+        if (_curModel) localStorage.setItem('model_' + _provider, _curModel);
         localStorage.setItem('baseUrl', getVal('baseUrl') || '');
         localStorage.setItem('systemPrompt', getVal('systemPrompt') || '');
         localStorage.setItem('model', getVal('modelSelect') || '');
@@ -6344,14 +6460,6 @@ function saveConfig(showFeedback = false) {
     } catch(e) {
         console.warn('[saveConfig] localStorage写入失败(已忽略):', e.message);
     }
-    const newApiKey = localStorage.getItem('apiKey');
-    const newBaseUrl = localStorage.getItem('baseUrl');
-    // ★ 修复: API Key 或 Base URL 变更时自动刷新模型列表
-    const apiKeyChanged = oldApiKey !== newApiKey;
-    const baseUrlChanged = oldBaseUrl !== newBaseUrl;
-    if ((apiKeyChanged || baseUrlChanged) && getVal('baseUrl') && getVal('apiKey')) {
-        fetchModels();
-    }
     if (showFeedback) {
         showToast('配置已保存 ✅', 'success');
         // ★ 修复: 保存后自动收起配置栏
@@ -6364,6 +6472,10 @@ function saveConfig(showFeedback = false) {
         }
         configSnapshot = null;
         configPanelWasOpen = false;
+    }
+    // ★ 保存后延迟刷新模型列表（避免和保存 toast 冲突）
+    if (getVal('baseUrl') && getVal('apiKey')) {
+        setTimeout(function() { fetchModels(true).catch(function(){}); }, 1500);
     }
     // ★ 配置变更后立即同步到服务器(按用户隔离)
     if (localStorage.getItem('authToken')) {
@@ -6410,7 +6522,7 @@ window.updateMarkdownConfig = () => {
 };
 
 // ==================== 模型管理 ====================
-window.fetchModels = async function () {
+window.fetchModels = async function (silent) {
     const key = getVal('apiKey');
     const url = getVal('baseUrl');
     const selects = ['modelSelect', 'titleModel', 'searchModel', 'aiSearchJudgeModel'];
@@ -6438,11 +6550,14 @@ window.fetchModels = async function () {
         const mainSelect = getEl('modelSelect');
         if (mainSelect) {
             mainSelect.innerHTML = modelOptions;
-            mainSelect.value = localStorage.getItem('model') || DEFAULT_CONFIG.model;
-            // ★ 选择模型时立即保存到 localStorage + 服务器
+            var _p = getEl('baseUrlProvider')?.value || 'custom';
+            var _storedModel = localStorage.getItem('model_' + _p) || localStorage.getItem('model') || '';
+            mainSelect.value = (_storedModel && models.some(function(m) { return m.id === _storedModel; })) ? _storedModel : (models.length ? models[0].id : '');
             mainSelect.addEventListener('change', function() {
                 var val = this.value;
                 localStorage.setItem('model', val);
+                var _p2 = getEl('baseUrlProvider')?.value || 'custom';
+                localStorage.setItem('model_' + _p2, val);
                 saveConfigToServer();
             });
         }
@@ -6499,7 +6614,12 @@ window.fetchModels = async function () {
                         }
         }
     } catch (e) {
-        if (getVal('apiKey')) showToast('获取模型列表失败', 'error');
+        if (silent) throw e;
+        var _e = e.message || '';
+        if (_e.includes('401') || _e.includes('403')) showToast('API Key 无效 (401)', 'error');
+        else if (_e.includes('404')) showToast('URL 不正确 (404)', 'error');
+        else if (_e.includes('Failed to fetch')) showToast('无法连接', 'error');
+        else showToast('模型列表加载失败', 'error');
     }
 };
 
@@ -6510,10 +6630,14 @@ window.refreshModels = async function (e) {
         btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
     }
     try {
-        await window.fetchModels();
+        await window.fetchModels(true);
         showToast('模型列表已刷新', 'success');
-    } catch {
-        showToast('刷新失败', 'error');
+    } catch (e) {
+        var _em = (e && e.message) ? e.message : '';
+        if (_em.includes('401') || _em.includes('403')) showToast('API Key 无效 (401)', 'error');
+        else if (_em.includes('404')) showToast('URL 不正确 (404)', 'error');
+        else if (_em.includes('timeout') || _em.includes('Failed to fetch')) showToast('无法连接', 'error');
+        else showToast('刷新失败', 'error');
     } finally {
         if (btn) {
             btn.disabled = false;
@@ -7709,7 +7833,8 @@ function createTemporaryTimestampIfNeeded(text) {
     const lowerText = text.toLowerCase();
     if (timeKeywords.some(kw => lowerText.includes(kw))) {
         const now = new Date();
-        const timeContent = `当前时间戳:${now.toLocaleDateString()} ${now.toLocaleTimeString()} 时区:${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+        var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var pad=function(n){return n<10?'0'+n:n};var off=-Math.round(now.getTimezoneOffset()/60);var tz='GMT'+(off>=0?'+':'')+off;var ts=days[now.getDay()]+' '+now.getFullYear()+'-'+months[now.getMonth()]+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())+' '+tz;
+        var timeContent = '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。';
         return { role: 'system', content: timeContent, temporary: true };
     }
     return null;
@@ -7746,16 +7871,38 @@ function handleSlashCommand(cmd) {
     var modeLabels = { off:'已关闭', plan:'Plan 只读模式', agent:'Agent 交互模式', yolo:'YOLO 自动模式' };
     if (cmd.cmd === 'set_mode') {
         setAgentMode(cmd.mode);
-        appendMessage('system', '已切换到 ' + (modeLabels[cmd.mode] || cmd.mode));
+        showToast('已切换到 ' + (modeLabels[cmd.mode] || cmd.mode), 'success', 3000);
     } else if (cmd.cmd === 'set_model') {
         var sel = document.getElementById('modelSelect');
-        if (sel && cmd.model) {
-            var found = false;
-            Array.from(sel.options).forEach(function(o) {
-                if (o.value.toLowerCase().includes(cmd.model.toLowerCase()) || o.text.toLowerCase().includes(cmd.model.toLowerCase())) { sel.value = o.value; found = true; }
-            });
-            if (found) { localStorage.setItem('model', sel.value); localStorage.setItem('modelSelect', sel.value); appendMessage('system', '已切换到模型: ' + sel.options[sel.selectedIndex].text); }
-            else appendMessage('system', '未找到模型: ' + cmd.model);
+        if (!sel) return;
+        var models = Array.from(sel.options).filter(function(o) { return o.value; });
+        if (!cmd.model) {
+            // 无参数: 显示模型列表供选择
+            var list = models.slice(0, 15).map(function(o) { return o.value; }).join('\n');
+            appendMessage('system', '📋 可用模型 (输入 /model <名称> 切换):\n' + list);
+            return;
+        }
+        // 有参数: 模糊匹配
+        var q = cmd.model.toLowerCase();
+        var best = null; var bestScore = 0;
+        models.forEach(function(o) {
+            var v = o.value.toLowerCase();
+            if (v === q) { best = o; bestScore = 999; }
+            else if (v.indexOf(q) >= 0 && bestScore < 100) { var s = q.length / v.length; if (s > bestScore) { best = o; bestScore = s; } }
+        });
+        if (best) {
+            sel.value = best.value;
+            localStorage.setItem('model', best.value);
+            var _p = getEl('baseUrlProvider')?.value || 'custom';
+            localStorage.setItem('model_' + _p, best.value);
+            var toast = showToast('已切换: ' + best.text, 'success', 3000);
+        } else {
+            var partials = models.filter(function(o) { return o.value.toLowerCase().indexOf(q) >= 0; });
+            if (partials.length > 0) {
+                appendMessage('system', '🔍 匹配结果 (输入完整名称切换):\n' + partials.map(function(o) { return o.value; }).join('\n'));
+            } else {
+                appendMessage('system', '❌ 未找到模型: ' + cmd.model);
+            }
         }
     } else if (cmd.cmd === 'clear_chat') {
         var cid = currentChatId;
@@ -9338,6 +9485,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         if ($.sendBtn) $.sendBtn.classList.remove('hidden');
         if ($.stopBtn) $.stopBtn.classList.remove('visible');
         handleSlashCommand(command);
+        input.value = '';
         return;
     }
     var forceSearch = !!command;
@@ -10150,6 +10298,17 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 setTimeout(function() {
                     var _tEl = getEl("agentToolCount"); if (_tEl) _tEl.textContent = toolCallCount;
                     var _rEl = getEl("agentRoundCount"); if (_rEl) _rEl.textContent = toolCallCount;
+                    var _s = toolCallStats.getSummary();
+                    var _sEl = getEl("agentSuccessCount"); if (_sEl) _sEl.textContent = _s.success;
+                    var _eEl = getEl("agentErrorCount"); if (_eEl) _eEl.textContent = _s.error;
+                    var _dEl = getEl("agentTaskDetail");
+                    if (_dEl && _s.failedTools.length > 0) {
+                        var _lines = _s.failedTools.map(function(ft) {
+                            var _last = ft.errors[ft.errors.length - 1] || {};
+                            return '<span style=color:#ef4444>❌ ' + ft.name + '</span>: ' + (_last.msg || '未知错误').substring(0,60);
+                        });
+                        _dEl.innerHTML = _lines.join('<br>');
+                    }
                     var _mEl = getEl("agentMaxCount"); if (_mEl) _mEl.textContent = maxToolCalls;
                     var _pBar = getEl("agentProgressBar");
                     var _pFill = getEl("agentProgressFill");
@@ -11307,9 +11466,12 @@ window.useAlternativeVisionModel = function() {
                             _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
                         }
                     } catch(e) {}
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, true);
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running');
                     
                     const toolResult = await executeToolCallForRetry(tc);
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success');
+                    // ★ 记录统计
+                    if (tc.function && tc.function.name) toolCallStats.record(tc.function.name, !!toolResult.error, toolResult.error || '');
                     const resultContent = toolResult.error || toolResult.result || '(empty)';
 
                     // 确保content是字符串
@@ -11355,7 +11517,7 @@ window.useAlternativeVisionModel = function() {
                 }
 
                 // ★ 工具执行循环结束,隐藏状态浮条
-                if (typeof showToolStatus === 'function') showToolStatus(null, null, false);
+                if (typeof showToolStatus === 'function') showToolStatus(null, null, null);
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (_hasCreatedSubAgent) {
@@ -11626,6 +11788,7 @@ window.useAlternativeVisionModel = function() {
             if ($.sendBtn) $.sendBtn.classList.remove('hidden');
             if ($.stopBtn) $.stopBtn.classList.remove('visible');
         }
+        if (currentChatId === chatId) loadChat(chatId);
         if (Object.keys(isTypingMap).length === 0) localStorage.removeItem('ongoingChats');
         else saveOngoingChatsSnapshot();
     }
@@ -12069,6 +12232,22 @@ function renderChatHistory() {
         if (id === AGENT_CHAT_ID) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
+    // ★ 兜底: 如果过滤后为空但有userId，从 localStorage 重新加载
+    if (_chatIds.length === 0 && _uid) {
+        var _cached = localStorage.getItem('chats');
+        if (_cached) {
+            try {
+                var _parsed = JSON.parse(_cached);
+                if (_parsed && Object.keys(_parsed).length > 0) {
+                    chats = _parsed;
+                    _chatIds = Object.keys(chats).filter(function(id) {
+                        if (id === AGENT_CHAT_ID) return false;
+                        return !_uid || !chats[id].userId || chats[id].userId === _uid;
+                    });
+                }
+            } catch(e) {}
+        }
+    }
     // ★ 按更新时间排序,最新的在最上面
     _chatIds.sort(function(a, b) {
         var ta = chats[a].updated_at || chats[a].time || 0;
@@ -12528,12 +12707,21 @@ function createDataManagementSection() {
 }
 // ==================== 初始化配置 ====================
 function initializeConfig() {
-    // ★ API Key: 过滤掉无效的"not-needed"占位值
-    const storedApiKey = decrypt(localStorage.getItem('apiKey') || '');
-    const cleanApiKey = (storedApiKey && storedApiKey !== 'not-needed') ? storedApiKey : '';
-    setVal('apiKey', cleanApiKey || '');
-    setVal('baseUrl', localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url);
-    setVal('modelSelect', localStorage.getItem('model') || DEFAULT_CONFIG.model);
+    var savedProvider = localStorage.getItem('baseUrlProvider') || 'deepseek';
+    setVal('baseUrlProvider', savedProvider);
+    var _provCfg = API_PROVIDERS[savedProvider] || API_PROVIDERS.custom;
+    var _rawK = localStorage.getItem(_provCfg.keyLS);
+    var _pk = '';
+    if (_rawK) { _pk = decrypt(_rawK) || ''; if (_pk === 'not-needed') _pk = ''; }
+    // 兼容旧数据: DeepSeek 之前存 apiKey
+    if (!_pk && _provCfg.keyLS === 'apiKeyDeepseek') { var _old = localStorage.getItem('apiKey'); if (_old) { _pk = decrypt(_old) || ''; if (_pk === 'not-needed') _pk = ''; } }
+    setVal('apiKey', _pk);
+    var _lab = getEl('apiKeyLabel'); if (_lab) _lab.textContent = 'API Key (' + _provCfg.label + ')';
+    if (savedProvider === 'custom') setVal('baseUrl', localStorage.getItem('baseUrlCustom') || '');
+    else if (_provCfg.baseUrl) setVal('baseUrl', _provCfg.baseUrl);
+    else setVal('baseUrl', localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url);
+    var _pm = localStorage.getItem('model_' + savedProvider) || localStorage.getItem('model') || DEFAULT_CONFIG.model;
+    setVal('modelSelect', _pm);
     setVal('visionModel', localStorage.getItem('visionModel') || DEFAULT_CONFIG.visionModel || '');
     setVal('visionApiUrl', localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '');
     const storedVisionKey = decrypt(localStorage.getItem('visionApiKey') || '');
@@ -12751,35 +12939,20 @@ function setupEventListeners() {
 
     if ($.userInput) {
         $.userInput.addEventListener('keydown', e => {
+            var _p = getEl('slashPopup');
+            var _vis = _p && window._slashVisible;
+            if (e.key === 'ArrowDown' && _vis) { e.preventDefault(); navigateSlashPopup(1); return; }
+            if (e.key === 'ArrowUp' && _vis) { e.preventDefault(); navigateSlashPopup(-1); return; }
+            if (e.key === 'Escape' && _vis) { e.preventDefault(); hideSlashPopup(); return; }
             if (e.key === 'Enter' && !e.shiftKey) {
-                var _popup = getEl('slashPopup');
-                if (_popup && !_popup.classList.contains('hidden')) {
-                    // 选择当前高亮的命令
-                    var _sel = _popup.querySelector('.slash-item-highlight');
-                    if (_sel) { e.preventDefault(); _sel.click(); return; }
+                if (_vis) {
+                    e.preventDefault();
+                    var _sel = _p.querySelector('.slash-item-highlight');
+                    if (_sel) { selectSlashCommand(_sel.dataset.cmd, _sel.dataset.args); }
+                    return;
                 }
                 e.preventDefault();
                 sendMessage();
-            }
-            // Arrow keys for popup navigation
-            ['ArrowUp','ArrowDown'].forEach(function(k) {
-                if (e.key === k) {
-                    var _popup = getEl('slashPopup');
-                    if (_popup && !_popup.classList.contains('hidden')) {
-                        e.preventDefault();
-                        navigateSlashPopup(k === 'ArrowDown' ? 1 : -1);
-                    }
-                }
-            });
-            // Escape to close popup
-            if (e.key === 'Escape') return hideSlashPopup();
-            if (e.key === 'Tab') {
-                var _popup = getEl('slashPopup');
-                if (_popup && !_popup.classList.contains('hidden')) {
-                    e.preventDefault();
-                    var _sel = _popup.querySelector('.slash-item-highlight');
-                    if (_sel) { var _t = _sel.dataset.cmd; if (_t) { $.userInput.value = '/' + _t + ' '; hideSlashPopup(); window.autoResize($.userInput); $.userInput.focus(); } }
-                }
             }
         });
         window.autoResize($.userInput);
@@ -12809,11 +12982,45 @@ function setupEventListeners() {
             toggleImageProviderFields();
         });
     }
+    // ★ 绑定 provider change
+    var _urlSel = getEl('baseUrlProvider');
+    if (_urlSel && !_urlSel._providerBound) {
+        _urlSel._providerBound = true;
+        _urlSel.addEventListener('change', window.onProviderChange);
+    }
 }
 
 function loadInitialData() {
     // ★ 延迟加载模型列表,不阻塞首次渲染
     setTimeout(fetchModels, 500);
+
+    // ★ 如果聊天列表为空但已登录，延迟重试（可能 restoreUserData 还没完成）
+    var _uid = localStorage.getItem('authUserId') || '';
+    if (_uid && Object.keys(chats).filter(function(id) {
+        if (id === AGENT_CHAT_ID) return false;
+        return !chats[id].userId || chats[id].userId === _uid;
+    }).length === 0) {
+        // 延迟 2s 再次尝试从服务器加载
+        setTimeout(async function() {
+            try {
+                var _schats = await loadChatsFromServer();
+                if (_schats && typeof _schats === 'object' && Object.keys(_schats).length > 0) {
+                    var _added = 0;
+                    for (var _scid in _schats) {
+                        if (!chats[_scid]) {
+                            chats[_scid] = _schats[_scid];
+                            _added++;
+                        }
+                    }
+                    if (_added > 0) {
+                        console.log('[loadInitialData] 延迟补充了', _added, '个聊天');
+                        try { slimSaveChats(); } catch(e) {}
+                        renderChatHistory();
+                    }
+                }
+            } catch(e) {}
+        }, 2000);
+    }
 
     // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
     if (isAgentToolsActive()) {
@@ -13737,6 +13944,7 @@ async function engineApiHandler(action, args) {
             var _r = await fetch('/oneapichat/engine_api.php?action=ps' + authSuffix);
             var _d = await _r.json();
             if (_d.ok) return { result: _d.stdout, total: _d.total };
+            console.warn('[ps] failed:', JSON.stringify(_d).substring(0,200));
             return { error: _d.error || 'unreachable' };
         }
         if (action === 'disk') {
@@ -13756,7 +13964,7 @@ async function engineApiHandler(action, args) {
             if (_bmethod === 'POST') {
                 var _r = await fetch(_burl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(args || {}) });
                 var _d = await _r.json();
-                return _d.error ? { error: _d.error } : _d;
+                return _d.error ? { error: _d.error } : (_d.content || _d.snapshot || _d.result || _d.ok ? '操作完成' : _d);
             } else {
                 // GET: 拼参数到 URL
                 Object.keys(args || {}).forEach(function(k) {
@@ -13770,9 +13978,9 @@ async function engineApiHandler(action, args) {
                 if (_d.error) return { error: _d.error };
                 // screenshot: 带 image base64
                 if (_d.image) return { result: '截图完成', image: _d.image };
-                if (_d.ok || _d.result) return _d;
-                if (_d.content) return { result: _d.content };
+                if (_d.content) return { result: _d.content, url: _d.url };
                 if (_d.snapshot) return { result: typeof _d.snapshot === 'string' ? _d.snapshot : JSON.stringify(_d.snapshot) };
+                if (_d.ok) return { result: JSON.stringify(_d) };
                 return _d;
             }
         }
@@ -13781,12 +13989,19 @@ async function engineApiHandler(action, args) {
         if (directActions.indexOf(action) >= 0) {
             var _url = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat') + '/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
-            var _skipKeys = ['action', 'action_cmd', 'auth_token'];
+            var _skipKeys = ['action_cmd', 'auth_token'];
             Object.keys(args || {}).forEach(function(k) {
                 var v = args[k];
                 if (_skipKeys.indexOf(k) >= 0) return;
+                // file_op/network/docker 的 action 参数名冲突, 重命名
+                var _pk = k;
+                if (k === 'action') {
+                    if (action === 'file_op') _pk = 'file_action';
+                    else if (action === 'network') _pk = 'net_action';
+                    else if (action === 'docker') _pk = 'docker_action';
+                }
                 if (v !== undefined && v !== null) {
-                    _url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(String(v));
+                    _url += '&' + encodeURIComponent(_pk) + '=' + encodeURIComponent(String(v));
                 }
             });
             try {
@@ -13794,7 +14009,8 @@ async function engineApiHandler(action, args) {
                 var _d = await _r.json();
                 if (_d.error) return { error: _d.error };
                 // 引擎返回的是对象 (如 {ok:true, stdout:"..."}), 直接返回
-                if (_d.ok || _d.result) return _d;
+                if (_d.ok) return _d.stdout ? { result: _d.stdout, stderr: _d.stderr } : { result: JSON.stringify(_d) };
+                if (_d.result) return _d;
                 // stdout 格式: 提取关键输出
                 if (_d.stdout) return { result: _d.stdout, stderr: _d.stderr, exitCode: _d.exit_code };
                 // files 格式
