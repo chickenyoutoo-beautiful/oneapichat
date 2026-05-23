@@ -2269,7 +2269,7 @@ const DEFAULT_CONFIG = {
     agentMode: false,
     agentAutoDecision: true,
     agentProactive: false,
-    agentMaxToolRounds: 30,
+    agentMaxToolRounds: 50,
     agentThinkingDepth: 'standard',
     agentSystemPrompt: `你现在处于 Agent 模式,拥有增强自主能力。
 ## 子代理角色系统
@@ -8144,6 +8144,14 @@ function buildApiMessages(chatId) {
     }
 
     // ★ 修复: 统一清理消息内容中的 [object Object] 残留
+    // ★ 注入工具调用上限到 system prompt
+    var _maxRoundsAll = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+    var _toolLimitHint = '\n\n## 工具调用限制\n本轮对话最多调用 ' + _maxRoundsAll + ' 次工具。请合理规划调用次数。如果接近上限,请优先给出已有结果而不是继续调用。';
+    var _sysIdx = apiMessagesUnfiltered.findIndex(function(m) { return m.role === 'system'; });
+    if (_sysIdx >= 0) {
+        apiMessagesUnfiltered[_sysIdx].content += _toolLimitHint;
+    }
+
     function cleanObjectObject(val) {
         if (typeof val === 'string') {
             if (val === '[object Object]') return '';
@@ -9706,6 +9714,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // ★ Agent 模式: 合并 agent 系统提示词 + 记忆/人格/身份信息
     if (isAgentToolsActive()) {
         var agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+        // ★ 注入工具调用上限(模型一开始就知道最多调用几次)
+        var _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+        agentPrompt += '\n\n## 工具调用限制\n本轮对话最多调用 ' + _maxRounds + ' 次工具。请合理规划,避免浪费配额。如果接近上限,优先给出已有结果而不是继续调用。';
         if (agentPrompt) {
             // 追加到第一条 system 消息
             var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
@@ -10067,7 +10078,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 网络错误重试配置
     const maxRetries = 3;
     // Agent 模式使用自定义最大工具调用轮次
-    var maxToolCalls = agentModeActive ? (parseInt(localStorage.getItem('agentMaxToolRounds')) || 30) : 30;
+    var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
     let toolCallCount = 0;
 
     // 离线检测
@@ -10336,7 +10347,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 });
 
                 if (toolCallCount > maxToolCalls) {
-                    throw new Error('工具调用次数过多,可能存在循环,已停止');
+                    throw new Error('工具调用已达上限(' + maxToolCalls + '次),已停止。可在配置面板调整上限。');
                 }
 
                 // 将助手消息添加到历史(包含tool_calls)
