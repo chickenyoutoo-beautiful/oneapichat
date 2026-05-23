@@ -1692,6 +1692,40 @@ const SRC_TOOLS = [
     { type: "function", function: { name: "src_do_upgrade", description: "执行SRC升级(git pull+pip install+重启,需确认)", parameters: { type: "object", properties: {}, required: [] } } },
 ];
 
+// ==================== Windows 本机操控工具 (通过WSL2 PowerShell) ====================
+const WIN_POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+
+async function _winCmd(cmd) {
+    try {
+        var result = await window._agentExecForChat ? window._agentExecForChat(WIN_POWERSHELL + ' -Command "' + cmd.replace(/"/g, '\\"') + '"') : null;
+        if (!result) {
+            // fallback: 通过 exec 执行
+            return { ok: false, error: '需要使用 server_exec 工具执行 PowerShell 命令' };
+        }
+        return { ok: true, output: result };
+    } catch(e) { return { ok: false, error: e.message }; }
+}
+
+const WIN_TOOLS = [
+    { type: "function", function: { name: "win_info", description: "获取Windows宿主机系统信息(Windows版本/内存/CPU/磁盘等)", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "win_processes", description: "列出Windows运行的进程,可按名称筛选", parameters: { type: "object", properties: { filter: { type: "string", description: "进程名关键词筛选,如 'StarRail'" } }, required: [] } } },
+    { type: "function", function: { name: "win_kill", description: "结束Windows上的指定进程(按名称或PID)", parameters: { type: "object", properties: { target: { type: "string", description: "进程名或PID" } }, required: ["target"] } } },
+    { type: "function", function: { name: "win_start", description: "启动Windows上的程序", parameters: { type: "object", properties: { path: { type: "string", description: "程序路径或可执行文件名" } }, required: ["path"] } } },
+    { type: "function", function: { name: "win_restart", description: "重启Windows服务/程序(先kill再start)", parameters: { type: "object", properties: { name: { type: "string", description: "进程名,如 'StarRail.exe'" }, path: { type: "string", description: "启动路径" } }, required: ["name"] } } },
+    { type: "function", function: { name: "win_file", description: "列出Windows上的目录或读取文件内容(通过WSL /mnt/c/路径)", parameters: { type: "object", properties: { action: { type: "string", description: "list=列目录, read=读文件" }, path: { type: "string", description: "WSL路径如 /mnt/c/Users/AS/Desktop" } }, required: ["action","path"] } } },
+];
+
+// 注册
+(function() {
+    WIN_TOOLS.forEach(function(t) {
+        toolRegistry.register(t.function.name, {
+            name: t.function.name,
+            description: t.function.description,
+        });
+    });
+})();
+
+// ==================== 工具注册 ====================
 // 在工具注册表注册
 (function() {
     SRC_TOOLS.forEach(function(t) {
@@ -6386,7 +6420,8 @@ const _TOOL_CATEGORIES = [
     { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'], agentOnly: true },
     { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'], agentOnly: true },
     { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] },
-    { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] }
+    { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] },
+    { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL'], agentOnly: true }
 ];
 
 // ── 工具显示名映射 ──
@@ -6409,7 +6444,9 @@ const _TOOL_LABELS = {
     'SRC_STATUS_TOOL': 'SRC状态', 'SRC_DASHBOARD_TOOL': 'SRC资源面板', 'SRC_START_TOOL': 'SRC启动', 'SRC_STOP_TOOL': 'SRC停止',
     'SRC_GET_CONFIG_TOOL': 'SRC读配置', 'SRC_SET_CONFIG_TOOL': 'SRC改配置',
     'SRC_GET_LOGS_TOOL': 'SRC日志', 'SRC_GET_TASKS_TOOL': 'SRC任务', 'SRC_TOGGLE_TASK_TOOL': 'SRC开关任务',
-    'SRC_CHECK_UPGRADE_TOOL': 'SRC检查更新', 'SRC_DO_UPGRADE_TOOL': 'SRC执行升级'
+    'SRC_CHECK_UPGRADE_TOOL': 'SRC检查更新', 'SRC_DO_UPGRADE_TOOL': 'SRC执行升级',
+    'WIN_INFO_TOOL': 'Win系统信息', 'WIN_PROCESSES_TOOL': 'Win进程列表', 'WIN_KILL_TOOL': 'Win结束进程',
+    'WIN_START_TOOL': 'Win启动程序', 'WIN_RESTART_TOOL': 'Win重启程序', 'WIN_FILE_TOOL': 'Win文件操作'
 };
 
 // ── 动态渲染工具面板 ──
@@ -10492,6 +10529,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         // ===== SRC 工具: 始终注册,方便AI管理星穹铁道 =====
         if (agentModeActive) {
             SRC_TOOLS.forEach(function(t) { tools.push(t); });
+            WIN_TOOLS.forEach(function(t) { tools.push(t); });
         }
         // ★ 添加自定义技能到工具列表
         (function() {
@@ -10559,7 +10597,13 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'src_get_tasks': 'SRC_GET_TASKS_TOOL',
                 'src_toggle_task': 'SRC_TOGGLE_TASK_TOOL',
                 'src_check_upgrade': 'SRC_CHECK_UPGRADE_TOOL',
-                'src_do_upgrade': 'SRC_DO_UPGRADE_TOOL'
+                'src_do_upgrade': 'SRC_DO_UPGRADE_TOOL',
+                'win_info': 'WIN_INFO_TOOL',
+                'win_processes': 'WIN_PROCESSES_TOOL',
+                'win_kill': 'WIN_KILL_TOOL',
+                'win_start': 'WIN_START_TOOL',
+                'win_restart': 'WIN_RESTART_TOOL',
+                'win_file': 'WIN_FILE_TOOL'
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
@@ -11389,7 +11433,45 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             toolResult = d.ok ? { result: '✅ ' + (d.message || '升级完成') + '\n' + (d.output || '') } : { error: d.error || '升级失败' };
                         }
                     }
-                    // ===== 浏览器工具 =====
+                    // ===== Windows 本机工具 =====
+                     else if (func.name === 'win_info') {
+                        var cmd = WIN_POWERSHELL + ' -Command "systeminfo | Select-String OS,Physical,Processor | ForEach-Object { $_.Line.Trim() }"';
+                        toolResult = await engineApiHandler('exec', { cmd: cmd, timeout: 15 });
+                    }
+                     else if (func.name === 'win_processes') {
+                        var filter = (args.filter || '').replace(/[^a-zA-Z0-9._-]/g, '');
+                        var psCmd = filter
+                            ? WIN_POWERSHELL + ' -Command "Get-Process ' + filter + ' -ErrorAction SilentlyContinue | Format-Table Name,Id,CPU,WorkingSet -AutoSize | Out-String -Width 200"'
+                            : WIN_POWERSHELL + ' -Command "Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 | Format-Table Name,Id,CPU,WorkingSet -AutoSize | Out-String -Width 200"';
+                        toolResult = await engineApiHandler('exec', { cmd: psCmd, timeout: 10 });
+                    }
+                     else if (func.name === 'win_kill') {
+                        var target = (args.target || '').replace(/[^a-zA-Z0-9._-]/g, '');
+                        var killCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + target + ' -Force -ErrorAction SilentlyContinue; Stop-Process -Id ' + target + ' -Force -ErrorAction SilentlyContinue; Write-Output done"';
+                        toolResult = await engineApiHandler('exec', { cmd: killCmd, timeout: 10 });
+                    }
+                     else if (func.name === 'win_start') {
+                        var path = (args.path || '').replace(/'/g, '');
+                        var startCmd = WIN_POWERSHELL + ' -Command "Start-Process \"' + path + '\"; Write-Output started"';
+                        toolResult = await engineApiHandler('exec', { cmd: startCmd, timeout: 10 });
+                    }
+                     else if (func.name === 'win_restart') {
+                        var name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
+                        var path2 = (args.path || '').replace(/'/g, '');
+                        var restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2' + (path2 ? '; Start-Process \"' + path2 + '\"' : '') + '; Write-Output restarted"';
+                        toolResult = await engineApiHandler('exec', { cmd: restartCmd, timeout: 15 });
+                    }
+                     else if (func.name === 'win_file') {
+                        var action = args.action || 'list';
+                        var wslPath = (args.path || '/mnt/c/').replace(/\\/g, '/');
+                        if (!wslPath.startsWith('/mnt/')) { toolResult = { error: '请使用WSL路径如 /mnt/c/Users/AS/Desktop' }; }
+                        else if (action === 'list') {
+                            toolResult = await engineApiHandler('exec', { cmd: 'ls -la "' + wslPath + '" 2>&1 | head -50', timeout: 5 });
+                        } else if (action === 'read') {
+                            toolResult = await engineApiHandler('exec', { cmd: 'cat "' + wslPath + '" 2>&1 | head -200', timeout: 5 });
+                        } else { toolResult = { error: 'action 仅支持 list/read' }; }
+                    }
+// ===== 浏览器工具 =====
                      else if (func.name === 'browser_navigate') {
                         toolResult = await engineApiHandler('browser_navigate', args);
                     }
