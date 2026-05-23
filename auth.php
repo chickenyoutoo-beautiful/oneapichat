@@ -159,7 +159,6 @@ switch ($method) {
         if (!$input) jsonError(400, '无效的请求数据');
 
         if ($action === 'register') {
-            jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
 
