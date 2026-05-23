@@ -4388,38 +4388,42 @@ function playAgentEnterEffect(mode) {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 1. 模糊磨砂遮罩
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);background:' + (isYolo ? 'rgba(69,10,10,0.5)' : 'rgba(15,23,42,0.55)') + ';opacity:0;animation:agent-mask-in 0.45s ease forwards;"></div>' +
-        // 2. 叠加噪点纹理层
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.1s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity="0.04"/></svg>') + '\');"></div>' +
-        // 3. 边缘暗角
-        '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,0.5) 100%);opacity:0;animation:agent-vignette-in 0.5s 0.1s ease forwards;"></div>' +
-        // 4. 六边形网格
+        // 1. 透亮模糊遮罩（浅色，不黑）
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(18px) saturate(120%);-webkit-backdrop-filter:blur(18px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.25)' : 'rgba(238,242,255,0.25)') + ';opacity:0;animation:agent-mask-in 0.45s ease forwards;"></div>' +
+        // 2. 电路板线条图案
+        '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.1s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><g fill="none" stroke="rgba(99,102,241,0.06)" stroke-width="0.8"><rect x="0" y="0" width="30" height="30" rx="4"/><rect x="50" y="50" width="30" height="30" rx="4"/><circle cx="15" cy="15" r="3" fill="rgba(99,102,241,0.08)"/><circle cx="65" cy="65" r="3" fill="rgba(99,102,241,0.08)"/><path d="M30 15h20v30h-20z" opacity="0.3"/><path d="M50 15h20" opacity="0.3"/><path d="M15 30v20" opacity="0.3"/><path d="M65 30v20h-15" opacity="0.3"/></g></svg>') + '\');background-size:80px 80px;"></div>' +
+        // 3. 叠加噪点纹理层
+        '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.12s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity="0.04"/></svg>') + '\');"></div>' +
+        // 4. 微妙的边缘光晕（替代暗角，改用浅色）
+        '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,' + glow + '0.06) 70%,transparent 100%);opacity:0;animation:agent-mask-in 0.5s 0.08s ease forwards;"></div>' +
+        // 5. 六边形网格
         '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="' + hexStroke + '" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 1s 0.15s ease forwards;"></div>' +
-        // 5. 多层光环
-        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.5),0 0 0 0 ' + glow + '0.25),0 0 0 0 ' + glow + '0.1),0 0 0 0 ' + glow2 + '0.08);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
-        // 6. 光线
+        // 6. 多层光环
+        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.4),0 0 0 0 ' + glow + '0.2),0 0 0 0 ' + glow + '0.08),0 0 0 0 ' + glow2 + '0.06);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;"></div>' +
+        // 7. 光线
         '<div style="position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;">' +
-            Array.from({length: 8}, function(_, i) {
-                return '<div style="position:absolute;top:' + (8 + i*13) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + glow + '0.55),' + glow2 + '0.35),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' ' + (0.5+i*0.07) + 's ' + (0.08+i*0.05) + 's ease forwards;"></div>';
+            Array.from({length: 6}, function(_, i) {
+                return '<div style="position:absolute;top:' + (8 + i*16) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + glow + '0.4),' + glow2 + '0.25),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' ' + (0.5+i*0.07) + 's ' + (0.08+i*0.05) + 's ease forwards;"></div>';
             }).join('') +
         '</div>' +
-        // 7. 数字雨
+        // 8. 数字雨
         '<div style="position:absolute;inset:0;overflow:hidden;opacity:0;animation:agent-mask-in 0.4s 0.15s ease forwards;">' +
             Array.from({length: 15}, function() {
-                return '<div style="position:absolute;font-family:monospace;font-size:14px;color:' + glow + '0.06);top:' + (Math.random()*100) + '%;left:' + (Math.random()*100) + '%;animation:agent-float-up ' + (2+Math.random()*4) + 's ' + (Math.random()*3) + 's linear infinite;">' + Math.random().toString(2).substr(2,6) + '</div>';
+                return '<div style="position:absolute;font-family:monospace;font-size:14px;color:' + glow + '0.04);top:' + (Math.random()*100) + '%;left:' + (Math.random()*100) + '%;animation:agent-float-up ' + (2+Math.random()*4) + 's ' + (Math.random()*3) + 's linear infinite;">' + Math.random().toString(2).substr(2,6) + '</div>';
             }).join('') +
         '</div>' +
-        // 8. 中心艺术字
+        // 9. 中心艺术字（自身带模糊背景，不被背景干扰）
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">' +
-            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
-                titleWord.split('').map(function(letter, i) {
-                    var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
-                    var shadow = 'filter:drop-shadow(0 0 ' + (30+i*5) + 'px ' + glow + '0.5));';
-                    return '<span style="' + grad + shadow + '">' + letter + '</span>';
-                }).join('') +
+            '<div style="padding:20px 60px;border-radius:24px;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);background:rgba(255,255,255,0.03);opacity:0;animation:agent-mask-in 0.4s 0.12s ease forwards;">' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
+                    titleWord.split('').map(function(letter, i) {
+                        var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+                        var shadow = 'filter:drop-shadow(0 0 ' + (25+i*4) + 'px ' + glow + '0.4));';
+                        return '<span style="' + grad + shadow + '">' + letter + '</span>';
+                    }).join('') +
+                '</div>' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;">' + subtitle + '</div>' +
             '</div>' +
-            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.5);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;text-shadow:0 0 20px ' + glow2 + '0.25);">' + subtitle + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
     setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.4s ease'; setTimeout(function() { overlay.remove(); }, 400); }, 1500);
