@@ -75,9 +75,10 @@ const configs = [
     // DeepSeek V4 Flash — 2026年最新
     // 推理方式: reasoning_effort (low/medium/high/max) + 通过 extra_body 传 thinking type
     // 工具调用格式: <｜DSML｜tool_calls> XML (但API也兼容 OpenAI format)
+    // 多模态: 支持原生 image_url 输入(Vision 变体,部分账号灰度开放)
     cfg({
         match: ['deepseek-v4-flash'],
-        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
         maxOutputTokens: 384000,
@@ -86,10 +87,10 @@ const configs = [
         alias: ['deepseek', 'ds-v4-flash'],
     }),
 
-    // DeepSeek V4 Pro — 推理方式同上
+    // DeepSeek V4 Pro — 推理方式同上,支持原生多模态
     cfg({
         match: ['deepseek-v4-pro'],
-        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
         maxOutputTokens: 384000,
@@ -578,11 +579,22 @@ const configs = [
         defaultMaxTokens: 2048,
     }),
 
+    // ──────────── Qwen 多模态 (本地 llama.cpp) ────────────
+    // Qwen3.6-35B-A3B 等带 mmproj 的模型原生支持 vision
+    cfg({
+        match: ['Qwen3.6', 'Qwen3', 'Qwen2-VL', 'Qwen2.5-VL', 'qwenvl', 'Qwen-VL', 'Qwen2-VL-', 'Qwen2.5-VL-', 'mmproj', '.gguf'],
+        supports: [S.VISION, S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
+        bannedParams: ['logprobs', 'top_logprobs', 'logit_bias', 'user', 'frequency_penalty', 'presence_penalty'],
+        contextWindow: 32768,
+        maxOutputTokens: 16384,
+        defaultMaxTokens: 4096,
+    }),
+
     // ──────────── 通用配置 (fallback) ────────────
     // 匹配所有 OpenAI 兼容模型
     cfg({
         match: ['*'],
-        supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
+        supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
         bannedParams: ['logprobs', 'top_logprobs', 'user', 'reasoning_effort'],
         contextWindow: 131072,
         maxOutputTokens: 4096,
