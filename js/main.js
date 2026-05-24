@@ -13263,12 +13263,14 @@ async function autoGenerateTitle(chatId) {
         else recent += '助手: ' + m.content + '\n';
     }
     const model = getVal('titleModel') || 'deepseek-v4-flash';
-    // ★ MiniMax API 不兼容 OpenAI 格式的 reasoning/thinking 参数,用默认 API
+    // ★ MiniMax API 不兼容 OpenAI 格式的 reasoning/thinking 参数,
+    // 改用 DeepSeek API (尝试读取已保存的 DeepSeek Key)
     var _titleBaseUrl = getVal('baseUrl');
     var _titleApiKey = getVal('apiKey');
     if (_titleBaseUrl.includes('minimaxi.com')) {
         _titleBaseUrl = 'https://api.deepseek.com';
-        _titleApiKey = ''; // MiniMax key 不能用于 DeepSeek
+        var _dsKey = localStorage.getItem('apiKeyDeepseek') || '';
+        try { _titleApiKey = decrypt(_dsKey) || ''; } catch(e) { _titleApiKey = ''; }
     }
     if (!model) return;
     if (!_titleApiKey) return; // 没有有效 key 跳过
