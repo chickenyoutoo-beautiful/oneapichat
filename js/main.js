@@ -463,6 +463,7 @@ const API_PROVIDERS = {
     doubao:    { label: '字节豆包',       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',        keyLS: 'apiKeyDoubao',   baseKey: 'apiKeyDoubao' },
     openrouter:{ label: 'OpenRouter',     baseUrl: 'https://openrouter.ai/api/v1',                  keyLS: 'apiKeyOpenRouter', baseKey: 'apiKeyOpenRouter' },
     opencode:  { label: 'OpenCode',       baseUrl: 'https://api.opencode.ai/v1',                      keyLS: 'apiKeyOpenCode',  baseKey: 'apiKeyOpenCode' },
+    llamacpp:  { label: '本地模型 (llama.cpp)', baseUrl: 'https://localmodels.naujtrats.xyz/v1',   keyLS: 'apiKeyLlamaCpp',  baseKey: 'apiKeyLlamaCpp' },
     custom:    { label: '自定义',         baseUrl: '',                                                 keyLS: 'apiKeyCustom',  baseKey: 'apiKeyCustom' },
 };
 let _currentProvider = '';
@@ -2328,7 +2329,7 @@ const DEFAULT_CONFIG = {
         '   【关键规则】当用户上传了图片时:\n' +
         '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
         '   - 用户没有上传图片但要求画图时,调用 generate_image(纯文生图)\n' +
-        '   - 如果用户只是问图片里有什么/描述图片内容,可以直接回答或调用 analyze_image\n' +
+        '   - 如果用户只是问图片里有什么/描述图片内容,直接查看收到的图片回复（多模态）或调用 analyze_image（文本模型）\n' +
         '   【关键规则】当用户没有上传图片时:\n' +
         '   - 用户要求画图、生成图片时,调用 generate_image\n' +
         '   【强制要求】必须实际调用 generate_image 工具才能生成图片。严禁在回复中伪造图片URL或声称已生成图片但未使用工具。没有工具调用就没有图片。\n' +
@@ -2530,62 +2531,174 @@ let userScrolled = false;
 let isAutoScrolling = false;  // 防止自动滚动时干扰 userScrolled
 let streamingScrollLock = false;
 
-// ★ 流式渲染节流: buffer 收拢内容,每 60~100ms 渲染一次,避免每帧都重绘
-var _streamRenderTimer = {};
-var _streamPendingText = {};
-var _streamSilent = {};
-var _streamRafId = {};
-var _streamLastRender = {};
-function applyStreamRender(chatId, fullText, userScrolled, force) {
-    _streamPendingText[chatId] = fullText;
-    if (force) {
-        if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
-        if (_streamRafId[chatId]) { cancelAnimationFrame(_streamRafId[chatId]); _streamRafId[chatId] = null; }
-        _flushStreamRender(chatId, userScrolled);
-        return;
+// ★★★★★ 流式渲染优化 v2: 基于 RAF 的批量渲染 + 平滑滚动系统 ★★★★★
+// 参考: ChatGPT UI, Upstash smooth-streaming, Open WebUI rendering patterns
+// 核心优化: 
+//   1. 数据层(textBuffer)与渲染层(DOM)分离
+//   2. RAF 批量渲染(16ms对齐显示刷新率),不再是每token触发innerHTML
+//   3. 滚动跟随与渲染统一到RAF循环,不再独立setInterval
+//   4. marked.parse仅在实际渲染时调用,流式期间保护KaTeX原文
+
+var _streamState = {};  // { chatId: { text, rafId, lastRenderLen, lastTime, bubble } }
+
+function applyStreamRender(chatId, fullText) {
+    var st = _streamState[chatId];
+    if (!st) {
+        st = _streamState[chatId] = {
+            text: '',
+            rafId: null,
+            lastRenderLen: 0,
+            lastTime: 0,
+            bubble: activeBubbleMap[chatId],
+            tickCount: 0
+        };
     }
-    if (_streamRenderTimer[chatId]) return;
-    _streamRenderTimer[chatId] = setTimeout(function() {
-        _streamRenderTimer[chatId] = null;
-        if (!_streamRafId[chatId]) {
-            _streamRafId[chatId] = requestAnimationFrame(function() {
-                _streamRafId[chatId] = null;
-                _flushStreamRender(chatId, userScrolled);
-            });
-        }
-    }, 120);
+    st.text = fullText;
+    st.bubble = activeBubbleMap[chatId] || st.bubble;
+    if (!st.rafId) {
+        st.lastTime = performance.now();
+        st.rafId = requestAnimationFrame(function _streamLoop(now) {
+            var st2 = _streamState[chatId];
+            if (!st2) return;
+            // ★ 自适应帧率: 快速阶段(前100 tokens) 16ms/帧, 稳定后 33ms/帧
+            var interval = st2.tickCount < 100 ? 16 : 33;
+            if (now - st2.lastTime < interval && st2.text.length - st2.lastRenderLen < 40) {
+                // 数据量不够一帧,继续等待
+                st2.rafId = requestAnimationFrame(_streamLoop);
+                return;
+            }
+            st2.lastTime = now;
+            st2.tickCount++;
+            var bubble = st2.bubble;
+            var isAlive = bubble && document.body.contains(bubble);
+            var isTyping = isTypingMap[chatId];
+            if (!isAlive || !isTyping) {
+                // 气泡被移除或流已停止,清除状态
+                cancelAnimationFrame(st2.rafId);
+                delete _streamState[chatId];
+                return;
+            }
+            // 执行一次渲染
+            _flushStreamRender_batched(chatId, st2);
+            // 滚动跟随
+            if (!userScrolled && $.chatBox) {
+                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+            }
+            if (isTyping) {
+                st2.rafId = requestAnimationFrame(_streamLoop);
+            } else {
+                cancelAnimationFrame(st2.rafId);
+                st2.rafId = null;
+            }
+        });
+    }
 }
 
-function _flushStreamRender(chatId, userScrolled) {
-    if (_streamSilent[chatId]) return;
-    var text = _streamPendingText[chatId];
-    if (!text) return;
-    var currentBubble = activeBubbleMap[chatId];
-    if (!currentBubble) return;
-    var mb = currentBubble.querySelector('.markdown-body');
+function _flushStreamRender_batched(chatId, st) {
+    var text = st.text;
+    if (!text || text.length === st.lastRenderLen) return;
+    st.lastRenderLen = text.length;
+    var bubble = st.bubble;
+    if (!bubble) return;
+    var mb = bubble.querySelector('.markdown-body');
     if (!mb) return;
-    var lastLen = _streamLastRender[chatId] || 0;
-    var delta = text.length - lastLen;
-    // ★ 流式期间跳过快照渲染,等流结束一次性加载
-    // 但如果用户强制刷新(userScrolled为false时不做优化)跳过
-    if (delta < 50 && lastLen > 0) return;
-    _streamLastRender[chatId] = text.length;
+    var prevH = mb.offsetHeight;
+    if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
-        var html = _renderMarkdownWithMath(autoLinkURLs(text));
-        mb.innerHTML = html;
-        setTimeout(function() {
-            if (!window.hljs) return;
-            mb.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
-                try { hljs.highlightElement(b); } catch(e) {}
-            });
-        }, 200);
+        mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
     } catch(e) {
         mb.textContent = text;
     }
-    if (typeof userScrolled !== 'boolean') userScrolled = false;
-    if (!userScrolled && $.chatBox) {
-        $.chatBox.scrollTop = $.chatBox.scrollHeight;
+    requestAnimationFrame(function() { mb.style.minHeight = ''; });
+}
+
+// ★ 流式期间: 实时 KaTeX 渲染 + 公式缓存, 避免重复渲染已闭合的公式
+// 缓存 key = formula_text → rendered HTML, 只有新公式或变化才调用 katex
+function _renderMarkdownWithMath_cached(text, st) {
+    if (!text) return '';
+    if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
+
+    // ★ 增量公式缓存: st._mathCache = { formulaText: renderedHtml }
+    if (!st._mathCache) st._mathCache = {};
+    if (!st._lastFormulaCount) st._lastFormulaCount = 0;
+
+    // 提取所有公式及其位置
+    var formulas = [];
+    var protected_ = text;
+    var _mathCounter = 0;
+
+    // 块公式 $$...$$
+    protected_ = protected_.replace(/\$\$([\s\S]*?)\$\$/g, function(_, f) {
+        var id = 'MATHB' + (_mathCounter++);
+        formulas.push({ id: id, type: 'block', formula: f.trim() });
+        return id;
+    });
+    // 块公式 \[...\]
+    protected_ = protected_.replace(/\\\[([\s\S]*?)\\\]/g, function(_, f) {
+        var id = 'MATHB' + (_mathCounter++);
+        formulas.push({ id: id, type: 'block', formula: f.trim() });
+        return id;
+    });
+    // 行内公式 $...$
+    protected_ = protected_.replace(/(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)/g, function(_, f) {
+        var id = 'MATHI' + (_mathCounter++);
+        formulas.push({ id: id, type: 'inline', formula: f.trim() });
+        return id;
+    });
+    // 行内公式 \(...\)
+    protected_ = protected_.replace(/\\\(([^)]+?)\\\)/g, function(_, f) {
+        var id = 'MATHI' + (_mathCounter++);
+        formulas.push({ id: id, type: 'inline', formula: f.trim() });
+        return id;
+    });
+
+    var html = window.marked.parse(protected_);
+
+    // 渲染公式(带缓存)
+    for (var i = 0; i < formulas.length; i++) {
+        var fInfo = formulas[i];
+        var cacheKey = fInfo.type + ':' + fInfo.formula;
+        var rendered = st._mathCache[cacheKey];
+        if (!rendered) {
+            try {
+                if (window.katex) {
+                    rendered = katex.renderToString(fInfo.formula, {
+                        throwOnError: false,
+                        displayMode: fInfo.type === 'block',
+                        strict: false
+                    });
+                } else {
+                    rendered = fInfo.type === 'block'
+                        ? '<p style="text-align:center">$$' + fInfo.formula + '$$</p>'
+                        : '$' + fInfo.formula + '$';
+                }
+            } catch(e) {
+                rendered = fInfo.type === 'block'
+                    ? '<p style="text-align:center">$$' + fInfo.formula + '$$</p>'
+                    : '$' + fInfo.formula + '$';
+            }
+            st._mathCache[cacheKey] = rendered;
+        }
+        html = html.split(fInfo.id).join(rendered);
     }
+    st._lastFormulaCount = formulas.length;
+
+    return html;
+}
+
+// ★ 旧函数保留兼容(流结束后一次性完整渲染用)
+function _renderStreamMarkdown(text) {
+    return _renderMarkdownWithMath(text);
+}
+
+// ★ 流结束时清理RAF状态(外部调用)
+function cleanupStreamState(chatId) {
+    var st = _streamState[chatId];
+    if (st && st.rafId) {
+        cancelAnimationFrame(st.rafId);
+        st.rafId = null;
+    }
+    delete _streamState[chatId];
 }
   // 流式期间锁定滚动跟随
 let modelContextLength = JSON.parse(localStorage.getItem('modelContextLength') || '{}');
@@ -3018,7 +3131,16 @@ window.onProviderChange = function() {
 
     // 4. UI
     var label = getEl('apiKeyLabel'); if (label) label.textContent = 'API Key (' + cfg.label + ')';
-    var input = getEl('apiKey'); if (input) input.placeholder = provider === 'custom' ? '自定 URL 和 Key' : cfg.label + ' API Key';
+    var input = getEl('apiKey'); if (input) {
+        if (provider === 'llamacpp') {
+            input.placeholder = '本地模型无需 Key (可选)';
+            label.textContent = 'API Key (可选)';
+        } else if (provider === 'custom') {
+            input.placeholder = '自定 URL 和 Key';
+        } else {
+            input.placeholder = cfg.label + ' API Key';
+        }
+    }
 
     // 5. 模型
     var sm = localStorage.getItem('model_' + provider) || '';
@@ -3146,12 +3268,14 @@ function shouldUseVisionFormat() {
         const currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model || '';
         // ★ 使用模型配置:检查模型是否支持视觉
         const _vm = _getModelCfg().supportsVision(currentModel);
+        console.log('[Vision] shouldUseVisionFormat _forceVisionFormat=true, model=' + currentModel + ', supportsVision=' + _vm);
         if (!_vm) return false; // 文本模型不支持视觉格式,由 analyze_image 工具处理
+        console.log('[Vision] ✅ 将使用原生 image_url 格式');
         return true;
     }
 
     const visionModel = localStorage.getItem('visionModel') || '';
-    const model = localStorage.getItem('model') || '';
+    const model = getVal('modelSelect') || localStorage.getItem('model') || '';
 
     // 精确的视觉模型关键词(只包含真正的视觉模型)
     const visionKeywords = [
@@ -3202,14 +3326,15 @@ function buildUserContent(text, files) {
     if (!files?.length) return text;
 
     // 检查是否包含图片
-    const hasImages = files.some(f => f.type?.startsWith('image/'));
+    const hasImages = files.some(f => f.isImage || f.type?.startsWith('image/'));
+    console.log('[Vision] buildUserContent: files=' + files.length + ', hasImages=' + hasImages + ', files[0]=' + JSON.stringify(files[0] ? {name:files[0].name,isImage:files[0].isImage,type:files[0].type,hasContent:!!files[0].content} : null));
 
     if (hasImages && shouldUseVisionFormat()) {
         // OpenAI 视觉模型格式:数组
         const content = [];
         // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
         for (const f of files) {
-            if (f.type?.startsWith('image/')) {
+            if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
                 // 如果有服务器URL,优先使用(大幅减小请求体大小)
                 if (f.serverUrl) {
@@ -3219,6 +3344,7 @@ function buildUserContent(text, files) {
                     type: 'image_url',
                     image_url: { url: _imgUrl }
                 });
+                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 50) + '...', 'size:', _imgUrl.length);
             } else {
                 // 非图片文件转为文本(截断超大附件)
                 var _fileText = f.content || '';
@@ -3425,6 +3551,79 @@ function clearAllFiles() {
     if ($.fileInput) $.fileInput.value = '';
 }
 
+// ★ 粘贴图片支持: 监听输入框 paste 事件,自动将剪贴板图片转为 pendingFiles
+function setupPasteImageSupport() {
+    if (!$.userInput) return;
+    $.userInput.addEventListener('paste', async function(e) {
+        var items = (e.clipboardData || window.clipboardData)?.items;
+        if (!items) return;
+        var imageItems = [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                imageItems.push(items[i]);
+            }
+        }
+        if (!imageItems.length) return; // 没有图片,正常粘贴文字
+        e.preventDefault(); // 阻止默认粘贴(避免 base64 出现在输入框)
+        for (var j = 0; j < imageItems.length; j++) {
+            var blob = imageItems[j].getAsFile();
+            if (!blob) continue;
+            var reader = new FileReader();
+            await new Promise(function(resolve) {
+                reader.onload = function() {
+                    var dataUrl = reader.result;
+                    // 压缩大图
+                    if (dataUrl.length > 500 * 1024) {
+                        var img = new Image();
+                        img.onload = function() {
+                            var canvas = document.createElement('canvas');
+                            var maxW = 1920, maxH = 1920;
+                            var scale = Math.min(maxW / img.width, maxH / img.height, 1);
+                            canvas.width = img.width * scale;
+                            canvas.height = img.height * scale;
+                            var ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            dataUrl = canvas.toDataURL('image/webp', 0.85);
+                            addPastedImage(dataUrl, blob.name || 'clipboard.png', dataUrl.length);
+                            resolve();
+                        };
+                        img.src = dataUrl;
+                    } else {
+                        addPastedImage(dataUrl, blob.name || 'clipboard.png', dataUrl.length);
+                        resolve();
+                    }
+                };
+                reader.readAsDataURL(blob);
+            });
+        }
+        updateFilePreviewUI();
+    });
+}
+
+function addPastedImage(dataUrl, name, size) {
+    pendingFiles.push({
+        name: name,
+        content: dataUrl,
+        size: size,
+        isImage: true,
+        type: 'image/png'
+    });
+}
+
+// ★ 在光标位置插入文字(支持拖拽文字)
+function insertTextAtCursor(input, text) {
+    if (!input || !text) return;
+    var start = input.selectionStart || 0;
+    var end = input.selectionEnd || 0;
+    var before = input.value.substring(0, start);
+    var after = input.value.substring(end);
+    input.value = before + text + after;
+    var newPos = start + text.length;
+    input.setSelectionRange(newPos, newPos);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+}
+
 async function processSelectedFiles(fileList) {
     for (const file of Array.from(fileList)) {
         if (file.size > MAX_FILE_SIZE) {
@@ -3602,6 +3801,52 @@ window.hideThinking = function() {
 // 每个工具调用在回复气泡底部追加一条,调用完后保留显示
 // 下一个工具调用时自动追加新行,旧行向上滚动(单向滚动,不闪烁)
 window._toolCallLines = [];
+
+// ==================== 原生多模态处理状态提示 ====================
+// 参考工具调用状态行样式,正文出现后自动淡出
+window.showImageProcessingHint = function(chatId, files) {
+    if (!chatId || !activeBubbleMap[chatId]) return;
+    var bubble = activeBubbleMap[chatId];
+    // 避免重复创建
+    if (bubble.querySelector('.native-vision-hint')) return;
+
+    var imgCount = files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }).length;
+    var hintEl = document.createElement('div');
+    hintEl.className = 'native-vision-hint';
+    hintEl.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 12px;margin:4px 0;border-radius:8px;background:linear-gradient(135deg,#667eea0a,#764ba20a);border:1px solid #667eea18;font-size:12px;color:#a78bfa;animation:visionPulse 1.8s ease-in-out infinite;';
+    hintEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' +
+        '<span>原生视觉分析中 · ' + imgCount + ' 张图片</span>';
+
+    var reasoning = bubble.querySelector('details.reasoning-details');
+    var md = bubble.querySelector('.markdown-body');
+    if (reasoning) {
+        reasoning.after(hintEl);
+    } else if (md) {
+        md.before(hintEl);
+    } else {
+        bubble.appendChild(hintEl);
+    }
+
+    // ★ 正文出现后自动移除 (用 MutationObserver 监听)
+    var observer = new MutationObserver(function() {
+        var _md = bubble.querySelector('.markdown-body');
+        if (_md && _md.textContent && _md.textContent.trim().length > 5) {
+            _fadeOut();
+        }
+    });
+    function _fadeOut() {
+        observer.disconnect();
+        hintEl.style.transition = 'opacity 0.25s, transform 0.25s';
+        hintEl.style.opacity = '0';
+        hintEl.style.transform = 'translateY(-4px)';
+        setTimeout(function() { if (hintEl.parentNode) hintEl.remove(); }, 260);
+    }
+    if (md) observer.observe(md, { childList: true, subtree: true, characterData: true });
+    // 超时 60 秒自动移除
+    setTimeout(function() {
+        if (hintEl.parentNode) { _fadeOut(); }
+    }, 60000);
+};
 
 // ==================== 工具调用状态行 (独立, 完成后3秒淡出) ====================
 window.showToolStatus = function(toolName, argPreview, status) {
@@ -4145,7 +4390,9 @@ function bindSearchEvents() {
     getEl('aiSearchJudgeToggle')?.addEventListener('change', function () {
         getEl('aiSearchJudgeDetails').style.display = this.checked ? 'block' : 'none';
     });
-    ['aiSearchJudgeModel', 'aiSearchJudgePrompt', 'searchProvider', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'searchType', 'aiSearchTypeToggle', 'searchShowPromptToggle', 'searchAppendToSystem', 'searchToolCallToggle'].forEach(id => {
+    // ★ 搜索引擎切换: 参照主模型 onProviderChange,自动切换对应 Key
+    getEl('searchProvider')?.addEventListener('change', onSearchProviderChange);
+    ['aiSearchJudgeModel', 'aiSearchJudgePrompt', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'searchType', 'aiSearchTypeToggle', 'searchShowPromptToggle', 'searchAppendToSystem', 'searchToolCallToggle'].forEach(id => {
         const el = getEl(id);
         if (el) {
             el.addEventListener('change', function() { saveConfig(); });
@@ -4165,6 +4412,35 @@ function bindSearchEvents() {
     });
 }
 
+// ★ 搜索引擎提供商切换 (参照主模型 onProviderChange)
+const SEARCH_PROVIDER_KEY_MAP = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily' };
+
+window.onSearchProviderChange = function() {
+    var provider = getVal('searchProvider') || 'duckduckgo';
+    // 1. 保存当前 Key 到旧引擎
+    var curKey = getVal('searchApiKey') || '';
+    var oldProvider = localStorage.getItem('searchProvider') || 'duckduckgo';
+    if (oldProvider && oldProvider !== provider && curKey) {
+        var oldKeyId = SEARCH_PROVIDER_KEY_MAP[oldProvider];
+        if (oldKeyId) localStorage.setItem(oldKeyId, encrypt(curKey));
+    }
+    // 2. 切换到新引擎的 Key (优先独立 Key,其次通用 Key)
+    var newKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
+    var savedProviderKey = newKeyId ? localStorage.getItem(newKeyId) : null;
+    if (newKeyId && savedProviderKey) {
+        var dk = decrypt(savedProviderKey);
+        setVal('searchApiKey', (dk && dk !== 'not-needed') ? dk : '');
+    } else if (provider === 'duckduckgo') {
+        // DuckDuckGo 无需 Key,清空
+        setVal('searchApiKey', '');
+    } else {
+        // 没有独立 Key,保留当前值(可能是之前手动输入的通用 Key)
+    }
+    // 3. 持久化
+    localStorage.setItem('searchProvider', provider);
+    saveConfig();
+};
+
 function loadSearchConfig() {
     setChecked('searchToggle', localStorage.getItem('enableSearch') === 'true');
     setChecked('searchToolCallToggle', localStorage.getItem('searchToolCall') !== 'false');
@@ -4177,8 +4453,7 @@ function loadSearchConfig() {
     setVal('searchProvider', localStorage.getItem('searchProvider') || 'duckduckgo');
     // 优先使用当前引擎的独立Key,否则用通用Key
     const provider = localStorage.getItem('searchProvider') || 'duckduckgo';
-    const providerKeyMap = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily' };
-    const providerKey = providerKeyMap[provider];
+    const providerKey = SEARCH_PROVIDER_KEY_MAP[provider];
     const savedProviderKey = providerKey ? localStorage.getItem(providerKey) : null;
     const savedGeneralKey = localStorage.getItem('searchApiKey');
     if (providerKey && savedProviderKey) {
@@ -4933,8 +5208,50 @@ window._autoAskIdentity = async function() {
     if (isAgentToolsActive() && currentChatId === AGENT_CHAT_ID) {
         window.__autoIdentityAsked = true;
         setTimeout(function() {
-            appendMessage('system', '👋 欢迎!我注意到还没有设置身份信息。\n\n请告诉我:\n- 你希望我如何称呼你?\n- 你希望我以什么风格/身份与你对话?\n\n例如: "我叫奕侨,喜欢简洁直接的回复"');
+            showIdentityCard();
         }, 1000);
+    }
+};
+
+// ★ 身份卡片 - 漂亮弹窗代替丑陋系统消息
+window.showIdentityCard = function() {
+    var container = document.querySelector('.chat-messages') || document.getElementById('chat-messages');
+    if (!container) return;
+
+    // 移除已有的
+    var old = container.querySelector('.identity-card-wrapper');
+    if (old) old.remove();
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'identity-card-wrapper';
+    wrapper.style.cssText = 'display:flex;justify-content:center;padding:16px 0;animation:identitySlideIn 0.35s cubic-bezier(0.34,1.56,0.64,1);';
+    wrapper.innerHTML = '<div class="identity-card" style="max-width:420px;width:100%;background:linear-gradient(135deg,#667eea0e,#764ba20e);border:1px solid #667eea22;border-radius:16px;padding:20px 24px;box-shadow:0 4px 24px rgba(102,126,234,0.08);">' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+        '<span style="font-size:24px;">👋</span>' +
+        '<div style="font-weight:600;font-size:15px;color:#667eea;">你好! 设置身份信息</div>' +
+        '</div>' +
+        '<div style="color:#6b7280;font-size:13px;line-height:1.6;margin-bottom:16px;">' +
+        '告诉我你希望我怎么称呼你、以及我该以什么风格和你对话。' +
+        '<br>例如：<span style="color:#667eea;font-weight:500;">"叫我奕侨，回复简洁直接"</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="var e=event.target.closest(\'.identity-card-wrapper\');e.style.transition=\'all 0.25s\';e.style.opacity=\'0\';e.style.transform=\'translateY(-10px)\';setTimeout(function(){e.remove()},250)" style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:transparent;color:#6b7280;cursor:pointer;font-size:13px;transition:all 0.15s;" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">稍后再说</button>' +
+        '<button onclick="window._handleIdentityQuick(\'调用我Ai助手\');var e=event.target.closest(\'.identity-card-wrapper\');e.style.transition=\'all 0.25s\';e.style.opacity=\'0\';e.style.transform=\'translateY(-10px)\';setTimeout(function(){e.remove()},250)" style="flex:1;padding:8px 12px;border-radius:10px;border:none;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.15s;" onmouseover="this.style.opacity=\'0.9\'" onmouseout="this.style.opacity=\'1\'">快速跳过</button>' +
+        '</div></div>';
+    container.appendChild(wrapper);
+    // 滚动到底部
+    setTimeout(function() { wrapper.scrollIntoView({behavior:'smooth',block:'nearest'}); }, 100);
+};
+
+// 身份快捷设置
+window._handleIdentityQuick = function(name) {
+    var input = document.querySelector('#agent-chat-input, .chat-input') || document.querySelector('textarea');
+    if (input && typeof window.sendMessage === 'function') {
+        // 作为内部消息静默发送
+        var msgs = chats[currentChatId]?.messages;
+        if (msgs) {
+            msgs.push({role:'user',text:'请称呼我' + name + '。我已经设置好了,从现在开始按这个身份对话。',_internal:true});
+        }
     }
 };
 
@@ -7009,7 +7326,10 @@ window.fetchModels = async function (silent) {
         if (el) el.innerHTML = '<option>加载中...</option>';
     });
 
-    if (!key) {
+    // ★ llama.cpp 本地模型通常不需要 API Key,允许空 key 获取模型列表
+    var _provider = getEl('baseUrlProvider')?.value || 'custom';
+    var _isLocalModel = _provider === 'llamacpp';
+    if (!key && !_isLocalModel) {
         selects.forEach(id => {
             const el = getEl(id);
             if (el) el.innerHTML = '<option>请输入API Key</option>';
@@ -7018,7 +7338,8 @@ window.fetchModels = async function (silent) {
     }
 
     try {
-        const res = await fetch(`${url}/models`, { headers: { Authorization: `Bearer ${key}` } });
+        var _headers = _isLocalModel ? {} : { Authorization: `Bearer ${key}` };
+        const res = await fetch(`${url}/models`, { headers: _headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = data.data || [];
@@ -7488,6 +7809,44 @@ function appendToolCallMessage(toolName, args, result, durationMs, chatId) {
     if (isAutoScrolling) scrollToBottom();
 
     return row;
+}
+
+// ★ 渲染 web_fetch 访问的链接列表 - 放在气泡底部
+function _renderWebFetchUrls(bubble, urls) {
+    if (!bubble || !urls || !urls.length) return;
+    if (bubble.querySelector('.webfetch-urls-container')) return;
+    
+    var container = document.createElement('div');
+    container.className = 'webfetch-urls-container';
+    container.style.cssText = 'margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px;';
+    
+    var summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;font-size:11px;color:#6b7280;user-select:none;';
+    summary.textContent = '🌐 已抓取网页 (' + urls.length + ')';
+    
+    var details = document.createElement('details');
+    details.style.cssText = 'font-size:11px;';
+    details.appendChild(summary);
+    
+    var list = document.createElement('ol');
+    list.style.cssText = 'margin:4px 0 0 0;padding-left:18px;list-style-position:outside;';
+    
+    urls.forEach(function(u, i) {
+        var li = document.createElement('li');
+        li.style.cssText = 'margin-bottom:2px;line-height:1.3;';
+        var link = document.createElement('a');
+        link.href = u;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.style.cssText = 'color:#3b82f6;text-decoration:none;font-size:11px;word-break:break-all;';
+        link.textContent = u;
+        li.appendChild(link);
+        list.appendChild(li);
+    });
+    
+    details.appendChild(list);
+    container.appendChild(details);
+    bubble.appendChild(container);
 }
 
 function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null) {
@@ -7964,8 +8323,7 @@ async function performWebSearch(query, signal, type = 'web') {
     const t = Date.now();
 
     // 获取对应引擎的API Key
-    const providerKeyMap = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily' };
-    const providerKeyId = providerKeyMap[provider];
+    const providerKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
     let apiKey = '';
     if (providerKeyId) {
         apiKey = getVal(providerKeyId) || getVal('searchApiKey') || '';
@@ -8276,6 +8634,7 @@ function abortExistingRequest(chatId) {
         searchAbortControllerMap[chatId].abort();
         delete searchAbortControllerMap[chatId];
     }
+    cleanupStreamState(chatId);  // ★ 清理RAF渲染循环
     delete isTypingMap[chatId];
     delete activeBubbleMap[chatId];
     // ★ 主代理空闲了,处理子代理通知队列
@@ -8287,6 +8646,7 @@ function abortExistingRequest(chatId) {
 // 用户主动停止,设置用户停止标记
 function stopGenerationForChat(chatId) {
     userAbortMap[chatId] = true; // 标记用户主动停止,不再重试
+    cleanupStreamState(chatId);  // ★ 清理RAF渲染循环
     abortExistingRequest(chatId);
     // ★ 用户停止后也要处理队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
@@ -8678,8 +9038,10 @@ function injectCachedImageAnalyses(chatId, apiMessages) {
 
 function buildApiMessages(chatId) {
     const apiMessagesUnfiltered = [];
-    // 只检查当前消息(pendingFiles)是否包含图片,避免历史图片触发视觉模型
-    const currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/'));
+    // ★ 提前声明,供后续原生视觉判断使用
+    var _curModelName = (getVal('modelSelect') || '').toLowerCase();
+    // 只检查当前消息是否包含图片,避免历史图片触发视觉模型
+    const currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/')) || !!window.__currentMessageHasImages;
 
     // ★ 模型配置:根据模型类型决定 system 消息处理方式
     // MiniMax/部分模型不支持多条 system 消息,需要合并为一条
@@ -8734,6 +9096,8 @@ function buildApiMessages(chatId) {
         apiMessagesUnfiltered[_sysIdx].content += _toolLimitHint;
     }
 
+
+
     function cleanObjectObject(val) {
         if (typeof val === 'string') {
             if (val === '[object Object]') return '';
@@ -8763,6 +9127,7 @@ function buildApiMessages(chatId) {
             var prev = window._forceVisionFormat;
             if (msgHasImage || (i === msgs.length - 1 && currentHasImage)) {
                 window._forceVisionFormat = true;
+                console.log('[Vision] buildApiMessages: msg#' + i + ' hasImage=' + msgHasImage + ', currentHasImage=' + currentHasImage + ', files count=' + (files ? files.length : 0));
             }
             apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(msg.text, files) });
             window._forceVisionFormat = prev;
@@ -8884,7 +9249,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     const delta = event.delta || event.content || '';
                     if (delta) {
                         fullText += delta;
-                        applyStreamRender(chatId, fullText, userScrolled);
+                        applyStreamRender(chatId, fullText);
                     }
                 } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
                     const rd = event.delta || event.reasoning || '';
@@ -8961,8 +9326,9 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
         }
     }
 
-    // 清理 timer
+    // 清理 timer + RAF 流渲染状态
     if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+    cleanupStreamState(chatId);
 
     // 清理 savedPartial 和 msg_id 标记
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
@@ -9313,9 +9679,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
                             }
                         }
-                        // ★ 思考内容滚动追踪 - 每次 thinking delta 都跟底
+                        // ★ 思考内容滚动追踪 - RAF节流,避免每token都触发scroll
                         if (!userScrolled) {
-                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                            var _now2 = performance.now();
+                            if (!window._lastThinkingScroll || _now2 - window._lastThinkingScroll > 32) {
+                                window._lastThinkingScroll = _now2;
+                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                            }
                         }
                         // 无延迟: 立即渲染
                     } else if (hasReasoningContent) {
@@ -9337,9 +9707,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
                             }
                         }
-                        // ★ 思考内容滚动追踪 - 每次 thinking delta 都跟底
+                        // ★ 思考内容滚动追踪 - RAF节流
                         if (!userScrolled) {
-                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                            var _now3 = performance.now();
+                            if (!window._lastThinkingScroll || _now3 - window._lastThinkingScroll > 32) {
+                                window._lastThinkingScroll = _now3;
+                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                            }
                         }
                     }
 
@@ -9368,6 +9742,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     }
 
                     if (textContent && textContent.length > 0) {
+                        // ★ 如果模型已经通过 reasoning_content 提供了思考(如 llama.cpp deepseek format),
+                        //   则 content 中不应再包含 <think> 标签,将它们剥离避免重复显示
+                        if (reasoningText && textContent.includes('<think>')) {
+                            textContent = textContent.replace(/<think>([\s\S]*?)(?:<\/think>|$)/g, '').replace(/<\/think>/g, '').trim();
+                            if (!textContent) continue;
+                        }
                         fullText += textContent;
                         fullText = fullText.replace(/\[object Object\]/g, '');
 
@@ -9426,39 +9806,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     }
                                     _det3.querySelector('.reasoning-content').textContent = reasoningText;
                                 }
-                                // 流式渲染正文
-                                var markdownBody = currentBubble.querySelector('.markdown-body');
-                                if (markdownBody && window.marked) {
-                                    try {
-                                        // ★ 使用已清理 (think) 标签的 _t,而非原始 fullText
-                                        var _renderText = typeof _t !== 'undefined' ? _t : fullText;
-                                        const segments = _renderText.split('```');
-                                        let html = '';
-                                        for (let s = 0; s < segments.length; s++) {
-                                            if (s % 2 === 0) {
-                                                if (segments[s]) html += _renderMarkdownWithMath(autoLinkURLs(segments[s].replace(/!\[(.*?)\]\((.*?)\)/g, '[图片 $1]($2)')));
-                                            } else {
-                                                const seg = segments[s];
-                                                const nlIdx = seg.indexOf('\n');
-                                                const lang = nlIdx > 0 ? seg.slice(0, nlIdx).trim() : '';
-                                                const code = nlIdx > 0 ? seg.slice(nlIdx + 1) : seg;
-                                                const langAttr = lang ? ' class="language-' + lang + '"' : '';
-                                                html += '<pre><code' + langAttr + '>' + escapeHtml(code) + '</code></pre>';
-                                            }
-                                        }
-                                        markdownBody.innerHTML = html;
-                                        if (window.hljs) {
-                                            markdownBody.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(function(block) {
-                                                try { hljs.highlightElement(block); } catch(e) {}
-                                            });
-                                        }
-                                    } catch (mdErr) {
-                                        console.warn('[流式MD渲染失败]', mdErr.message);
-                                        markdownBody.textContent = typeof _t !== 'undefined' ? _t : fullText;
-                                    }
-                                } else if (markdownBody) {
-                                    markdownBody.textContent = typeof _t !== 'undefined' ? _t : fullText;
-                                }
+                                // 流式渲染正文: 统一走节流管道
+                                var _renderText = typeof _t !== 'undefined' ? _t : fullText;
+                                applyStreamRender(chatId, _renderText);
                                 // AI流式回复时,如果用户没有主动滚动上查,则跟随滚动
                                 var _isFirstContent = !window._streamContentRendered;
                                 if (_isFirstContent) {
@@ -9904,8 +10254,9 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 }
 
 function handleError(e, chatId, pendingMsg, currentBubble) {
-    // ★ 清除流式保存定时器
+    // ★ 清除流式保存定时器 + RAF渲染循环
     if (pendingMsg && pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+    cleanupStreamState(chatId);
     // ★ 通知模式解锁
     window._agentNotifyProcessing = false;
     const hasContent = pendingMsg && pendingMsg.content && typeof pendingMsg.content === 'string' && pendingMsg.content.trim() !== '';
@@ -10119,6 +10470,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 添加用户消息
     // 保存当前消息是否包含图片(在 clearAllFiles 之前)
     const currentMessageHasImages = files && files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/'));
+    // ★ 保存标记供 buildApiMessages 使用（pendingFiles 即将被清空）
+    window.__currentMessageHasImages = currentMessageHasImages;
 
     // 立即清空输入框,让用户知道消息已发送
     if (input) {
@@ -11159,7 +11512,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                             : (r.content || '(无内容)');
                                         return `${label}${r.url}\n${content}`;
                                     });
-                                    toolResult = { result: parts.join('\n\n---\n\n') };
+                                    toolResult = { result: parts.join('\n\n---\n\n'), _webFetchUrls: urls };
                                     if (currentChatId === chatId) {
                                         const currentBubble = activeBubbleMap[chatId];
                                         const status = currentBubble?.querySelector('.search-status');
@@ -12279,6 +12632,7 @@ window.useAlternativeVisionModel = function() {
 ;
 
 // 执行每个工具调用并添加结果(只对有有效内容的tool call执行)
+                var _allWebFetchUrls = [];
                 for (const tc of validToolCalls) {
                     // ★ 实时显示工具执行状态
                     var _argPreview = '';
@@ -12295,6 +12649,17 @@ window.useAlternativeVisionModel = function() {
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success');
                     // ★ 记录统计
                     if (tc.function && tc.function.name) toolCallStats.record(tc.function.name, !!toolResult.error, toolResult.error || '');
+                    // ★ 收集 web_fetch 访问的 URL
+                    if (tc.function && tc.function.name === 'web_fetch' && toolResult._webFetchUrls && toolResult._webFetchUrls.length > 0) {
+                        _allWebFetchUrls = _allWebFetchUrls.concat(toolResult._webFetchUrls);
+                        // 去重
+                        var _seenUrls = new Set();
+                        _allWebFetchUrls = _allWebFetchUrls.filter(function(u) {
+                            if (_seenUrls.has(u)) return false;
+                            _seenUrls.add(u);
+                            return true;
+                        });
+                    }
                     const resultContent = toolResult.error || toolResult.result || '(empty)';
 
                     // 确保content是字符串
@@ -12341,6 +12706,10 @@ window.useAlternativeVisionModel = function() {
 
                 // ★ 工具执行循环结束,隐藏状态浮条
                 if (typeof showToolStatus === 'function') showToolStatus(null, null, null);
+                // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
+                if (_allWebFetchUrls.length > 0) {
+                    pendingMsg._webFetchUrls = _allWebFetchUrls;
+                }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (_hasCreatedSubAgent) {
@@ -12395,7 +12764,8 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // 重置 AbortController 和 timeout 以便下一个请求使用
+                // ★ 重置前先杀死旧的 AbortController
+                try { abortMain.abort(); } catch(e) {}
                 const newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutId);
@@ -12452,6 +12822,10 @@ window.useAlternativeVisionModel = function() {
                             });
                         }
                     }
+                    // ★ 渲染 web_fetch 访问的链接列表
+                    if (pendingMsg._webFetchUrls && pendingMsg._webFetchUrls.length > 0) {
+                        _renderWebFetchUrls(_bubble, pendingMsg._webFetchUrls);
+                    }
                 }
             }
             // ★ 子代理完成报告处理:触发队列中的下一个通知
@@ -12507,6 +12881,7 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg.reasoning = '';
                 }
                 showToast('⚠️ 模型不支持工具调用,已切换为普通问答模式', 'warning', 4000);
+                try { abortMain.abort(); } catch(e) {}
                 var _downgradeCtrl = new AbortController();
                 abortControllerMap[chatId] = _downgradeCtrl;
                 clearTimeout(timeoutId);
@@ -12529,6 +12904,7 @@ window.useAlternativeVisionModel = function() {
                     setVal('maxTokensInput', maxVal);
                     body.max_tokens = maxVal;
                     showToast('max_tokens 自动调整为 ' + maxVal, 'warning', 3000);
+                    try { abortMain.abort(); } catch(e) {}
                     const retryCtrl = new AbortController();
                     abortControllerMap[chatId] = retryCtrl;
                     clearTimeout(timeoutId);
@@ -12545,6 +12921,8 @@ window.useAlternativeVisionModel = function() {
                 const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
                 showToast(`网络超时,${attempt + 1}/${maxRetries},${(delay/1000).toFixed(0)}s后重试...`, 'warning', 3000);
                 await new Promise(r => setTimeout(r, delay));
+                // ★ 重试前先杀死旧请求,避免新旧请求并发
+                try { abortCtrl.abort(); } catch(e) {}
                 const newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutIdVal);
@@ -12602,6 +12980,8 @@ window.useAlternativeVisionModel = function() {
         // 清理临时消息
         chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary);
         delete isTypingMap[chatId];
+        // ★ 停止流渲染 RAF 循环
+        cleanupStreamState(chatId);
         delete abortControllerMap[chatId];
         delete searchAbortControllerMap[chatId];
         delete activeBubbleMap[chatId];
@@ -12933,6 +13313,7 @@ async function autoGenerateTitle(chatId) {
 
 async function typeTitle(chatId, finalTitle, index = 0) {
     if (currentChatId !== chatId) {
+        if (!chats[chatId]) return;
         chats[chatId].title = finalTitle;
         saveChatsDebounced();
         renderChatHistory();
@@ -12940,6 +13321,7 @@ async function typeTitle(chatId, finalTitle, index = 0) {
         return;
     }
     if (index === 0) {
+        if (!chats[chatId]) return;
         chats[chatId].title = '';
         saveChatsDebounced();
         renderChatHistory();
@@ -12994,6 +13376,10 @@ function compressChatsForStorage(chatsObj) {
                 // 截断超长消息内容
                 if (msg.content && msg.content.length > 10000) {
                     msg.content = msg.content.slice(0, 10000) + '...(内容已截断)';
+                }
+                // ★ 截断 web_fetch URL 列表 (最多保留10条)
+                if (msg._webFetchUrls && msg._webFetchUrls.length > 10) {
+                    msg._webFetchUrls = msg._webFetchUrls.slice(0, 10);
                 }
                 return msg;
             });
@@ -13259,7 +13645,11 @@ window.loadChat = function (id) {
                     // 插入工具调用html到文本之前
                     displayText = toolDisplayHtml + displayText;
                 }
-                appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null);
+                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null);
+                // ★ 恢复时也渲染 web_fetch 链接列表
+                if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
+                    _renderWebFetchUrls(_bubble, m._webFetchUrls);
+                }
             }
         });
     }
@@ -13766,7 +14156,16 @@ function setupEventListeners() {
         wrapper.addEventListener('drop', async e => {
             e.preventDefault();
             drop.classList.remove('show');
-            if (e.dataTransfer.files.length) await processSelectedFiles(e.dataTransfer.files);
+            // ★ 优先处理文件,其次处理拖拽文字
+            if (e.dataTransfer.files.length) {
+                await processSelectedFiles(e.dataTransfer.files);
+            } else {
+                // 拖拽进来的纯文本:插入到光标位置
+                var _dropText = e.dataTransfer.getData('text/plain');
+                if (_dropText && $.userInput) {
+                    insertTextAtCursor($.userInput, _dropText);
+                }
+            }
         });
     }
 
@@ -13981,6 +14380,7 @@ function initializeApp() {
         cacheDOMElements();
         injectStyles();
         setupKeyboardDetection(); // 初始化键盘检测(支持平板和手机)
+        setupPasteImageSupport(); // ★ 支持粘贴剪贴板图片
 
         // ★ 登录门禁:未登录则弹出登录框,token无效也弹出
         var token = localStorage.getItem('authToken');
