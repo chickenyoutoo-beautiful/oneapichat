@@ -252,9 +252,10 @@ const configs = [
     // ──────────── MiniMax 系列 ────────────
 
     // M2.7 — 不支持 tool_choice, 使用XML格式工具调用
+    // M2.7 不支持原生 image_url, 图片通过 analyze_image 工具间接识别
     cfg({
         match: ['minimax-m2.7', 'minimax-m2', 'minimax-max'],
-        supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
+        supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
         bannedParams: ['tool_choice', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'user', 'seed', 'response_format', 'logprobs', 'reasoning_effort', 'parallel_tool_calls'],
         bannedBodyKeys: ['tool_choice', 'reasoning_effort', 'top_logprobs', 'logprobs', 'parallel_tool_calls'],
         contextWindow: 204800,
