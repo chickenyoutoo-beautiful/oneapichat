@@ -13267,13 +13267,15 @@ async function autoGenerateTitle(chatId) {
     // 改用 DeepSeek API (尝试读取已保存的 DeepSeek Key)
     var _titleBaseUrl = getVal('baseUrl');
     var _titleApiKey = getVal('apiKey');
+    // 本地模型(llamacpp) 不需要 key，直接用它生成标题
+    var _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
     if (_titleBaseUrl.includes('minimaxi.com')) {
         _titleBaseUrl = 'https://api.deepseek.com';
         var _dsKey = localStorage.getItem('apiKeyDeepseek') || '';
         try { _titleApiKey = decrypt(_dsKey) || ''; } catch(e) { _titleApiKey = ''; }
     }
     if (!model) return;
-    if (!_titleApiKey) return; // 没有有效 key 跳过
+    if (!_titleApiKey && !_isLocalTitle) return; // 没有有效 key 跳过
     try {
         const body = {
             model,
@@ -13291,7 +13293,7 @@ async function autoGenerateTitle(chatId) {
         body.reasoning_split = false;
         const res = await fetch(_titleBaseUrl + '/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _titleApiKey },
+            headers: { 'Content-Type': 'application/json', ...(_isLocalTitle ? {} : { Authorization: 'Bearer ' + _titleApiKey }) },
             body: JSON.stringify(body)
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
