@@ -3333,13 +3333,16 @@ function buildUserContent(text, files) {
         // OpenAI 视觉模型格式:数组
         const content = [];
         // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
+        // ★ 本地模型(llamacpp): 强制用 base64 data URL,因为 localmodels 无法访问外网
+        var _isLocalModel = (window._currentProvider || getEl?.('baseUrlProvider')?.value || '') === 'llamacpp';
         for (const f of files) {
             if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
-                // 如果有服务器URL,优先使用(大幅减小请求体大小)
-                if (f.serverUrl) {
+                // 非本地模型且有服务器URL时,优先使用服务器URL(大幅减小请求体大小)
+                if (!_isLocalModel && f.serverUrl) {
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 }
+                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 60) + '...', 'type:', _isLocalModel ? 'base64(dataURL)' : 'serverUrl', 'size:', _imgUrl.length);
                 content.push({
                     type: 'image_url',
                     image_url: { url: _imgUrl }
