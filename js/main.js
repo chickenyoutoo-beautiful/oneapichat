@@ -13280,8 +13280,8 @@ async function autoGenerateTitle(chatId) {
             temperature: 0,
             max_tokens: 500
         };
-        // 关闭思考模式(DeepSeek/OpenAI 兼容),MiniMax 不支持这些参数
-        if (!_isMiniMax) {
+        // 关闭思考模式(DeepSeek/OpenAI 兼容),MiniMax/llamacpp 不支持这些参数
+        if (!_isMiniMax && !_isLocalTitle) {
             body.extra_body = body.extra_body || {};
             body.extra_body.thinking = { type: "disabled" };
         }
@@ -13293,8 +13293,17 @@ async function autoGenerateTitle(chatId) {
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        let rawTitle = data.choices[0].message.content || '';
-        // 清理 think 标签(某些模型即使禁用了 thinking 还是会输出)
+        let rawTitle = (data.choices[0].message.content || data.choices[0].message.reasoning_content || '').trim();
+        if (!rawTitle || rawTitle.length < 2) {
+            rawTitle = (data.choices[0].message.reasoning_content || '').trim();
+        }
+        // ★ 如果 content 太长(>200字),说明可能包含了思考/废话,取最后一句
+        if (rawTitle.length > 200) {
+            var _lines = rawTitle.split(/\n/);
+            var _last = _lines[_lines.length - 1] || rawTitle.slice(-50);
+            rawTitle = _last.trim();
+        }
+        // 清理 think 标签
         rawTitle = rawTitle.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
         // 清理星号包裹(MiniMax 等模型喜欢加 **粗体**)
         rawTitle = rawTitle.replace(/^\*+\s*|\s*\*+$/g, '').trim();
