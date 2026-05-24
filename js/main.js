@@ -13263,22 +13263,13 @@ async function autoGenerateTitle(chatId) {
         else recent += '助手: ' + m.content + '\n';
     }
     const model = getVal('titleModel') || 'deepseek-v4-flash';
-    // ★ MiniMax API 不兼容 OpenAI 格式的 reasoning/thinking 参数,
-    // 改用 DeepSeek API (尝试读取已保存的 DeepSeek Key)
+    // ★ 用当前 API 生成标题,对不兼容的 API 做参数清理
     var _titleBaseUrl = getVal('baseUrl');
     var _titleApiKey = getVal('apiKey');
-    // 本地模型(llamacpp) 不需要 key，直接用它生成标题
     var _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
-    if (_titleBaseUrl.includes('minimaxi.com')) {
-        // MiniMax key 不能用于 DeepSeek, 尝试用已保存的 DeepSeek key
-        var _dsKeyRaw = localStorage.getItem('apiKeyDeepseek') || '';
-        try { _titleApiKey = decrypt(_dsKeyRaw) || ''; } catch(e) { _titleApiKey = ''; }
-        // 没存 DeepSeek key 就跳过标题生成
-        if (!_titleApiKey) return;
-        _titleBaseUrl = 'https://api.deepseek.com';
-    }
+    var _isMiniMax = _titleBaseUrl.includes('minimaxi.com');
     if (!model) return;
-    if (!_titleApiKey && !_isLocalTitle) return; // 没有有效 key 跳过
+    if (!_titleApiKey && !_isLocalTitle) return;
     try {
         const body = {
             model,
@@ -13289,10 +13280,11 @@ async function autoGenerateTitle(chatId) {
             temperature: 0,
             max_tokens: 500
         };
-        // 尝试关闭思考模式,多个 API 兼容
-        body.extra_body = body.extra_body || {};
-        body.extra_body.thinking = { type: "disabled" };
-        // MiniMax 兼容
+        // 关闭思考模式(DeepSeek/OpenAI 兼容),MiniMax 不支持这些参数
+        if (!_isMiniMax) {
+            body.extra_body = body.extra_body || {};
+            body.extra_body.thinking = { type: "disabled" };
+        }
         body.reasoning_split = false;
         const res = await fetch(_titleBaseUrl + '/chat/completions', {
             method: 'POST',
