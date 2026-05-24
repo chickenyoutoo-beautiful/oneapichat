@@ -50,12 +50,30 @@ $sessionsFile = $usersDir . 'sessions.json';
 // ---- 读取/写入辅助函数 ----
 function readJson($path) {
     if (!file_exists($path)) return [];
-    $data = @json_decode(@file_get_contents($path), true);
-    return is_array($data) ? $data : [];
+    $raw = @file_get_contents($path);
+    if ($raw === false || trim($raw) === '') return [];
+    $data = @json_decode($raw, true);
+    if (!is_array($data)) {
+        // ★ 文件损坏时保留备份并返回空数组,下次写入会覆盖
+        $backup = $path . '.corrupted.' . date('Ymd_His');
+        @rename($path, $backup);
+        error_log('[auth.php] Corrupted JSON file backed up: ' . $backup);
+        return [];
+    }
+    return $data;
 }
 
 function writeJson($path, $data) {
-    return @file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX) !== false;
+    // ★ 原子写入: 先写临时文件,再 rename,防止并发写入导致文件损坏
+    $tmpPath = $path . '.' . getmypid() . '.tmp';
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if ($json === false) return false;
+    if (@file_put_contents($tmpPath, $json, LOCK_EX) === false) return false;
+    if (!@rename($tmpPath, $path)) {
+        @unlink($tmpPath);
+        return false;
+    }
+    return true;
 }
 
 function jsonError($code, $msg) {
@@ -159,6 +177,7 @@ switch ($method) {
         if (!$input) jsonError(400, '无效的请求数据');
 
         if ($action === 'register') {
+            jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
 
