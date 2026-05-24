@@ -13262,7 +13262,8 @@ async function autoGenerateTitle(chatId) {
         if (m.role === 'user') recent += '用户: ' + buildUserContent(m.text, m.files) + '\n';
         else recent += '助手: ' + m.content + '\n';
     }
-    const model = getVal('titleModel') || 'deepseek-v4-flash';
+    // ★ 标题生成: 优先用 titleModel, 没设置就用当前主模型, 实在没有再 fallback
+    const model = getVal('titleModel') || getVal('modelSelect') || 'deepseek-v4-flash';
     // ★ 用当前 API 生成标题,对不兼容的 API 做参数清理
     var _titleBaseUrl = getVal('baseUrl');
     var _titleApiKey = getVal('apiKey');
