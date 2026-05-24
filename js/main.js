@@ -407,34 +407,33 @@ function compressImage(dataUrl, maxDim, quality) {
     return new Promise(function(resolve, reject) {
         maxDim = maxDim || IMAGE_COMPRESS_MAX_DIM;
         quality = quality || IMAGE_COMPRESS_QUALITY;
+        // ★ 提取原始图片 MIME 类型,保持格式不转为 webp
+        // 因为 llama.cpp 等本地 vision encoder 可能不支持 webp
+        var _mimeMatch = (dataUrl || '').match(/^data:(image\/[\w+]+);/);
+        var _outMime = (_mimeMatch && _mimeMatch[1]) || 'image/jpeg';
         var img = new Image();
         img.onload = function() {
             var w = img.width, h = img.height;
-            // 如果图片已经很小,不压缩
-            if (w <= maxDim && h <= maxDim) {
-                // 但还是转 webp 以减少体积
-                var canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                var ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                resolve(canvas.toDataURL('image/webp', quality));
-                return;
-            }
+            // ★ canvas.toDataURL 不支持 'image/png' 质量参数以外的格式带质量
+            // PNG 无损, JPEG 带质量, 其他格式统一用 JPEG
+            var _useMime = 'image/jpeg';
+            var _useQ = quality;
+            if (_outMime === 'image/png') { _useMime = 'image/png'; _useQ = undefined; }
             // 等比例缩小
-            var ratio = Math.min(maxDim / w, maxDim / h);
-            w = Math.round(w * ratio);
-            h = Math.round(h * ratio);
+            if (w > maxDim || h > maxDim) {
+                var ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+            }
             var canvas = document.createElement('canvas');
             canvas.width = w;
             canvas.height = h;
             var ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, w, h);
-            // 先用0.7质量,如果体积>3MB则降质量到0.4
-            var result = canvas.toDataURL('image/webp', quality);
+            var result = _useMime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', quality);
             var bytes = atob(result.split(',')[1]).length;
             if (bytes > IMAGE_COMPRESS_MAX_SIZE_MB * 1024 * 1024) {
-                result = canvas.toDataURL('image/webp', 0.4);
+                result = canvas.toDataURL('image/jpeg', 0.4);
             }
             resolve(result);
         };
@@ -3706,7 +3705,9 @@ async function processSelectedFiles(fileList) {
                 console.log('[Image]', file.name, '压缩:', (file.size/1024).toFixed(0), 'KB →', compressedSizeKB, 'KB');
 
                 // ★ 上传到本地服务器(用压缩后的字节数,UI显示正确的实际大小)
-                var fileObj = { name: file.name, content: dataUrl, size: compressedBytes, isImage: true, type: 'image/webp' };
+                // type 从压缩后 dataUrl 提取,保持原始格式(JPEG/PNG),避免 webp 不被本地模型支持
+                var _compType = (dataUrl.match(/^data:(image\/[\w+]+);/) || [])[1] || 'image/jpeg';
+                var fileObj = { name: file.name, content: dataUrl, size: compressedBytes, isImage: true, type: _compType };
                 _setProgress(60, '上传中...');
                 try {
                     var srvUrl = await uploadImageToServer(dataUrl);
