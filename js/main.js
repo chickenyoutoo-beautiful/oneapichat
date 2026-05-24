@@ -3334,7 +3334,9 @@ function buildUserContent(text, files) {
         const content = [];
         // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
         // ★ 本地模型(llamacpp): 强制用 base64 data URL,因为 localmodels 无法访问外网
-        var _isLocalModel = (window._currentProvider || localStorage.getItem('baseUrlProvider') || '') === 'llamacpp';
+        var _provider = window._currentProvider || localStorage.getItem('baseUrlProvider') || '';
+        var _isLocalModel = _provider === 'llamacpp';
+        console.log('[Vision] provider检测: _currentProvider=' + window._currentProvider + ', localStorage baseUrlProvider=' + localStorage.getItem('baseUrlProvider') + ', _provider=' + _provider + ', _isLocalModel=' + _isLocalModel);
         for (const f of files) {
             if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
