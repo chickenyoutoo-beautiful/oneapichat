@@ -10837,8 +10837,14 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             tools.push(WEB_FETCH_TOOL_DEFINITION);
             if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
         }
-        // 图片工具(始终可用)
-        tools = tools.concat(imageTools);
+        // 图片工具: 原生多模态模型有图片时不注册 analyze_image,避免重复分析
+        if (currentMessageHasImages && window.MODEL_CONFIGS && window.MODEL_CONFIGS.supportsVision(modelLower)) {
+            tools.push(IMAGE_TOOL_DEFINITION);
+            if (i2iTool) tools.push(i2iTool);
+            console.log('[Vision] 原生多模态模式,已跳过 analyze_image 工具注册');
+        } else {
+            tools = tools.concat(imageTools);
+        }
         // 文件读取/搜索(基础操作,不限制)
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
