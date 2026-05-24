@@ -539,6 +539,18 @@ const configs = [
         defaultMaxTokens: 2048,
     }),
 
+    // ──────────── Qwen 多模态 (本地 llama.cpp) ────────────
+    // Qwen3.6-35B-A3B 等带 mmproj 的模型原生支持 vision
+    // ★ 必须放在通用 qwen fallback 之前,否则 'qwen' 会抢先匹配 Qwen3.6
+    cfg({
+        match: ['Qwen3.6', 'Qwen3', 'Qwen2-VL', 'Qwen2.5-VL', 'qwenvl', 'Qwen-VL', 'Qwen2-VL-', 'Qwen2.5-VL-', 'mmproj', '.gguf'],
+        supports: [S.VISION, S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
+        bannedParams: ['logprobs', 'top_logprobs', 'logit_bias', 'user', 'frequency_penalty', 'presence_penalty'],
+        contextWindow: 32768,
+        maxOutputTokens: 16384,
+        defaultMaxTokens: 4096,
+    }),
+
     cfg({
         match: ['qwen', 'qwen2.5', 'qwen2'],
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
@@ -577,17 +589,6 @@ const configs = [
         contextWindow: 16384,
         maxOutputTokens: 4096,
         defaultMaxTokens: 2048,
-    }),
-
-    // ──────────── Qwen 多模态 (本地 llama.cpp) ────────────
-    // Qwen3.6-35B-A3B 等带 mmproj 的模型原生支持 vision
-    cfg({
-        match: ['Qwen3.6', 'Qwen3', 'Qwen2-VL', 'Qwen2.5-VL', 'qwenvl', 'Qwen-VL', 'Qwen2-VL-', 'Qwen2.5-VL-', 'mmproj', '.gguf'],
-        supports: [S.VISION, S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
-        bannedParams: ['logprobs', 'top_logprobs', 'logit_bias', 'user', 'frequency_penalty', 'presence_penalty'],
-        contextWindow: 32768,
-        maxOutputTokens: 16384,
-        defaultMaxTokens: 4096,
     }),
 
     // ──────────── 通用配置 (fallback) ────────────
