@@ -3334,7 +3334,7 @@ function buildUserContent(text, files) {
         const content = [];
         // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
         // ★ 本地模型(llamacpp): 强制用 base64 data URL,因为 localmodels 无法访问外网
-        var _isLocalModel = (window._currentProvider || getEl?.('baseUrlProvider')?.value || '') === 'llamacpp';
+        var _isLocalModel = window._currentProvider === 'llamacpp';
         for (const f of files) {
             if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
@@ -14444,6 +14444,9 @@ function initializeApp() {
 
         // ★ 从服务器恢复当前账号的配置和聊天记录(登录用户专用)
         await restoreUserData();
+
+        // ★ 初始化 _currentProvider (页面加载时不会触发 onProviderChange)
+        _currentProvider = localStorage.getItem('baseUrlProvider') || 'custom';
 
         // ★ 服务器同步后再次深度清理(防止服务器数据也有污染)
         try {
