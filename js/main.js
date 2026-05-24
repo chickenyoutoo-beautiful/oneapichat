@@ -3334,7 +3334,7 @@ function buildUserContent(text, files) {
         const content = [];
         // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
         // ★ 本地模型(llamacpp): 强制用 base64 data URL,因为 localmodels 无法访问外网
-        var _isLocalModel = window._currentProvider === 'llamacpp';
+        var _isLocalModel = (window._currentProvider || localStorage.getItem('baseUrlProvider') || '') === 'llamacpp';
         for (const f of files) {
             if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
@@ -3342,7 +3342,7 @@ function buildUserContent(text, files) {
                 if (!_isLocalModel && f.serverUrl) {
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 }
-                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 60) + '...', 'type:', _isLocalModel ? 'base64(dataURL)' : 'serverUrl', 'size:', _imgUrl.length);
+                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 60) + '...', 'isLocalModel:', _isLocalModel, 'src:', _isLocalModel ? 'base64' : (f.serverUrl ? 'serverUrl' : 'base64'), 'size:', _imgUrl.length);
                 content.push({
                     type: 'image_url',
                     image_url: { url: _imgUrl }
