@@ -3267,9 +3267,7 @@ function shouldUseVisionFormat() {
         const currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model || '';
         // ★ 使用模型配置:检查模型是否支持视觉
         const _vm = _getModelCfg().supportsVision(currentModel);
-        console.log('[Vision] shouldUseVisionFormat _forceVisionFormat=true, model=' + currentModel + ', supportsVision=' + _vm);
         if (!_vm) return false; // 文本模型不支持视觉格式,由 analyze_image 工具处理
-        console.log('[Vision] ✅ 将使用原生 image_url 格式');
         return true;
     }
 
@@ -3326,7 +3324,6 @@ function buildUserContent(text, files) {
 
     // 检查是否包含图片
     const hasImages = files.some(f => f.isImage || f.type?.startsWith('image/'));
-    console.log('[Vision] buildUserContent: files=' + files.length + ', hasImages=' + hasImages + ', files[0]=' + JSON.stringify(files[0] ? {name:files[0].name,isImage:files[0].isImage,type:files[0].type,hasContent:!!files[0].content} : null));
 
     if (hasImages && shouldUseVisionFormat()) {
         // OpenAI 视觉模型格式:数组
@@ -3343,12 +3340,11 @@ function buildUserContent(text, files) {
                 if (!_isLocalModel && f.serverUrl) {
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 }
-                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 60) + '...', 'isLocalModel:', _isLocalModel, 'src:', _isLocalModel ? 'base64' : (f.serverUrl ? 'serverUrl' : 'base64'), 'size:', _imgUrl.length);
+                console.log('[Vision] 📷 ' + _imgUrl.substring(0, 50) + '...');
                 content.push({
                     type: 'image_url',
                     image_url: { url: _imgUrl }
                 });
-                console.log('[Vision] 图片已加入请求:', _imgUrl.substring(0, 50) + '...', 'size:', _imgUrl.length);
             } else {
                 // 非图片文件转为文本(截断超大附件)
                 var _fileText = f.content || '';
@@ -5149,10 +5145,14 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
         return (m.role === 'user' ? '用户: ' : 'AI: ') + (m.text || m.content || '').substring(0, 200);
     }).join('\n');
 
-    // 用本地小模型判断是否需要保存记忆
+    // 用廉价模型,但必须用 DeepSeek API(不能走 MiniMax)
     var key = localStorage.getItem('apiKey') || '';
     var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
-    var model = 'deepseek-chat'; // 用廉价模型
+    if (baseUrl.includes('minimaxi.com')) {
+        // MiniMax 不兼容,用免费/廉价后备
+        return;
+    }
+    var model = 'deepseek-chat';
     if (!key) return;
 
     try {
@@ -9133,7 +9133,6 @@ function buildApiMessages(chatId) {
             var prev = window._forceVisionFormat;
             if (msgHasImage || (i === msgs.length - 1 && currentHasImage)) {
                 window._forceVisionFormat = true;
-                console.log('[Vision] buildApiMessages: msg#' + i + ' hasImage=' + msgHasImage + ', currentHasImage=' + currentHasImage + ', files count=' + (files ? files.length : 0));
             }
             apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(msg.text, files) });
             window._forceVisionFormat = prev;
@@ -10841,7 +10840,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         if (currentMessageHasImages && window.MODEL_CONFIGS && window.MODEL_CONFIGS.supportsVision(modelLower)) {
             tools.push(IMAGE_TOOL_DEFINITION);
             if (i2iTool) tools.push(i2iTool);
-            console.log('[Vision] 原生多模态模式,已跳过 analyze_image 工具注册');
         } else {
             tools = tools.concat(imageTools);
         }
@@ -13265,7 +13263,15 @@ async function autoGenerateTitle(chatId) {
         else recent += '助手: ' + m.content + '\n';
     }
     const model = getVal('titleModel') || 'deepseek-v4-flash';
+    // ★ MiniMax API 不兼容 OpenAI 格式的 reasoning/thinking 参数,用默认 API
+    var _titleBaseUrl = getVal('baseUrl');
+    var _titleApiKey = getVal('apiKey');
+    if (_titleBaseUrl.includes('minimaxi.com')) {
+        _titleBaseUrl = 'https://api.deepseek.com';
+        _titleApiKey = ''; // MiniMax key 不能用于 DeepSeek
+    }
     if (!model) return;
+    if (!_titleApiKey) return; // 没有有效 key 跳过
     try {
         const body = {
             model,
@@ -13281,9 +13287,9 @@ async function autoGenerateTitle(chatId) {
         body.extra_body.thinking = { type: "disabled" };
         // MiniMax 兼容
         body.reasoning_split = false;
-        const res = await fetch(getVal('baseUrl') + '/chat/completions', {
+        const res = await fetch(_titleBaseUrl + '/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getVal('apiKey') },
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _titleApiKey },
             body: JSON.stringify(body)
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
