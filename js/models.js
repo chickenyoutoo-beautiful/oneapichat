@@ -760,7 +760,9 @@ return {
 
     /** 检查模型是否支持视觉 */
     supportsVision: function(name) {
-        return this.supports(name, 'vision');
+        var result = this.supports(name, 'vision');
+        console.log('[models.js] supportsVision(' + name + ') = ' + result + ', matched config match=' + JSON.stringify(_matchConfig(name).match));
+        return result;
     },
 
     /** 检查模型是否支持 reasoning_effort */
