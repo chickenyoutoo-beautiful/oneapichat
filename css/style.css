@@ -851,17 +851,58 @@ select option { background: white; color: #1f2937; }
     border-color: #374151;
 }
 .drop-overlay-input {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(37, 99, 235, 0.15); backdrop-filter: blur(3px);
-    border: 3px dashed var(--primary); border-radius: 9999px;
+    position: absolute; top: -4px; left: -4px; right: -4px; bottom: -4px;
+    background: rgba(255,255,255,0.92);
+    border: 2px solid var(--primary); border-radius: 9999px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 1rem; color: var(--primary); font-weight: 600; pointer-events: none;
-    z-index: 30; opacity: 0; visibility: hidden; transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 30; opacity: 0; visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease, transform 0.25s ease;
+    transform: scale(0.98);
+    box-shadow: 0 0 0 1px var(--primary), 0 8px 32px rgba(99,102,241,0.12);
 }
 .dark .drop-overlay-input {
-    background: rgba(59, 130, 246, 0.2); border-color: var(--primary-hover); color: var(--primary-hover);
+    background: rgba(31,41,55,0.94);
+    border-color: var(--primary-hover);
+    box-shadow: 0 0 0 1px var(--primary-hover), 0 8px 32px rgba(99,102,241,0.18);
 }
-.drop-overlay-input.show { opacity: 1; visibility: visible; }
+.drop-overlay-input.show {
+    opacity: 1; visibility: visible;
+    transform: scale(1);
+}
+.drop-overlay-inner {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 8px 24px;
+    animation: dropPulse 1.6s ease-in-out infinite;
+}
+@keyframes dropPulse {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-2px); }
+}
+.dark .drop-overlay-inner {
+    animation: none;
+}
+.drop-overlay-svg {
+    width: 28px; height: 28px;
+    color: var(--primary);
+    filter: drop-shadow(0 2px 4px rgba(99,102,241,0.2));
+}
+.dark .drop-overlay-svg {
+    color: var(--primary-hover);
+}
+.drop-overlay-text {
+    font-size: 15px; font-weight: 600; color: var(--primary);
+    letter-spacing: -0.01em;
+}
+.dark .drop-overlay-text {
+    color: var(--primary-hover);
+}
+.drop-overlay-sub {
+    font-size: 11px; color: #9ca3af; font-weight: 400;
+}
+.dark .drop-overlay-sub {
+    color: #6b7280;
+}
 
 /* ===== 输入框 ===== */
 #userInput {
@@ -4686,4 +4727,35 @@ details[open] .src-chevron { transform: rotate(180deg); }
 }
 .tool-toggle-row.tool-disabled .switch input {
     cursor: not-allowed;
+}
+
+/* 原生多模态处理提示 */
+@keyframes visionPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+.native-vision-hint {
+    animation: visionPulse 2s ease-in-out infinite;
+}
+
+/* 身份卡片动效 */
+@keyframes identitySlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+.identity-card-wrapper {
+    animation: identitySlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 原生视觉提示 (暗色模式适配) */
+.dark .native-vision-hint {
+    background: linear-gradient(135deg, #667eea10, #764ba210) !important;
+    border-color: #667eea15 !important;
+    color: #a78bfa !important;
 }
