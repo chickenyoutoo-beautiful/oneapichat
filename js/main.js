@@ -13270,9 +13270,12 @@ async function autoGenerateTitle(chatId) {
     // 本地模型(llamacpp) 不需要 key，直接用它生成标题
     var _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
     if (_titleBaseUrl.includes('minimaxi.com')) {
+        // MiniMax key 不能用于 DeepSeek, 尝试用已保存的 DeepSeek key
+        var _dsKeyRaw = localStorage.getItem('apiKeyDeepseek') || '';
+        try { _titleApiKey = decrypt(_dsKeyRaw) || ''; } catch(e) { _titleApiKey = ''; }
+        // 没存 DeepSeek key 就跳过标题生成
+        if (!_titleApiKey) return;
         _titleBaseUrl = 'https://api.deepseek.com';
-        var _dsKey = localStorage.getItem('apiKeyDeepseek') || '';
-        try { _titleApiKey = decrypt(_dsKey) || ''; } catch(e) { _titleApiKey = ''; }
     }
     if (!model) return;
     if (!_titleApiKey && !_isLocalTitle) return; // 没有有效 key 跳过
