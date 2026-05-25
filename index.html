@@ -49,7 +49,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=1779648800"></script>
+<script defer src="./js/main.js?v=1779702946"></script>
 <script defer src="./js/src-manager.js?v=4"></script>
 
     <!-- /命令列表 SVG 图标库 -->
@@ -72,9 +72,9 @@
     </svg>
 
 <script>
-// 从 PHP 后端获取 API Key（通过环境变量注入，避免硬编码泄露）
-window.ONEAPI_KEY = '<?= preg_replace('/[^a-zA-Z0-9_\-]/', '', getenv('ONEAPI_KEY') ?: '') ?>';
-window.VISION_API_KEY = '<?= preg_replace('/[^a-zA-Z0-9_\-]/', '', getenv('VISION_API_KEY') ?: '') ?>';
+// API Keys 由前端从 localStorage 恢复，不再硬编码
+window.ONEAPI_KEY = '';
+window.VISION_API_KEY = '';
 </script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
@@ -199,19 +199,22 @@ window.VISION_API_KEY = '<?= preg_replace('/[^a-zA-Z0-9_\-]/', '', getenv('VISIO
                 <!-- Agent 模式按钮 + 悬停模式选择 -->
                 <div class="agent-split-btn" id="agentSplitBtn">
                     <div class="agent-mode-wrapper">
-                        <button onclick="window.toggleAgentMode()" class="agent-main-btn" title="Agent 模式">
+                        <button id="agentMainBtn" class="agent-main-btn" title="Agent 模式">
                             <span class="agent-dot"></span>
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
                         </button>
                         <div class="agent-mode-popup" id="agentModePopup">
                             <button data-mode="plan" onclick="setAgentMode('plan')" title="Plan 只读">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <span class="popup-label">Plan</span>
                             </button>
                             <button data-mode="agent" onclick="setAgentMode('agent')" title="Agent 交互">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
+                                <span class="popup-label">Agent</span>
                             </button>
                             <button data-mode="yolo" onclick="setAgentMode('yolo')" title="YOLO 自动">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
+                                <span class="popup-label">YOLO</span>
                             </button>
                         </div>
                     </div>
@@ -1144,9 +1147,7 @@ window.addEventListener('pageshow', function(e) {
 
     <!-- PWA Service Worker -->
     <script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/oneapichat/sw.js').catch(function() {});
-    }
+    // Service Worker 已禁用，避免缓存问题
     </script>
 </body>
 </html>
