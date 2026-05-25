@@ -38,3 +38,5 @@ css/src-console.css
 js/src-manager.js
 __pycache__/
 backups/
+config.ini
+config.ini.template
