@@ -2342,7 +2342,7 @@ const DEFAULT_CONFIG = {
         '   【关键规则】当用户上传了图片时:\n' +
         '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
         '   - 用户没有上传图片但要求画图时,调用 generate_image(纯文生图)\n' +
-        '   - 如果用户只是问图片里有什么/描述图片内容,直接查看收到的图片回复（多模态）或调用 analyze_image（文本模型）\n' +
+        '   - 如果用户只是问图片里有什么/描述图片内容,直接查看收到的图片回复(多模态)或调用 analyze_image(文本模型)\n' +
         '   【关键规则】当用户没有上传图片时:\n' +
         '   - 用户要求画图、生成图片时,调用 generate_image\n' +
         '   【强制要求】必须实际调用 generate_image 工具才能生成图片。严禁在回复中伪造图片URL或声称已生成图片但未使用工具。没有工具调用就没有图片。\n' +
@@ -2546,7 +2546,7 @@ let streamingScrollLock = false;
 
 // ★★★★★ 流式渲染优化 v2: 基于 RAF 的批量渲染 + 平滑滚动系统 ★★★★★
 // 参考: ChatGPT UI, Upstash smooth-streaming, Open WebUI rendering patterns
-// 核心优化: 
+// 核心优化:
 //   1. 数据层(textBuffer)与渲染层(DOM)分离
 //   2. RAF 批量渲染(16ms对齐显示刷新率),不再是每token触发innerHTML
 //   3. 滚动跟随与渲染统一到RAF循环,不再独立setInterval
@@ -4009,10 +4009,11 @@ function updateSlashPopup(query) {
         groups[g].forEach(function(m) {
             var iconSvg = m.icon ? '<svg class="slash-item-icon-svg"><use href="#cmd-icon-' + m.icon + '"/></svg>' : '';
             var argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
-            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '">' +
+            var disabledClass = m._disabled ? ' slash-item-disabled' : '';
+            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + disabledClass + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '"' + (m._disabled ? ' style="pointer-events:none;opacity:0.4"' : '') + '>' +
                 iconSvg +
                 '<span class=slash-item-cmd>/' + m.cmd + '</span>' + argTag +
-                '<span class=slash-item-hint>' + m.hint + '</span>' +
+                '<span class=slash-item-hint>' + (m._disabled ? '(Agent模式可用) ' : '') + m.hint + '</span>' +
             '</div>';
             idx++;
         });
@@ -4658,13 +4659,32 @@ function getAgentMode() {
 function setAgentMode(mode) {
     if (['off','plan','agent','yolo'].indexOf(mode) === -1) mode = 'off';
     var prevMode = getAgentMode();
+    
+    // ★ 同模式再次点击 = 退出到 off
+    if (mode !== 'off' && mode === prevMode) {
+        mode = 'off';
+    }
+
+    // ★ 动画互斥锁: 如果有动画正在播放,立即清除
+    if (window._agentAnimLock) {
+        _clearAllAgentOverlays();
+        clearTimeout(window._agentAnimLock);
+    }
+
     localStorage.setItem('agentMode', mode);
 
-    // ★ 整页转场动效(根据具体模式传递主题)
+    // ★ 整页转场动效(先判断目标模式,再判断来源模式)
     if (mode === 'agent' || mode === 'yolo') {
         playAgentEnterEffect(mode);
-    } else if (prevMode === 'agent' || prevMode === 'yolo') {
+        window._agentAnimLock = setTimeout(function() { window._agentAnimLock = null; }, 950);
+    } else if (mode === 'plan') {
+        // ★ Plan: 蓝色进入特效
+        playAgentEnterEffect('plan');
+        window._agentAnimLock = setTimeout(function() { window._agentAnimLock = null; }, 700);
+    } else if (mode === 'off' && (prevMode === 'agent' || prevMode === 'yolo' || prevMode === 'plan')) {
+        // ★ 切回 off: 退出特效(仅当从非 off 模式切换时)
         playAgentExitEffect(prevMode);
+        window._agentAnimLock = setTimeout(function() { window._agentAnimLock = null; }, 700);
     }
 
     updateAgentUI();
@@ -4679,19 +4699,20 @@ function setAgentMode(mode) {
             $.sidebar?.classList.add('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
         }
-        // 保存当前普通聊天 ID, 进入 agent 后不再混回原 agent 聊天
-        if (currentChatId) {
+        // 保存当前普通聊天 ID
+        if (currentChatId && currentChatId !== '_agent_main') {
             lastNormalChatId = currentChatId;
             localStorage.setItem('lastNormalChatId', lastNormalChatId);
         }
-        // ★ 提取当前普通聊天的非 system 消息作为上下文，注入新 agent 聊天
-        var contextMsgs = currentChatId ? (chats[currentChatId]?.messages || []).filter(function(m) {
-            return m.role !== 'system' && !m._internal && m.content && typeof m.content === 'string' && m.content.trim();
-        }) : [];
-        // 生成新的 agent 聊天（每次进入都是新的，不会复用旧的）
-        createAgentChat(contextMsgs).then(function(agentId) {
+        // ★ 始终复用同一个主代理聊天,不复用旧的随机ID
+        var agentId = '_agent_main';
+        if (!chats[agentId]) {
+            createAgentChat().then(function() {
+                loadChat(agentId);
+            });
+        } else {
             loadChat(agentId);
-        });
+        }
     } else if (mode === 'off') {
         // ★ 普通模式: 关闭所有 Agent 专属工具
         var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
@@ -4703,8 +4724,8 @@ function setAgentMode(mode) {
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
         }
         // 切换到 agent 聊天时切回普通模式,恢复上次普通聊天
-        if (currentChatId && currentChatId.startsWith('agent_')) {
-            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return !id.startsWith('agent_'); }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
+        if (currentChatId && currentChatId === '_agent_main') {
+            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== '_agent_main'; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
             if (restoreId && chats[restoreId]) {
                 loadChat(restoreId);
             }
@@ -4752,7 +4773,7 @@ function isPlanMode() {
 }
 
 // ★ Agent 模式整页转场动效
-// overlay 管理：防止快速切换时动画叠加
+// overlay 管理:防止快速切换时动画叠加
 var _agentOverlayMap = {}; // mode -> { el, timer }
 
 function _clearAgentOverlay(mode) {
@@ -4767,24 +4788,21 @@ function _clearAgentOverlay(mode) {
 
 function _clearAllAgentOverlays() {
     Object.keys(_agentOverlayMap).forEach(function(m) { _clearAgentOverlay(m); });
-    // 清除所有遗留的 agent-transition-overlay（兜底）
+    // 清除所有遗留的 agent-transition-overlay(兜底)
     document.querySelectorAll('.agent-transition-overlay').forEach(function(el) { el.remove(); });
 }
 
 function playAgentEnterEffect(mode) {
-    // ★ 关键：切换前先清除所有旧 overlay，防止叠加
     _clearAllAgentOverlays();
-    var isDark = document.documentElement.classList.contains('dark');
-    // agent: 蓝紫色系 / yolo: 红金色系
+    var isPlan = mode === 'plan';
     var isYolo = mode === 'yolo';
-    var c1 = isYolo ? [239,68,68] : [99,102,241];
-    var c2 = isYolo ? [245,158,11] : [168,85,247];
-    var c3 = isYolo ? [220,38,38] : [236,72,153];
+    var c1 = isYolo ? [239,68,68] : isPlan ? [59,130,246] : [99,102,241];
+    var c2 = isYolo ? [245,158,11] : isPlan ? [96,165,250] : [168,85,247];
     var glow = 'rgba(' + c1.join(',') + ',';
     var glow2 = 'rgba(' + c2.join(',') + ',';
-    var titleGrad = isYolo ? '#ef4444,#f97316,#eab308' : '#6366f1,#a855f7,#ec4899';
-    var titleWord = isYolo ? 'YOLO' : 'AGENT';
-    var subtitle = isYolo ? 'AUTONOMOUS' : 'ENHANCED';
+    var titleGrad = isYolo ? '#ef4444,#f97316,#eab308' : isPlan ? '#3b82f6,#60a5fa,#93c5fd' : '#6366f1,#a855f7,#ec4899';
+    var titleWord = isYolo ? 'YOLO' : isPlan ? 'PLAN' : 'AGENT';
+    var subtitle = isYolo ? 'AUTONOMOUS' : isPlan ? 'READ-ONLY' : 'ENHANCED';
     var hexStroke = 'rgba(' + c1.join(',') + ',0.12)';
 
     // 预载艺术字
@@ -4799,92 +4817,53 @@ function playAgentEnterEffect(mode) {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 1. 透亮模糊遮罩（浅色，不黑）
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(18px) saturate(120%);-webkit-backdrop-filter:blur(18px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.25)' : 'rgba(238,242,255,0.25)') + ';opacity:0;animation:agent-mask-in 0.45s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
-        // 2. 电路板线条图案
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.1s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><g fill="none" stroke="rgba(99,102,241,0.06)" stroke-width="0.8"><rect x="0" y="0" width="30" height="30" rx="4"/><rect x="50" y="50" width="30" height="30" rx="4"/><circle cx="15" cy="15" r="3" fill="rgba(99,102,241,0.08)"/><circle cx="65" cy="65" r="3" fill="rgba(99,102,241,0.08)"/><path d="M30 15h20v30h-20z" opacity="0.3"/><path d="M50 15h20" opacity="0.3"/><path d="M15 30v20" opacity="0.3"/><path d="M65 30v20h-15" opacity="0.3"/></g></svg>') + '\');background-size:80px 80px;"></div>' +
-        // 3. 叠加噪点纹理层
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-mask-in 0.5s 0.12s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity="0.04"/></svg>') + '\');"></div>' +
-        // 4. 微妙的边缘光晕(替代暗角,改用浅色)
-        '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,' + glow + '0.06) 70%,transparent 100%);opacity:0;animation:agent-mask-in 0.5s 0.08s ease forwards;"></div>' +
-        // 5. 六边形网格
-        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="' + hexStroke + '" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 1s 0.15s ease forwards;will-change:transform;"></div>' +
-        // 6. 多层光环
-        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.4),0 0 0 0 ' + glow + '0.2),0 0 0 0 ' + glow + '0.08),0 0 0 0 ' + glow2 + '0.06);animation:agent-pulse-rings 0.9s cubic-bezier(0.16,1,0.3,1) forwards;will-change:transform;"></div>' +
-        // 7. 光线
+        // 1. 背景模糊(跟随模式颜色)
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(12px) saturate(100%);-webkit-backdrop-filter:blur(12px) saturate(100%);background:' + (isYolo ? 'rgba(254,242,242,0.22)' : isPlan ? 'rgba(239,246,255,0.22)' : 'rgba(238,242,255,0.22)') + ';opacity:0;animation:agent-mask-in 0.25s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
+        // 2. 六边形网格(加速)
+        '<div style="position:absolute;inset:0;opacity:0;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="' + hexStroke + '" stroke-width="1"/></svg>') + '\');background-size:60px 52px;animation:agent-hex-in 0.6s 0.08s ease forwards;will-change:transform;"></div>' +
+        // 3. 多层光环(加速)
+        '<div style="position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;box-shadow:0 0 0 0 ' + glow + '0.3),0 0 0 0 ' + glow + '0.1);animation:agent-pulse-rings 0.6s cubic-bezier(0.16,1,0.3,1) forwards;will-change:transform;"></div>' +
+        // 4. 光线(减少数量+加速)
         '<div style="position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;">' +
-            Array.from({length: 6}, function(_, i) {
-                return '<div style="position:absolute;top:' + (8 + i*16) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + glow + '0.4),' + glow2 + '0.25),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' ' + (0.5+i*0.07) + 's ' + (0.08+i*0.05) + 's ease forwards;"></div>';
+            Array.from({length: 3}, function(_, i) {
+                return '<div style="position:absolute;top:' + (15 + i*30) + '%;left:-100%;width:200%;height:1px;background:linear-gradient(90deg,transparent,' + glow + '0.3),' + glow2 + '0.15),transparent);animation:agent-line-' + (i%2===0?'right':'left') + ' 0.4s ' + (0.05+i*0.04) + 's ease forwards;"></div>';
             }).join('') +
         '</div>' +
-        // 8. 数字雨
-        '<div style="position:absolute;inset:0;overflow:hidden;opacity:0;animation:agent-mask-in 0.4s 0.15s ease forwards;">' +
-            Array.from({length: 15}, function() {
-                return '<div style="position:absolute;font-family:monospace;font-size:14px;color:' + glow + '0.04);top:' + (Math.random()*100) + '%;left:' + (Math.random()*100) + '%;animation:agent-float-up ' + (2+Math.random()*4) + 's ' + (Math.random()*3) + 's linear infinite;">' + Math.random().toString(2).substr(2,6) + '</div>';
-            }).join('') +
-        '</div>' +
-        // 9. 中心艺术字(自身带模糊背景,不被背景干扰)
+        // 5. 中心文字(缩小+去内层模糊)
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">' +
-            '<div style="padding:20px 60px;border-radius:24px;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);background:rgba(255,255,255,0.03);opacity:0;animation:agent-mask-in 0.4s 0.12s ease forwards;will-change:opacity;">' +
-                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:96px;font-weight:900;letter-spacing:6px;line-height:1;text-align:center;opacity:0;animation:agent-title-in 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) forwards;">' +
+            '<div style="opacity:0;animation:agent-mask-in 0.3s 0.08s ease forwards;will-change:opacity;">' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:64px;font-weight:900;letter-spacing:4px;line-height:1;text-align:center;opacity:0;animation:agent-title-in 0.5s 0.1s cubic-bezier(0.16,1,0.3,1) forwards;">' +
                     titleWord.split('').map(function(letter, i) {
                         var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
-                        var shadow = 'filter:drop-shadow(0 0 ' + (25+i*4) + 'px ' + glow + '0.4));';
+                        var shadow = 'filter:drop-shadow(0 0 ' + (12+i*2) + 'px ' + glow + '0.3));';
                         return '<span style="' + grad + shadow + '">' + letter + '</span>';
                     }).join('') +
                 '</div>' +
-                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:20px;font-weight:600;letter-spacing:18px;color:' + glow2 + '0.4);opacity:0;animation:agent-subtitle-in 0.6s 0.3s ease forwards;margin-top:14px;text-align:center;width:100%;">' + subtitle + '</div>' +
+                '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:14px;font-weight:600;letter-spacing:12px;color:' + glow2 + '0.35);opacity:0;animation:agent-subtitle-in 0.4s 0.2s ease forwards;margin-top:8px;text-align:center;width:100%;">' + subtitle + '</div>' +
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    var enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.4s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 400); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 1500);
+    var enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.25s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 250); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 900);
     _agentOverlayMap[mode] = { el: overlay, timer: enterTimer };
 }
 
 function playAgentExitEffect(mode) {
-    // ★ 清除该模式的任何旧 overlay，防止叠加
     _clearAgentOverlay('exit:' + mode);
-    var isDark = document.documentElement.classList.contains('dark');
-    var isYolo = mode === 'yolo';
-    var c1 = isYolo ? [239,68,68] : [99,102,241];
-    var c2 = isYolo ? [245,158,11] : [168,85,247];
-    var glow = 'rgba(' + c1.join(',') + ',';
-    var glow2 = 'rgba(' + c2.join(',') + ',';
-    var exitWord = isYolo ? 'SHUTDOWN' : 'COMPLETE';
+    // ★ 退出: 暗色淡出,柔和醒目
+    var exitWord = 'OFF';
 
     var overlay = document.createElement('div');
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        // 透亮模糊遮罩
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(10px) saturate(120%);-webkit-backdrop-filter:blur(10px) saturate(120%);background:' + (isYolo ? 'rgba(254,242,242,0.2)' : 'rgba(238,242,255,0.2)') + ';animation:agent-exit-mask 0.5s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
-        // 光点向中心聚集
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-exit-particles 0.6s ease forwards;">' +
-            Array.from({length: 40}, function(_, i) {
-                var angle = Math.random() * 360;
-                var r = 30 + Math.random() * 60;
-                var x = 50 + Math.cos(angle * Math.PI / 180) * r;
-                var y = 50 + Math.sin(angle * Math.PI / 180) * r;
-                var size = 2 + Math.random() * 4;
-                var dur = 0.35 + Math.random() * 0.35;
-                var delay = Math.random() * 0.15;
-                var color = Math.random() > 0.5 ? glow + '0.8)' : glow2 + '0.6)';
-                return '<div style="position:absolute;left:' + x + '%;top:' + y + '%;width:' + size + 'px;height:' + size + 'px;background:linear-gradient(135deg,' + glow + '0.8),' + glow2 + '0.6));border-radius:50%;animation:agent-particle-implode ' + dur + 's ' + delay + 's ease forwards;"></div>';
-            }).join('') +
-        '</div>' +
-        // 六边形网格反向缩放
-        '<div style="position:absolute;inset:0;opacity:0;animation:agent-hex-out 0.5s 0.05s ease forwards;background-image:url(\'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="52"><path d="M30 0L60 15v22L30 52 0 37V15z" fill="none" stroke="rgba(' + c1.join(',') + ',0.1)" stroke-width="1"/></svg>') + '\');background-size:60px 52px;"></div>' +
-        // 双层收缩环
-        '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:2px solid ' + glow + '0.12);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
-        '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:1px solid ' + glow2 + '0.08);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.6s 0.05s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
-        // 文字
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(6px) brightness(0.85);-webkit-backdrop-filter:blur(6px) brightness(0.85);background:rgba(0,0,0,0.15);animation:agent-exit-mask 0.5s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
+        '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:2px solid rgba(255,255,255,0.1);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.5s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
-            '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:52px;font-weight:800;letter-spacing:8px;background:linear-gradient(135deg,' + glow + '0.2),' + glow2 + '0.1));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
+            '<div style="font-family:system-ui,sans-serif;font-size:42px;font-weight:600;letter-spacing:5px;color:rgba(255,255,255,0.7);opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    // playAgentExitEffect 的 overlay 以 'exit:' + mode 为 key
     var exitKey = 'exit:' + mode;
-    var exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 300); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 800);
+    var exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.2s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 200); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 650);
     _agentOverlayMap[exitKey] = { el: overlay, timer: exitTimer };
 }
 
@@ -4897,39 +4876,23 @@ window.toggleAgentMode = function() {
 };
 
 /**
- * 创建新的 agent 聊天（每次进入 agent 模式都是新对话，不复用旧记录）
- * @param {Array} contextMsgs 当前普通聊天的历史消息，作为上下文注入
- * @returns {Promise<string>} 新建 agent 聊天的 ID
+ * 创建主代理聊天 (始终复用 _agent_main,不新建)
+ * @returns {Promise}
  */
-function createAgentChat(contextMsgs) {
+function createAgentChat() {
     return new Promise(function(resolve) {
         var uid = localStorage.getItem('authUserId') || '';
         var agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
-        // ★ 每次生成带时间戳的唯一 ID，不复用 AGENT_CHAT_ID
-        var agentId = 'agent_' + Date.now();
-
-        // ★ 组装 system prompt：Agent 介绍 + 注入的上下文
-        var contextIntro = contextMsgs && contextMsgs.length > 0
-            ? '\n## 当前对话上下文（来自普通聊天）\n以下是你与用户之前的对话记录，进入 Agent 模式后请基于这些上下文继续帮助用户：\n'
-            : '';
-        var injectedContext = '';
-        if (contextMsgs && contextMsgs.length > 0) {
-            injectedContext = contextMsgs.map(function(m) {
-                return '**' + (m.role === 'user' ? '用户' : '助手') + '**: ' + m.content;
-            }).join('\n');
-        }
-        var fullSystem = agentSys + contextIntro + injectedContext;
-
+        var agentId = '_agent_main';
         chats[agentId] = {
-            title: 'Agent-' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            title: 'Agent',
             userId: uid,
             updated_at: Date.now(),
             messages: [
-                { role: 'system', content: fullSystem || 'You are an AI assistant in Agent mode.' }
+                { role: 'system', content: agentSys || 'You are an AI assistant in Agent mode.' }
             ]
         };
-        saveChats();
-        resolve(agentId);
+        resolve();
     });
 }
 
@@ -5294,7 +5257,7 @@ window.showIdentityCard = function() {
         '</div>' +
         '<div style="color:#6b7280;font-size:13px;line-height:1.6;margin-bottom:16px;">' +
         '告诉我你希望我怎么称呼你、以及我该以什么风格和你对话。' +
-        '<br>例如：<span style="color:#667eea;font-weight:500;">"叫我奕侨，回复简洁直接"</span>' +
+        '<br>例如:<span style="color:#667eea;font-weight:500;">"叫我奕侨,回复简洁直接"</span>' +
         '</div>' +
         '<div style="display:flex;gap:8px;">' +
         '<button onclick="var e=event.target.closest(\'.identity-card-wrapper\');e.style.transition=\'all 0.25s\';e.style.opacity=\'0\';e.style.transform=\'translateY(-10px)\';setTimeout(function(){e.remove()},250)" style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:transparent;color:#6b7280;cursor:pointer;font-size:13px;transition:all 0.15s;" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">稍后再说</button>' +
@@ -5431,11 +5394,14 @@ function _startAgentHeartbeatIfNeeded() {
     }, 30000);
 }
 
-// 在 setAgentMode 后启动心跳
+// 在 setAgentMode 后启动心跳 + 关闭popup
 (function() {
     var origSetAgentMode = window.setAgentMode;
     window.setAgentMode = function(mode) {
         origSetAgentMode(mode);
+        // ★ 选完关闭 popup(桌面端hover也适用)
+        var popup = getEl('agentModePopup');
+        if (popup) popup.classList.remove('show');
         _startAgentHeartbeatIfNeeded();
     };
 })();
@@ -5831,6 +5797,25 @@ function updateAgentUI() {
     }
     // 更新 body class 用于 CSS 控制
     document.body.classList.toggle('agent-active', isActive);
+
+    // ★ 普通模式: 改输入框提示文字,过滤Agent命令
+    var input = $.userInput || getEl('userInput');
+    if (input) {
+        input.placeholder = mode === 'off' ? '发送消息... / 开头用斜杠命令' : '发送消息给 Agent... / 开头用斜杠命令';
+    }
+    // 过滤命令列表
+    _updateCommandFilter(mode);
+}
+
+// ★ 根据模式过滤命令 (普通模式禁用 Agent 命令)
+function _updateCommandFilter(mode) {
+    var agentCmds = ['mode', 'model'];
+    var isAgent = mode !== 'off';
+    SLASH_COMMANDS.forEach(function(c) {
+        if (agentCmds.indexOf(c.cmd) !== -1) {
+            c._disabled = !isAgent;
+        }
+    });
 }
 
 /** 更新三模式选择器的 UI 状态 */
@@ -5839,31 +5824,30 @@ function _positionModePopup() {
     var popup = getEl('agentModePopup');
     var wrapper = document.querySelector('.agent-mode-wrapper');
     if (!popup || !wrapper) return;
+
     var rect = wrapper.getBoundingClientRect();
-    var popupRect = popup.getBoundingClientRect();
-    // 动态判断：空间足够则向下，否则向上弹出
-    var spaceBelow = window.innerHeight - rect.bottom;
-    var spaceAbove = rect.top;
-    var isMobile = window.matchMedia('(max-width: 640px)').matches;
-    var POPUP_HEIGHT = popupRect.height || 36; // fallback
-    var POPUP_WIDTH = 120;
-    if (isMobile) {
-        // 移动端：居中，宽度跟随按钮或更宽
+
+    if (window.matchMedia('(max-width: 640px)').matches) {
+        // ★ 移动端: 紧贴按钮下方弹出
         popup.style.top = (rect.bottom + 4) + 'px';
-        popup.style.left = '50%';
-        popup.style.transform = 'translateX(-50%)';
-        popup.style.minWidth = Math.max(rect.width, POPUP_WIDTH) + 'px';
-    } else {
-        // 桌面端：智能判断上下
-        if (spaceBelow >= POPUP_HEIGHT + 8 || spaceBelow >= spaceAbove) {
-            popup.style.top = (rect.bottom + 4) + 'px';
-        } else {
-            popup.style.top = (rect.top - POPUP_HEIGHT - 4) + 'px';
-        }
         popup.style.left = rect.left + 'px';
-        popup.style.transform = 'none';
-        popup.style.minWidth = '';
+        popup.style.right = 'auto';
+        popup.style.bottom = 'auto';
+        return;
     }
+    var popupRect = popup.getBoundingClientRect();
+    var POPUP_HEIGHT = popupRect.height || 40;
+    var spaceBelow = window.innerHeight - rect.bottom;
+
+    // 下方空间够就向下弹,否则向上
+    if (spaceBelow >= POPUP_HEIGHT + 8) {
+        popup.style.top = (rect.bottom + 4) + 'px';
+    } else {
+        popup.style.top = (rect.top - POPUP_HEIGHT - 4) + 'px';
+    }
+    popup.style.left = rect.left + 'px';
+    popup.style.right = 'auto';
+    popup.style.bottom = 'auto';
 }
 
 // 页面加载时预定位模式菜单
@@ -5874,51 +5858,52 @@ window._agentPopupTimer = null;
 window._setupAgentPopup = function() {
     var wrapper = document.querySelector('.agent-mode-wrapper');
     var popup = getEl('agentModePopup');
-    if (!wrapper || !popup) return;
+    var mainBtn = document.getElementById('agentMainBtn');
+    if (!wrapper || !popup || !mainBtn) return;
 
-    // --- 桌面端：hover 显示/隐藏 ---
+    // ★ 点击按钮的统一入口
+    mainBtn.addEventListener('click', function() {
+        var isMobile = window.matchMedia('(max-width: 640px)').matches;
+        var curMode = getAgentMode();
+        if (isMobile) {
+            // 已激活状态 → 直接退出
+            if (curMode !== 'off') {
+                setAgentMode('off');
+                return;
+            }
+            // 关闭状态 → 弹 popup 选模式
+            if (popup.classList.contains('show')) {
+                popup.classList.remove('show');
+            } else {
+                _positionModePopup();
+                popup.classList.add('show');
+            }
+        } else {
+            // 桌面端：直接 toggle
+            window.toggleAgentMode();
+        }
+    });
+
+    // ★ 桌面端：hover 弹出
     wrapper.addEventListener('mouseenter', function() {
-        if (window._agentPopupTimer) { clearTimeout(window._agentPopupTimer); }
+        if (window.matchMedia('(max-width: 640px)').matches) return;
+        if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
         _positionModePopup();
         popup.classList.add('show');
     });
     wrapper.addEventListener('mouseleave', function() {
-        window._agentPopupTimer = setTimeout(function() {
-            popup.classList.remove('show');
-        }, 150);
+        if (window.matchMedia('(max-width: 640px)').matches) return;
+        window._agentPopupTimer = setTimeout(function() { popup.classList.remove('show'); }, 200);
     });
-    popup.addEventListener('mouseenter', function() {
-        if (window._agentPopupTimer) { clearTimeout(window._agentPopupTimer); }
-    });
-    popup.addEventListener('mouseleave', function() {
-        popup.classList.remove('show');
-    });
+    popup.addEventListener('mouseenter', function() { if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer); });
+    popup.addEventListener('mouseleave', function() { popup.classList.remove('show'); });
 
-    // --- 移动端：点击切换显示/隐藏 ---
-    wrapper.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (popup.classList.contains('show')) {
-            popup.classList.remove('show');
-        } else {
-            _positionModePopup();
-            popup.classList.add('show');
-        }
-    });
-
-    // 点击 popup 外部隐藏
+    // 点击外部关闭
     document.addEventListener('click', function(e) {
         if (!popup.classList.contains('show')) return;
-        if (!wrapper.contains(e.target) && !popup.contains(e.target)) {
-            popup.classList.remove('show');
-        }
+        if (!wrapper.contains(e.target) && !popup.contains(e.target)) popup.classList.remove('show');
     });
-
-    // 移动端滚动时自动隐藏
-    document.addEventListener('touchmove', function() {
-        if (popup.classList.contains('show')) {
-            popup.classList.remove('show');
-        }
-    }, { passive: true });
+    document.addEventListener('touchmove', function() { popup.classList.remove('show'); }, { passive: true });
 };
 
 
@@ -7922,22 +7907,22 @@ function appendToolCallMessage(toolName, args, result, durationMs, chatId) {
 function _renderWebFetchUrls(bubble, urls) {
     if (!bubble || !urls || !urls.length) return;
     if (bubble.querySelector('.webfetch-urls-container')) return;
-    
+
     var container = document.createElement('div');
     container.className = 'webfetch-urls-container';
     container.style.cssText = 'margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px;';
-    
+
     var summary = document.createElement('summary');
     summary.style.cssText = 'cursor:pointer;font-size:11px;color:#6b7280;user-select:none;';
     summary.textContent = '🌐 已抓取网页 (' + urls.length + ')';
-    
+
     var details = document.createElement('details');
     details.style.cssText = 'font-size:11px;';
     details.appendChild(summary);
-    
+
     var list = document.createElement('ol');
     list.style.cssText = 'margin:4px 0 0 0;padding-left:18px;list-style-position:outside;';
-    
+
     urls.forEach(function(u, i) {
         var li = document.createElement('li');
         li.style.cssText = 'margin-bottom:2px;line-height:1.3;';
@@ -7950,7 +7935,7 @@ function _renderWebFetchUrls(bubble, urls) {
         li.appendChild(link);
         list.appendChild(li);
     });
-    
+
     details.appendChild(list);
     container.appendChild(details);
     bubble.appendChild(container);
@@ -10576,7 +10561,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 添加用户消息
     // 保存当前消息是否包含图片(在 clearAllFiles 之前)
     const currentMessageHasImages = files && files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/'));
-    // ★ 保存标记供 buildApiMessages 使用（pendingFiles 即将被清空）
+    // ★ 保存标记供 buildApiMessages 使用(pendingFiles 即将被清空)
     window.__currentMessageHasImages = currentMessageHasImages;
 
     // 立即清空输入框,让用户知道消息已发送
@@ -13579,7 +13564,7 @@ function renderChatHistory() {
     var _uid = localStorage.getItem('authUserId') || '';
     var _chatIds = Object.keys(chats).filter(function(id) {
         // ★ 过滤: 排除 agent 独立聊天
-        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
+        if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
     // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
@@ -13591,7 +13576,7 @@ function renderChatHistory() {
                 if (_parsed && Object.keys(_parsed).length > 0) {
                     chats = _parsed;
                     _chatIds = Object.keys(chats).filter(function(id) {
-                        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
+                        if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
                         return !_uid || !chats[id].userId || chats[id].userId === _uid;
                     });
                 }
@@ -14368,7 +14353,7 @@ function loadInitialData() {
     // ★ 如果聊天列表为空但已登录,延迟重试(可能 restoreUserData 还没完成)
     var _uid = localStorage.getItem('authUserId') || '';
     if (_uid && Object.keys(chats).filter(function(id) {
-        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
+        if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
         return !chats[id].userId || chats[id].userId === _uid;
     }).length === 0) {
         // 延迟 2s 再次尝试从服务器加载
@@ -14395,14 +14380,14 @@ function loadInitialData() {
 
     // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
     if (isAgentToolsActive()) {
-        // 已在 setAgentMode 中创建了带上下文的 agent 聊天，直接加载
-        if (currentChatId && currentChatId.startsWith('agent_')) {
+        // 已在 setAgentMode 中创建了带上下文的 agent 聊天,直接加载
+        if (currentChatId && currentChatId === '_agent_main') {
             loadChat(currentChatId);
             $.sidebar?.classList.add('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
             renderChatHistory();
         } else {
-            // 兜底：页面加载时 agent 模式激活，但没有 agent 聊天（刷新场景）
+            // 兜底:页面加载时 agent 模式激活,但没有 agent 聊天(刷新场景)
             createAgentChat([]).then(function(agentId) {
                 loadChat(agentId);
                 $.sidebar?.classList.add('collapsed');
