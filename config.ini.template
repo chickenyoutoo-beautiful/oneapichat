@@ -1,8 +1,8 @@
 [common]
 ; 手机号账号(必填)
-username = 19118593666
+username =
 ; 登录密码(必填)
-password = PASSWORD_REMOVED_2
+password =
 ; 要学习的课程ID列表, 逗号隔开(选填，不需要则留空)
 course_list = 261707780,261707854,261707763,261707791
 
@@ -14,9 +14,9 @@ chapter_order = sequential
 [tiku]
 provider=TikuYanxi,TikuAI
 submit=true
-tokens=TIKU_TOKEN_REMOVED
+tokens=你的言溪题库token
 true_list=正确,对,√,是
 false_list=错误,错,×,否,不对,不正确
-ai_base_url=https://oneapi.naujtrats.xyz/v1
+ai_base_url=https://api.deepseek.com
 ai_model=deepseek-v4-flash
-ai_key=DEEPSEEK_KEY_REMOVED_2
+ai_key=你的DeepSeek API Key
