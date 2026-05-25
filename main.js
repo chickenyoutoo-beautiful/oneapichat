@@ -321,7 +321,7 @@ window.analyzeImage = async function(imageInput, focus) {
 window.quickSetupOneAPIChat = function() {
 
     const config = {
-        key: 'KEY_REMOVED',
+        key: window.ONEAPI_KEY || '',
         url: 'https://oneapi.naujtrats.xyz/v1',
         model: 'deepseek-v4-flash',
         visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
@@ -1540,11 +1540,11 @@ const BACKEND_SSE_URL = '/oneapichat/engine_api.php?action=chat_stream';
 
 const DEFAULT_CONFIG = {
     // 预置 oneapi API Key
-    key: 'KEY_REMOVED',
+    key: window.ONEAPI_KEY || '',
     url: 'https://oneapi.naujtrats.xyz/v1',
     model: 'deepseek-v4-flash',
     visionApiUrl: 'https://xiaoxin.naujtrats.xyz/mcp',
-    visionApiKey: 'KEY_REMOVED',
+    visionApiKey: window.VISION_API_KEY || '',
     visionModel: 'MiniMax-VL-01',
     imageModel: 'image-01',
     imageBaseUrl: 'https://api.minimaxi.com/v1',
