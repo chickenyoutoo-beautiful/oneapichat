@@ -3,407 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>个人设置 · NAUJTRATS</title>
+    <title>个人中心 · NAUJTRATS</title>
     <link rel="icon" type="image/png" sizes="16x16" href="./src/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="./src/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="256x256" href="./src/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] } }
-            }
-        }
-    </script>
+    <script>tailwind.config={darkMode:'class',theme:{extend:{fontFamily:{sans:['Inter','system-ui','-apple-system','sans-serif']}}}}</script>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+        <symbol id="ic-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></symbol>
+        <symbol id="ic-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+        <symbol id="ic-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></symbol>
+        <symbol id="ic-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+        <symbol id="ic-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></symbol>
+        <symbol id="ic-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+        <symbol id="ic-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+        <symbol id="ic-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+        <symbol id="ic-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+        <symbol id="ic-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+        <symbol id="ic-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></symbol>
+        <symbol id="ic-id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="10" x2="7" y2="10"/><line x1="7" y1="14" x2="11" y2="14"/></symbol>
+        <symbol id="ic-role" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></symbol>
+        <symbol id="ic-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></symbol>
+        <symbol id="ic-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    </svg>
     <style>
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
-        .glass-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.8);
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0,0,0,0.05);
-        }
-        .dark .glass-card {
-            background: rgba(31, 41, 55, 0.95);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.05);
-        }
-        .brand-glow {
-            text-shadow: 0 0 40px rgba(37, 99, 235, 0.3);
-        }
-        .dark .brand-glow {
-            text-shadow: 0 0 40px rgba(59, 130, 246, 0.2);
-        }
-        .input-field {
-            transition: all 0.2s ease;
-            border: 1.5px solid #e5e7eb;
-        }
-        .input-field:focus {
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-            outline: none;
-        }
-        .dark .input-field {
-            background: #374151;
-            border-color: #4b5563;
-            color: #f3f4f6;
-        }
-        .dark .input-field:focus {
-            border-color: #60a5fa;
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
-        }
-        .dark .input-field::placeholder { color: #9ca3af; }
-        .btn-primary {
-            background: #2563eb;
-            transition: all 0.2s ease;
-        }
-        .btn-primary:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3); }
-        .btn-primary:active { transform: translateY(0); box-shadow: none; }
-        .btn-primary:disabled { opacity: 0.6; transform: none; cursor: not-allowed; box-shadow: none; }
-        .dark .btn-primary { background: #3b82f6; }
-        .dark .btn-primary:hover { background: #2563eb; }
-        .btn-danger {
-            background: #ef4444;
-            transition: all 0.2s ease;
-        }
-        .btn-danger:hover { background: #dc2626; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3); }
-        .btn-danger:active { transform: translateY(0); }
-        .error-msg {
-            animation: shake 0.4s ease;
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #dc2626;
-        }
-        .dark .error-msg {
-            background: rgba(239, 68, 68, 0.1);
-            border-color: rgba(239, 68, 68, 0.3);
-            color: #f87171;
-        }
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            20%, 60% { transform: translateX(-6px); }
-            40%, 80% { transform: translateX(6px); }
-        }
-        .success-msg {
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            color: #16a34a;
-        }
-        .dark .success-msg {
-            background: rgba(22, 163, 74, 0.1);
-            border-color: rgba(22, 163, 74, 0.3);
-            color: #4ade80;
-        }
-        .section-card {
-            background: #fff;
-            border: 1px solid #e5e7eb;
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
-        }
-        .dark .section-card {
-            background: #1f2937;
-            border-color: #374151;
-        }
-        .section-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid #f3f4f6;
-        }
-        .dark .section-title {
-            color: #f9fafb;
-            border-bottom-color: #374151;
-        }
-        .avatar-circle {
-            width: 64px;
-            height: 64px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            font-weight: 700;
-            color: white;
-            flex-shrink: 0;
-        }
-        .floating-orb {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(80px);
-            pointer-events: none;
-            animation: float 8s ease-in-out infinite;
-        }
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) scale(1); }
-            50% { transform: translateY(-30px) scale(1.05); }
-        }
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fadeInUp 0.5s ease-out forwards; }
+        body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
+        .glass{background:rgba(255,255,255,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(0,0,0,.06);border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.06)}
+        .dark .glass{background:rgba(31,41,55,.95);border-color:rgba(255,255,255,.06);box-shadow:0 4px 24px rgba(0,0,0,.3)}
+        .inp{transition:all .2s;border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 14px;font-size:14px;width:100%;background:#fff;color:#111827;box-sizing:border-box}
+        .inp:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:0}
+        .dark .inp{background:#374151;border-color:#4b5563;color:#f3f4f6}
+        .dark .inp:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(96,165,250,.15)}
+        .btn{font-weight:600;font-size:14px;padding:12px 24px;border-radius:12px;border:0;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+        .btn:hover{transform:translateY(-1px)}
+        .btn:active{transform:translateY(0)}
+        .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+        .btn-p{background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff}
+        .btn-p:hover{box-shadow:0 8px 20px rgba(37,99,235,.3)}
+        .btn-d{background:#ef4444;color:#fff}
+        .btn-d:hover{background:#dc2626;box-shadow:0 8px 20px rgba(239,68,68,.3)}
+        .btn-o{background:0;border:1.5px solid #d1d5db;color:#374151;font-weight:500;font-size:13px;padding:8px 16px;border-radius:10px}
+        .dark .btn-o{border-color:#4b5563;color:#d1d5db}
+        .msg-e{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:12px 16px;border-radius:10px;font-size:13px;animation:shake .4s}
+        .dark .msg-e{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#f87171}
+        .msg-s{background:#f0fdf4;border:1px solid #bbf7d0;color:#16a34a;padding:12px 16px;border-radius:10px;font-size:13px}
+        .dark .msg-s{background:rgba(22,163,74,.1);border-color:rgba(22,163,74,.3);color:#4ade80}
+        @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+        .avt{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer;transition:transform .2s}
+        .avt:hover{transform:scale(1.05)}
+        .stat{background:#f8fafc;border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:12px}
+        .dark .stat{background:#1e293b}
+        .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:9999px;font-size:11px;font-weight:600}
+        .badge-ad{background:#eff6ff;color:#2563eb}.dark .badge-ad{background:#1e3a5f;color:#60a5fa}
+        .badge-us{background:#f3f4f6;color:#6b7280}.dark .badge-us{background:#374151;color:#9ca3af}
+        .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);z-index:100;align-items:center;justify-content:center}
+        .avted{background:#fff;border-radius:20px;padding:24px;max-width:340px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+        .dark .avted{background:#1f2937}
+        .c-pick{width:36px;height:36px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all .15s}
+        .c-pick:hover{transform:scale(1.15)}
+        .c-pick.on{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.2)}
+        @keyframes fi{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+        .ai{animation:fi .4s ease-out forwards;opacity:0}
+        .s1{animation-delay:.05s}.s2{animation-delay:.1s}.s3{animation-delay:.15s}.s4{animation-delay:.2s}
     </style>
 </head>
-<body class="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors">
-
-    <!-- 背景装饰 -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none">
-        <div class="floating-orb w-96 h-96 bg-blue-400 opacity-15 -top-20 -right-20" style="animation-delay: 0s;"></div>
-        <div class="floating-orb w-80 h-80 bg-indigo-400 opacity-12 bottom-10 -left-20" style="animation-delay: 3s;"></div>
-    </div>
-
-    <!-- Header -->
-    <header class="relative z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-700">
+<body class="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <header class="z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 sticky top-0">
         <div class="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <a href="./" class="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-                    <span class="text-sm font-medium">返回聊天</span>
-                </a>
-            </div>
-            <h1 class="brand-glow text-xl font-bold text-gray-900 dark:text-white">个人设置</h1>
-            <div class="w-24"></div>
+            <a href="./" class="btn-o">
+                <svg width="16" height="16"><use href="#ic-back"/></svg>返回
+            </a>
+            <h1 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <svg width="20" height="20"><use href="#ic-settings"/></svg>个人中心
+            </h1>
+            <div class="w-12"></div>
         </div>
     </header>
-
-    <!-- Main Content -->
-    <main class="relative z-10 max-w-2xl mx-auto px-4 py-8 animate-fade-in">
-        
-        <!-- 用户信息卡片 -->
-        <div class="section-card" id="profileCard">
-            <div class="flex items-center gap-4 mb-6">
-                <div class="avatar-circle" id="avatarInitial">?</div>
-                <div>
-                    <div class="text-lg font-semibold text-gray-900 dark:text-white" id="displayUsername">加载中...</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1" id="displayUserId">-</div>
+    <main class="max-w-2xl mx-auto px-4 py-6 space-y-5">
+        <!-- 头像+基本信息 -->
+        <div class="glass p-6 ai">
+            <div class="flex items-center gap-5">
+                <div class="avt" id="avt" style="background:linear-gradient(135deg,#667eea,#764ba2)" onclick="openAvt()" title="点击修改头像">?</div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xl font-bold text-gray-900 dark:text-white truncate" id="uname">-</span>
+                        <span class="badge" id="rb">-</span>
+                    </div>
+                    <div class="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5" id="uid"><svg width="12" height="12"><use href="#ic-id"/></svg>-</div>
                 </div>
             </div>
-            <div class="text-xs text-gray-400 dark:text-gray-500" id="displayCreatedAt"></div>
+            <div class="grid grid-cols-2 gap-3 mt-5">
+                <div class="stat"><svg width="18" height="18" class="text-blue-500"><use href="#ic-clock"/></svg><div><div class="text-xs text-gray-400">最后活跃</div><div class="text-sm font-medium text-gray-700 dark:text-gray-300" id="la">-</div></div></div>
+                <div class="stat"><svg width="18" height="18" class="text-indigo-500"><use href="#ic-cal"/></svg><div><div class="text-xs text-gray-400">注册时间</div><div class="text-sm font-medium text-gray-700 dark:text-gray-300" id="ca">-</div></div></div>
+            </div>
         </div>
-
         <!-- 修改用户名 -->
-        <div class="section-card">
-            <div class="section-title">✏️ 修改用户名</div>
-            <form id="usernameForm" onsubmit="return handleUpdateUsername(event)">
-                <div class="space-y-1.5 mb-4">
-                    <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide uppercase">新用户名</label>
-                    <input type="text" id="newUsername" placeholder="2-20个字符，中英文或数字" autocomplete="off"
-                        class="input-field w-full px-4 py-3 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400">
-                </div>
-                <div id="usernameError" class="hidden text-sm px-4 py-3 rounded-xl error-msg mb-4"></div>
-                <div id="usernameSuccess" class="hidden text-sm px-4 py-3 rounded-xl success-msg mb-4"></div>
-                <button type="submit" id="usernameBtn" class="btn-primary w-full py-3 rounded-xl text-white font-semibold text-sm tracking-wide">
-                    保存用户名
-                </button>
-            </form>
+        <div class="glass p-6 ai s1">
+            <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2"><svg width="16" height="16" class="text-blue-500"><use href="#ic-edit"/></svg>修改用户名</h2>
+            <input class="inp mb-3" id="nuname" placeholder="2-20个字符" maxlength="20">
+            <div id="umsg" class="hidden mb-3"></div>
+            <button class="btn btn-p" id="ubtn" onclick="updateUname()"><svg width="16" height="16"><use href="#ic-save"/></svg>保存</button>
         </div>
-
         <!-- 修改密码 -->
-        <div class="section-card">
-            <div class="section-title">🔐 修改密码</div>
-            <form id="passwordForm" onsubmit="return handleUpdatePassword(event)">
-                <div class="space-y-1.5 mb-4">
-                    <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide uppercase">当前密码</label>
-                    <input type="password" id="currentPassword" placeholder="输入当前密码" autocomplete="off"
-                        class="input-field w-full px-4 py-3 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400">
-                </div>
-                <div class="space-y-1.5 mb-4">
-                    <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide uppercase">新密码</label>
-                    <input type="password" id="newPassword" placeholder="至少6位" autocomplete="off"
-                        class="input-field w-full px-4 py-3 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400">
-                </div>
-                <div class="space-y-1.5 mb-4">
-                    <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide uppercase">确认新密码</label>
-                    <input type="password" id="confirmNewPassword" placeholder="再次输入新密码" autocomplete="off"
-                        class="input-field w-full px-4 py-3 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400">
-                </div>
-                <div id="passwordError" class="hidden text-sm px-4 py-3 rounded-xl error-msg mb-4"></div>
-                <div id="passwordSuccess" class="hidden text-sm px-4 py-3 rounded-xl success-msg mb-4"></div>
-                <button type="submit" id="passwordBtn" class="btn-danger w-full py-3 rounded-xl text-white font-semibold text-sm tracking-wide">
-                    修改密码
-                </button>
-            </form>
+        <div class="glass p-6 ai s2">
+            <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2"><svg width="16" height="16" class="text-red-500"><use href="#ic-lock"/></svg>修改密码</h2>
+            <input type="password" class="inp mb-2" id="cpw" placeholder="当前密码">
+            <input type="password" class="inp mb-2" id="npw" placeholder="新密码（至少6位）">
+            <input type="password" class="inp mb-3" id="cpw2" placeholder="确认新密码">
+            <div id="pmsg" class="hidden mb-3"></div>
+            <button class="btn btn-d" id="pbtn" onclick="updatePw()"><svg width="16" height="16"><use href="#ic-lock"/></svg>修改密码</button>
         </div>
-
-        <!-- 退出登录 -->
-        <div class="section-card text-center">
-            <button onclick="handleLogout()" class="text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors text-sm font-medium">
-                🚪 退出登录
-            </button>
+        <!-- 账号信息 -->
+        <div class="glass p-6 ai s3">
+            <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2"><svg width="16" height="16" class="text-purple-500"><use href="#ic-shield"/></svg>账号信息</h2>
+            <div class="space-y-3 text-sm">
+                <div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700"><span class="text-gray-400 flex items-center gap-2"><svg width="14" height="14"><use href="#ic-id"/></svg>用户ID</span><span class="text-gray-900 dark:text-white font-mono text-xs" id="iuid">-</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700"><span class="text-gray-400 flex items-center gap-2"><svg width="14" height="14"><use href="#ic-role"/></svg>角色</span><span id="irole">-</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700"><span class="text-gray-400 flex items-center gap-2"><svg width="14" height="14"><use href="#ic-mail"/></svg>邮箱</span><span class="text-gray-900 dark:text-white text-xs" id="imail">未设置</span></div>
+                <div class="flex justify-between items-center py-2"><span class="text-gray-400 flex items-center gap-2"><svg width="14" height="14"><use href="#ic-cal"/></svg>注册时间</span><span class="text-gray-900 dark:text-white text-xs" id="ica">-</span></div>
+            </div>
         </div>
+        <!-- 退出 -->
+        <div class="text-center pb-8 ai s4"><button onclick="logout()" class="btn-o inline-flex"><svg width="14" height="14"><use href="#ic-logout"/></svg>退出登录</button></div>
     </main>
+    <!-- 头像编辑器 -->
+    <div class="overlay hidden" id="avtO" onclick="if(event.target===this)closeAvt()">
+        <div class="avted ai">
+            <div class="flex items-center justify-between mb-4"><h3 class="font-semibold text-gray-900 dark:text-white">自定义头像</h3><button onclick="closeAvt()" class="text-gray-400 hover:text-gray-600"><svg width="18" height="18"><use href="#ic-x"/></svg></button></div>
+            <div class="flex justify-center mb-4"><div class="avt" id="avtP" style="background:linear-gradient(135deg,#667eea,#764ba2)">?</div></div>
+            <div class="text-xs text-gray-400 mb-3">颜色</div>
+            <div class="flex flex-wrap gap-2 mb-4" id="cpal"></div>
+            <div class="text-xs text-gray-400 mb-2">文字</div>
+            <input class="inp mb-4" id="avtT" placeholder="最多2字符" maxlength="2" oninput="upAvtP()">
+            <div class="flex gap-2"><button class="btn-o flex-1" onclick="closeAvt()">取消</button><button class="btn btn-p flex-1" onclick="saveAvt()"><svg width="14" height="14"><use href="#ic-save"/></svg>保存</button></div>
+        </div>
+    </div>
+<script>
+const API='/oneapichat';
+const COLORS=[['#667eea','#764ba2'],['#f093fb','#f5576c'],['#4facfe','#00f2fe'],['#43e97b','#38f9d7'],['#fa709a','#fee140'],['#a18cd1','#fbc2eb'],['#fccb90','#d57eeb'],['#e0c3fc','#8ec5fc'],['#f5576c','#ff6b6b'],['#2563eb','#4f46e5'],['#0891b2','#06b6d4'],['#16a34a','#22c55e']];
+let g=COLORS[0];
+function $(id){return document.getElementById(id)}
+function token(){return localStorage.getItem('authToken')||''}
+function msg(id,t,s){var e=$(id);if(!e)return;e.textContent=t;e.className=s==='e'?'msg-e':'msg-s';e.classList.remove('hidden')}
+function hmsg(id){var e=$(id);if(e)e.classList.add('hidden')}
+function upAvt(u,c,t){var e=$('avt');if(!e)return;e.style.background='linear-gradient(135deg,'+(c||COLORS[0]).join(',')+')';e.textContent=t||(u||'?').charAt(0).toUpperCase()}
 
-    <script>
-        const SERVER_API_BASE = '/oneapichat';
+(async function(){
+var t=token();if(!t){location.href='./';return}
+try{var r=await fetch(API+'/auth.php?action=get_profile&token='+encodeURIComponent(t));var d=await r.json();if(!d.success)throw new Error(d.error||'expired');
+var u=d.username||'?';
+$('uname').textContent=u;
+$('uid').innerHTML='<svg width="12" height="12"><use href="#ic-id"/></svg> '+(localStorage.getItem('authUserId')||'-').slice(0,12)+'...';
+$('la').textContent=d.last_active?new Date(d.last_active).toLocaleDateString('zh-CN'):'-';
+$('ca').textContent=d.created_at?new Date(d.created_at).toLocaleDateString('zh-CN'):'-';
+$('nuname').value=u;
+$('iuid').textContent=(localStorage.getItem('authUserId')||'-').slice(0,16)+'...';
+$('ica').textContent=d.created_at?new Date(d.created_at).toLocaleDateString('zh-CN'):'-';
+$('imail').textContent=d.email||'未设置';
+var ro=d.role||'user';
+$('irole').innerHTML='<span class="badge '+(ro==='root'?'badge-ad':'badge-us')+'"><svg width="10" height="10"><use href="#'+(ro==='root'?'ic-shield':'ic-user')+'"/></svg>'+(ro==='root'?'管理员':'用户')+'</span>';
+$('rb').className='badge '+(ro==='root'?'badge-ad':'badge-us');
+$('rb').innerHTML='<svg width="10" height="10"><use href="#'+(ro==='root'?'ic-shield':'ic-user')+'"/></svg>'+(ro==='root'?'管理员':'用户');
+var av=JSON.parse(localStorage.getItem('avatarConfig')||'null');
+if(av){g=av.gradient;$('avtT').value=av.text||''}
+upAvt(u,g,av?.text);
+}catch(e){if(e.message==='expired'){localStorage.clear();location.href='./'}}
+})();
 
-        function getToken() {
-            return localStorage.getItem('authToken') || '';
-        }
+function openAvt(){
+$('avtO').classList.remove('hidden');
+$('cpal').innerHTML=COLORS.map(function(c,i){return '<div class="c-pick'+(c===g?' on':'')+'" style="background:linear-gradient(135deg,'+c.join(',')+')" onclick="selC('+i+')"></div>'}).join('');
+$('avtT').value=$('avt').textContent;upAvtP()
+}
+function closeAvt(){$('avtO').classList.add('hidden')}
+function selC(i){g=COLORS[i];document.querySelectorAll('.c-pick').forEach(function(e,idx){e.classList.toggle('on',idx===i)});upAvtP()}
+function upAvtP(){var e=$('avtP'),t=$('avtT').value||$('uname').textContent.charAt(0);e.style.background='linear-gradient(135deg,'+g.join(',')+')';e.textContent=t.slice(0,2)}
+function saveAvt(){var t=$('avtT').value.slice(0,2),c={gradient:g,text:t};localStorage.setItem('avatarConfig',JSON.stringify(c));upAvt($('uname').textContent,g,t);closeAvt();msg('umsg','头像已保存','s');setTimeout(function(){hmsg('umsg')},2000)}
 
-        function getUsername() {
-            return localStorage.getItem('authUsername') || '';
-        }
+async function updateUname(){
+hmsg('umsg');var n=$('nuname').value.trim(),b=$('ubtn');
+if(!n||n.length<2){msg('umsg','用户名长度需在2-20字符','e');return}
+b.disabled=1;b.innerHTML='<svg width="16" height="16"><use href="#ic-save"/></svg> 保存中...';
+try{var r=await fetch(API+'/auth.php?action=update_profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token(),username:n})});var d=await r.json();
+if(d.success){localStorage.setItem('authUsername',d.username);$('uname').textContent=d.username;upAvt(d.username,g,$('avtT').value);msg('umsg','用户名已更新','s');setTimeout(function(){hmsg('umsg')},2000)}
+else msg('umsg',d.error||'更新失败','e')}
+catch(e){msg('umsg','网络错误','e')}
+finally{b.disabled=0;b.innerHTML='<svg width="16" height="16"><use href="#ic-save"/></svg> 保存'}
+}
 
-        function showError(id, msg) {
-            const el = document.getElementById(id);
-            if (el) { el.textContent = msg; el.classList.remove('hidden'); }
-            else console.error('Element not found:', id);
-        }
+async function updatePw(){
+hmsg('pmsg');var cp=$('cpw').value,np=$('npw').value,c2=$('cpw2').value,b=$('pbtn');
+if(!cp){msg('pmsg','请输入当前密码','e');return}
+if(!np||np.length<6){msg('pmsg','新密码至少6位','e');return}
+if(np!==c2){msg('pmsg','两次密码不一致','e');return}
+b.disabled=1;b.innerHTML='<svg width="16" height="16"><use href="#ic-lock"/></svg> 修改中...';
+try{var r=await fetch(API+'/auth.php?action=update_profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token(),current_password:cp,new_password:np})});var d=await r.json();
+if(d.success){msg('pmsg','密码修改成功','s');$('cpw').value='';$('npw').value='';$('cpw2').value=''}
+else msg('pmsg',d.error||'修改失败','e')}
+catch(e){msg('pmsg','网络错误','e')}
+finally{b.disabled=0;b.innerHTML='<svg width="16" height="16"><use href="#ic-lock"/></svg> 修改密码'}
+}
 
-        function showSuccess(id, msg) {
-            const el = document.getElementById(id);
-            if (el) { el.textContent = msg; el.classList.remove('hidden'); }
-        }
-
-        function clearMessages() {
-            ['usernameError','usernameSuccess','passwordError','passwordSuccess'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
-        }
-
-        function updateAvatarInitial(username) {
-            const initial = document.getElementById('avatarInitial');
-            if (initial && username) {
-                initial.textContent = username.charAt(0).toUpperCase();
-            }
-        }
-
-        // 初始化
-        (async function init() {
-            const token = getToken();
-            if (!token) {
-                alert('未登录，即将跳转到登录页面');
-                window.location.href = '/?from=chat';
-                return;
-            }
-
-            // 加载用户信息
-            try {
-                const resp = await fetch(SERVER_API_BASE + '/auth.php?action=get_profile&token=' + encodeURIComponent(token));
-                const data = await resp.json();
-                if (data.success) {
-                    document.getElementById('displayUsername').textContent = data.username;
-                    document.getElementById('displayUserId').textContent = 'ID: ' + (localStorage.getItem('authUserId') || '-').substring(0, 16) + '...';
-                    if (data.created_at) {
-                        document.getElementById('displayCreatedAt').textContent = '注册于：' + data.created_at.substring(0, 10);
-                    }
-                    updateAvatarInitial(data.username);
-                    document.getElementById('newUsername').value = data.username;
-                } else {
-                    alert('会话已过期，请重新登录');
-                    window.location.href = '/?from=chat';
-                }
-            } catch(err) {
-                console.error('[profile]', err);
-                alert('加载失败，请检查网络');
-            }
-        })();
-
-        // 更新用户名
-        async function handleUpdateUsername(e) {
-            e.preventDefault();
-            clearMessages();
-
-            const token = getToken();
-            const newUsername = document.getElementById('newUsername').value.trim();
-            const btn = document.getElementById('usernameBtn');
-
-            if (!newUsername || newUsername.length < 2 || newUsername.length > 20) {
-                showError('usernameError', '用户名长度需在 2-20 个字符');
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = '保存中...';
-
-            try {
-                const resp = await fetch(SERVER_API_BASE + '/auth.php?action=update_profile', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, username: newUsername })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    localStorage.setItem('authUsername', data.username);
-                    document.getElementById('displayUsername').textContent = data.username;
-                    updateAvatarInitial(data.username);
-                    showSuccess('usernameSuccess', '用户名已更新为：' + data.username);
-                } else {
-                    showError('usernameError', data.error || '更新失败');
-                }
-            } catch(err) {
-                showError('usernameError', '网络错误，请重试');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '保存用户名';
-            }
-        }
-
-        // 更新密码
-        async function handleUpdatePassword(e) {
-            e.preventDefault();
-            clearMessages();
-
-            const token = getToken();
-            const currentPw = document.getElementById('currentPassword').value;
-            const newPw = document.getElementById('newPassword').value;
-            const confirmPw = document.getElementById('confirmNewPassword').value;
-            const btn = document.getElementById('passwordBtn');
-
-            if (!currentPw) { showError('passwordError', '请输入当前密码'); return; }
-            if (!newPw || newPw.length < 6) { showError('passwordError', '新密码长度至少 6 位'); return; }
-            if (newPw !== confirmPw) { showError('passwordError', '两次输入的密码不一致'); return; }
-
-            btn.disabled = true;
-            btn.textContent = '修改中...';
-
-            try {
-                const resp = await fetch(SERVER_API_BASE + '/auth.php?action=update_profile', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, current_password: currentPw, new_password: newPw })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    showSuccess('passwordSuccess', '密码修改成功！');
-                    document.getElementById('currentPassword').value = '';
-                    document.getElementById('newPassword').value = '';
-                    document.getElementById('confirmNewPassword').value = '';
-                } else {
-                    showError('passwordError', data.error || '修改失败');
-                }
-            } catch(err) {
-                showError('passwordError', '网络错误，请重试');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '修改密码';
-            }
-        }
-
-        // 退出登录
-        async function handleLogout() {
-            if (!confirm('确定要退出登录吗？')) return;
-            try {
-                const token = getToken();
-                await fetch(SERVER_API_BASE + '/auth.php?action=logout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token })
-                });
-            } catch(e) {}
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('authUsername');
-            localStorage.removeItem('authUserId');
-            window.location.href = './?redirect=chat';
-        }
-    </script>
+function logout(){if(!confirm('确定退出？'))return;fetch(API+'/auth.php?action=logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token()})}).catch(function(){});localStorage.clear();location.href='./'}
+</script>
 </body>
 </html>
