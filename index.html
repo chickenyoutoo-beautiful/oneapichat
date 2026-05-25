@@ -71,6 +71,11 @@
         <symbol id="cmd-icon-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
     </svg>
 
+<script>
+// 从 PHP 后端获取 API Key（通过环境变量注入，避免硬编码泄露）
+window.ONEAPI_KEY = '<?= preg_replace('/[^a-zA-Z0-9_\-]/', '', getenv('ONEAPI_KEY') ?: '') ?>';
+window.VISION_API_KEY = '<?= preg_replace('/[^a-zA-Z0-9_\-]/', '', getenv('VISION_API_KEY') ?: '') ?>';
+</script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
     <!-- 登录弹窗 -->
