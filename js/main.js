@@ -4659,23 +4659,24 @@ function setAgentMode(mode) {
         var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
         _agentKeys.forEach(function(k) { window.setToolEnabled(k, true); });
 
-        // ★ Agent 模式: 自动收起左侧栏, 切换到 agent 独立聊天
+        // ★ Agent 模式: 自动收起左侧栏, 切换到新 agent 聊天
         var wasCollapsed = $.sidebar?.classList.contains('collapsed');
         if (!wasCollapsed) {
             $.sidebar?.classList.add('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
         }
-        // 保存当前普通聊天 ID, 切换到 agent 聊天
-        if (currentChatId && currentChatId !== AGENT_CHAT_ID) {
+        // 保存当前普通聊天 ID, 进入 agent 后不再混回原 agent 聊天
+        if (currentChatId) {
             lastNormalChatId = currentChatId;
             localStorage.setItem('lastNormalChatId', lastNormalChatId);
         }
-        ensureAgentChat().then(function() {
-            if (currentChatId !== AGENT_CHAT_ID) {
-                // 检测当前聊天是否有非 system 消息
-                var hasMsgs = (chats[AGENT_CHAT_ID]?.messages || []).filter(function(m) { return m.role !== 'system' && !m._internal; }).length > 0;
-                loadChat(AGENT_CHAT_ID);
-            }
+        // ★ 提取当前普通聊天的非 system 消息作为上下文，注入新 agent 聊天
+        var contextMsgs = currentChatId ? (chats[currentChatId]?.messages || []).filter(function(m) {
+            return m.role !== 'system' && !m._internal && m.content && typeof m.content === 'string' && m.content.trim();
+        }) : [];
+        // 生成新的 agent 聊天（每次进入都是新的，不会复用旧的）
+        createAgentChat(contextMsgs).then(function(agentId) {
+            loadChat(agentId);
         });
     } else if (mode === 'off') {
         // ★ 普通模式: 关闭所有 Agent 专属工具
@@ -4688,8 +4689,8 @@ function setAgentMode(mode) {
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
         }
         // 切换到 agent 聊天时切回普通模式,恢复上次普通聊天
-        if (currentChatId === AGENT_CHAT_ID) {
-            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== AGENT_CHAT_ID; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
+        if (currentChatId && currentChatId.startsWith('agent_')) {
+            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return !id.startsWith('agent_'); }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
             if (restoreId && chats[restoreId]) {
                 loadChat(restoreId);
             }
@@ -4881,26 +4882,40 @@ window.toggleAgentMode = function() {
     setAgentMode(newMode);
 };
 
-/** 确保 AGENT_CHAT_ID 聊天存在 */
-function ensureAgentChat() {
+/**
+ * 创建新的 agent 聊天（每次进入 agent 模式都是新对话，不复用旧记录）
+ * @param {Array} contextMsgs 当前普通聊天的历史消息，作为上下文注入
+ * @returns {Promise<string>} 新建 agent 聊天的 ID
+ */
+function createAgentChat(contextMsgs) {
     return new Promise(function(resolve) {
-        if (chats[AGENT_CHAT_ID]) {
-            resolve();
-            return;
-        }
         var uid = localStorage.getItem('authUserId') || '';
-        // ★ 使用空的 agent 系统提示词,不填充当前普通 system prompt
         var agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
-        chats[AGENT_CHAT_ID] = {
-            title: 'Agent聊天',
+        // ★ 每次生成带时间戳的唯一 ID，不复用 AGENT_CHAT_ID
+        var agentId = 'agent_' + Date.now();
+
+        // ★ 组装 system prompt：Agent 介绍 + 注入的上下文
+        var contextIntro = contextMsgs && contextMsgs.length > 0
+            ? '\n## 当前对话上下文（来自普通聊天）\n以下是你与用户之前的对话记录，进入 Agent 模式后请基于这些上下文继续帮助用户：\n'
+            : '';
+        var injectedContext = '';
+        if (contextMsgs && contextMsgs.length > 0) {
+            injectedContext = contextMsgs.map(function(m) {
+                return '**' + (m.role === 'user' ? '用户' : '助手') + '**: ' + m.content;
+            }).join('\n');
+        }
+        var fullSystem = agentSys + contextIntro + injectedContext;
+
+        chats[agentId] = {
+            title: 'Agent-' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
             userId: uid,
             updated_at: Date.now(),
             messages: [
-                { role: 'system', content: agentSys || 'You are an AI assistant in Agent mode.' }
+                { role: 'system', content: fullSystem || 'You are an AI assistant in Agent mode.' }
             ]
         };
         saveChats();
-        resolve();
+        resolve(agentId);
     });
 }
 
@@ -13550,7 +13565,7 @@ function renderChatHistory() {
     var _uid = localStorage.getItem('authUserId') || '';
     var _chatIds = Object.keys(chats).filter(function(id) {
         // ★ 过滤: 排除 agent 独立聊天
-        if (id === AGENT_CHAT_ID) return false;
+        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
     // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
@@ -13562,7 +13577,7 @@ function renderChatHistory() {
                 if (_parsed && Object.keys(_parsed).length > 0) {
                     chats = _parsed;
                     _chatIds = Object.keys(chats).filter(function(id) {
-                        if (id === AGENT_CHAT_ID) return false;
+                        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
                         return !_uid || !chats[id].userId || chats[id].userId === _uid;
                     });
                 }
@@ -14339,7 +14354,7 @@ function loadInitialData() {
     // ★ 如果聊天列表为空但已登录,延迟重试(可能 restoreUserData 还没完成)
     var _uid = localStorage.getItem('authUserId') || '';
     if (_uid && Object.keys(chats).filter(function(id) {
-        if (id === AGENT_CHAT_ID) return false;
+        if (id === AGENT_CHAT_ID || id.startsWith('agent_')) return false;
         return !chats[id].userId || chats[id].userId === _uid;
     }).length === 0) {
         // 延迟 2s 再次尝试从服务器加载
@@ -14366,13 +14381,21 @@ function loadInitialData() {
 
     // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
     if (isAgentToolsActive()) {
-        ensureAgentChat().then(function() {
-            loadChat(AGENT_CHAT_ID);
-            // Agent 模式: 折叠侧边栏
+        // 已在 setAgentMode 中创建了带上下文的 agent 聊天，直接加载
+        if (currentChatId && currentChatId.startsWith('agent_')) {
+            loadChat(currentChatId);
             $.sidebar?.classList.add('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
             renderChatHistory();
-        });
+        } else {
+            // 兜底：页面加载时 agent 模式激活，但没有 agent 聊天（刷新场景）
+            createAgentChat([]).then(function(agentId) {
+                loadChat(agentId);
+                $.sidebar?.classList.add('collapsed');
+                if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+                renderChatHistory();
+            });
+        }
     } else {
         const last = localStorage.getItem('lastChatId');
         if (last && chats[last]) {
