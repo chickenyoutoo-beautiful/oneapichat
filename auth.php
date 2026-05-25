@@ -322,9 +322,11 @@ switch ($method) {
             }
             $users = readJson($usersFile);
             $username = $users[$userId]['username'] ?? '未知用户';
-            // ★ 更新最后活跃时间
-            $users[$userId]['last_active'] = date('c');
-            writeJson($usersFile, $users);
+            // ★ 更新最后活跃时间 (带保护: 用户数据为空时跳过写入)
+            if (!empty($users[$userId]) && !empty($users[$userId]['username'])) {
+                $users[$userId]['last_active'] = date('c');
+                writeJson($usersFile, $users);
+            }
             echo json_encode([
                 'valid' => true,
                 'username' => $username,
