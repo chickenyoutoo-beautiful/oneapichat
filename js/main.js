@@ -2040,8 +2040,22 @@ async function loadConfigFromServer() {
             return;
         }
         // 静默写入所有键,只在出错时记录
+        // ★ 跳过无效值:含中文/英文提示语的模型名、明显错误数据
+        var _invalidModel = function(v) {
+            if (!v || typeof v !== 'string') return true;
+            // 过滤提示语(加载中、请输入API Key、空字符串、未设置)
+            if (/^[\s\S]*(加载|请输入|请先|未设置|默认|选择|请选择)/.test(v)) return true;
+            // 过滤纯 placeholder
+            if (v.length < 2) return true;
+            return false;
+        };
         for (var k in config) {
             var _skipKeys = ['baseUrlProvider','apiKey','baseUrl'];
+            // ★ model 字段写入前额外校验:不接受提示语或过短的值
+            if (k === 'model' && _invalidModel(config[k])) {
+                console.log('[loadConfigFromServer] 跳过无效 model:', config[k]);
+                continue;
+            }
             if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && _skipKeys.indexOf(k) === -1) {
                 try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
