@@ -5907,6 +5907,14 @@ window._setupAgentPopup = function() {
                 popup.classList.remove('show');
                 var curMode = getAgentMode();
                 setAgentMode(curMode !== 'off' ? 'off' : 'agent');
+                // ★ 双击后立即刷新按钮文字
+                var lbl = mainBtn.querySelector('.agent-btn-label');
+                if (lbl) {
+                    var m = getAgentMode();
+                    var ts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
+                    lbl.textContent = ts[m] || 'Agent';
+                    lbl.style.opacity = '1';
+                }
                 return;
             }
             lastTap = now;
@@ -5929,8 +5937,8 @@ window._setupAgentPopup = function() {
                                     var ts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
                                     label.textContent = ts[m] || 'Agent';
                                     label.style.opacity = '1';
-                                }, 120);
-                            }, 1600);
+                                }, 100);
+                            }, 800);
                         }, 120);
                     }
                 }
@@ -11043,8 +11051,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         tools.push(CHAOXING_EXAM_STATUS_TOOL);
         tools.push(CHAOXING_EXAM_STOP_TOOL);
 
-        // ===== C 类工具: 始终在列表中,由 ask_agent 控制是否启用(yolo模式不需要) =====
-        if (!isYoloMode()) {
+        // ===== autonomous_mode: 仅 Agent 模式可用 =====
+        if (agentModeActive) {
             tools.push(AUTONOMOUS_MODE_TOOL);
         }
         // ===== SRC 工具: 始终注册,方便AI管理星穹铁道 =====
@@ -11850,6 +11858,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         } else {
                             var reason = args.reason || '执行高级操作';
                             if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
+                                abortExistingRequest(chatId);
+                                if (searchAbortControllerMap[chatId]) { searchAbortControllerMap[chatId].abort(); delete searchAbortControllerMap[chatId]; }
+                                delete isTypingMap[chatId];
                                 setAgentMode('agent');
                                 toolResult = { result: '✅ Agent 模式已启用,现在可以执行文件操作和命令了。' };
                             } else {
@@ -11858,12 +11869,24 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         }
                     }
                      else if (func.name === 'autonomous_mode') {
-                        if (isYoloMode()) {
-                            toolResult = { result: '✅ 当前已是 YOLO 自主模式,所有操作自动批准。' };
+                        // ★ 必须在 Agent 或 YOLO 模式下才能切换
+                        if (getAgentMode() === 'off') {
+                            toolResult = { result: '⚠️ 请先启用 Agent 模式，再启用 YOLO 自主模式。' };
+                        } else if (isYoloMode()) {
+                            toolResult = { result: '✅ 当前已是 YOLO 自主模式。' };
                         } else {
                             var enabled = args.enabled !== false;
-                            localStorage.setItem('agentProactive', enabled ? 'true' : 'false');
-                            toolResult = { result: enabled ? '✅ 自主模式已启用,AI可以自主决定使用工具。' : '🔒 自主模式已禁用,AI将每次请求用户确认。' };
+                            if (enabled) {
+                                if (confirm('⚠️ 确定启用 YOLO 自主模式？\n\n所有工具操作将自动批准，不再逐一确认。\n此操作需由你亲自点击"确定"。')) {
+                                    setAgentMode('yolo');
+                                    toolResult = { result: '✅ 已切换到 YOLO 自主模式。' };
+                                } else {
+                                    toolResult = { result: '❌ 用户取消了 YOLO 模式切换。' };
+                                }
+                            } else {
+                                setAgentMode('agent');
+                                toolResult = { result: '🔒 已退出自主模式，恢复为 Agent 交互模式。' };
+                            }
                         }
                     }
                      else if (func.name === 'engine_agent_ask') {
@@ -14491,6 +14514,8 @@ function loadInitialData() {
         }
         configPanelWasOpen = false;
     }
+    // ★ 硬刷新确保侧边栏状态正确
+    updateAgentUI();
 }
 
 async function loadAllResources() {
