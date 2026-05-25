@@ -4737,7 +4737,28 @@ function isPlanMode() {
 }
 
 // ★ Agent 模式整页转场动效
+// overlay 管理：防止快速切换时动画叠加
+var _agentOverlayMap = {}; // mode -> { el, timer }
+
+function _clearAgentOverlay(mode) {
+    var entry = _agentOverlayMap[mode];
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    if (entry.el && entry.el.parentNode) {
+        entry.el.remove();
+    }
+    delete _agentOverlayMap[mode];
+}
+
+function _clearAllAgentOverlays() {
+    Object.keys(_agentOverlayMap).forEach(function(m) { _clearAgentOverlay(m); });
+    // 清除所有遗留的 agent-transition-overlay（兜底）
+    document.querySelectorAll('.agent-transition-overlay').forEach(function(el) { el.remove(); });
+}
+
 function playAgentEnterEffect(mode) {
+    // ★ 关键：切换前先清除所有旧 overlay，防止叠加
+    _clearAllAgentOverlays();
     var isDark = document.documentElement.classList.contains('dark');
     // agent: 蓝紫色系 / yolo: 红金色系
     var isYolo = mode === 'yolo';
@@ -4801,10 +4822,13 @@ function playAgentEnterEffect(mode) {
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.4s ease'; setTimeout(function() { overlay.remove(); }, 400); }, 1500);
+    var enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.4s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 400); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 1500);
+    _agentOverlayMap[mode] = { el: overlay, timer: enterTimer };
 }
 
 function playAgentExitEffect(mode) {
+    // ★ 清除该模式的任何旧 overlay，防止叠加
+    _clearAgentOverlay('exit:' + mode);
     var isDark = document.documentElement.classList.contains('dark');
     var isYolo = mode === 'yolo';
     var c1 = isYolo ? [239,68,68] : [99,102,241];
@@ -4843,7 +4867,10 @@ function playAgentExitEffect(mode) {
             '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:52px;font-weight:800;letter-spacing:8px;background:linear-gradient(135deg,' + glow + '0.2),' + glow2 + '0.1));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; setTimeout(function() { overlay.remove(); }, 300); }, 800);
+    // playAgentExitEffect 的 overlay 以 'exit:' + mode 为 key
+    var exitKey = 'exit:' + mode;
+    var exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.3s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 300); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 800);
+    _agentOverlayMap[exitKey] = { el: overlay, timer: exitTimer };
 }
 
 // 兼容旧版 toggleAgentMode
@@ -5780,28 +5807,47 @@ function updateAgentUI() {
 /** 更新三模式选择器的 UI 状态 */
 // ★ 悬停模式菜单定位
 function _positionModePopup() {
-    var wrapper = document.querySelector('.agent-mode-wrapper');
-    if (wrapper) {
-        wrapper.addEventListener('mouseenter', _positionModePopup);
-    }
     var popup = getEl('agentModePopup');
     var wrapper = document.querySelector('.agent-mode-wrapper');
     if (!popup || !wrapper) return;
     var rect = wrapper.getBoundingClientRect();
-    popup.style.top = (rect.bottom + 2) + 'px';
-    popup.style.left = (rect.left) + 'px';
-    popup.style.transform = 'none';
+    var popupRect = popup.getBoundingClientRect();
+    // 动态判断：空间足够则向下，否则向上弹出
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var spaceAbove = rect.top;
+    var isMobile = window.matchMedia('(max-width: 640px)').matches;
+    var POPUP_HEIGHT = popupRect.height || 36; // fallback
+    var POPUP_WIDTH = 120;
+    if (isMobile) {
+        // 移动端：居中，宽度跟随按钮或更宽
+        popup.style.top = (rect.bottom + 4) + 'px';
+        popup.style.left = '50%';
+        popup.style.transform = 'translateX(-50%)';
+        popup.style.minWidth = Math.max(rect.width, POPUP_WIDTH) + 'px';
+    } else {
+        // 桌面端：智能判断上下
+        if (spaceBelow >= POPUP_HEIGHT + 8 || spaceBelow >= spaceAbove) {
+            popup.style.top = (rect.bottom + 4) + 'px';
+        } else {
+            popup.style.top = (rect.top - POPUP_HEIGHT - 4) + 'px';
+        }
+        popup.style.left = rect.left + 'px';
+        popup.style.transform = 'none';
+        popup.style.minWidth = '';
+    }
 }
 
 // 页面加载时预定位模式菜单
 setTimeout(_positionModePopup, 500);
 window.addEventListener('resize', _positionModePopup);
-// ★ Agent 模式弹出菜单(鼠标延迟隐藏)
+// ★ Agent 模式弹出菜单(鼠标延迟隐藏 + 移动端点击切换)
 window._agentPopupTimer = null;
 window._setupAgentPopup = function() {
     var wrapper = document.querySelector('.agent-mode-wrapper');
     var popup = getEl('agentModePopup');
     if (!wrapper || !popup) return;
+
+    // --- 桌面端：hover 显示/隐藏 ---
     wrapper.addEventListener('mouseenter', function() {
         if (window._agentPopupTimer) { clearTimeout(window._agentPopupTimer); }
         _positionModePopup();
@@ -5818,6 +5864,32 @@ window._setupAgentPopup = function() {
     popup.addEventListener('mouseleave', function() {
         popup.classList.remove('show');
     });
+
+    // --- 移动端：点击切换显示/隐藏 ---
+    wrapper.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (popup.classList.contains('show')) {
+            popup.classList.remove('show');
+        } else {
+            _positionModePopup();
+            popup.classList.add('show');
+        }
+    });
+
+    // 点击 popup 外部隐藏
+    document.addEventListener('click', function(e) {
+        if (!popup.classList.contains('show')) return;
+        if (!wrapper.contains(e.target) && !popup.contains(e.target)) {
+            popup.classList.remove('show');
+        }
+    });
+
+    // 移动端滚动时自动隐藏
+    document.addEventListener('touchmove', function() {
+        if (popup.classList.contains('show')) {
+            popup.classList.remove('show');
+        }
+    }, { passive: true });
 };
 
 
