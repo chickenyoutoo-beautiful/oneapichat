@@ -5727,13 +5727,21 @@ window.mainAgentReply = function() {
 
 function updateAgentUI() {
     var mode = getAgentMode();
-    var isActive = mode === 'agent' || mode === 'yolo';
+    var isActive = mode !== 'off';  // ★ plan/agent/yolo 都算激活
     // 更新三模式选择器按钮
     updateModeSelector(mode);
-    // Header Agent 按钮绿点状态
+    // Header Agent 按钮圆点
     var splitBtn = getEl('agentSplitBtn');
     if (splitBtn) {
         splitBtn.classList.toggle('active', isActive);
+    }
+    // 圆点颜色
+    var dot = splitBtn ? splitBtn.querySelector('.agent-dot') : null;
+    if (dot) {
+        var dotColors = { 'off': 'rgba(255,255,255,0.5)', 'plan': '#3b82f6', 'agent': '#22c55e', 'yolo': '#ef4444' };
+        dot.style.setProperty('background', dotColors[mode] || dotColors['off'], 'important');
+        var dotShadow = { 'plan': '0 0 6px rgba(59,130,246,0.6)', 'agent': '0 0 6px rgba(34,197,94,0.6)', 'yolo': '0 0 6px rgba(239,68,68,0.6)' };
+        dot.style.setProperty('box-shadow', dotShadow[mode] || 'none', 'important');
     }
     // 配置面板开关
     var configToggle = getEl('agentModeToggle');
@@ -5796,6 +5804,18 @@ function updateAgentUI() {
         }
     }
     // 更新 body class 用于 CSS 控制
+    // ★ 统一侧边栏：Agent/Plan/YOLO 收起, Off 展开
+    if (mode === 'off') {
+        if ($.sidebar?.classList.contains('collapsed')) {
+            $.sidebar.classList.remove('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
+        }
+    } else {
+        if ($.sidebar && !$.sidebar.classList.contains('collapsed')) {
+            $.sidebar.classList.add('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+        }
+    }
     document.body.classList.toggle('agent-active', isActive);
 
     // ★ 普通模式: 改输入框提示文字,过滤Agent命令
@@ -5861,44 +5881,78 @@ window._setupAgentPopup = function() {
     var mainBtn = document.getElementById('agentMainBtn');
     if (!wrapper || !popup || !mainBtn) return;
 
-    // ★ 点击按钮的统一入口
-    mainBtn.addEventListener('click', function() {
-        var isMobile = window.matchMedia('(max-width: 640px)').matches;
-        var curMode = getAgentMode();
-        if (isMobile) {
-            // 已激活状态 → 直接退出
-            if (curMode !== 'off') {
-                setAgentMode('off');
+    function updateBtnLabel() {
+        var el = mainBtn.querySelector('.agent-btn-label');
+        if (!el) return;
+        var mode = getAgentMode();
+        var texts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
+        el.style.transition = 'opacity 0.15s';
+        el.style.opacity = '0';
+        setTimeout(function() {
+            el.textContent = texts[mode] || 'Agent';
+            el.style.opacity = '1';
+        }, 120);
+    }
+    updateBtnLabel();
+
+    var isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer:coarse)').matches;
+
+    if (isTouch) {
+        var tapTimer = null, lastTap = 0;
+        mainBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var now = Date.now();
+            if (now - lastTap < 400) {
+                clearTimeout(tapTimer); lastTap = 0;
+                popup.classList.remove('show');
+                var curMode = getAgentMode();
+                setAgentMode(curMode !== 'off' ? 'off' : 'agent');
                 return;
             }
-            // 关闭状态 → 弹 popup 选模式
+            lastTap = now;
             if (popup.classList.contains('show')) {
                 popup.classList.remove('show');
             } else {
                 _positionModePopup();
                 popup.classList.add('show');
+                if (getAgentMode() !== 'off') {
+                    var label = mainBtn.querySelector('.agent-btn-label');
+                    if (label) {
+                        label.style.opacity = '0';
+                        setTimeout(function() {
+                            label.textContent = '双击关闭';
+                            label.style.opacity = '1';
+                            setTimeout(function() {
+                                label.style.opacity = '0';
+                                setTimeout(function() {
+                                    var m = getAgentMode();
+                                    var ts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
+                                    label.textContent = ts[m] || 'Agent';
+                                    label.style.opacity = '1';
+                                }, 120);
+                            }, 1600);
+                        }, 120);
+                    }
+                }
             }
-        } else {
-            // 桌面端：直接 toggle
+            tapTimer = setTimeout(function() { lastTap = 0; }, 450);
+        });
+    } else {
+        mainBtn.addEventListener('click', function() {
             window.toggleAgentMode();
-        }
-    });
+        });
+        wrapper.addEventListener('mouseenter', function() {
+            if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
+            _positionModePopup();
+            popup.classList.add('show');
+        });
+        wrapper.addEventListener('mouseleave', function() {
+            window._agentPopupTimer = setTimeout(function() { popup.classList.remove('show'); }, 200);
+        });
+        popup.addEventListener('mouseenter', function() { if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer); });
+        popup.addEventListener('mouseleave', function() { popup.classList.remove('show'); });
+    }
 
-    // ★ 桌面端：hover 弹出
-    wrapper.addEventListener('mouseenter', function() {
-        if (window.matchMedia('(max-width: 640px)').matches) return;
-        if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
-        _positionModePopup();
-        popup.classList.add('show');
-    });
-    wrapper.addEventListener('mouseleave', function() {
-        if (window.matchMedia('(max-width: 640px)').matches) return;
-        window._agentPopupTimer = setTimeout(function() { popup.classList.remove('show'); }, 200);
-    });
-    popup.addEventListener('mouseenter', function() { if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer); });
-    popup.addEventListener('mouseleave', function() { popup.classList.remove('show'); });
-
-    // 点击外部关闭
     document.addEventListener('click', function(e) {
         if (!popup.classList.contains('show')) return;
         if (!wrapper.contains(e.target) && !popup.contains(e.target)) popup.classList.remove('show');

@@ -177,7 +177,7 @@ switch ($method) {
         if (!$input) jsonError(400, '无效的请求数据');
 
         if ($action === 'register') {
-            jsonError(403, '注册暂未开放,请使用已有账号登录');
+            // jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
 
@@ -344,7 +344,11 @@ switch ($method) {
 
             echo json_encode([
                 'success' => true,
-                'username' => $users[$userId]['username'],
+                'user_id' => $userId,
+                'username' => $users[$userId]['username'] ?? '',
+                'role' => $users[$userId]['role'] ?? 'user',
+                'email' => $users[$userId]['email'] ?? null,
+                'last_active' => $users[$userId]['last_active'] ?? null,
                 'created_at' => $users[$userId]['created_at'] ?? null
             ]);
             exit;

@@ -139,7 +139,20 @@ switch ($action) {
         break;
 
     case 'agent_notifications':
-        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications?" . $userParam . "'") ?: json_encode(['notifications' => [], 'count' => 0]);
+        $raw = shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications?" . $userParam . "'");
+        $data = $raw ? json_decode($raw, true) : null;
+        if (!$data) {
+            echo json_encode(['notifications' => [], 'count' => 0, 'allProcessed' => true]);
+            break;
+        }
+        $notifs = $data['notifications'] ?? [];
+        // 判断是否全部已处理
+        $allProcessed = true;
+        foreach ($notifs as $n) {
+            if (empty($n['processed'])) { $allProcessed = false; break; }
+        }
+        $data['allProcessed'] = $allProcessed;
+        echo json_encode($data);
         break;
 
     case 'agent_notifications_mark':

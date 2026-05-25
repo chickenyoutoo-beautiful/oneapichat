@@ -116,6 +116,7 @@ if ($action === 'save_config' && $userId && $method === 'POST') {
     $input = file_get_contents('php://input');
     $configFile = $configDir . 'config_' . $namespace . '.json';
     @file_put_contents($configFile, $input, LOCK_EX);
+    @chmod($configFile, 0666); // ★ 确保 www-data 后续可写入
     echo json_encode(['success' => true]);
     exit;
 }
@@ -188,6 +189,7 @@ switch ($method) {
         }
         
         if (@file_put_contents($filename, $jsonData, LOCK_EX) !== false) {
+            @chmod($filename, 0666); // ★ 确保 www-data 后续可写入
             echo json_encode(['success' => true, 'path' => basename($filename)]);
         } else {
             http_response_code(500);
