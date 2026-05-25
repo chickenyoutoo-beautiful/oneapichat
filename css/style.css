@@ -2720,6 +2720,43 @@ html:not(.dark) #userInput {
     color: #60a5fa;
 }
 
+/* ===== 移动端 Agent 模式菜单优化 ===== */
+@media (max-width: 640px) {
+    .agent-mode-popup {
+        /* 移动端改为紧贴按钮下方，居中 */
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        min-width: 110px;
+        /* 防止超出屏幕 */
+        max-width: calc(100vw - 16px);
+    }
+    .agent-mode-popup button {
+        /* 增大触控区域 */
+        padding: 10px 12px;
+        min-height: 44px;
+        min-width: 44px;
+        justify-content: center;
+    }
+    .agent-mode-popup button svg {
+        /* 保证图标在触控区域内居中 */
+        width: 18px;
+        height: 18px;
+    }
+}
+
+/* 触控设备：hover 效果改为 active 效果（更快的反馈） */
+@media (hover: none) and (pointer: coarse) {
+    .agent-mode-popup button:active {
+        background: #f3f4f6;
+        color: #3b82f6;
+        transform: scale(0.95);
+    }
+    .dark .agent-mode-popup button:active {
+        background: #374151;
+        color: #60a5fa;
+    }
+}
+
 /* ===== 配置面板打开时导航栏收缩 ===== */
 .config-open .flex.items-center.gap-4 {
     overflow-x: auto;
