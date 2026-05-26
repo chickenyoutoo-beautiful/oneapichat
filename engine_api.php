@@ -399,7 +399,7 @@ switch ($action) {
         $destPath = $destDir . $fn;
         if (copy($srcPath, $destPath) || rename($srcPath, $destPath)) {
             $url = '/oneapichat/uploads/shared/' . rawurlencode($fn);
-            $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'naujtrats.xyz') . $url;
+            $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . 'naujtrats.xyz' . $url;
             echo json_encode(['ok'=>true,'url'=>$fullUrl,'path'=>$url,'size'=>filesize($destPath)]);
         } else {
             echo json_encode(['ok'=>false,'error'=>'复制失败']);
