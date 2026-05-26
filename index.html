@@ -49,7 +49,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=1779800636"></script>
+<script defer src="./js/main.js?v=1779803895"></script>
 <script defer src="./js/src-manager.js?v=4"></script>
 
     <!-- /命令列表 SVG 图标库 -->
@@ -540,7 +540,7 @@ window.VISION_API_KEY = '';
             <div class="config-slider-field">
                 <div class="config-slider-header">
                     <span class="config-label">Max Tokens</span>
-                    <input type="number" id="maxTokensInput" min="256" max="1048576" step="256" value="8192" onchange="window.syncTokenFromInput()" class="config-number" style="width:90px;">
+                    <input type="number" id="maxTokensInput" min="256" max="1048576" step="256" value="8192" onchange="window.syncTokenFromInput()" class="config-number" style="width:90px;" autocomplete="off">
                 </div>
                 <input type="range" id="maxTokens" min="256" max="1048576" step="256" value="8192" oninput="window.syncTokenFromRange()" class="config-slider w-full">
             </div>
@@ -567,12 +567,15 @@ window.VISION_API_KEY = '';
                 </div>
                 <div class="config-field" style="margin-top:8px">
                     <label class="config-label" style="display:block;margin-bottom:4px;">TTS API Key</label>
-                    <input type="password" style="position:absolute;left:-9999px;top:-9999px" autocomplete="new-password" name="fake_tts">
-                    <input type="password" id="ttsApiKey" class="config-input" placeholder="独立 TTS Key 或复用 VLM Key" onchange="window.saveConfig()" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')">
+                    <input type="text" id="ttsApiKey" class="config-input" style="-webkit-text-security:disc;" placeholder="独立 TTS Key 或复用 VLM Key" onchange="window.saveConfig()" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                </div>
+                <div class="config-field" style="margin-top:8px">
+                    <label class="config-label" style="display:block;margin-bottom:4px;">Group ID (MiniMax TTS 必填)</label>
+                    <input type="text" id="ttsGroupId" class="config-input" placeholder="MiniMax 控制台的 Group ID" onchange="window.saveConfig()">
                 </div>
                 <div class="config-field" style="margin-top:8px" id="ttsApiUrlRow">
                     <label class="config-label" style="display:block;margin-bottom:4px;">TTS API URL</label>
-                    <input type="text" id="ttsApiUrl" class="config-input" placeholder="https://api.minimax.io/v1/t2a_v2" onchange="window.saveConfig()">
+                    <input type="text" id="ttsApiUrl" class="config-input" placeholder="https://api.minimaxi.com/v1/t2a_v2" onchange="window.saveConfig()">
                 </div>
                 <div class="config-field" style="margin-top:8px">
                     <label class="config-label" style="display:block;margin-bottom:4px;">默认音色 (voice_id)</label>

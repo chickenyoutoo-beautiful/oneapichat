@@ -367,6 +367,18 @@ window.analyzeVideo = async function(videoInput, query) {
         result += '\n**关键帧分析(' + frameAnalyses.length + '帧):**\n';
         frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
     }
+    // ★ 缓存分析结果(30分钟内复用)
+    try {
+        if (currentChatId && chats[currentChatId]) {
+            if (!chats[currentChatId].videoAnalyses) chats[currentChatId].videoAnalyses = {};
+            chats[currentChatId].videoAnalyses[enginePath] = {
+                time: Date.now(), duration: duration,
+                meta: { width: width, height: height, codec: codec, fps: fps, format: infoJson.format?.format_name },
+                frames: frameAnalyses
+            };
+            slimSaveChats();
+        }
+    } catch(e3) {}
     return result;
 };
 
@@ -1027,11 +1039,12 @@ const ENGINE_PUSH_TOOL = {
     type: "function",
     function: {
         name: "engine_push",
-        description: "向用户推送一条通知消息,消息会通过心跳机制在下次心跳时到达前端。适合Cron任务或子代理完成后通知用户。",
+        description: "向用户推送通知消息,可附带服务器文件作为下载链接。当视频剪辑/文件处理完成后,调用此工具把结果文件发送给用户。传file参数指定服务器上文件路径(如/tmp/video.mp4),用户会收到紫色下载按钮。",
         parameters: {
             type: "object",
             properties: {
-                msg: { type: "string", description: "推送消息内容" }
+                msg: { type: "string", description: "推送消息内容" },
+                file: { type: "string", description: "可选,服务器上文件路径(如/tmp/video_output.mp4),会生成下载链接" }
             },
             required: ["msg"]
         }
@@ -7001,6 +7014,7 @@ window.setToolEnabled = function(toolKey, enabled) {
 const _TOOL_CATEGORIES = [
     { label: '🔍 搜索与获取', keys: ['SEARCH_TOOL_DEFINITION','RAG_SEARCH_TOOL_DEFINITION','WEB_FETCH_TOOL_DEFINITION'] },
     { label: '🎨 图像', keys: ['IMAGE_TOOL_DEFINITION','ANALYZE_IMAGE_TOOL'] },
+    { label: '🎬 视频', keys: ['VIDEO_UNDERSTANDING_TOOL','VIDEO_EDIT_TOOL'] },
     { label: '📚 刷课', keys: ['CHAXING_LOGIN_TOOL_DEFINITION','CHAXING_LIST_TOOL_DEFINITION','CHAXING_TOOL_DEFINITION','CHAXING_STATUS_TOOL_DEFINITION','CHAXING_STOP_TOOL_DEFINITION','CHAXING_STATS_TOOL_DEFINITION','CHAXING_OVERVIEW_TOOL'] },
     { label: '📝 考试', keys: ['CHAXING_AUTH_TOOL','CHAXING_EXAM_LIST_TOOL','CHAXING_EXAM_START_TOOL','CHAXING_EXAM_STATUS_TOOL','CHAXING_EXAM_STOP_TOOL'] },
     { label: '💻 服务器操控 ⚠️', keys: ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_FILE_OP_TOOL'], agentOnly: true },
@@ -7507,6 +7521,7 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('ttsApiUrl', getVal('ttsApiUrl') || '');
     localStorage.setItem('ttsVoiceId', getVal('ttsVoiceId') || '');
     localStorage.setItem('ttsSpeed', getVal('ttsSpeed') || '1.0');
+    localStorage.setItem('ttsGroupId', getVal('ttsGroupId') || '');
     // ★ 保存工具开关状态
     if (window.saveToolToggleStates) window.saveToolToggleStates();
     } catch(e) {
@@ -12025,15 +12040,18 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         var _pushMsg = args.msg || '';
                         var _pushFile = args.file || '';
                         if (_pushFile) {
-                            // 复制文件到 uploads/shared/
                             try {
                                 var _pRes = await fetch('/oneapichat/engine_api.php?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
                                 var _pData = await _pRes.json();
                                 if (_pData.ok && _pData.url) {
+                                    var _pushUrl = _pData.url.startsWith('http') ? _pData.url : window.location.origin + _pData.url;
+                                    _pushMsg += '\n\n📥 下载链接: ' + _pushUrl;
                                     if (!pendingMsg._sharedFiles) pendingMsg._sharedFiles = [];
                                     pendingMsg._sharedFiles.push({ url: _pData.url, size: _pData.size || 0 });
+                                } else {
+                                    _pushMsg += '\n\n⚠️ 文件复制失败: ' + (_pData.error || '未知');
                                 }
-                            } catch(e) {}
+                            } catch(e) { _pushMsg += '\n\n⚠️ 推送异常: ' + e.message; }
                         }
                         toolResult = { result: '✅ ' + _pushMsg };
                     }
@@ -12615,14 +12633,33 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             if (input && !input.startsWith('http') && !input.startsWith('data:')) {
                                 input = window.location.origin + input;
                             }
-                            try {
+                            // ★ 检查缓存: 30分钟内已分析过的视频直接复用
+                            var _cacheKey = vf.serverUrl || input;
+                            var _cached = chats[chatId]?.videoAnalyses?.[_cacheKey];
+                            if (_cached && _cached.time && (Date.now() - _cached.time < 1800000) && _cached.frames && _cached.frames.length > 0) {
+                                var _cr = '🎬 **视频分析结果(缓存)**\n\n**元信息:**\n';
+                                _cr += '- 时长: ' + Math.floor(_cached.duration/60) + '分' + Math.round(_cached.duration%60) + '秒\n';
+                                if (_cached.meta?.width) _cr += '- 分辨率: ' + _cached.meta.width + 'x' + _cached.meta.height + '\n';
+                                _cr += '\n**关键帧分析(' + _cached.frames.length + '帧):**\n';
+                                _cached.frames.forEach(function(a){ _cr += '\n' + a + '\n'; });
+                                toolResult = { result: _cr };
+                            } else {
                                 var r = await window.analyzeVideo(input, query);
                                 toolResult = { result: r };
-                            } catch(e) { toolResult = { error: e.message }; }
+                            }
                         }
                     } else if (func.name === 'video_edit') {
-                        // 视频剪辑工具: 转发到引擎
                         var _srcEnginePath = args.input_path || '';
+                        // ★ 智能补全: 如果没传 input_path,从当前聊天的上传文件里找
+                        if (!_srcEnginePath && chats[chatId]) {
+                            var _msgs2 = chats[chatId].messages;
+                            for (var _vi2 = _msgs2.length-1; _vi2 >= 0; _vi2--) {
+                                if (_msgs2[_vi2].files) {
+                                    var _vf2 = _msgs2[_vi2].files.find(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
+                                    if (_vf2) { _srcEnginePath = _vf2.serverUrl || _vf2.content || ''; break; }
+                                }
+                            }
+                        }
                         if (_srcEnginePath.startsWith('http')) _srcEnginePath = _srcEnginePath.replace(window.location.origin, '');
                         if (args.params && args.params.files && Array.isArray(args.params.files)) {
                             for (var _fi=0; _fi<args.params.files.length; _fi++) {
@@ -12634,10 +12671,12 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         if (args.action === 'tts') {
                             _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
                             _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
+                            _veditBody.params.group_id = args.params?.group_id || localStorage.getItem('ttsGroupId') || '';
                         }
                         if (args.action === 'voice' && !_veditBody.params.api_key) {
                             _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
                             _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
+                            _veditBody.params.group_id = args.params?.group_id || localStorage.getItem('ttsGroupId') || '';
                         }
                         var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody) });
                         var _veditData = await _veditResp.json();
@@ -14504,6 +14543,7 @@ function initAgentConfig() {
     setVal('ttsApiUrl', localStorage.getItem('ttsApiUrl') || '');
     setVal('ttsVoiceId', localStorage.getItem('ttsVoiceId') || '');
     setVal('ttsSpeed', localStorage.getItem('ttsSpeed') || '1.0');
+    setVal('ttsGroupId', localStorage.getItem('ttsGroupId') || '');
     // 更新三模式选择器
     updateModeSelector(mode);
     // ★ Agent/YOLO 模式下强制启用工具调用

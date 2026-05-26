@@ -120,6 +120,9 @@ DEFAULT_FONT = SUBTITLE_FONTS.get("noto-sans", list(SUBTITLE_FONTS.values())[0])
 
 def _apply_subtitle(input_path, output_path, params):
     """应用字幕到视频,使用 Pillow 渲染中文/emoji,完美支持 Unicode"""
+    # ★ 路径转换: /oneapichat/... → PROJECT_ROOT + /uploads/...
+    if input_path.startswith("/oneapichat/"):
+        input_path = os.path.join(PROJECT_ROOT, input_path.replace("/oneapichat/", "", 1))
     txt = params.get("text", "Hello")
     fs = int(params.get("fontsize", 42))
     tc = params.get("color", "white")
@@ -337,11 +340,12 @@ def _apply_tts(params):
             return f"TTS 失败 (OpenAI): {resp.status_code} {resp.text[:200]}"
         except Exception as e: return f"TTS 异常 (OpenAI): {str(e)}"
     
-    # Minimax (default)
-    url = tts_url or "https://api.minimax.io/v1/t2a_v2"
+    # Minimax (default) — 需要 group_id
+    url = tts_url or "https://api.minimaxi.com/v1/t2a_v2"
     body = {"model": model, "text": text, "stream": False,
             "voice_setting": {"voice_id": voice_id, "speed": speed, "vol": volume, "pitch": pitch},
             "audio_setting": {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1},
+            "group_id": params.get("group_id", ""),
             "language_boost": params.get("language","auto")}
     try:
         resp = requests.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
@@ -1715,8 +1719,8 @@ def engine_network(target: str = Query(...), action: str = Query("ping"), timeou
             return {"ok": True, "stdout": "\n".join(lines[:10])}
         else:
             return {"error": f"Unknown action: {action}"}
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
-        return {"ok": True, "stdout": result.stdout[:2000], "stderr": result.stderr[:500]}
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout + 5)
+        return {"ok": True, "stdout": result.stdout.decode('utf-8','replace')[:2000], "stderr": result.stderr.decode('utf-8','replace')[:500]}
     except Exception as e:
         return {"error": str(e)}
 
@@ -1738,11 +1742,16 @@ def engine_file_op(action: str = Query(...), src: str = Query(...), dst: str = Q
     """文件操作"""
     import os as _os, shutil
     try:
-        allowed = [str(TEMP_DIR), PROJECT_ROOT]
+        allowed = [str(TEMP_DIR), PROJECT_ROOT, PROJECT_ROOT + '/uploads', PROJECT_ROOT + '/oneapichat']
+        # 路径转换: /oneapichat/uploads/... → /var/www/html/oneapichat/uploads/...
+        for path in ('src', 'dst'):
+            p = locals().get(path, '')
+            if p and p.startswith('/oneapichat/'):
+                locals()[path] = PROJECT_ROOT + '/' + p.replace('/oneapichat/', '', 1)
         def safe(p):
             return any(p.startswith(pre) for pre in allowed)
         if not safe(src) or (dst and not safe(dst)):
-            return {"error": f"只允许操作 {TEMP_DIR} 和 {PROJECT_ROOT} 目录"}
+            return {"error": f"只允许操作 {TEMP_DIR}, {PROJECT_ROOT}, {PROJECT_ROOT}/uploads 目录"}
         if action in ("cp", "copy"):
             shutil.copy2(src, dst)
         elif action in ("mv", "move"):
