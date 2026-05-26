@@ -7489,6 +7489,8 @@ function saveConfig(showFeedback = false) {
             } else if (!$.configPanel.classList.contains('hidden-panel')) {
                 $.configPanel.classList.add('hidden-panel');
             }
+            // ★ 同时隐藏遮罩层
+            if ($.sidebarMask) $.sidebarMask.classList.remove('active');
         }
         configSnapshot = null;
         configPanelWasOpen = false;

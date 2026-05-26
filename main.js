@@ -324,6 +324,30 @@ window.analyzeImage = async function(imageInput, focus) {
         }
     }
 }
+
+window.analyzeVideo = async function(videoInput, query) {
+    if (!videoInput) throw new Error('无效视频');
+    try {
+        var resp = await fetch('/oneapichat/video_analyze.php', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                video_url: videoInput.startsWith('http') ? videoInput : '',
+                video_base64: videoInput.startsWith('data:') ? videoInput : '',
+                query: query, frames_count: 3
+            })
+        });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        if (data.result.indexOf('分析请求失败') >= 0) throw new Error('帧分析失败');
+        return data.result;
+    } catch(e) {
+        // 降级: analyzeImage 分析首帧
+        if (videoInput.startsWith('data:')) {
+            return '(仅首帧) ' + await window.analyzeImage(videoInput, query);
+        }
+        throw e;
+    }
+};
 // 测试 MCP 端点
 
 // 一键配置
@@ -1615,6 +1639,21 @@ const ANALYZE_IMAGE_TOOL = {
                     type: "integer",
                     description: "要分析的图片索引(0=第一张,1=第二张...)。当用户上传了多张图片时使用此参数指定具体分析哪一张,避免每次都分析第一张。默认0。"
                 }
+            }
+        }
+    }
+};
+
+const VIDEO_UNDERSTANDING_TOOL = {
+    type: "function",
+    function: {
+        name: "video_understanding",
+        description: "分析上传的视频内容。提取关键帧并进行全面理解。",
+        parameters: {
+            type: "object",
+            properties: {
+                query: { type: "string", description: "分析需求，如'描述视频内容''视频中有什么'等" },
+                video_index: { type: "integer", description: "视频索引，0表示第一个视频" }
             }
         }
     }
@@ -3647,6 +3686,7 @@ async function processSelectedFiles(fileList) {
 
         // 检查是否是图片文件
         var isImage = file.type.startsWith('image/');
+        var isVideo = file.type.startsWith('video/');
 
         // ★ 创建进度条容器(文件预览区域内)
         var progressContainer = document.createElement('div');
@@ -3734,6 +3774,20 @@ async function processSelectedFiles(fileList) {
                 pendingFiles.push(fileObj);
                 _setDone();
                 // 短暂展示完成状态后替换为文件tag
+                setTimeout(function() {
+                    if (progressContainer.parentNode) progressContainer.remove();
+                    updateFilePreviewUI();
+                }, 600);
+            } else if (isVideo) {
+                _setProgress(20, '读取视频中...');
+                var base64 = await fileToBase64(file);
+                var dataUrl = 'data:' + file.type + ';base64,' + base64;
+                var fileObj = { name: file.name, content: dataUrl, size: file.size, isVideo: true, type: file.type };
+                _setProgress(60, '上传视频中...');
+                var srvUrl = await uploadImageToServer(dataUrl);
+                if (srvUrl) fileObj.serverUrl = srvUrl;
+                pendingFiles.push(fileObj);
+                _setDone();
                 setTimeout(function() {
                     if (progressContainer.parentNode) progressContainer.remove();
                     updateFilePreviewUI();
@@ -6915,7 +6969,7 @@ const _TOOL_CATEGORIES = [
 // ── 工具显示名映射 ──
 const _TOOL_LABELS = {
     'SEARCH_TOOL_DEFINITION': '联网搜索', 'RAG_SEARCH_TOOL_DEFINITION': '知识库搜索', 'WEB_FETCH_TOOL_DEFINITION': '网页抓取',
-    'IMAGE_TOOL_DEFINITION': '图片生成', 'ANALYZE_IMAGE_TOOL': '图片分析',
+    'IMAGE_TOOL_DEFINITION': '图片生成', 'ANALYZE_IMAGE_TOOL': '图片分析', 'VIDEO_UNDERSTANDING_TOOL': '视频分析',
     'CHAXING_LOGIN_TOOL_DEFINITION': '登录', 'CHAXING_LIST_TOOL_DEFINITION': '课程列表', 'CHAXING_TOOL_DEFINITION': '刷课执行',
     'CHAXING_STATUS_TOOL_DEFINITION': '状态', 'CHAXING_STOP_TOOL_DEFINITION': '停止', 'CHAXING_STATS_TOOL_DEFINITION': '统计',
     'CHAXING_OVERVIEW_TOOL': '总览',
@@ -8063,7 +8117,17 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         const fileList = document.createElement('div');
         fileList.className = 'file-list';
         files.forEach(f => {
-            if (f.isImage || f.type?.startsWith('image/')) {
+            if ((f.isVideo || f.type?.startsWith('video/')) && f.content) {
+                const vid = document.createElement('video');
+                vid.controls = true;
+                vid.preload = 'metadata';
+                vid.style.cssText = 'max-width:100%;max-height:300px;border-radius:8px;margin-top:4px';
+                const src = document.createElement('source');
+                src.src = f.content;
+                src.type = f.type || 'video/mp4';
+                vid.appendChild(src);
+                fileList.appendChild(vid);
+            } else if (f.isImage || f.type?.startsWith('image/')) {
                 // 图片文件:显示预览
                 const img = document.createElement('img');
                 img.className = 'file-image-preview';
@@ -10636,7 +10700,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 图片会作为附件发送给AI,AI可以自主选择是否使用 analyze_image 工具
 
     if (!skipUserAdd) {
-        chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
+        chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : (f.isVideo ? 'video/mp4' : '')), isVideo: f.isVideo || false, isImage: f.isImage || false })) });
         // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
         if (chats[chatId].title === '新对话') {
@@ -10969,6 +11033,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 构建工具列表
     const imageTools = [IMAGE_TOOL_DEFINITION, ANALYZE_IMAGE_TOOL];
     if (i2iTool) imageTools.push(i2iTool);
+    imageTools.push(VIDEO_UNDERSTANDING_TOOL);
 
     // 构建工具列表:根据搜索开关和工具模式动态选择
     const searchOn = getChecked('searchToggle');
@@ -11081,6 +11146,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'generate_image': 'IMAGE_TOOL_DEFINITION',
                 'generate_image_i2i': 'IMAGE_TOOL_DEFINITION',
                 'analyze_image': 'ANALYZE_IMAGE_TOOL',
+                'video_understanding': 'VIDEO_UNDERSTANDING_TOOL',
                 'chaoxing_login': 'CHAXING_LOGIN_TOOL_DEFINITION',
                 'chaoxing_list_courses': 'CHAXING_LIST_TOOL_DEFINITION',
                 'chaoxing_auto': 'CHAXING_TOOL_DEFINITION',
@@ -12455,6 +12521,28 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 const errorMsg = e?.message || e?.toString() || String(e) || '图片分析失败';
                                 toolResult = { error: errorMsg };
                             }
+                        }
+                    } else if (func.name === 'video_understanding') {
+                        var query = args.query || '描述视频内容';
+                        var vidIdx = args.video_index || 0;
+                        var vids = [];
+                        if (chats[chatId]) {
+                            var msgs = chats[chatId].messages;
+                            for (var vi = msgs.length-1; vi >= 0; vi--) {
+                                if (msgs[vi].files) {
+                                    var vf = msgs[vi].files.filter(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
+                                    vids = vids.concat(vf);
+                                }
+                            }
+                        }
+                        var vf = vids[vidIdx];
+                        if (!vf) { toolResult = { error: '未找到视频' }; }
+                        else {
+                            var input = vf.serverUrl || vf.content;
+                            try {
+                                var r = await window.analyzeVideo(input, query);
+                                toolResult = { result: r };
+                            } catch(e) { toolResult = { error: e.message }; }
                         }
                     }
                     return toolResult;
