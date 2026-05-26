@@ -242,6 +242,23 @@ def _default_tools() -> list[ToolDef]:
             },
             tags=["执行", "python"],
         ),
+        ToolDef(
+            name="video_edit",
+            description="视频剪辑工具。支持裁剪(trim)、拼接(concat)、调速(speed)、转场(transition)、画中画(overlay)、文字水印(text)、提取音频(audio)、查看视频信息(info)。使用MoviePy和FFmpeg执行。需要提供输入文件路径。",
+            capabilities={Capability.WritesFiles, Capability.ExecutesCode, Capability.RequiresApproval},
+            approval=ApprovalKind.REQUIRED,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "操作类型: trim(裁剪) concat(拼接) speed(调速) transition(转场) resize(缩放) overlay(画中画) text(文字) audio(提取音频) info(查看信息)"},
+                    "params": {"type": "object", "description": "操作参数JSON,不同action参数不同"},
+                    "input_path": {"type": "string", "description": "输入视频文件路径"},
+                    "output_path": {"type": "string", "description": "输出视频文件路径"},
+                },
+                "required": ["action", "params", "input_path"],
+            },
+            tags=["视频", "剪辑", "ffmpeg", "moviepy"],
+        ),
     ]
 
 
