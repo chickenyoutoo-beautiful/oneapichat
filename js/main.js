@@ -101,7 +101,10 @@ function _renderMarkdownWithMath(text) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
     const protected = _protectMath(text);
     const html = marked.parse(protected);
-    return _restoreMath(html);
+    // ★ 所有链接打开新标签页
+    var result = _restoreMath(html);
+    result = result.replace(/<a /g, '<a target="_blank" rel="noopener" ');
+    return result;
 }
 
 // 一键修复配置
@@ -1699,13 +1702,13 @@ const VIDEO_EDIT_TOOL = {
     type: "function",
     function: {
         name: "video_edit",
-        description: "视频剪辑 + 配音工具。字幕(text)、滤镜(video_filter:sepia|eq|vignette|bw|vintage|grain|...)、转场(video_transition:fade|dissolve|wipeleft|...)、配音(voice:含tts语音合成)、纯语音(tts)、裁剪(trim)、拼接(concat)、调速(speed)、缩放(resize)、画中画(overlay)、旋转(rotate)、音频提取(audio)。TTS支持MiniMax/OpenAI/自定义,可指定音色语速。",
+        description: "视频剪辑+字幕+配音工具。支持精确时间轴字幕(timeline数组)、滤镜(video_filter:sepia|eq|vignette|bw|vintage|grain)、转场(video_transition:fade|dissolve|wipeleft)、配音(voice:含tts)、纯语音(tts)、裁剪(trim)、拼接(concat)、调速(speed)、缩放(resize)、画中画(overlay)、旋转(rotate)、音频提取(audio)。TTS默认MiniMax,可选OpenAI。字幕用timeline数组按时间轴精确显示,每条有start/end/text。",
         parameters: {
             type: "object",
             properties: {
-                action: { type: "string", description: "操作: trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info" },
-                params: { type: "object", description: "tts:{text,voice_id,speed,provider:minimax|openai,api_key} voice:{text,voice_id,mix:replace|mix} text:{text,fontsize,font,bg,bg_opacity,color} video_filter:{type:sepia|eq|vignette|bw|...} video_transition:{type:fade|dissolve|...,duration,offset,files:['视频2路径']}" },
-                input_path: { type: "string", description: "输入视频路径(服务器绝对路径或 /oneapichat/uploads/...)" },
+                action: { type: "string", description: "操作: compose trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info。compose=字幕+逐句TTS配音+视频精确对齐, 推荐用于配音场景" },
+                params: { type: "object", description: "compose:{timeline:[{start:0,end:2.5,text:'你好',voice_id:'female-yujie'}],voice_id:'female-yujie',fontsize:28,font:'noto-sans-bold',bg_opacity:0.5,bg_color:'#1a1a2e',bg_radius:12,bg_volume:0.3} 每条字幕可单独指定voice_id实现多角色切换。默认音色可选:male-qn-qingse/male-qn-jingying/female-shaonv/female-yujie/presenter_male/presenter_female等" },
+                input_path: { type: "string", description: "输入视频路径。用户上传视频后,消息中会标注「服务器路径: /oneapichat/uploads/...」,直接用这个路径即可,无需搜索。" },
                 output_path: { type: "string", description: "输出路径(可选)" }
             },
             required: ["action", "params", "input_path"]
@@ -3456,15 +3459,21 @@ function buildUserContent(text, files) {
                     image_url: { url: _imgUrl }
                 });
             } else {
-                // 非图片文件转为文本(截断超大附件)
-                var _fileText = f.content || '';
-                if (_fileText.length > 80000) {
-                    _fileText = _fileText.substring(0, 80000) + '\n...(文件过长已截断)';
+                // 非图片文件: 注入服务器路径元信息
+                var _isVid = f.isVideo || (f.type && f.type.startsWith('video/'));
+                var _info = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+                if (f.serverUrl) {
+                    _info += `\n服务器路径: ${f.serverUrl}`;
+                    if (_isVid) {
+                        _info += `\n⚠️ 可直接用此路径调用 video_edit: input_path="${f.serverUrl}"`;
+                    }
                 }
-                content.push({
-                    type: 'text',
-                    text: `[附件: ${f.name}]\n${_fileText}`
-                });
+                if (!_isVid) {
+                    var _fText = f.content || '';
+                    if (_fText.length > 80000) _fText = _fText.substring(0, 80000) + '\n...(文件过长已截断)';
+                    if (_fText) _info += '\n' + _fText;
+                }
+                content.push({ type: 'text', text: _info });
             }
         }
         // 添加用户文本指令
@@ -3485,9 +3494,18 @@ function buildUserContent(text, files) {
         const otherFiles = files.filter(f => !f.type?.startsWith('image/'));
         const otherContent = otherFiles.length
             ? otherFiles.map(f => {
-                var _fc = f.content || '';
-                if (_fc.length > 80000) _fc = _fc.substring(0, 80000) + '\n...(文件过长已截断)';
-                return `[附件: ${f.name}]\n${_fc}`;
+                var _isV = f.isVideo || (f.type && f.type.startsWith('video/'));
+                var _oi = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+                if (f.serverUrl) {
+                    _oi += `\n服务器路径: ${f.serverUrl}`;
+                    if (_isV) _oi += `\n⚠️ 可直接用此路径调用 video_edit: input_path="${f.serverUrl}"`;
+                }
+                if (!_isV) {
+                    var _fc = f.content || '';
+                    if (_fc.length > 80000) _fc = _fc.substring(0, 80000) + '\n...(文件过长已截断)';
+                    if (_fc) _oi += '\n' + _fc;
+                }
+                return _oi;
             }).join('\n\n')
             : '';
         const imagePart = imageDescs.join(', ');
@@ -3500,11 +3518,23 @@ function buildUserContent(text, files) {
     // 非图片文件:保持原有文本格式,但截断超大附件避免超token
     const MAX_FILE_CHARS = 80000;
     const fileParts = files.map(f => {
+        // ★ 视频/大文件: 不传 base64 内容到模型,而是注入服务器路径元信息
+        var isVideo = f.isVideo || (f.type && f.type.startsWith('video/'));
         var c = f.content || '';
-        if (c.length > MAX_FILE_CHARS) {
-            c = c.substring(0, MAX_FILE_CHARS) + '\n...(文件过长已截断,原始长度' + c.length + '字符)';
+        var info = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+        if (f.serverUrl) {
+            info += `\n服务器路径: ${f.serverUrl}`;
+            if (isVideo) {
+                info += `\n⚠️ 视频已上传到服务器,可直接用此路径调用 video_edit 工具。格式: video_edit action="info" input_path="${f.serverUrl}"`;
+            }
         }
-        return `[附件: ${f.name}]\n${c}`;
+        if (!isVideo && c.length <= MAX_FILE_CHARS) {
+            info += `\n${c}`;
+        } else if (!isVideo && c.length > MAX_FILE_CHARS) {
+            info += `\n${c.substring(0, MAX_FILE_CHARS)}\n...(文件过长已截断,原始长度${c.length}字符)`;
+        }
+        // 视频不传 base64,避免超 token
+        return info;
     });
     return fileParts.join('\n\n') + (text ? `\n指令: ${text}` : '');
 }
@@ -6197,8 +6227,20 @@ function requestToolApproval(toolName, args) {
     return new Promise(function(resolve) {
         var mode = getAgentMode();
 
+        // ★ 超时保护: 30秒内未响应则自动拒绝
+        var _approvalTimer = setTimeout(function() {
+            console.warn('[审批] 超时未响应,自动拒绝:', toolName);
+            sessionUsage.approvalsRejected++;
+            resolve(false);
+        }, 30000);
+
+        function _cleanup() {
+            clearTimeout(_approvalTimer);
+        }
+
         // YOLO 模式: 自动批准所有操作
         if (mode === 'yolo') {
+            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -6206,14 +6248,15 @@ function requestToolApproval(toolName, args) {
 
         // Plan 模式: 拒绝所有写操作
         if (mode === 'plan') {
+            _cleanup();
             sessionUsage.approvalsRejected++;
-
             resolve(false);
             return;
         }
 
         // Agent 模式: 检查 '始终允许此工具' 规则
         if (isAlwaysAllowed(toolName)) {
+            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -6221,6 +6264,7 @@ function requestToolApproval(toolName, args) {
 
         // 只读工具自动批准 (Feature 6)
         if (isReadOnlyTool(toolName)) {
+            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -6233,6 +6277,7 @@ function requestToolApproval(toolName, args) {
         if (args && args.name && !cmdPart) cmdPart = args.name.substring(0, 50);
         var rememberKey = toolName + '_' + (cmdPart || '');
         if (remembered[rememberKey] !== undefined) {
+            _cleanup();
             var approved = remembered[rememberKey];
             if (approved) { sessionUsage.approvalsGranted++; } else { sessionUsage.approvalsRejected++; }
             resolve(approved);
@@ -6312,7 +6357,7 @@ function requestToolApproval(toolName, args) {
 
         // 弹窗动画: 先出场再交互
         requestAnimationFrame(function() { overlay.classList.add('active'); });
-        overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) { _cleanup(); overlay.remove(); resolve(false); } });
 
 
         // 按钮事件
@@ -6320,6 +6365,7 @@ function requestToolApproval(toolName, args) {
         var rejectBtn = overlay.querySelector('#approvalRejectBtn');
 
         confirmBtn.onclick = function() {
+            _cleanup();
             var remember = overlay.querySelector('#approvalRememberCheck');
             if (remember && remember.checked) {
                 remembered[rememberKey] = true;
@@ -6336,6 +6382,7 @@ function requestToolApproval(toolName, args) {
         };
 
         rejectBtn.onclick = function() {
+            _cleanup();
             var remember = overlay.querySelector('#approvalRememberCheck');
             if (remember && remember.checked) {
                 remembered[rememberKey] = false;
@@ -7518,10 +7565,8 @@ function saveConfig(showFeedback = false) {
     // ★ TTS 语音合成配置
     localStorage.setItem('ttsProvider', getVal('ttsProvider') || 'minimax');
     localStorage.setItem('ttsApiKey', encrypt(getVal('ttsApiKey') || ''));
-    localStorage.setItem('ttsApiUrl', getVal('ttsApiUrl') || '');
     localStorage.setItem('ttsVoiceId', getVal('ttsVoiceId') || '');
     localStorage.setItem('ttsSpeed', getVal('ttsSpeed') || '1.0');
-    localStorage.setItem('ttsGroupId', getVal('ttsGroupId') || '');
     // ★ 保存工具开关状态
     if (window.saveToolToggleStates) window.saveToolToggleStates();
     } catch(e) {
@@ -11133,8 +11178,9 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         // 文件读取/搜索(基础操作,不限制)
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
-        // ask_agent: AI可通过此工具请求用户启用Agent模式(yolo模式下不需要)
-        if (!isYoloMode()) {
+        // ask_agent: 仅在普通模式下注册,AI通过此工具请求用户启用Agent模式
+        // Agent模式/yolo模式下无需此工具
+        if (!agentModeActive) {
             tools.push(ASK_AGENT_TOOL);
         }
 
@@ -12044,14 +12090,11 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 var _pRes = await fetch('/oneapichat/engine_api.php?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
                                 var _pData = await _pRes.json();
                                 if (_pData.ok && _pData.url) {
-                                    var _pushUrl = _pData.url.startsWith('http') ? _pData.url : window.location.origin + _pData.url;
-                                    _pushMsg += '\n\n📥 下载链接: ' + _pushUrl;
-                                    if (!pendingMsg._sharedFiles) pendingMsg._sharedFiles = [];
-                                    pendingMsg._sharedFiles.push({ url: _pData.url, size: _pData.size || 0 });
+                                    _pushMsg += '\n📥 ' + _pData.url;
                                 } else {
-                                    _pushMsg += '\n\n⚠️ 文件复制失败: ' + (_pData.error || '未知');
+                                    _pushMsg += '\n⚠️ 文件无法分享: ' + (_pData.error || '文件不存在');
                                 }
-                            } catch(e) { _pushMsg += '\n\n⚠️ 推送异常: ' + e.message; }
+                            } catch(e) { _pushMsg += '\n⚠️ 文件分享异常: ' + e.message; }
                         }
                         toolResult = { result: '✅ ' + _pushMsg };
                     }
@@ -12671,17 +12714,25 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         if (args.action === 'tts') {
                             _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
                             _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
-                            _veditBody.params.group_id = args.params?.group_id || localStorage.getItem('ttsGroupId') || '';
+                            _veditBody.params.group_id = args.params?.group_id || '';
                         }
                         if (args.action === 'voice' && !_veditBody.params.api_key) {
                             _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
                             _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
-                            _veditBody.params.group_id = args.params?.group_id || localStorage.getItem('ttsGroupId') || '';
+                            _veditBody.params.group_id = args.params?.group_id || '';
                         }
-                        var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody) });
-                        var _veditData = await _veditResp.json();
-                        if (_veditData.error) { toolResult = { error: _veditData.error }; }
-                        else { toolResult = { result: _veditData.result || '操作完成' }; }
+                        try {
+                            var _ctlr = new AbortController();
+                            var _to = setTimeout(function() { _ctlr.abort(); }, 600000); // 10分钟超时
+                            var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody), signal: _ctlr.signal });
+                            clearTimeout(_to);
+                            var _veditData = await _veditResp.json();
+                            if (_veditData.error) { toolResult = { error: _veditData.error }; }
+                            else { toolResult = { result: _veditData.result || '操作完成' }; }
+                        } catch (_veditErr) {
+                            console.error('[video_edit] 请求失败:', _veditErr.message);
+                            toolResult = { error: '视频剪辑请求超时或失败: ' + (_veditErr.message || '未知错误') + '。请尝试缩小视频或降低分辨率后重试。' };
+                        }
                     }
                     return toolResult;
                 }
@@ -13224,21 +13275,6 @@ window.useAlternativeVisionModel = function() {
                     // ★ 渲染 web_fetch 访问的链接列表
                     if (pendingMsg._webFetchUrls && pendingMsg._webFetchUrls.length > 0) {
                         _renderWebFetchUrls(_bubble, pendingMsg._webFetchUrls);
-                    }
-                    // ★ 渲染 engine_push 分享的文件按钮
-                    if (pendingMsg._sharedFiles && pendingMsg._sharedFiles.length > 0) {
-                        var _sfCont = document.createElement('div');
-                        _sfCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
-                        pendingMsg._sharedFiles.forEach(function(_sf) {
-                            var _fn = _sf.url.split('/').pop().split('?')[0];
-                            var _a = document.createElement('a');
-                            _a.href = _sf.url.startsWith('/') ? window.location.origin + _sf.url : _sf.url;
-                            _a.target = '_blank'; _a.download = _fn;
-                            _a.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#4f46e5;color:#fff;border-radius:10px;font-size:12px;font-weight:500;text-decoration:none;box-shadow:0 2px 8px rgba(79,70,229,0.25);';
-                            _a.innerHTML = '🎬 ' + _fn + ' <span style="opacity:0.7;font-size:10px;">' + (_sf.size ? (_sf.size/1048576).toFixed(1)+'MB' : '') + '</span>';
-                            _sfCont.appendChild(_a);
-                        });
-                        _bubble.appendChild(_sfCont);
                     }
                 }
             }
@@ -14540,10 +14576,25 @@ function initAgentConfig() {
     setVal('agentSystemPrompt', localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
     setVal('ttsProvider', localStorage.getItem('ttsProvider') || 'minimax');
     setVal('ttsApiKey', (function(){try{return decrypt(localStorage.getItem('ttsApiKey')||'')||'';}catch(e){return '';}})());
-    setVal('ttsApiUrl', localStorage.getItem('ttsApiUrl') || '');
-    setVal('ttsVoiceId', localStorage.getItem('ttsVoiceId') || '');
+    // TTS 音色: 如果存储的值不在下拉选项中, 追加 custom option
+    (function(){
+        var voiceSel = getEl('ttsVoiceId');
+        if (voiceSel) {
+            var savedVoice = localStorage.getItem('ttsVoiceId') || 'male-qn-qingse';
+            var found = false;
+            for (var i = 0; i < voiceSel.options.length; i++) {
+                if (voiceSel.options[i].value === savedVoice) { found = true; break; }
+            }
+            if (!found && savedVoice) {
+                var opt = document.createElement('option');
+                opt.value = savedVoice;
+                opt.textContent = savedVoice + ' (已保存)';
+                voiceSel.insertBefore(opt, voiceSel.lastElementChild);
+            }
+            voiceSel.value = savedVoice;
+        }
+    })();
     setVal('ttsSpeed', localStorage.getItem('ttsSpeed') || '1.0');
-    setVal('ttsGroupId', localStorage.getItem('ttsGroupId') || '');
     // 更新三模式选择器
     updateModeSelector(mode);
     // ★ Agent/YOLO 模式下强制启用工具调用

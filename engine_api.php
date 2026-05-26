@@ -391,7 +391,15 @@ switch ($action) {
     case 'push_file':
         $srcPath = $_GET['path'] ?? '';
         if (!$srcPath) { echo json_encode(['ok'=>false,'error'=>'缺少path']); exit; }
+        // ★ 路径转换
+        if (str_starts_with($srcPath, '/oneapichat/uploads/')) {
+            $srcPath = __DIR__ . '/uploads/' . substr($srcPath, strlen('/oneapichat/uploads/'));
+        } elseif (str_starts_with($srcPath, '/oneapichat/')) {
+            $srcPath = __DIR__ . '/' . substr($srcPath, strlen('/oneapichat/'));
+        }
+        // ★ /tmp/ 等绝对路径直接复制
         if (!file_exists($srcPath)) { echo json_encode(['ok'=>false,'error'=>'源文件不存在: '.$srcPath]); exit; }
+        if (!is_readable($srcPath)) { echo json_encode(['ok'=>false,'error'=>'无法读取源文件']); exit; }
         $ext = strtolower(pathinfo($srcPath, PATHINFO_EXTENSION));
         $fn = 'push_' . substr(md5($srcPath . time()), 0, 8) . '.' . $ext;
         $destDir = __DIR__ . '/uploads/shared/';

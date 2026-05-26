@@ -49,7 +49,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=1779808438"></script>
+<script defer src="./js/main.js?v=1779814492"></script>
 <script defer src="./js/src-manager.js?v=4"></script>
 
     <!-- /命令列表 SVG 图标库 -->
@@ -471,16 +471,26 @@ window.VISION_API_KEY = '';
                 <label class="config-label">Base URL</label>
                 <input type="text" id="baseUrl" placeholder="如: https://api.deepseek.com" class="config-input">
             </div>
+            </div>
+            </details>
+
+        <!-- 分类: 视觉理解 -->
+        <details class="config-section details-section">
+            <summary class="config-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                视觉理解
+            </summary>
+            <div class="details-content">
             <div class="config-field">
-                <label class="config-label">视觉理解模型</label>
+                <label class="config-label">模型</label>
                 <input type="text" id="visionModel" placeholder="如: deepseek-chat" class="config-input">
             </div>
             <div class="config-field">
-                <label class="config-label">视觉理解 API 地址</label>
+                <label class="config-label">API 地址</label>
                 <input type="text" id="visionApiUrl" placeholder="如: https://api.minimaxi.com (留空则用通用 API)" class="config-input">
             </div>
             <div class="config-field">
-                <label class="config-label">视觉理解 API Key</label>
+                <label class="config-label">API Key</label>
                 <input type="text" id="visionApiKey" autocomplete="off" class="config-input masked-key" placeholder="视觉理解专用密钥">
             </div>
             </div>
@@ -573,19 +583,25 @@ window.VISION_API_KEY = '';
                 </div>
                 <div class="config-field" style="margin-top:8px">
                     <label class="config-label" style="display:block;margin-bottom:4px;">TTS API Key</label>
-                    <input type="text" id="ttsApiKey" class="config-input" style="-webkit-text-security:disc;" placeholder="独立 TTS Key 或复用 VLM Key" onchange="window.saveConfig()" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                    <input type="text" id="ttsApiKey" class="config-input" style="-webkit-text-security:disc;" placeholder="留空则复用 VLM Key" onchange="window.saveConfig()" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
                 </div>
                 <div class="config-field" style="margin-top:8px">
-                    <label class="config-label" style="display:block;margin-bottom:4px;">Group ID (MiniMax TTS 必填)</label>
-                    <input type="text" id="ttsGroupId" class="config-input" placeholder="MiniMax 控制台的 Group ID" onchange="window.saveConfig()">
-                </div>
-                <div class="config-field" style="margin-top:8px" id="ttsApiUrlRow">
-                    <label class="config-label" style="display:block;margin-bottom:4px;">TTS API URL</label>
-                    <input type="text" id="ttsApiUrl" class="config-input" placeholder="https://api.minimaxi.com/v1/t2a_v2" onchange="window.saveConfig()">
-                </div>
-                <div class="config-field" style="margin-top:8px">
-                    <label class="config-label" style="display:block;margin-bottom:4px;">默认音色 (voice_id)</label>
-                    <input type="text" id="ttsVoiceId" class="config-input" placeholder="male-qn-qingse" onchange="window.saveConfig()">
+                    <label class="config-label" style="display:block;margin-bottom:4px;">默认音色</label>
+                    <select id="ttsVoiceId" class="config-select" onchange="window.saveConfig()">
+                        <option value="male-qn-qingse">青涩青年 (male-qn-qingse)</option>
+                        <option value="male-qn-jingying">精英男性 (male-qn-jingying)</option>
+                        <option value="male-qn-badao">霸道总裁 (male-qn-badao)</option>
+                        <option value="male-qn-daxuesheng">大学生男 (male-qn-daxuesheng)</option>
+                        <option value="female-shaonv">元气少女 (female-shaonv)</option>
+                        <option value="female-yujie">御姐 (female-yujie)</option>
+                        <option value="female-sijie">师姐姐 (female-sijie)</option>
+                        <option value="female-tianmei">甜美女生 (female-tianmei)</option>
+                        <option value="presenter_male">专业男主播 (presenter_male)</option>
+                        <option value="presenter_female">专业女主播 (presenter_female)</option>
+                        <option value="audiobook_male_1">有声书男声1 (audiobook_male_1)</option>
+                        <option value="audiobook_female_1">有声书女声1 (audiobook_female_1)</option>
+                        <option value="custom">✎ 自定义</option>
+                    </select>
                 </div>
                 <div class="config-field" style="margin-top:8px">
                     <label class="config-label" style="display:block;margin-bottom:4px;">默认语速</label>

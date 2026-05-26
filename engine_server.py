@@ -119,37 +119,105 @@ SUBTITLE_FONTS = {
 }
 DEFAULT_FONT = SUBTITLE_FONTS.get("noto-sans", list(SUBTITLE_FONTS.values())[0])
 
+def _generate_srt(subtitles, output_srt_path):
+    """
+    根据字幕数组生成 SRT 文件
+    subtitles: [{"start": 0.5, "end": 2.0, "text": "你好"}, ...]
+    返回: SRT 文件路径
+    """
+    with open(output_srt_path, 'w', encoding='utf-8') as f:
+        for i, sub in enumerate(subtitles, 1):
+            start = sub.get("start", 0)
+            end = sub.get("end", start + 3)
+            text = sub.get("text", "")
+            # 格式化为 SRT 时间戳: HH:MM:SS,mmm
+            def _fmt_ts(t):
+                h = int(t // 3600)
+                m = int((t % 3600) // 60)
+                s = int(t % 60)
+                ms = int((t % 1) * 1000)
+                return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+            f.write(f"{i}\n{_fmt_ts(start)} --> {_fmt_ts(end)}\n{text}\n\n")
+    return output_srt_path
+
+
 def _apply_subtitle(input_path, output_path, params):
-    """应用字幕到视频,使用 Pillow 渲染中文/emoji,完美支持 Unicode"""
-    # ★ 路径转换: /oneapichat/... → PROJECT_ROOT + /uploads/...
+    """
+    应用字幕到视频。支持两种模式:
+    1. timeline 模式(推荐): 精确时间轴字幕, 用 ffmpeg subtitles 滤镜烧录
+       params: { timeline: [{start:0, end:2.5, text:"你好"}, ...], fontsize, color, bg, ... }
+    2. 降级模式(Pillow渲染): 仅有 text 时, 覆盖整段视频
+       params: { text: "你好世界", fontsize, color, bg, ... }
+    """
+    # ★ 路径转换
     if input_path.startswith("/oneapichat/"):
         input_path = os.path.join(PROJECT_ROOT, input_path.replace("/oneapichat/", "", 1))
-    txt = params.get("text", "Hello")
+
     fs = int(params.get("fontsize", 42))
     tc = params.get("color", "white")
     ft = params.get("font", "noto-sans-bold")
     bg_enabled = params.get("bg", True)
-    bg_opacity = float(params.get("bg_opacity", 0.4))
+    bg_opacity = float(params.get("bg_opacity", 0.6))
     bg_color = params.get("bg_color", "black").strip()
-    # 字符串颜色转 RGB
-    if isinstance(bg_color, str):
-        color_map = {"black": (0,0,0), "white": (255,255,255), "red": (255,0,0), "green": (0,255,0), "blue": (0,0,255), "gray": (128,128,128)}
-        bg_color = color_map.get(bg_color.lower(), (0,0,0))
     stroke_color = params.get("stroke_color", "black")
     stroke_width = int(params.get("stroke_width", 2))
-    y_pos = int(params.get("y", 60))
+    y_pos = params.get("y", "bottom")  # bottom | top | middle | 像素值
+    timeline = params.get("timeline", None)
+
+    is_timeline = timeline and isinstance(timeline, list) and len(timeline) > 0
+
+    if is_timeline:
+        # ── 精确时间轴模式: SRT + ffmpeg subtitles 滤镜 ──
+        srt_path = tempfile.mktemp(suffix='.srt')
+        _generate_srt(timeline, srt_path)
+
+        # 构建 force_style 字符串
+        font_name = "Noto Sans CJK SC"  # ffmpeg libass 识别的字体名
+        styles = [
+            f"FontName={font_name}",
+            f"FontSize={fs}",
+            f"PrimaryColour=&H{_color_to_ass(tc)}",
+            f"OutlineColour=&H{_color_to_ass(stroke_color)}",
+            f"Outline={stroke_width}",
+            f"BorderStyle=1",  # 1=outline+shadow, 3=opaque box
+            f"Alignment={_ypos_to_alignment(y_pos)}",
+            f"MarginV=30",
+        ]
+        if bg_enabled:
+            styles.append("BorderStyle=3")  # 不透明背景框
+            styles.append(f"BackColour=&H{_color_to_ass(bg_color)}")
+        force_style = ",".join(styles)
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", f"subtitles={srt_path}:force_style='{force_style}'",
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "aac",
+            output_path
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        try: os.unlink(srt_path)
+        except: pass
+
+        if r.returncode != 0:
+            err = r.stderr[-500:] if r.stderr else "unknown"
+            return f"字幕烧录失败: {err}"
+        return f"字幕完成 (timeline {len(timeline)}条): {output_path} (字体:{ft}, 大小:{fs})"
+
+    # ── 降级模式: 单字幕 full-duration Pillow 渲染 ──
+    txt = params.get("text", "Hello")
     font_path = SUBTITLE_FONTS.get(ft, DEFAULT_FONT)
-    
+
     from moviepy import VideoFileClip, CompositeVideoClip, ImageClip
     from PIL import Image, ImageDraw, ImageFont
     clip = VideoFileClip(input_path)
-    
-    # 用 Pillow 渲染字幕为透明 PNG
+
     try:
         pil_font = ImageFont.truetype(font_path, fs)
     except Exception:
         pil_font = ImageFont.truetype(DEFAULT_FONT, fs)
-    
+
     lines = txt.split('\n')
     line_imgs = []
     max_w = 0; total_h = 0
@@ -160,45 +228,89 @@ def _apply_subtitle(input_path, output_path, params):
         lw = bbox[2] - bbox[0]
         lh = bbox[3] - bbox[1]
         lh += int(fs * 0.25)
-        img = Image.new('RGBA', (lw + 30, lh + 10), (0,0,0,0))
+        img = Image.new('RGBA', (lw + 30, lh + 10), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.text((15, 5), line, font=pil_font, fill=tc,
                   stroke_width=stroke_width, stroke_fill=stroke_color)
         line_imgs.append(img)
         max_w = max(max_w, lw + 30)
         total_h += lh + 10
-    
-    # 合并多行
-    final_img = Image.new('RGBA', (max_w + 50, total_h + 12), (0,0,0,0))
+
+    final_img = Image.new('RGBA', (max_w + 50, total_h + 12), (0, 0, 0, 0))
     cy = 6
     for img in line_imgs:
         final_img.paste(img, (25, cy), img)
         cy += img.height
-    
-    # 保存临时文件
-    import tempfile
+
     sub_path = tempfile.mktemp(suffix='.png')
     final_img.save(sub_path)
-    
+
     sub_clip = ImageClip(sub_path).with_duration(clip.duration)
-    sub_clip = sub_clip.with_position(("center", clip.h - y_pos - final_img.height))
-    
+    # Y 位置解析
+    if isinstance(y_pos, str):
+        y_px = clip.h - 80 - final_img.height  # bottom
+    else:
+        y_px = clip.h - int(y_pos) - final_img.height
+    sub_clip = sub_clip.with_position(("center", y_px))
+
     layers = [clip, sub_clip]
     if bg_enabled:
         from moviepy import ColorClip
         bg_h = final_img.height + 24
         try:
-            bg = ColorClip(size=(clip.w, bg_h), color=bg_color).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
+            bg = ColorClip(size=(clip.w, bg_h), color=_str_to_rgb(bg_color)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
         except:
-            bg = ColorClip(size=(clip.w, bg_h), color=(0,0,0)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
+            bg = ColorClip(size=(clip.w, bg_h), color=(0, 0, 0)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
         layers.insert(1, bg)
-    
+
     final = CompositeVideoClip(layers)
     final.write_videofile(output_path, codec="libx264", audio_codec="aac")
     clip.close(); sub_clip.close(); final.close()
     try: os.unlink(sub_path)
     except: pass
-    return f"字幕完成: {output_path} (字体:{ft}, 大小:{fs})"
+    # 自动复制到 shared
+    try:
+        import shutil
+        fn = 'push_' + __import__('hashlib').md5(output_path.encode()).hexdigest()[:8] + '.mp4'
+        dest_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, fn)
+        shutil.copy2(output_path, dest)
+        os.chmod(dest, 0o644)
+        url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
+        return f"字幕完成: {url} (字体:{ft}, 大小:{fs})"
+    except:
+        return f"字幕完成: {output_path} (字体:{ft}, 大小:{fs})"
+
+
+def _str_to_rgb(s):
+    """颜色字符串转 RGB 元组"""
+    color_map = {"black": (0,0,0), "white": (255,255,255), "red": (255,0,0),
+                 "green": (0,255,0), "blue": (0,0,255), "gray": (128,128,128)}
+    return color_map.get(s.lower().strip(), (0, 0, 0))
+
+
+def _color_to_ass(color_name):
+    """颜色名转 ASS 格式 (BBGGRR 十六进制, 不含 alpha)"""
+    rgb = _str_to_rgb(color_name)
+    # ASS 格式: &HBBGGRR&
+    return f"{rgb[2]:02X}{rgb[1]:02X}{rgb[0]:02X}"
+
+
+def _ypos_to_alignment(y_pos):
+    """Y 位置转 ASS alignment 值 (1-9, 数字小键盘布局)"""
+    if isinstance(y_pos, str):
+        y_pos = y_pos.lower().strip()
+        if y_pos == "top": return 8    # 顶部居中
+        if y_pos == "middle": return 5  # 正中
+        return 2  # 底部居中 (默认)
+    try:
+        py = int(y_pos)
+        if py < 150: return 8   # 靠近顶部
+        if py > 400: return 2   # 靠近底部
+        return 5
+    except:
+        return 2
 
 def _apply_filter(input_path, output_path, params):
     """视频滤镜特效"""
@@ -328,7 +440,9 @@ def _apply_tts(params):
     pitch = int(params.get("pitch", 0))
     model = params.get("model", "speech-2.8-hd")
     output_path = params.get("output_path", "/tmp/tts_output.mp3")
-    if not tts_key: tts_key = "mmx"  # mmx-cli uses saved credentials
+    if not tts_key:
+        # ★ api_key 为空: 让 mmx CLI 使用自己配置文件中的凭证(不传 --api-key)
+        tts_key = None
     
     if provider == "openai":
         url = tts_url or "https://api.openai.com/v1/audio/speech"
@@ -343,8 +457,15 @@ def _apply_tts(params):
     
     # Minimax — 通过 mmx-cli 调用 Token Plan TTS
     output_path = params.get("output_path", "/tmp/tts_output.mp3")
+    # ★ mmx 绝对路径(引擎进程 PATH 可能不包含 npm global bin)
+    mmx_bin = "/home/naujtrats/.npm-global/bin/mmx"
+    if not os.path.exists(mmx_bin):
+        mmx_bin = "mmx"  # fallback
     try:
-        cmd = ["mmx", "--api-key", tts_key, "--region", "cn", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
+        cmd = [mmx_bin, "--region", "cn", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
+        # 只有 params 显式传了 api_key 时才用, 否则让 mmx 读自己的配置文件
+        if tts_key:
+            cmd = [mmx_bin, "--api-key", tts_key, "--region", "cn", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
         if speed != 1.0: cmd += ["--speed", str(speed)]
         if volume != 1.0: cmd += ["--vol", str(volume)]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=PROJECT_ROOT)
@@ -361,19 +482,251 @@ def _apply_tts(params):
         return f"TTS 异常 (mmx): {str(e)}"
 
 def _apply_voice_to_video(video_path, audio_path, output_path, params):
-    """将音频混入视频(FFmpeg)"""
+    """将音频混入视频(FFmpeg),保持原视频速度不变"""
     volume = float(params.get("volume", 1.0))
-    mix = params.get("mix", "replace")  # replace 替换原音频, mix 混合
+    mix = params.get("mix", "replace")
+    import json as _json
+    va = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",video_path], capture_output=True, text=True, timeout=10)
+    aa = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",audio_path], capture_output=True, text=True, timeout=10)
+    vd = float(_json.loads(va.stdout).get("format",{}).get("duration",0))
+    ad = float(_json.loads(aa.stdout).get("format",{}).get("duration",0))
     if mix == "replace":
-        cmd = ["ffmpeg","-y","-i",video_path,"-i",audio_path,"-c:v","copy","-map","0:v:0","-map","1:a:0","-shortest",output_path]
+        if ad > vd:
+            # 配音比视频长: 循环视频以匹配配音时长 (保持原速不变)
+            cmd = ["ffmpeg","-y","-stream_loop","-1","-i",video_path,"-i",audio_path,
+                   "-c:v","libx264","-c:a","aac","-shortest","-map","0:v:0","-map","1:a:0",output_path]
+        else:
+            # 视频比配音长: 截断视频到配音结束
+            cmd = ["ffmpeg","-y","-i",video_path,"-i",audio_path,
+                   "-c:v","copy","-map","0:v:0","-map","1:a:0","-shortest",output_path]
     else:
         cmd = ["ffmpeg","-y","-i",video_path,"-i",audio_path,"-filter_complex",
                f"[1:a]volume={volume}[a1];[0:a][a1]amix=inputs=2:duration=first:dropout_transition=2",
                "-c:v","copy","-shortest",output_path]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         return f"配音失败: {r.stderr[-300:]}"
-    return f"配音完成: {output_path}"
+    try:
+        import shutil
+        fn = 'push_' + __import__('hashlib').md5(output_path.encode()).hexdigest()[:8] + os.path.splitext(output_path)[1]
+        dest_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, fn)
+        shutil.copy2(output_path, dest)
+        os.chmod(dest, 0o644)
+        url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
+        return f"配音完成: {url} (视频{vd:.1f}s, 配音{ad:.1f}s)"
+    except:
+        return f"配音完成: {output_path} (视频{vd:.1f}s, 配音{ad:.1f}s)"
+
+
+def _apply_compose(input_path, output_path, params):
+    """
+    组合: 精美字幕 + 逐句TTS配音 + 原视频背景音保留
+    timeline: [{start:0, end:2.5, text:"你好"}, ...]
+    """
+    import tempfile as _tmp, json as _json
+    timeline = params.get("timeline", [])
+    if not timeline or not isinstance(timeline, list):
+        return "错误: compose 需要 timeline 数组"
+
+    # ── 样式参数 ──
+    fs = int(params.get("fontsize", 28))
+    ft = params.get("font", "noto-sans-bold")
+    tc = params.get("color", "white")
+    voice_id = params.get("voice_id", "female-yujie")
+    bg_enabled = params.get("bg", True)
+    bg_opacity = float(params.get("bg_opacity", 0.5))
+    bg_color = params.get("bg_color", "#1a1a2e")
+    bg_radius = int(params.get("bg_radius", 12))
+    stroke_width = int(params.get("stroke_width", 1))
+    stroke_color = params.get("stroke_color", "#00000080")
+    y_margin = int(params.get("y_margin", 40))  # 字幕距底部的距离
+    tts_volume = float(params.get("tts_volume", 1.0))
+    bg_volume = float(params.get("bg_volume", 0.3))  # 原音频保留比例
+
+    # Step 1: 逐条渲染字幕 PNG (Pillow, 精美样式)
+    from PIL import Image, ImageDraw, ImageFont
+    font_path = SUBTITLE_FONTS.get(ft, DEFAULT_FONT)
+    try:
+        pil_font = ImageFont.truetype(font_path, fs)
+    except:
+        pil_font = ImageFont.truetype(DEFAULT_FONT, fs)
+
+    subtitle_pngs = []
+    for i, seg in enumerate(timeline):
+        t = seg.get("text", "").strip()
+        if not t:
+            subtitle_pngs.append(None)
+            continue
+        # 渲染单行/多行字幕
+        lines = t.split('\n')
+        line_imgs = []
+        max_w = 0; total_h = 0
+        padding_x = 30; padding_y = 16
+        for line in lines:
+            line = line.strip()
+            if not line: line = ' '
+            bbox = pil_font.getbbox(line)
+            lw = bbox[2] - bbox[0] + 4  # 额外给描边留空间
+            lh = bbox[3] - bbox[1] + 4
+            # 单行背景: 文字宽+内边距, 文字高+内边距
+            img_w = lw + padding_x * 2
+            img_h = lh + padding_y
+            img = Image.new('RGBA', (img_w, img_h), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            # 圆角背景
+            if bg_enabled:
+                _rgba = _hex_to_rgba(bg_color, bg_opacity)
+                _draw_rounded_rect(draw, (0, 0, img_w, img_h), bg_radius, _rgba)
+            # 文字
+            draw.text((padding_x, padding_y // 2 - 2), line, font=pil_font, fill=tc,
+                      stroke_width=stroke_width, stroke_fill=stroke_color)
+            line_imgs.append(img)
+            max_w = max(max_w, img_w)
+            total_h += img_h
+
+        # 合并多行到一张图
+        final_img = Image.new('RGBA', (max_w, total_h + 4), (0, 0, 0, 0))
+        cy = 2
+        for img in line_imgs:
+            final_img.paste(img, ((max_w - img.width) // 2, cy), img)
+            cy += img.height
+
+        png_path = _tmp.mktemp(suffix=f'_sub{i}.png')
+        final_img.save(png_path)
+        subtitle_pngs.append((png_path, float(seg.get("start", 0)), float(seg.get("end", seg.get("start", 0) + 3))))
+
+    # Step 2: 逐句 TTS
+    mmx_bin = "/home/naujtrats/.npm-global/bin/mmx"
+    if not os.path.exists(mmx_bin):
+        mmx_bin = "mmx"
+    tts_segments = []
+    for i, seg in enumerate(timeline):
+        t = seg.get("text", "").strip()
+        if not t:
+            continue
+        start = seg.get("start", 0)
+        end = seg.get("end", start + 3)
+        window_dur = end - start
+        char_count = len(t.replace(' ', '').replace('\n', ''))
+        estimated_speed = round(char_count / (window_dur * 4), 1) if window_dur > 0 else 1.0
+        speed = max(0.7, min(1.5, estimated_speed))
+        # ★ 每条字幕可有独立音色, 未指定用全局 voice_id
+        seg_voice = seg.get("voice_id", voice_id)
+
+        audio_out = _tmp.mktemp(suffix=f'_seg{i}.m4a')
+        _before = set(glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3")))
+        cmd = [mmx_bin, "--region", "cn", "speech", "synthesize",
+               "--text", t, "--voice", seg_voice,
+               "--speed", str(speed), "--output", audio_out]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=PROJECT_ROOT)
+        if r.returncode != 0:
+            continue
+        _after = set(glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3")))
+        _new = list(_after - _before)
+        if _new:
+            import shutil
+            shutil.move(max(_new, key=os.path.getmtime), audio_out)
+        else:
+            _speech_files = glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3"))
+            if _speech_files:
+                import shutil
+                shutil.copy(max(_speech_files, key=os.path.getmtime), audio_out)
+
+        r_info = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", audio_out],
+            capture_output=True, text=True, timeout=10)
+        actual_dur = float(_json.loads(r_info.stdout).get("format", {}).get("duration", 1))
+
+        if actual_dur > window_dur:
+            trimmed = _tmp.mktemp(suffix=f'_seg{i}_trim.m4a')
+            subprocess.run(["ffmpeg", "-y", "-i", audio_out, "-ss", "0", "-t", str(window_dur),
+                           "-c:a", "aac", trimmed], capture_output=True, timeout=15)
+            try: os.unlink(audio_out)
+            except: pass
+            audio_out = trimmed
+            actual_dur = window_dur
+
+        tts_segments.append((audio_out, float(start), actual_dur))
+
+    # Step 3: 叠加字幕 PNG 到视频 (moviepy 逐段精确时间轴)
+    from moviepy import VideoFileClip, CompositeVideoClip, ImageClip, concatenate_videoclips
+    from moviepy import AudioFileClip, CompositeAudioClip
+
+    clip = VideoFileClip(input_path)
+    video_w, video_h = clip.w, clip.h
+    duration = clip.duration
+
+    # 构建字幕 clips
+    subtitle_clips = []
+    for png_path, start_t, end_t in subtitle_pngs:
+        if png_path is None:
+            continue
+        dur = max(0.1, end_t - start_t)
+        sc = ImageClip(png_path).with_duration(dur).with_start(start_t)
+        # 位置: 距离底部 y_margin px
+        img_h = Image.open(png_path).height
+        sc = sc.with_position(("center", video_h - y_margin - img_h))
+        subtitle_clips.append(sc)
+
+    # 构建音频
+    audio_clips = []
+    if clip.audio:
+        original_audio = clip.audio.with_volume_scaled(bg_volume)
+        audio_clips.append(original_audio)
+    for ap, offset, dur in tts_segments:
+        ac = AudioFileClip(ap).with_start(offset).with_volume_scaled(tts_volume)
+        if ac.duration > dur:
+            ac = ac.subclipped(0, dur)
+        audio_clips.append(ac)
+
+    # 合成
+    video_layers = [clip] + subtitle_clips
+    final_video = CompositeVideoClip(video_layers, size=(video_w, video_h))
+    if audio_clips:
+        final_audio = CompositeAudioClip(audio_clips)
+        final_video = final_video.with_audio(final_audio)
+
+    final_video.write_videofile(output_path, codec="libx264", audio_codec="aac",
+                                fps=clip.fps, preset="fast")
+    clip.close()
+    final_video.close()
+    for _, _, _ in subtitle_pngs:
+        try: os.unlink(_[0])
+        except: pass
+    for ap, _, _ in tts_segments:
+        try: os.unlink(ap)
+        except: pass
+
+    return f"compose 完成 (字幕{len(timeline)}条 + {len(tts_segments)}段配音, 背景音保留{bg_volume*100:.0f}%): {output_path}"
+
+
+def _hex_to_rgba(hex_color, alpha):
+    """#RRGGBB 或 #RRGGBBAA → (R,G,B,A)"""
+    h = hex_color.lstrip('#')
+    if len(h) == 6:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(alpha * 255))
+    elif len(h) == 8:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16))
+    return (0, 0, 0, int(alpha * 255))
+
+
+def _draw_rounded_rect(draw, rect, radius, fill):
+    """画圆角矩形到 Pillow draw 对象"""
+    x1, y1, x2, y2 = rect
+    r = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
+    # 四个角扇形
+    draw.pieslice([x1, y1, x1 + r*2, y1 + r*2], 180, 270, fill=fill)
+    draw.pieslice([x2 - r*2, y1, x2, y1 + r*2], 270, 360, fill=fill)
+    draw.pieslice([x1, y2 - r*2, x1 + r*2, y2], 90, 180, fill=fill)
+    draw.pieslice([x2 - r*2, y2 - r*2, x2, y2], 0, 90, fill=fill)
+    # 填充矩形
+    draw.rectangle([x1 + r, y1, x2 - r, y1 + r], fill=fill)
+    draw.rectangle([x1 + r, y2 - r, x2 - r, y2], fill=fill)
+    draw.rectangle([x1, y1 + r, x1 + r, y2 - r], fill=fill)
+    draw.rectangle([x2 - r, y1 + r, x2, y2 - r], fill=fill)
+    draw.rectangle([x1 + r, y1 + r, x2 - r, y2 - r], fill=fill)
 
 def get_ns(suffix: str, user_id: str = "") -> EngineStore:
     """获取用户隔离的 store 实例"""
@@ -1303,8 +1656,10 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                             return tts_result
                         audio_path = tts_result.split(": ")[1].split(" ")[0] if ": " in tts_result else "/tmp/tts_output.mp3"
                     return _apply_voice_to_video(input_path, audio_path, output_path, params)
+                elif action == "compose":
+                    return _apply_compose(input_path, output_path, params)
                 else:
-                    return f"未知操作: {action}, 支持: trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/frames/info"
+                    return f"未知操作: {action}, 支持: trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/compose/frames/info"
             except ImportError as _e:
                 return f"缺少依赖: {str(_e)}, 请先安装: pip install moviepy --break-system-packages"
             except Exception as _e:
@@ -3021,6 +3376,8 @@ async def video_edit_endpoint(request: Request):
                     return {"error": tts_result2}
                 audio_path2 = tts_result2.split(": ")[1].split(" ")[0] if ": " in tts_result2 else "/tmp/tts_output.mp3"
             return {"result": _apply_voice_to_video(input_path, audio_path2, output_path, params)}
+        elif action == "compose":
+            return {"result": _apply_compose(input_path, output_path, params)}
         elif action == "frames":
             # 提取关键帧并返回 base64 数组
             count = int(params.get("count", 3))
