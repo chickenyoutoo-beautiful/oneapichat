@@ -344,7 +344,7 @@ def _apply_tts(params):
     # Minimax — 通过 mmx-cli 调用 Token Plan TTS
     output_path = params.get("output_path", "/tmp/tts_output.mp3")
     try:
-        cmd = ["mmx", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
+        cmd = ["mmx", "--api-key", tts_key, "--region", "cn", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
         if speed != 1.0: cmd += ["--speed", str(speed)]
         if volume != 1.0: cmd += ["--vol", str(volume)]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=PROJECT_ROOT)
