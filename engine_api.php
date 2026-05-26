@@ -386,4 +386,23 @@ switch ($action) {
         $ctx = stream_context_create($opts);
         echo @file_get_contents($engine_url . '/engine/browser/js', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
+
+    // ★ engine_push 文件复制到 uploads
+    case 'push_file':
+        $srcPath = $_GET['path'] ?? '';
+        if (!$srcPath) { echo json_encode(['ok'=>false,'error'=>'缺少path']); exit; }
+        if (!file_exists($srcPath)) { echo json_encode(['ok'=>false,'error'=>'源文件不存在: '.$srcPath]); exit; }
+        $ext = strtolower(pathinfo($srcPath, PATHINFO_EXTENSION));
+        $fn = 'push_' . substr(md5($srcPath . time()), 0, 8) . '.' . $ext;
+        $destDir = __DIR__ . '/uploads/shared/';
+        if (!is_dir($destDir)) mkdir($destDir, 0755, true);
+        $destPath = $destDir . $fn;
+        if (copy($srcPath, $destPath) || rename($srcPath, $destPath)) {
+            $url = '/oneapichat/uploads/shared/' . rawurlencode($fn);
+            $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'naujtrats.xyz') . $url;
+            echo json_encode(['ok'=>true,'url'=>$fullUrl,'path'=>$url,'size'=>filesize($destPath)]);
+        } else {
+            echo json_encode(['ok'=>false,'error'=>'复制失败']);
+        }
+        break;
 }

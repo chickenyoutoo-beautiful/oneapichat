@@ -157,11 +157,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 限制文件大小: 200MB (视频需要更大容量)
-    $maxSize = $isVideo ? 200 * 1024 * 1024 : 10 * 1024 * 1024;
+    // 限制文件大小: 300MB
+    $maxSize = $isVideo ? 300 * 1024 * 1024 : 10 * 1024 * 1024;
     if (strlen($imageData) > $maxSize) {
         $typeLabel = $isVideo ? 'Video' : 'Image';
-        $maxLabel = $isVideo ? '200MB' : '10MB';
+        $maxLabel = $isVideo ? '300MB' : '10MB';
         http_response_code(413);
         echo json_encode(['error' => $typeLabel . ' too large (max ' . $maxLabel . ')']);
         exit;
