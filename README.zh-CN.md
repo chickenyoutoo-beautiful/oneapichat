@@ -214,3 +214,16 @@ OneAPIChat 附带了一个**超星（学习通）自动化**的 Web 界面，作
 - [KaTeX](https://katex.org/) — 数学公式渲染
 - [Mermaid](https://mermaid.js.org/) — 图表渲染
 - 所有开源贡献者
+
+## 🎤 语音合成 (TTS)
+
+项目通过 MiniMax CLI (`mmx-cli`) 调用 Token Plan 的语音合成服务。
+
+### 配置步骤
+1. 部署脚本已自动安装 `mmx-cli`
+2. 部署后手动登录：
+   ```bash
+   mmx auth login --api-key <你的Token Plan Key> --region cn
+   ```
+3. 在配置面板 → 语音合成中选择 MiniMax 提供商即可
+

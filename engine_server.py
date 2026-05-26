@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
 import tempfile
+import glob
 
 # Cross-platform: fcntl is Unix-only
 try:
@@ -327,7 +328,7 @@ def _apply_tts(params):
     pitch = int(params.get("pitch", 0))
     model = params.get("model", "speech-2.8-hd")
     output_path = params.get("output_path", "/tmp/tts_output.mp3")
-    if not tts_key: return "错误: 未配置 TTS API Key"
+    if not tts_key: tts_key = "mmx"  # mmx-cli uses saved credentials
     
     if provider == "openai":
         url = tts_url or "https://api.openai.com/v1/audio/speech"
@@ -340,24 +341,24 @@ def _apply_tts(params):
             return f"TTS 失败 (OpenAI): {resp.status_code} {resp.text[:200]}"
         except Exception as e: return f"TTS 异常 (OpenAI): {str(e)}"
     
-    # Minimax (default) — 需要 group_id
-    url = tts_url or "https://api.minimaxi.com/v1/t2a_v2"
-    body = {"model": model, "text": text, "stream": False,
-            "voice_setting": {"voice_id": voice_id, "speed": speed, "vol": volume, "pitch": pitch},
-            "audio_setting": {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1},
-            "group_id": params.get("group_id", ""),
-            "language_boost": params.get("language","auto")}
+    # Minimax — 通过 mmx-cli 调用 Token Plan TTS
+    output_path = params.get("output_path", "/tmp/tts_output.mp3")
     try:
-        resp = requests.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
-        data = resp.json()
-        if data.get("base_resp",{}).get("status_code") != 0:
-            return f"TTS 失败: {data.get('base_resp',{}).get('status_msg','')} (code:{data.get('base_resp',{}).get('status_code','')})"
-        hex_str = data.get("data",{}).get("audio","") if isinstance(data.get("data"), dict) else ""
-        if not hex_str: return f"TTS 返回空音频: {json.dumps(data)[:200]}"
-        import binascii
-        with open(output_path, "wb") as f: f.write(binascii.unhexlify(hex_str))
-        return f"语音合成完成 (MiniMax): {output_path} (音色:{voice_id})"
-    except Exception as e: return f"TTS 异常: {str(e)}"
+        cmd = ["mmx", "speech", "synthesize", "--text", text, "--voice", voice_id, "--output", output_path]
+        if speed != 1.0: cmd += ["--speed", str(speed)]
+        if volume != 1.0: cmd += ["--vol", str(volume)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=PROJECT_ROOT)
+        if r.returncode == 0:
+            mp3_files = glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3"))
+            if mp3_files:
+                newest = max(mp3_files, key=os.path.getmtime)
+                os.rename(newest, output_path)
+            return f"语音合成完成 (mmx): {output_path} (音色:{voice_id})"
+        else:
+            err = (r.stderr or r.stdout)[:300]
+            return f"TTS 失败 (mmx): {err}"
+    except Exception as e:
+        return f"TTS 异常 (mmx): {str(e)}"
 
 def _apply_voice_to_video(video_path, audio_path, output_path, params):
     """将音频混入视频(FFmpeg)"""
@@ -2931,7 +2932,7 @@ async def video_edit_endpoint(request: Request):
                 return JSONResponse({"error": "不支持远程URL,请先用 server_exec + curl 下载到服务器"}, status_code=400)
             else:
                 input_path = PROJECT_ROOT + input_path
-        if not os.path.exists(input_path):
+        if not os.path.exists(input_path) and action not in ("tts", "voice"):
             return JSONResponse({"error": f"文件不存在: {input_path}"}, status_code=404)
         if action == "info":
             cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path]
