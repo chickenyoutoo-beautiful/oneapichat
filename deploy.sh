@@ -223,6 +223,16 @@ native_install() {
         --break-system-packages 2>/dev/null || \
     pip3 install fastapi uvicorn requests aiofiles python-multipart 2>&1 | tail -3
 
+    info "安装 MiniMax CLI (用于 Token Plan TTS 语音合成)..."
+    npm install -g mmx-cli 2>&1 | tail -3
+    echo ""
+    echo "========================================="
+    echo "  MiniMax CLI 已安装。"
+    echo "  部署后请手动登录你的 Token Plan:"
+    echo "    mmx auth login --api-key <你的Key> --region cn"
+    echo "========================================="
+    echo ""
+
     success "依赖安装完成"
 }
 
