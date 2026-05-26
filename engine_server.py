@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'pylib'))
 
 try:
     from fastapi import FastAPI, Query, HTTPException, Request
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
 except:
@@ -104,6 +104,271 @@ class EngineStore:
 cron_store = EngineStore(ENGINE_DIR / "cron.json")
 agent_store = EngineStore(ENGINE_DIR / "agents.json")
 heartbeat_store = EngineStore(ENGINE_DIR / "heartbeat.json")
+
+# ── 字幕字体配置 ──
+SUBTITLE_FONTS = {
+    "noto-sans": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "noto-sans-bold": "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "noto-serif": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "noto-serif-bold": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+    "wqy-zenhei": "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "droid": "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "nimbus-sans": "/usr/share/fonts/X11/Type1/NimbusSans-Regular.pfb",
+    "nimbus-mono": "/usr/share/fonts/opentype/urw-base35/NimbusMonoPS-Regular.otf",
+}
+DEFAULT_FONT = SUBTITLE_FONTS.get("noto-sans", list(SUBTITLE_FONTS.values())[0])
+
+def _apply_subtitle(input_path, output_path, params):
+    """应用字幕到视频,使用 Pillow 渲染中文/emoji,完美支持 Unicode"""
+    txt = params.get("text", "Hello")
+    fs = int(params.get("fontsize", 42))
+    tc = params.get("color", "white")
+    ft = params.get("font", "noto-sans-bold")
+    bg_enabled = params.get("bg", True)
+    bg_opacity = float(params.get("bg_opacity", 0.4))
+    bg_color = params.get("bg_color", "black").strip()
+    # 字符串颜色转 RGB
+    if isinstance(bg_color, str):
+        color_map = {"black": (0,0,0), "white": (255,255,255), "red": (255,0,0), "green": (0,255,0), "blue": (0,0,255), "gray": (128,128,128)}
+        bg_color = color_map.get(bg_color.lower(), (0,0,0))
+    stroke_color = params.get("stroke_color", "black")
+    stroke_width = int(params.get("stroke_width", 2))
+    y_pos = int(params.get("y", 60))
+    font_path = SUBTITLE_FONTS.get(ft, DEFAULT_FONT)
+    
+    from moviepy import VideoFileClip, CompositeVideoClip, ImageClip
+    from PIL import Image, ImageDraw, ImageFont
+    clip = VideoFileClip(input_path)
+    
+    # 用 Pillow 渲染字幕为透明 PNG
+    try:
+        pil_font = ImageFont.truetype(font_path, fs)
+    except Exception:
+        pil_font = ImageFont.truetype(DEFAULT_FONT, fs)
+    
+    lines = txt.split('\n')
+    line_imgs = []
+    max_w = 0; total_h = 0
+    for line in lines:
+        line = line.strip()
+        if not line: line = ' '
+        bbox = pil_font.getbbox(line)
+        lw = bbox[2] - bbox[0]
+        lh = bbox[3] - bbox[1]
+        lh += int(fs * 0.25)
+        img = Image.new('RGBA', (lw + 30, lh + 10), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        draw.text((15, 5), line, font=pil_font, fill=tc,
+                  stroke_width=stroke_width, stroke_fill=stroke_color)
+        line_imgs.append(img)
+        max_w = max(max_w, lw + 30)
+        total_h += lh + 10
+    
+    # 合并多行
+    final_img = Image.new('RGBA', (max_w + 50, total_h + 12), (0,0,0,0))
+    cy = 6
+    for img in line_imgs:
+        final_img.paste(img, (25, cy), img)
+        cy += img.height
+    
+    # 保存临时文件
+    import tempfile
+    sub_path = tempfile.mktemp(suffix='.png')
+    final_img.save(sub_path)
+    
+    sub_clip = ImageClip(sub_path).with_duration(clip.duration)
+    sub_clip = sub_clip.with_position(("center", clip.h - y_pos - final_img.height))
+    
+    layers = [clip, sub_clip]
+    if bg_enabled:
+        from moviepy import ColorClip
+        bg_h = final_img.height + 24
+        try:
+            bg = ColorClip(size=(clip.w, bg_h), color=bg_color).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
+        except:
+            bg = ColorClip(size=(clip.w, bg_h), color=(0,0,0)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
+        layers.insert(1, bg)
+    
+    final = CompositeVideoClip(layers)
+    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+    clip.close(); sub_clip.close(); final.close()
+    try: os.unlink(sub_path)
+    except: pass
+    return f"字幕完成: {output_path} (字体:{ft}, 大小:{fs})"
+
+def _apply_filter(input_path, output_path, params):
+    """视频滤镜特效"""
+    ftype = params.get("type", "bw")
+    from moviepy import VideoFileClip, vfx
+    clip = VideoFileClip(input_path)
+    filters_map = {
+        "bw": vfx.BlackAndWhite,
+        "invert": vfx.InvertColors,
+        "brightness": lambda: vfx.LumContrast(lum=int(params.get("brightness",30)), contrast=int(params.get("contrast",0))),
+        "fade_in": lambda: vfx.FadeIn(int(params.get("duration",1))),
+        "fade_out": lambda: vfx.FadeOut(int(params.get("duration",1))),
+        "mirror_x": vfx.MirrorX,
+        "mirror_y": vfx.MirrorY,
+        "painting": lambda: vfx.Painting(saturation=float(params.get("saturation",1.3))),
+        "gamma": lambda: vfx.GammaCorrection(gamma=float(params.get("gamma",1.2))),
+        "slide_in": lambda: vfx.SlideIn(int(params.get("side",1)), int(params.get("duration",1))),
+        "slide_out": lambda: vfx.SlideOut(int(params.get("side",1)), int(params.get("duration",1))),
+        "freeze": lambda: vfx.Freeze(t=float(params.get("time",0)), d=int(params.get("duration",2))),
+        "blur": lambda: vfx.HeadBlur(r_blur=int(params.get("radius",10))),
+    }
+    f = filters_map.get(ftype, lambda: vfx.BlackAndWhite())()
+    clip = clip.with_effects([f])
+    clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+    clip.close()
+    return f"滤镜完成 ({ftype}): {output_path}"
+
+def _apply_transition(input_path, output_path, params):
+    """视频转场效果"""
+    files = params.get("files", [])
+    if not files or len(files) < 1:
+        return "错误: transition 需要 params.files[0] 为第二个视频路径"
+    ttype = params.get("type", "crossfade")
+    duration = int(params.get("duration", 1))
+    from moviepy import VideoFileClip, CompositeVideoClip, vfx
+    clip1 = VideoFileClip(input_path)
+    clip2 = VideoFileClip(files[0])
+    if clip1.duration < duration or clip2.duration < duration:
+        clip1.close(); clip2.close()
+        return f"错误: 视频太短 (需 >= {duration}s)"
+    if ttype == "crossfade":
+        clip1e = clip1.subclipped(0, clip1.duration - duration/2).with_effects([vfx.CrossFadeOut(duration/2)])
+        clip2e = clip2.subclipped(duration/2).with_effects([vfx.CrossFadeIn(duration/2)])
+    elif ttype == "fade":
+        clip1e = clip1.subclipped(0, clip1.duration - duration).with_effects([vfx.FadeOut(duration)])
+        clip2e = clip2.subclipped(duration).with_effects([vfx.FadeIn(duration)])
+    elif ttype == "slide_left":
+        clip1e = clip1.subclipped(0, clip1.duration - duration).with_effects([vfx.SlideOut(1, duration)])
+        clip2e = clip2.subclipped(duration).with_effects([vfx.SlideIn(3, duration)])
+    elif ttype == "slide_right":
+        clip1e = clip1.subclipped(0, clip1.duration - duration).with_effects([vfx.SlideOut(3, duration)])
+        clip2e = clip2.subclipped(duration).with_effects([vfx.SlideIn(1, duration)])
+    elif ttype == "wipe":
+        clip1e = clip1.subclipped(0, clip1.duration - duration).with_effects([vfx.FadeOut(duration)])
+        clip2e = clip2
+    else:
+        clip1e = clip1; clip2e = clip2
+    final = CompositeVideoClip([clip1e, clip2e.with_start(clip1e.duration)])
+    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+    clip1.close(); clip2.close()
+    return f"转场完成 ({ttype}): {output_path}"
+
+
+
+def _apply_ffmpeg_filter(input_path, output_path, params):
+    """FFmpeg 高性能滤镜: hue, eq, boxblur, vignette, unsharp, colorbalance, drawtext"""
+    ftype = params.get("type", "none")
+    filters = {
+        "hue": f"hue=s={params.get('saturation',1.2)}",
+        "eq": f"eq=brightness={float(params.get('brightness',0)):.2f}:contrast={float(params.get('contrast',1)):.2f}",
+        "boxblur": f"boxblur={params.get('radius',5)}",
+        "vignette": "vignette=PI/4",
+        "unsharp": "unsharp=5:5:1.0",
+        "colorbalance": f"colorbalance=rs={float(params.get('r',0)):.2f}:gs={float(params.get('g',0)):.2f}:bs={float(params.get('b',0)):.2f}",
+        "sepia": "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
+        "vintage": "curves=vintage",
+        "grain": "noise=alls=20:allf=t+u",
+        "bw": "colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3",
+    }
+    vf = filters.get(ftype)
+    if not vf: return f"未知滤镜: {ftype}, 支持: " + ", ".join(filters.keys())
+    cmd = ["ffmpeg", "-y", "-i", input_path, "-vf", vf, "-c:v", "libx264", "-c:a", "aac", output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0: return f"滤镜失败: {r.stderr[-300:]}"
+    return f"滤镜完成 ({ftype}): {output_path}"
+
+def _apply_ffmpeg_transition(input_path, output_path, params):
+    """FFmpeg xfade 高性能转场: fade, wipeleft, slideright, dissolve, pixelize, circlecrop, radial, squeeze"""
+    files = params.get("files", [])
+    if not files: return "错误: transition 需要 params.files[0] 为第二个视频路径"
+    ttype = params.get("type", "fade")
+    duration = float(params.get("duration", 1))
+    offset = float(params.get("offset", 2)) - duration
+    extra = params.get("extra", "")
+    # 先取两个视频的时长
+    import json as _json
+    r1 = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",input_path], capture_output=True, text=True, timeout=10)
+    r2 = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",files[0]], capture_output=True, text=True, timeout=10)
+    d1 = float(_json.loads(r1.stdout).get("format",{}).get("duration",0))
+    d2 = float(_json.loads(r2.stdout).get("format",{}).get("duration",0))
+    offset = min(offset, d1 - duration)
+    if offset < 0: offset = max(0, d1 - duration)
+    cmd = [
+        "ffmpeg","-y",
+        "-i", input_path,
+        "-i", files[0],
+        "-filter_complex",
+        f"[0:v][1:v]xfade=transition={ttype}:duration={duration}:offset={offset}{extra}[v];"
+        f"[0:a][1:a]acrossfade=d={duration}[a]",
+        "-map","[v]","-map","[a]",
+        "-c:v","libx264","-c:a","aac",
+        output_path
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if r.returncode != 0: return f"转场失败: {r.stderr[-300:]}"
+    return f"转场完成 ({ttype}): {output_path}"
+def _apply_tts(params):
+    """多提供商 TTS 语音合成"""
+    text = params.get("text", "")
+    if not text: return "错误: 缺少 text 参数"
+    provider = params.get("provider", "minimax")
+    tts_key = params.get("api_key", "")
+    tts_url = params.get("api_url", "")
+    voice_id = params.get("voice_id", "male-qn-qingse")
+    speed = float(params.get("speed", 1.0))
+    volume = float(params.get("volume", 1.0))
+    pitch = int(params.get("pitch", 0))
+    model = params.get("model", "speech-2.8-hd")
+    output_path = params.get("output_path", "/tmp/tts_output.mp3")
+    if not tts_key: return "错误: 未配置 TTS API Key"
+    
+    if provider == "openai":
+        url = tts_url or "https://api.openai.com/v1/audio/speech"
+        body = {"model": "tts-1", "voice": voice_id or "alloy", "input": text, "speed": speed}
+        try:
+            resp = requests.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
+            if resp.status_code == 200:
+                with open(output_path, "wb") as f: f.write(resp.content)
+                return f"语音合成完成 (OpenAI): {output_path} ({len(resp.content)} bytes)"
+            return f"TTS 失败 (OpenAI): {resp.status_code} {resp.text[:200]}"
+        except Exception as e: return f"TTS 异常 (OpenAI): {str(e)}"
+    
+    # Minimax (default)
+    url = tts_url or "https://api.minimax.io/v1/t2a_v2"
+    body = {"model": model, "text": text, "stream": False,
+            "voice_setting": {"voice_id": voice_id, "speed": speed, "vol": volume, "pitch": pitch},
+            "audio_setting": {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1},
+            "language_boost": params.get("language","auto")}
+    try:
+        resp = requests.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
+        data = resp.json()
+        if data.get("base_resp",{}).get("status_code") != 0:
+            return f"TTS 失败: {data.get('base_resp',{}).get('status_msg','')} (code:{data.get('base_resp',{}).get('status_code','')})"
+        hex_str = data.get("data",{}).get("audio","") if isinstance(data.get("data"), dict) else ""
+        if not hex_str: return f"TTS 返回空音频: {json.dumps(data)[:200]}"
+        import binascii
+        with open(output_path, "wb") as f: f.write(binascii.unhexlify(hex_str))
+        return f"语音合成完成 (MiniMax): {output_path} (音色:{voice_id})"
+    except Exception as e: return f"TTS 异常: {str(e)}"
+
+def _apply_voice_to_video(video_path, audio_path, output_path, params):
+    """将音频混入视频(FFmpeg)"""
+    volume = float(params.get("volume", 1.0))
+    mix = params.get("mix", "replace")  # replace 替换原音频, mix 混合
+    if mix == "replace":
+        cmd = ["ffmpeg","-y","-i",video_path,"-i",audio_path,"-c:v","copy","-map","0:v:0","-map","1:a:0","-shortest",output_path]
+    else:
+        cmd = ["ffmpeg","-y","-i",video_path,"-i",audio_path,"-filter_complex",
+               f"[1:a]volume={volume}[a1];[0:a][a1]amix=inputs=2:duration=first:dropout_transition=2",
+               "-c:v","copy","-shortest",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return f"配音失败: {r.stderr[-300:]}"
+    return f"配音完成: {output_path}"
 
 def get_ns(suffix: str, user_id: str = "") -> EngineStore:
     """获取用户隔离的 store 实例"""
@@ -981,10 +1246,60 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         clip.audio.write_audiofile(audio_output)
                     clip.close()
                     return f"音频提取完成: {audio_output}"
-                elif action == "transition":
-                    return "转场操作需要两个视频文件,请使用 concat 或 FFmpeg xfade 滤镜手动执行"
+                elif action == "concat":
+                    files = params.get("files", [])
+                    if not files:
+                        return "错误: concat 需要 files 数组参数"
+                    from moviepy import concatenate_videoclips
+                    clips = [VideoFileClip(f) for f in files]
+                    final = concatenate_videoclips(clips, method="compose")
+                    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    for c in clips: c.close()
+                    final.close()
+                    return f"拼接完成 ({len(files)}个视频): {output_path}"
+                elif action == "overlay":
+                    overlay_path = params.get("overlay_path", "")
+                    if not overlay_path or not os.path.exists(overlay_path):
+                        return "错误: overlay 需要 overlay_path 参数指向存在的文件"
+                    x = params.get("x", 10)
+                    y = params.get("y", 10)
+                    scale = params.get("scale", 0.3)
+                    from moviepy import CompositeVideoClip
+                    clip = VideoFileClip(input_path)
+                    ov = VideoFileClip(overlay_path).resized(scale)
+                    ov = ov.with_position((x, y))
+                    final = CompositeVideoClip([clip, ov])
+                    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    clip.close(); ov.close(); final.close()
+                    return f"画中画完成: {output_path}"
+                elif action == "text":
+                    return _apply_subtitle(input_path, output_path, params)
+                elif action == "rotate":
+                    angle = float(params.get("angle", 90))
+                    from moviepy import vfx
+                    clip = VideoFileClip(input_path)
+                    clip = clip.with_effects([vfx.Rotate(angle)])
+                    clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    clip.close()
+                    return f"旋转完成 ({angle}°): {output_path}"
+                elif action in ("filter", "video_filter"):
+                    return _apply_ffmpeg_filter(input_path, output_path, params)
+                elif action in ("transition", "video_transition"):
+                    return _apply_ffmpeg_transition(input_path, output_path, params)
+                elif action == "tts":
+                    return _apply_tts(params)
+                elif action == "voice":
+                    # voice: 将 TTS 生成的音频混入视频
+                    audio_path = params.get("audio_path", "")
+                    if not audio_path:
+                        # 如果没有 audio_path,先调 TTS 生成
+                        tts_result = _apply_tts(params)
+                        if "失败" in tts_result or "异常" in tts_result:
+                            return tts_result
+                        audio_path = tts_result.split(": ")[1].split(" ")[0] if ": " in tts_result else "/tmp/tts_output.mp3"
+                    return _apply_voice_to_video(input_path, audio_path, output_path, params)
                 else:
-                    return f"未知操作: {action}, 支持: trim/speed/resize/audio/info"
+                    return f"未知操作: {action}, 支持: trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/frames/info"
             except ImportError as _e:
                 return f"缺少依赖: {str(_e)}, 请先安装: pip install moviepy --break-system-packages"
             except Exception as _e:
@@ -2583,6 +2898,154 @@ async def browser_page_close():
     bm = await ensure_browser_connected()
     result = await bm.close_page()
     return result
+
+
+@app.post("/engine/video_edit")
+async def video_edit_endpoint(request: Request):
+    """视频剪辑 HTTP 端点"""
+    try:
+        body = await request.json()
+        action = body.get("action", "")
+        params = body.get("params", {})
+        input_path = body.get("input_path", "")
+        output_path = body.get("output_path", "/tmp/video_output.mp4")
+        if not input_path:
+            return JSONResponse({"error": "未提供 input_path"}, status_code=400)
+        # ★ 自动转换相对路径为绝对路径(支持上传文件的 URL 格式)
+        if not os.path.exists(input_path) and input_path.startswith("/"):
+            # 处理 /oneapichat/uploads/... 格式
+            if input_path.startswith("/oneapichat/"):
+                input_path = PROJECT_ROOT + "/" + input_path.replace("/oneapichat/", "", 1)
+            elif input_path.startswith("/uploads/"):
+                input_path = PROJECT_ROOT + input_path
+            elif input_path.startswith("http"):
+                return JSONResponse({"error": "不支持远程URL,请先用 server_exec + curl 下载到服务器"}, status_code=400)
+            else:
+                input_path = PROJECT_ROOT + input_path
+        if not os.path.exists(input_path):
+            return JSONResponse({"error": f"文件不存在: {input_path}"}, status_code=404)
+        if action == "info":
+            cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            return {"result": r.stdout}
+        elif action == "trim":
+            start = params.get("start", 0)
+            end = params.get("end", None)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if end: clip = clip.subclip(start, end)
+            else: clip = clip.subclip(start)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"裁剪完成: {output_path}"}
+        elif action == "speed":
+            factor = float(params.get("factor", 1.0))
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.MultiplySpeed(factor)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"调速完成 (x{factor}): {output_path}"}
+        elif action == "resize":
+            width = params.get("width", 0); height = params.get("height", 0)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if width and height: clip = clip.resized((width, height))
+            elif width: clip = clip.resized(width=width)
+            elif height: clip = clip.resized(height=height)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"缩放完成: {output_path}"}
+        elif action == "audio":
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            audio_output = output_path + ".mp3" if not output_path.endswith(".mp3") else output_path
+            if clip.audio: clip.audio.write_audiofile(audio_output)
+            clip.close()
+            return {"result": f"音频提取完成: {audio_output}"}
+        elif action == "concat":
+            files = params.get("files", [])
+            if not files: return JSONResponse({"error": "concat 需要 files 数组"}, status_code=400)
+            from moviepy import VideoFileClip, concatenate_videoclips
+            clips = [VideoFileClip(f) for f in files]
+            final = concatenate_videoclips(clips, method="compose")
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            for c in clips: c.close()
+            final.close()
+            return {"result": f"拼接完成: {output_path}"}
+        elif action == "overlay":
+            overlay_path = params.get("overlay_path", "")
+            if not overlay_path or not os.path.exists(overlay_path):
+                return JSONResponse({"error": "overlay_path 无效"}, status_code=400)
+            x, y = params.get("x", 10), params.get("y", 10)
+            scale = params.get("scale", 0.3)
+            from moviepy import VideoFileClip, CompositeVideoClip
+            clip = VideoFileClip(input_path)
+            ov = VideoFileClip(overlay_path).resized(scale).with_position((x, y))
+            final = CompositeVideoClip([clip, ov])
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close(); ov.close(); final.close()
+            return {"result": f"画中画完成: {output_path}"}
+        elif action == "text":
+            result = _apply_subtitle(input_path, output_path, params)
+            return {"result": result}
+        elif action == "rotate":
+            angle = float(params.get("angle", 90))
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.Rotate(angle)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"旋转完成 ({angle}°): {output_path}"}
+        elif action in ("filter", "video_filter"):
+            return {"result": _apply_ffmpeg_filter(input_path, output_path, params)}
+        elif action in ("transition", "video_transition"):
+            return {"result": _apply_ffmpeg_transition(input_path, output_path, params)}
+        elif action == "tts":
+            return {"result": _apply_tts(params)}
+        elif action == "voice":
+            audio_path2 = params.get("audio_path", "")
+            if not audio_path2:
+                tts_result2 = _apply_tts(params)
+                if "失败" in tts_result2 or "异常" in tts_result2:
+                    return {"error": tts_result2}
+                audio_path2 = tts_result2.split(": ")[1].split(" ")[0] if ": " in tts_result2 else "/tmp/tts_output.mp3"
+            return {"result": _apply_voice_to_video(input_path, audio_path2, output_path, params)}
+        elif action == "frames":
+            # 提取关键帧并返回 base64 数组
+            count = int(params.get("count", 3))
+            duration = float(params.get("duration", 10))
+            scale = int(params.get("scale", 640))
+            interval = max(1, int(duration / count))
+            import base64 as b64
+            cmd = ["ffmpeg", "-y", "-i", input_path, "-vframes", str(count),
+                   "-vf", f"fps=1/{interval},scale={scale}:-1",
+                   "-f", "image2pipe", "-q:v", "3", "-vcodec", "mjpeg", "-"]
+            r = subprocess.run(cmd, capture_output=True, timeout=60)
+            if r.returncode != 0 or len(r.stdout) < 100:
+                return JSONResponse({"error": f"截图失败: {r.stderr.decode()[:200]}"}, status_code=500)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            frame_count = 0
+            frames = []
+            pos = 0; buf = r.stdout
+            clips_total = []
+            while pos < len(buf) - 4:
+                soi = buf.find(b'\xff\xd8', pos)
+                if soi < 0: break
+                eoi = buf.find(b'\xff\xd9', soi)
+                if eoi < 0: break
+                jpg = buf[soi:eoi+2]
+                frames.append("data:image/jpeg;base64," + b64.b64encode(jpg).decode())
+                pos = eoi + 2
+            clip.close()
+            return {"result": json.dumps({"frames": frames, "count": len(frames)})}
+        else:
+            return JSONResponse({"error": f"未知操作: {action}"}, status_code=400)
+    except ImportError as e:
+        return JSONResponse({"error": f"缺少依赖: {str(e)}"}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": f"视频剪辑失败: {str(e)}"}, status_code=500)
 
 
 if __name__ == "__main__":

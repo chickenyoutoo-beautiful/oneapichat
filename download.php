@@ -23,19 +23,22 @@ if (!$filename) {
     exit;
 }
 
-// 安全检查：只允许临时目录下的 .md 和 .txt 文件
-$allowedDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR;
-$filepath = $allowedDir . $filename;
-
-// 防止目录穿越
-$realPath = realpath($filepath);
-if ($realPath === false || strpos($realPath, realpath($allowedDir)) !== 0) {
-    http_response_code(403);
-    echo json_encode(['error' => '文件路径不合法']);
-    exit;
+// 安全检查：只允许 tmp 和 uploads 目录
+$allowedDirs = [
+    sys_get_temp_dir() . DIRECTORY_SEPARATOR,
+    __DIR__ . '/uploads/',
+];
+$realPath = false;
+foreach ($allowedDirs as $allowedDir) {
+    $filepath = $allowedDir . $filename;
+    $realPath = realpath($filepath);
+    if ($realPath !== false) {
+        $foundDir = realpath($allowedDir);
+        if ($foundDir && strpos($realPath, $foundDir) === 0) break;
+        $realPath = false;
+    }
 }
-
-if (!file_exists($realPath)) {
+if (!$realPath || !file_exists($realPath)) {
     http_response_code(404);
     echo json_encode(['error' => '文件不存在']);
     exit;

@@ -327,32 +327,49 @@ window.analyzeImage = async function(imageInput, focus) {
 
 window.analyzeVideo = async function(videoInput, query) {
     if (!videoInput) throw new Error('无效视频');
+    var enginePath = videoInput;
+    if (videoInput.startsWith('http')) enginePath = videoInput.replace(window.location.origin, '');
+    
+    // 1. 获取视频元信息
+    var infoRes = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'info',params:{},input_path:enginePath}) });
+    var infoData = await infoRes.json();
+    if (infoData.error) throw new Error(infoData.error);
+    var infoJson = JSON.parse(infoData.result || '{}');
+    var duration = parseFloat(infoJson.format?.duration || 0);
+    var vStream = (infoJson.streams || []).find(function(s){return s.codec_type==='video';}) || {};
+    var width = vStream.width || 0, height = vStream.height || 0, codec = vStream.codec_name || '', fps = vStream.r_frame_rate || '';
+    
+    // 2. 智能帧数 + 关键帧
+    var frameCount = Math.max(8, Math.min(120, Math.ceil(duration) + Math.floor((query||'').length / 3)));
+    var frameAnalyses = [];
     try {
-        // 确保URL是完整的(如果是相对路径,补全为当前源)
-        var fullUrl = videoInput;
-        if (!videoInput.startsWith('http') && !videoInput.startsWith('data:')) {
-            fullUrl = window.location.origin + videoInput;
+        var frRes = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'frames',params:{count:frameCount,duration:duration||10,scale:640},input_path:enginePath}) });
+        var frData = await frRes.json();
+        if (!frData.error && frData.result) {
+            var frJson = JSON.parse(frData.result);
+            var frames = frJson.frames || [];
+            var promises = frames.map(function(f, fi) {
+                return window.analyzeImage(f, '第'+(fi+1)+'/'+frames.length+'帧。'+(query||'描述画面内容'))
+                    .then(function(d) { return '**第'+(fi+1)+'帧:** '+(d||'分析完成'); })
+                    .catch(function() { return '第'+(fi+1)+'帧: 分析失败'; });
+            });
+            frameAnalyses = await Promise.all(promises);
         }
-        var resp = await fetch('/oneapichat/video_analyze.php', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({
-                video_url: fullUrl.startsWith('http') ? fullUrl : '',
-                video_base64: fullUrl.startsWith('data:') ? fullUrl : '',
-                query: query, frames_count: 3
-            })
-        });
-        var data = await resp.json();
-        if (data.error) throw new Error(data.error);
-        if (data.result && data.result.indexOf('分析请求失败') >= 0) throw new Error('帧分析失败');
-        return data.result || '视频分析完成';
-    } catch(e) {
-        // 降级: analyzeImage 分析首帧
-        if (videoInput.startsWith('data:')) {
-            return '(仅首帧) ' + await window.analyzeImage(videoInput, query);
-        }
-        throw e;
+    } catch(e) {}
+    
+    // 3. 构建结果
+    var result = '🎬 **视频分析结果**\n\n**元信息:**\n';
+    result += '- 时长: ' + Math.floor(duration/60) + '分' + Math.round(duration%60) + '秒\n';
+    if (width) result += '- 分辨率: ' + width + 'x' + height + '\n';
+    if (fps) result += '- 帧率: ' + fps + '\n';
+    if (codec) result += '- 编码: ' + codec + '\n';
+    if (frameAnalyses.length > 0) {
+        result += '\n**关键帧分析(' + frameAnalyses.length + '帧):**\n';
+        frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
     }
+    return result;
 };
+
 // 测试 MCP 端点
 
 // 一键配置
@@ -418,7 +435,7 @@ function clearAuthToken() {
 }
 
 const MOBILE_BREAKPOINT = 786;
-const MAX_FILE_SIZE = 40 * 1024 * 1024;
+const MAX_FILE_SIZE = 300 * 1024 * 1024;
 
 // ★ 图片压缩配置: 最大宽/高和压缩质量
 const IMAGE_COMPRESS_MAX_DIM = 2048;      // 最大边 2048px
@@ -1664,6 +1681,25 @@ const VIDEO_UNDERSTANDING_TOOL = {
     }
 };
 
+// ==================== 视频剪辑工具 ====================
+const VIDEO_EDIT_TOOL = {
+    type: "function",
+    function: {
+        name: "video_edit",
+        description: "视频剪辑 + 配音工具。字幕(text)、滤镜(video_filter:sepia|eq|vignette|bw|vintage|grain|...)、转场(video_transition:fade|dissolve|wipeleft|...)、配音(voice:含tts语音合成)、纯语音(tts)、裁剪(trim)、拼接(concat)、调速(speed)、缩放(resize)、画中画(overlay)、旋转(rotate)、音频提取(audio)。TTS支持MiniMax/OpenAI/自定义,可指定音色语速。",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", description: "操作: trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info" },
+                params: { type: "object", description: "tts:{text,voice_id,speed,provider:minimax|openai,api_key} voice:{text,voice_id,mix:replace|mix} text:{text,fontsize,font,bg,bg_opacity,color} video_filter:{type:sepia|eq|vignette|bw|...} video_transition:{type:fade|dissolve|...,duration,offset,files:['视频2路径']}" },
+                input_path: { type: "string", description: "输入视频路径(服务器绝对路径或 /oneapichat/uploads/...)" },
+                output_path: { type: "string", description: "输出路径(可选)" }
+            },
+            required: ["action", "params", "input_path"]
+        }
+    }
+};
+
 // ==================== Agent 模式控制工具 ====================
 const ASK_AGENT_TOOL = {
     type: "function",
@@ -2168,11 +2204,14 @@ async function restoreUserData() {
     var _serverChats = null;
     await Promise.all([
         (async function() {
-            try { await loadConfigFromServer(); } catch(e) { console.warn('[restoreUserData] 配置加载失败:', e.message); }
+            try { await Promise.race([loadConfigFromServer(), new Promise(function(resolve){setTimeout(resolve, 8000)})]); } catch(e) { console.warn('[restoreUserData] 配置加载失败:', e.message); }
         })(),
         (async function() {
             try {
-                _serverChats = await loadChatsFromServer();
+                _serverChats = await Promise.race([
+                    loadChatsFromServer(),
+                    new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 10000); })
+                ]);
                 if (_serverChats && typeof _serverChats === 'object' && Object.keys(_serverChats).length > 0) {
                     // ★ 合并:本地优先(最新数据),服务器补充缺失项
                     var merged = JSON.parse(JSON.stringify(chats));
@@ -2386,7 +2425,7 @@ const DEFAULT_CONFIG = {
         '   【关键规则】当用户上传了图片时:\n' +
         '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
         '   - 用户没有上传图片但要求画图时,调用 generate_image(纯文生图)\n' +
-        '   - 如果用户只是问图片里有什么/描述图片内容,调用 analyze_image 工具来分析图片\n' +
+        '   - 如果用户只是问图片里有什么/描述图片内容,直接查看收到的图片回复(多模态)或调用 analyze_image(文本模型)\n' +
         '   【关键规则】当用户没有上传图片时:\n' +
         '   - 用户要求画图、生成图片时,调用 generate_image\n' +
         '   【强制要求】必须实际调用 generate_image 工具才能生成图片。严禁在回复中伪造图片URL或声称已生成图片但未使用工具。没有工具调用就没有图片。\n' +
@@ -2532,21 +2571,15 @@ async function fetchWithRetry(url, options, maxRetries = 3, retryDelay = 1000) {
 function setupKeyboardDetection() {
     // 优先使用 visualViewport API
     if (window.visualViewport) {
-        var _vpHeight = window.visualViewport.height;
-        window.visualViewport.addEventListener('resize', function() {
-            var vp = window.visualViewport;
-            var diff = _vpHeight - vp.height;
-            keyboardActive = diff > 50;
-            // iOS Safari 键盘收起时强制重置视口
-            if (diff < -30 && !keyboardActive) {
-                document.body.classList.remove('keyboard-visible');
-                window.scrollTo(0, 0);
-                setTimeout(function(){window.scrollTo(0,0);},150);
-                setTimeout(function(){window.scrollTo(0,0);},400);
-            } else if (keyboardActive) {
-                document.body.classList.add('keyboard-visible');
-            }
-            _vpHeight = vp.height;
+        window.visualViewport.addEventListener('resize', () => {
+            const viewport = window.visualViewport;
+            // 如果视口宽度没变但高度减少了,说明键盘弹出了
+            const heightDiff = lastInnerHeight - viewport.height;
+            keyboardActive = heightDiff > 50; // 高度减少超过50px认为是键盘
+            lastInnerHeight = viewport.height;
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+            // 滚动时也可能伴随键盘操作
         });
     } else {
         // 回退方案:监听 window 的 resize 事件
@@ -3332,13 +3365,6 @@ function shouldUseVisionFormat() {
         // ★ 使用模型配置:检查模型是否支持视觉
         const _vm = _getModelCfg().supportsVision(currentModel);
         if (!_vm) return false; // 文本模型不支持视觉格式,由 analyze_image 工具处理
-        // ★ 额外检查:即使模型配置认为支持视觉,也要看 autoDetectedTextModels 黑名单
-        try {
-            var _autoTextModels = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
-            for (var _ati2 = 0; _ati2 < _autoTextModels.length; _ati2++) {
-                if (currentModel.toLowerCase().indexOf(_autoTextModels[_ati2]) !== -1) return false;
-            }
-        } catch(e) {}
         return true;
     }
 
@@ -3442,7 +3468,7 @@ function buildUserContent(text, files) {
         if (!window._currentMessageImagesByChat) window._currentMessageImagesByChat = {};
         window._currentMessageImagesByChat[currentChatId] = imageFiles.map(f => ({ name: f.name, content: f.content, type: f.type }));
 
-        const imageDescs = imageFiles.map(f => `[用户上传了图片(需要用analyze_image查看内容): ${f.name}]`);
+        const imageDescs = imageFiles.map(f => `[用户上传了图片: ${f.name}]`);
         const otherFiles = files.filter(f => !f.type?.startsWith('image/'));
         const otherContent = otherFiles.length
             ? otherFiles.map(f => {
@@ -3698,7 +3724,7 @@ function insertTextAtCursor(input, text) {
 async function processSelectedFiles(fileList) {
     for (const file of Array.from(fileList)) {
         if (file.size > MAX_FILE_SIZE) {
-            showToast('文件 ' + file.name + ' 超过10MB', 'warning');
+            showToast('文件 ' + file.name + ' 超过300MB', 'warning');
             continue;
         }
 
@@ -6987,7 +7013,7 @@ const _TOOL_CATEGORIES = [
 // ── 工具显示名映射 ──
 const _TOOL_LABELS = {
     'SEARCH_TOOL_DEFINITION': '联网搜索', 'RAG_SEARCH_TOOL_DEFINITION': '知识库搜索', 'WEB_FETCH_TOOL_DEFINITION': '网页抓取',
-    'IMAGE_TOOL_DEFINITION': '图片生成', 'ANALYZE_IMAGE_TOOL': '图片分析', 'VIDEO_UNDERSTANDING_TOOL': '视频分析',
+    'IMAGE_TOOL_DEFINITION': '图片生成', 'ANALYZE_IMAGE_TOOL': '图片分析', 'VIDEO_UNDERSTANDING_TOOL': '视频分析', 'VIDEO_EDIT_TOOL': '视频剪辑',
     'CHAXING_LOGIN_TOOL_DEFINITION': '登录', 'CHAXING_LIST_TOOL_DEFINITION': '课程列表', 'CHAXING_TOOL_DEFINITION': '刷课执行',
     'CHAXING_STATUS_TOOL_DEFINITION': '状态', 'CHAXING_STOP_TOOL_DEFINITION': '停止', 'CHAXING_STATS_TOOL_DEFINITION': '统计',
     'CHAXING_OVERVIEW_TOOL': '总览',
@@ -7475,6 +7501,12 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('agentMaxToolRounds', getVal('agentMaxToolRounds') || '30');
     localStorage.setItem('agentThinkingDepth', getVal('agentThinkingDepth') || 'standard');
     localStorage.setItem('agentSystemPrompt', getVal('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
+    // ★ TTS 语音合成配置
+    localStorage.setItem('ttsProvider', getVal('ttsProvider') || 'minimax');
+    localStorage.setItem('ttsApiKey', encrypt(getVal('ttsApiKey') || ''));
+    localStorage.setItem('ttsApiUrl', getVal('ttsApiUrl') || '');
+    localStorage.setItem('ttsVoiceId', getVal('ttsVoiceId') || '');
+    localStorage.setItem('ttsSpeed', getVal('ttsSpeed') || '1.0');
     // ★ 保存工具开关状态
     if (window.saveToolToggleStates) window.saveToolToggleStates();
     } catch(e) {
@@ -7489,8 +7521,9 @@ function saveConfig(showFeedback = false) {
             } else if (!$.configPanel.classList.contains('hidden-panel')) {
                 $.configPanel.classList.add('hidden-panel');
             }
-            // ★ 同时隐藏遮罩层
+            // ★ 同步隐藏遮罩
             if ($.sidebarMask) $.sidebarMask.classList.remove('active');
+            lockBodyScroll(false);
         }
         configSnapshot = null;
         configPanelWasOpen = false;
@@ -8137,40 +8170,37 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         const fileList = document.createElement('div');
         fileList.className = 'file-list';
         files.forEach(f => {
-            if (f.isVideo || f.type?.startsWith('video/')) {
-                var videoSrc = f.serverUrl || f.content || '';
-                if (videoSrc && videoSrc.startsWith('/')) videoSrc = window.location.origin + videoSrc;
-                if (videoSrc) {
+            if (f.isVideo || (f.type && f.type.startsWith('video/')))  {
+                var _vsrc = f.serverUrl || f.content || '';
+                if (_vsrc && _vsrc.startsWith('/')) _vsrc = window.location.origin + _vsrc;
+                if (_vsrc) {
                     var vid = document.createElement('video');
                     vid.controls = true;
                     vid.preload = 'metadata';
                     vid.style.cssText = 'max-width:100%;max-height:300px;border-radius:8px;margin-top:4px';
                     var src = document.createElement('source');
-                    src.src = videoSrc;
+                    src.src = _vsrc;
                     src.type = f.type || 'video/mp4';
                     vid.appendChild(src);
                     fileList.appendChild(vid);
                 }
             } else if (f.isImage || f.type?.startsWith('image/')) {
-                // 优先使用 serverUrl(避免 localStorage 撑爆后图片丢失)
-                var imgSrc = f.serverUrl || f.content || '';
-                if (imgSrc && imgSrc.startsWith('/')) imgSrc = window.location.origin + imgSrc;
-                // 点击放大
+                var _isrc = f.serverUrl || f.content || '';
+                if (_isrc && _isrc.startsWith('/')) _isrc = window.location.origin + _isrc;
                 var img = document.createElement('img');
                 img.className = 'file-image-preview';
-                img.src = imgSrc;
+                img.src = _isrc;
                 img.alt = f.name;
                 img.title = f.name;
                 img.loading = 'lazy';
+                // 点击放大
                 img.style.cursor = 'pointer';
-                img.onclick = function() {
-                    var modal = document.createElement('div');
+                img.onclick = () => {
+                    const modal = document.createElement('div');
                     modal.className = 'image-modal';
                     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;';
-                    var modalImg = document.createElement('img');
-                    modalImg.src = imgSrc;
-                    modalImg.style.maxWidth = '90%';
-                    modalImg.style.maxHeight = '90%';
+                    const modalImg = document.createElement('img');
+                    modalImg.src = f.content;
                     modalImg.style.maxWidth = '90%';
                     modalImg.style.maxHeight = '90%';
                     modalImg.style.objectFit = 'contain';
@@ -10584,16 +10614,15 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
         saveChats();
     }
 
-    // 重新发送之前的用户消息,但移除图片文件(因为模型不支持 image_url 格式)
+    // 重新发送之前的用户消息
     if (chatId && chats[chatId]) {
         const lastUser = [...chats[chatId].messages].reverse().find(m => m.role === 'user' && !m.temporary);
         if (lastUser) {
-            // ★ 关键修复:重发时移除图片文件,避免再次触发 image_url 格式导致重复400死循环
-            var textFiles = lastUser.files ? lastUser.files.filter(function(f) { return !f.isImage && !f.isVideo && !(f.type && (f.type.startsWith('image/') || f.type.startsWith('video/'))); }) : [];
 
             setTimeout(async () => {
                 try {
-                    await sendMessage(true, lastUser.text, textFiles);
+                    // ★ 自动重发(图片已由文本模型列表屏蔽,走 analyze_image 工具)
+                    await sendMessage(true, lastUser.text, lastUser.files);
                 } catch (e) {
                     console.error('[AutoRecovery] 重发失败:', e);
                 }
@@ -10729,7 +10758,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 图片会作为附件发送给AI,AI可以自主选择是否使用 analyze_image 工具
 
     if (!skipUserAdd) {
-        chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : (f.isVideo ? 'video/mp4' : '')), isVideo: f.isVideo || false, isImage: f.isImage || false })) });
+        chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
         // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
         if (chats[chatId].title === '新对话') {
@@ -10755,7 +10784,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // 执行搜索
     const _modelMiniMax2 = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     // ★ 修复: MiniMax 也启用工具调用模式,让模型通过 tool_calls 决定何时搜索
-    const useToolCall = getChecked('searchToolCallToggle');
+    const useToolCall = getChecked('searchToolCallToggle') || (files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/')));
     let searchResult = { searchPerformed: false, searchResults: null, optimized: null, searchError: null };
     // 工具调用模式下不主动搜索,让模型通过tool_calls决定何时搜索
     if (!useToolCall && (getChecked('searchToggle') || forceSearch)) {
@@ -10771,6 +10800,91 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         }
     }
 
+    // ★ 非工具调用模式下:自动分析上传的图片并告诉模型
+    // 当使用不支持工具的模型(如deepseek-r1)时,AI无法调用 analyze_image 工具
+    // 因此需要在上游自动完成图片分析,将结果注入上下文
+    if (currentMessageHasImages && !useToolCall) {
+        var _allImageAnalyses = [];
+        var _imageFiles = files ? files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }) : [];
+        // 也检查聊天记录中的图片
+        if (!_imageFiles.length && chats[chatId]) {
+            var _lastMsgs = chats[chatId].messages;
+            for (var _imi = _lastMsgs.length - 1; _imi >= 0; _imi--) {
+                var _m = _lastMsgs[_imi];
+                if (_m.role === 'user' && _m.files && _m.files.length) {
+                    _imageFiles = _m.files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
+                    if (_imageFiles.length) break;
+                }
+            }
+        }
+        if (_imageFiles.length) {
+            showToast('🔍 正在自动分析' + _imageFiles.length + '张图片...', 'info', 5000);
+            if (currentBubble) {
+                var _imgStatus = document.createElement('div');
+                _imgStatus.className = 'search-status';
+                _imgStatus.textContent = '🔍 自动分析' + _imageFiles.length + '张图片...';
+                var _mb = currentBubble.querySelector('.markdown-body');
+                if (_mb) _mb.appendChild(_imgStatus);
+            }
+            for (var _iai = 0; _iai < _imageFiles.length; _iai++) {
+                var _imgFile = _imageFiles[_iai];
+                var _imgInput = '';
+                if (_imgFile.serverUrl && typeof _imgFile.serverUrl === 'string' && _imgFile.serverUrl.length > 0) {
+                    _imgInput = _imgFile.serverUrl.startsWith('http') ? _imgFile.serverUrl : window.location.origin + _imgFile.serverUrl;
+                } else {
+                    _imgInput = _imgFile.content || '';
+                }
+                if (_imgInput) {
+                    try {
+                        var _analysis = await window.analyzeImage(_imgInput, '请详细描述这张图片的内容,包括物体、场景、文字等所有可见信息。');
+                        if (_analysis && typeof _analysis === 'string' && _analysis.length > 10) {
+                            _allImageAnalyses.push('【图片' + (_iai + 1) + '分析结果】\n' + _analysis);
+                        }
+                        if (currentBubble) {
+                            var _st = currentBubble.querySelector('.search-status');
+                            if (_st) _st.textContent = '✅ 已分析' + (_iai + 1) + '/' + _imageFiles.length + '张图片';
+                        }
+                    } catch(e) {
+                        console.warn('[AutoAnalyze] 图片', _iai + 1, '分析失败:', e.message);
+                        _allImageAnalyses.push('【图片' + (_iai + 1) + '】[分析失败: ' + e.message + ']');
+                    }
+                }
+            }
+            if (_allImageAnalyses.length) {
+                var _analysisText = '\n\n以下是对用户上传图片的自动分析结果(AI无法直接看到图片,请根据以下描述回答):\n\n' + _allImageAnalyses.join('\n\n---\n\n');
+                // 注入到最近的非 system 消息中
+                var _sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+                if (_sysIdx !== -1) {
+                    apiMessages[_sysIdx].content += _analysisText;
+                } else {
+                    apiMessages.unshift({ role: 'system', content: _analysisText });
+                }
+                // ★ 缓存到 chat 中,后续追问无需重新分析
+                try {
+                    if (!chats[chatId].imageAnalyses) chats[chatId].imageAnalyses = [];
+                    for (var _cai = 0; _cai < _allImageAnalyses.length; _cai++) {
+                        var _cacheEntry = _allImageAnalyses[_cai];
+                        // 去重:检查是否已缓存过相同内容
+                        if (chats[chatId].imageAnalyses.indexOf(_cacheEntry) === -1) {
+                            chats[chatId].imageAnalyses.push(_cacheEntry);
+                        }
+                    }
+                    if (chats[chatId].imageAnalyses.length > 50) {
+                        chats[chatId].imageAnalyses = chats[chatId].imageAnalyses.slice(-30);
+                    }
+                    slimSaveChats();
+                } catch(e) {
+                    console.warn('[CacheImage] 缓存失败:', e.message);
+                }
+                if (currentBubble) {
+                    var _st = currentBubble.querySelector('.search-status');
+                    if (_st) _st.textContent = '✅ 图片分析完成(' + _imageFiles.length + '张)';
+                }
+                showToast('✅ 图片自动分析完成', 'success', 2000);
+            }
+        }
+    }
+
     // 可选:上下文压缩
     if (!skipUserAdd && getChecked('compressToggle')) {
         const threshold = parseInt(getVal('compressThreshold')) || 10;
@@ -10782,17 +10896,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     // ★ 提前设置 MiniMax 标记,供 buildApiMessages 使用
     window.__isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     let apiMessages = buildApiMessages(chatId);
-
-    // ★ 非视觉模型+有图片:注入提示引导模型调用 analyze_image 工具
-    if (currentMessageHasImages && !(window.MODEL_CONFIGS && window.MODEL_CONFIGS.supportsVision((getVal('modelSelect') || '').toLowerCase()))) {
-        var _imgHint = '\n\n用户上传了图片。你无法直接看到图片内容,但可以使用 analyze_image 工具来分析图片。请根据用户的问题决定是否需要调用 analyze_image 工具来分析图片。如果有需要,调用该工具获取图片内容描述后再回答。';
-        var _sysIdx2 = apiMessages.findIndex(function(m) { return m.role === 'system'; });
-        if (_sysIdx2 !== -1) {
-            apiMessages[_sysIdx2].content += _imgHint;
-        } else {
-            apiMessages.unshift({ role: 'system', content: _imgHint });
-        }
-    }
 
     // ★ 注入历史图片分析缓存,避免模型重复调用 analyze_image 工具
     if (chats[chatId] && chats[chatId].imageAnalyses && chats[chatId].imageAnalyses.length > 0) {
@@ -10965,8 +11068,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
 
     // ★ Agent 模式: 始终启用工具调用
     var agentModeActive = isAgentToolsActive();
-    // 视觉模型有图片时自动开启工具调用(提供图生图等工具)
-    // 非视觉模型有图片时:由 useToolCall 开关决定(预分析已提前注入,无需强制开启)
     var effectiveToolCall = useToolCall || currentMessageHasImages || agentModeActive;
 
     // ★ 终极检查: 模型在 no-tool 列表中就直接跳过整个工具注册
@@ -10991,6 +11092,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
     const imageTools = [IMAGE_TOOL_DEFINITION, ANALYZE_IMAGE_TOOL];
     if (i2iTool) imageTools.push(i2iTool);
     imageTools.push(VIDEO_UNDERSTANDING_TOOL);
+    imageTools.push(VIDEO_EDIT_TOOL);
 
     // 构建工具列表:根据搜索开关和工具模式动态选择
     const searchOn = getChecked('searchToggle');
@@ -11016,8 +11118,8 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         // 文件读取/搜索(基础操作,不限制)
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
-        // ask_agent: 仅在非 Agent/YOLO 模式下注册,用于请求升级模式
-        if (!isYoloMode() && !isAgentToolsActive()) {
+        // ask_agent: AI可通过此工具请求用户启用Agent模式(yolo模式下不需要)
+        if (!isYoloMode()) {
             tools.push(ASK_AGENT_TOOL);
         }
 
@@ -11104,6 +11206,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 'generate_image_i2i': 'IMAGE_TOOL_DEFINITION',
                 'analyze_image': 'ANALYZE_IMAGE_TOOL',
                 'video_understanding': 'VIDEO_UNDERSTANDING_TOOL',
+                'video_edit': 'VIDEO_EDIT_TOOL',
                 'chaoxing_login': 'CHAXING_LOGIN_TOOL_DEFINITION',
                 'chaoxing_list_courses': 'CHAXING_LIST_TOOL_DEFINITION',
                 'chaoxing_auto': 'CHAXING_TOOL_DEFINITION',
@@ -11878,8 +11981,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'ask_agent') {
                         if (isYoloMode()) {
                             toolResult = { result: '✅ 当前已是 YOLO 自主模式,无需再次请求。' };
-                        } else if (isAgentToolsActive()) {
-                            toolResult = { result: '✅ 当前已是 Agent 模式,可直接使用服务器工具。' };
                         } else {
                             var reason = args.reason || '执行高级操作';
                             if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
@@ -11921,7 +12022,20 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         toolResult = await engineApiHandler('agent_stop', args);
                     }
                      else if (func.name === 'engine_push') {
-                        toolResult = await engineApiHandler('push', args);
+                        var _pushMsg = args.msg || '';
+                        var _pushFile = args.file || '';
+                        if (_pushFile) {
+                            // 复制文件到 uploads/shared/
+                            try {
+                                var _pRes = await fetch('/oneapichat/engine_api.php?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
+                                var _pData = await _pRes.json();
+                                if (_pData.ok && _pData.url) {
+                                    if (!pendingMsg._sharedFiles) pendingMsg._sharedFiles = [];
+                                    pendingMsg._sharedFiles.push({ url: _pData.url, size: _pData.size || 0 });
+                                }
+                            } catch(e) {}
+                        }
+                        toolResult = { result: '✅ ' + _pushMsg };
                     }
                     // ===== SRC 星穹铁道工具 (完整版) =====
                      else if (func.name === 'src_status') {
@@ -12489,24 +12603,46 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                             var msgs = chats[chatId].messages;
                             for (var vi = msgs.length-1; vi >= 0; vi--) {
                                 if (msgs[vi].files) {
-                                    var vf = msgs[vi].files.filter(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
-                                    vids = vids.concat(vf);
+                                    var vf2 = msgs[vi].files.filter(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
+                                    vids = vids.concat(vf2);
                                 }
                             }
                         }
                         var vf = vids[vidIdx];
                         if (!vf) { toolResult = { error: '未找到视频' }; }
                         else {
-                            var input = vf.content || vf.serverUrl;
-                            // serverUrl 是相对路径时补全为完整URL
-                            if (vf.serverUrl && typeof vf.serverUrl === 'string' && vf.serverUrl.length > 0) {
-                                input = vf.serverUrl.startsWith('http') ? vf.serverUrl : window.location.origin + vf.serverUrl;
+                            var input = vf.serverUrl || vf.content;
+                            if (input && !input.startsWith('http') && !input.startsWith('data:')) {
+                                input = window.location.origin + input;
                             }
                             try {
                                 var r = await window.analyzeVideo(input, query);
                                 toolResult = { result: r };
                             } catch(e) { toolResult = { error: e.message }; }
                         }
+                    } else if (func.name === 'video_edit') {
+                        // 视频剪辑工具: 转发到引擎
+                        var _srcEnginePath = args.input_path || '';
+                        if (_srcEnginePath.startsWith('http')) _srcEnginePath = _srcEnginePath.replace(window.location.origin, '');
+                        if (args.params && args.params.files && Array.isArray(args.params.files)) {
+                            for (var _fi=0; _fi<args.params.files.length; _fi++) {
+                                if (args.params.files[_fi].startsWith('http')) args.params.files[_fi] = args.params.files[_fi].replace(window.location.origin, '');
+                            }
+                        }
+                        var _veditBody = { action: args.action || 'info', params: args.params || {}, input_path: _srcEnginePath };
+                        if (args.output_path) _veditBody.output_path = args.output_path;
+                        if (args.action === 'tts') {
+                            _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
+                            _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
+                        }
+                        if (args.action === 'voice' && !_veditBody.params.api_key) {
+                            _veditBody.params.api_key = decrypt(localStorage.getItem('ttsApiKey')||'')||decrypt(localStorage.getItem('visionApiKey')||'')||'';
+                            _veditBody.params.provider = args.params?.provider || localStorage.getItem('ttsProvider') || 'minimax';
+                        }
+                        var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody) });
+                        var _veditData = await _veditResp.json();
+                        if (_veditData.error) { toolResult = { error: _veditData.error }; }
+                        else { toolResult = { result: _veditData.result || '操作完成' }; }
                     }
                     return toolResult;
                 }
@@ -13049,6 +13185,21 @@ window.useAlternativeVisionModel = function() {
                     // ★ 渲染 web_fetch 访问的链接列表
                     if (pendingMsg._webFetchUrls && pendingMsg._webFetchUrls.length > 0) {
                         _renderWebFetchUrls(_bubble, pendingMsg._webFetchUrls);
+                    }
+                    // ★ 渲染 engine_push 分享的文件按钮
+                    if (pendingMsg._sharedFiles && pendingMsg._sharedFiles.length > 0) {
+                        var _sfCont = document.createElement('div');
+                        _sfCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
+                        pendingMsg._sharedFiles.forEach(function(_sf) {
+                            var _fn = _sf.url.split('/').pop().split('?')[0];
+                            var _a = document.createElement('a');
+                            _a.href = _sf.url.startsWith('/') ? window.location.origin + _sf.url : _sf.url;
+                            _a.target = '_blank'; _a.download = _fn;
+                            _a.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#4f46e5;color:#fff;border-radius:10px;font-size:12px;font-weight:500;text-decoration:none;box-shadow:0 2px 8px rgba(79,70,229,0.25);';
+                            _a.innerHTML = '🎬 ' + _fn + ' <span style="opacity:0.7;font-size:10px;">' + (_sf.size ? (_sf.size/1048576).toFixed(1)+'MB' : '') + '</span>';
+                            _sfCont.appendChild(_a);
+                        });
+                        _bubble.appendChild(_sfCont);
                     }
                 }
             }
@@ -13644,7 +13795,6 @@ function slimSaveChats() {
                     c.messages = c.messages.map(function(msg) {
                         if (msg.files) {
                             msg.files = msg.files.map(function(f) {
-                                // ★ 保留 serverUrl(刷新后可以通过服务器加载图片)
                                 if (f.content && (f.isImage || f.isVideo || (f.type && (f.type.startsWith('image/') || f.type.startsWith('video/'))))) {
                                     return { name: f.name, type: f.type || (f.isImage ? 'image/png' : 'video/mp4'), size: f.size, isImage: f.isImage, isVideo: f.isVideo, content: '', serverUrl: f.serverUrl || '' };
                                 }
@@ -13776,6 +13926,7 @@ window.createNewChat = function () {
 };
 
 window.loadChat = function (id) {
+    if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
     currentChatId = id;
     localStorage.setItem('lastChatId', id);
     const container = $.chatMessagesContainer;
@@ -14298,13 +14449,7 @@ function initializeConfig() {
             $.chatTitle.id = 'chatTitle';
             $.chatTitle.dataset.mobile = '1';
             $.chatTitle.textContent = '新对话';
-            var _hb = document.querySelector('header');
-            var _cb = document.getElementById('chatBox');
-            if (_hb && _cb && _hb.parentNode) {
-                _hb.parentNode.insertBefore($.chatTitle, _cb);
-            } else {
-                document.getElementById('chatBox')?.prepend($.chatTitle);
-            }
+            document.getElementById('chatBox')?.prepend($.chatTitle);
         } else {
             const header = document.querySelector('header');
             const left = header?.querySelector('.flex.items-center.gap-4');
@@ -14354,6 +14499,11 @@ function initAgentConfig() {
     setVal('agentMaxToolRounds', localStorage.getItem('agentMaxToolRounds') || '30');
     setVal('agentThinkingDepth', localStorage.getItem('agentThinkingDepth') || 'standard');
     setVal('agentSystemPrompt', localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
+    setVal('ttsProvider', localStorage.getItem('ttsProvider') || 'minimax');
+    setVal('ttsApiKey', (function(){try{return decrypt(localStorage.getItem('ttsApiKey')||'')||'';}catch(e){return '';}})());
+    setVal('ttsApiUrl', localStorage.getItem('ttsApiUrl') || '');
+    setVal('ttsVoiceId', localStorage.getItem('ttsVoiceId') || '');
+    setVal('ttsSpeed', localStorage.getItem('ttsSpeed') || '1.0');
     // 更新三模式选择器
     updateModeSelector(mode);
     // ★ Agent/YOLO 模式下强制启用工具调用

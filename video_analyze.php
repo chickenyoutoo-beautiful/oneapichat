@@ -12,6 +12,7 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Content-Type: application/json; charset=utf-8');
 
+ob_end_clean(); ob_start();
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
@@ -88,14 +89,73 @@ try {
         throw new Exception('无法从视频中提取任何帧');
     }
 
-    // === 步骤4: 分析每一帧 ===
+    // === 步骤4: 并行分析所有帧 ===
     $frameAnalyses = [];
     $totalFrames = count($frames);
-    for ($i = 0; $i < $totalFrames; $i++) {
-        $frameBase64 = $frames[$i];
-        $frameAnalysis = analyzeFrame($frameBase64, $query, $i, $totalFrames, $useDirectApi, $visionUrl, $visionKey, $visionModel);
-        $frameAnalyses[] = $frameAnalysis;
-        gc_collect_cycles();
+    @set_time_limit(300); // 允许最长5分钟
+    if ($useDirectApi && function_exists('curl_multi_init')) {
+        // ★ 并行请求: 多帧同时调用 VLM API
+        $mh = curl_multi_init();
+        $handles = [];
+        for ($i = 0; $i < $totalFrames; $i++) {
+            $url = rtrim($visionUrl, '/');
+            $prompt = '这是视频的第' . ($i + 1) . '/' . $totalFrames . '帧。分析需求: ' . $query . '。请详细描述这一帧画面的内容,包括可见的物体、人物、场景、文字、动作等。';
+            $body = json_encode([
+                'model' => $visionModel,
+                'prompt' => $prompt,
+                'image_url' => $frames[$i]
+            ]);
+            $ch = curl_init($url);
+            $headers = ['Content-Type: application/json'];
+            if ($visionKey) $headers[] = 'Authorization: Bearer ' . $visionKey;
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $body,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 90,
+                CURLOPT_CONNECTTIMEOUT => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+            ]);
+            curl_multi_add_handle($mh, $ch);
+            $handles[$i] = $ch;
+        }
+        // 执行并行请求(总超时120秒)
+        $running = null;
+        $startTime = time();
+        do {
+            curl_multi_exec($mh, $running);
+            if ($running > 0) {
+                curl_multi_select($mh, 0.5);
+                if (time() - $startTime > 120) break; // 120秒总超时
+            }
+        } while ($running > 0);
+        // 收集结果
+        for ($i = 0; $i < $totalFrames; $i++) {
+            $ch = $handles[$i];
+            $response = @curl_multi_getcontent($ch);
+            $httpCode = @curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpCode === 200 && $response && strlen($response) > 0) {
+                $data = @json_decode($response, true);
+                if ($data) {
+                    $frameAnalyses[] = $data['choices'][0]['message']['content'] ?? $data['content'] ?? $data['result'] ?? '帧' . ($i+1) . ': 分析完成';
+                } else {
+                    $frameAnalyses[] = '帧' . ($i+1) . ': ' . substr($response, 0, 300);
+                }
+            } else {
+                $frameAnalyses[] = '帧' . ($i+1) . ': 分析失败(HTTP ' . intval($httpCode) . ')';
+            }
+            @curl_multi_remove_handle($mh, $ch);
+            @curl_close($ch);
+        }
+        @curl_multi_close($mh);
+    } else {
+        // 降级: 串行分析
+        for ($i = 0; $i < $totalFrames; $i++) {
+            $frameAnalysis = analyzeFrame($frames[$i], $query, $i, $totalFrames, $useDirectApi, $visionUrl, $visionKey, $visionModel);
+            $frameAnalyses[] = $frameAnalysis;
+            gc_collect_cycles();
+        }
     }
 
     // === 步骤5: 汇总结果 ===
