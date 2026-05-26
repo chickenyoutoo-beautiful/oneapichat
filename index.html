@@ -49,7 +49,7 @@
     <!-- 主脚本（defer 不阻塞渲染） -->
     
 
-<script defer src="./js/main.js?v=1779805516"></script>
+<script defer src="./js/main.js?v=1779808067"></script>
 <script defer src="./js/src-manager.js?v=4"></script>
 
     <!-- /命令列表 SVG 图标库 -->
@@ -439,11 +439,12 @@ window.VISION_API_KEY = '';
         </div>
 
         <!-- 分类: 聊天模型 -->
-        <div class="config-section">
-            <div class="config-section-title">
+        <details class="config-section details-section" open>
+            <summary class="config-section-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                 聊天模型
-            </div>
+            </summary>
+            <div class="details-content">
             <div class="config-field">
                 <label class="config-label">提供商</label>
                 <select id="baseUrlProvider" class="config-input config-select">
@@ -482,14 +483,16 @@ window.VISION_API_KEY = '';
                 <label class="config-label">视觉理解 API Key</label>
                 <input type="text" id="visionApiKey" autocomplete="off" class="config-input masked-key" placeholder="视觉理解专用密钥">
             </div>
-        </div>
+            </div>
+            </details>
 
         <!-- 分类: 图像生成 -->
-        <div class="config-section">
-            <div class="config-section-title">
+        <details class="config-section details-section" open>
+            <summary class="config-section-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                 图像生成
-            </div>
+            </summary>
+            <div class="details-content">
             <div class="config-field">
                 <label class="config-label">提供商</label>
                 <select id="imageProvider" class="config-input config-select">
@@ -522,14 +525,16 @@ window.VISION_API_KEY = '';
             <div id="imageProviderHint" class="config-hint" style="font-size:12px;color:#666;margin-top:4px;">
                 MiniMax: 使用 image-01 模型,写实风格。OpenRouter: 使用 GPT Image 2。各自使用独立的 API Key 和 API 地址。
             </div>
-        </div>
+            </div>
+        </details>
 
         <!-- 分类: 生成参数 -->
-        <div class="config-section">
-            <div class="config-section-title">
+        <details class="config-section details-section" open>
+            <summary class="config-section-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                 生成参数
-            </div>
+            </summary>
+            <div class="details-content">
             <div class="config-slider-field">
                 <div class="config-slider-header">
                     <span class="config-label">Temperature</span>
@@ -548,7 +553,8 @@ window.VISION_API_KEY = '';
                 <span class="config-label">流式输出</span>
                 <input type="checkbox" id="streamToggle" class="config-toggle" checked >
             </div>
-        </div>
+            </div>
+        </details>
 
         <!-- 分类: 语音合成 (TTS) -->
         <details class="config-section details-section">
@@ -716,12 +722,13 @@ window.VISION_API_KEY = '';
                 </div>
             </div>
         </details>
-                <!-- 记忆系统面板 -->
-                <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb;" class="dark:border-gray-700">
-                    <div class="config-section-title" style="margin-bottom:8px;">
+                <!-- 记忆系统面板 (可折叠) -->
+                <details class="config-section details-section" style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb;" open>
+                    <summary class="config-section-title" style="margin-bottom:8px;">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
                         记忆系统
-                    </div>
+                    </summary>
+                    <div class="details-content">
                     <!-- 记忆条目列表 -->
                     <div id="memoryList" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">
                         <div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">加载中...</div>
@@ -736,17 +743,20 @@ window.VISION_API_KEY = '';
                         <button onclick="window.refreshMemoryList()" class="config-btn" style="padding:6px 12px;font-size:11px;">🔄 刷新</button>
                         <button onclick="window.clearAllMemories()" class="config-btn" style="padding:6px 12px;font-size:11px;color:#ef4444;">🗑 清空</button>
                     </div>
-                </div>
+                    </div>
+                </details>
 
 
         <!-- 分类: System Prompt -->
-        <div class="config-section">
-            <div class="config-section-title">
+        <details class="config-section details-section">
+            <summary class="config-section-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 System Prompt
-            </div>
+            </summary>
+            <div class="details-content">
             <textarea id="systemPrompt" rows="3" class="config-textarea" placeholder="设置默认系统提示词..."></textarea>
-        </div>
+            </div>
+        </details>
 
         <!-- 分类: Agent 模式 (可折叠) -->
         <details class="config-section details-section" id="agentConfigSection">
