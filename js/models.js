@@ -75,10 +75,10 @@ const configs = [
     // DeepSeek V4 Flash — 2026年最新
     // 推理方式: reasoning_effort (low/medium/high/max) + 通过 extra_body 传 thinking type
     // 工具调用格式: <｜DSML｜tool_calls> XML (但API也兼容 OpenAI format)
-    // 多模态: 支持原生 image_url 输入(Vision 变体,部分账号灰度开放)
+    // DeepSeek V4 Flash — 纯文本模型,不支持视觉
     cfg({
         match: ['deepseek-v4-flash'],
-        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
         maxOutputTokens: 384000,
@@ -87,10 +87,10 @@ const configs = [
         alias: ['deepseek', 'ds-v4-flash'],
     }),
 
-    // DeepSeek V4 Pro — 推理方式同上,支持原生多模态
+    // DeepSeek V4 Pro — 推理方式同上,纯文本模型
     cfg({
         match: ['deepseek-v4-pro'],
-        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
         maxOutputTokens: 384000,
@@ -131,7 +131,8 @@ const configs = [
     // GPT-4o / GPT-4o-mini
     cfg({
         match: ['gpt-4o', 'gpt-4o-mini', 'gpt-4o-', 'chatgpt-4o'],
-        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.RESP_FORMAT, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        // ★ 修复: deepseek-v4-flash 不支持视觉
+        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.RESP_FORMAT, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         contextWindow: 128000,
         maxOutputTokens: 16384,
         defaultMaxTokens: 4096,
@@ -177,7 +178,8 @@ const configs = [
     // GPT-5-Pro 仅支持 reasoning_effort=high
     cfg({
         match: ['gpt-5', 'gpt-5.1', 'gpt-5.2', 'gpt-5-pro'],
-        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL, S.MAX_COMP_TOKENS],
+        // ★ 修复: deepseek-v4-flash 不支持视觉
+        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL, S.MAX_COMP_TOKENS],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logit_bias', 'response_format', 'max_tokens'],
         bannedBodyKeys: ['max_tokens'],
         contextWindow: 200000,
@@ -464,7 +466,8 @@ const configs = [
 
     cfg({
         match: ['gemini-3', 'gemini-3.0', 'gemini-3-'],
-        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
+        // ★ 修复: deepseek-v4-flash 不支持视觉
+        supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'user', 'response_format'],
         contextWindow: 1048576,  // 1M tokens
         maxOutputTokens: 16384,

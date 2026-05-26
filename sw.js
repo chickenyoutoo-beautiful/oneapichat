@@ -1,5 +1,5 @@
-// Service Worker v5
-const CACHE_NAME = 'naujtrats-v5';
+// Service Worker v6
+const CACHE_NAME = 'naujtrats-v6';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
@@ -12,16 +12,20 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-  // 只缓存 GET 静态资源
   if (e.request.method !== 'GET') return;
   if (url.includes('/engine_api') || url.includes('/chat.php') || url.includes('/auth.php')) return;
   if (!url.startsWith('http')) return;
 
   e.respondWith(
     fetch(e.request).then(r => {
-      const clone = r.clone();
-      caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+      if (!r.ok && r.status !== 0) return r;
+      var clone = r.clone();
+      caches.open(CACHE_NAME).then(function(c) {
+        return c.put(e.request, clone);
+      }).catch(function() {});
       return r;
-    }).catch(() => caches.match(e.request))
+    }).catch(function() {
+      return caches.match(e.request);
+    })
   );
 });

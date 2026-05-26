@@ -2555,15 +2555,16 @@ html:not(.dark) #userInput {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 2px;
     background: transparent;
     border: none;
     color: #9ca3af;
-    padding: 8px 10px;
+    padding: 3px 6px;
     border-radius: 9999px 0 0 9999px;
     cursor: pointer;
     transition: all 0.2s;
-    height: 32px;
+    height: 24px;
+    font-size: 10px;
 }
 .agent-main-btn:hover { color: #6b7280; }
 .agent-mode-popup {
@@ -2987,6 +2988,8 @@ html:not(.dark) #userInput {
 .agent-split-right {
     border-radius: 0 22px 22px 0;
     position: relative;
+    padding: 3px 6px;
+    height: 24px;
 }
 .agent-split-divider {
     width: 1px;
@@ -4568,4 +4571,47 @@ details[open] .src-chevron { transform: rotate(180deg); }
     .popup-label {
         display: inline;
     }
+}
+
+
+/* ==================== 移动端增强 ==================== */
+@media (max-width: 786px) {
+    /* header: 单行,隐藏刷课和SRC */
+    header a[href="chaoxing.html"],
+    header #srcHeaderBtn { display: none !important; }
+
+    /* 侧边栏功能入口 */
+    .sidebar-mobile-actions { display: block !important; margin-top: auto !important; border-top: 1px solid #e5e7eb; }
+    .dark .sidebar-mobile-actions { border-top-color: #374151; }
+
+    /* 聊天标题: 灵动岛胶囊 */
+    #chatTitle[data-mobile] {
+        display: block !important;
+        position: fixed;
+        top: 44px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 50;
+        max-width: 70%;
+        text-align: center;
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 0.3rem 1rem;
+        background: #fff;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        border-radius: 999px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border: 0.5px solid rgba(128,128,128,0.18);
+    }
+    .dark #chatTitle[data-mobile] { background: #1f2937; border-color: rgba(255,255,255,0.1); }
+    #chatBox { padding-top: 2rem !important; }
+}
+
+/* iOS Safari 键盘修复 */
+@supports (-webkit-touch-callout: none) {
+    .h-screen { height: 100dvh !important; }
+    body.keyboard-visible { position: fixed; width: 100%; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden !important; }
 }

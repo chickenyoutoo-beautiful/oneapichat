@@ -399,7 +399,7 @@ AGENT_ROLES = {
     "developer": {
         "label": "⚡ 开发者",
         "desc": "读写文件、执行命令、搜索、浏览器操控。全能执行角色",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
+        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "video_edit", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 30
     },
@@ -413,7 +413,7 @@ AGENT_ROLES = {
     "general": {
         "label": "🌐 全能代理",
         "desc": "所有工具可用(默认角色)",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "server_sys_info", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
+        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python", "server_file_read", "server_file_write", "server_file_append", "server_sys_info", "video_edit", "browser_navigate", "browser_screenshot", "browser_click", "browser_type", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 30
     }
@@ -921,6 +921,75 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 return f"浏览器获取结构失败: {str(e)}"
+        elif tool_name == "video_edit":
+            try:
+                import json as _json
+                action = args.get("action", "")
+                params = args.get("params", {})
+                input_path = args.get("input_path", "")
+                output_path = args.get("output_path", "/tmp/video_output.mp4")
+                if not input_path:
+                    return "错误: 未提供输入视频路径"
+                if not os.path.exists(input_path):
+                    return f"错误: 输入文件不存在: {input_path}"
+                if action == "info":
+                    import subprocess
+                    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path]
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    return r.stdout
+                elif action == "trim":
+                    start = params.get("start", 0)
+                    end = params.get("end", None)
+                    from moviepy import VideoFileClip
+                    clip = VideoFileClip(input_path)
+                    if end:
+                        clip = clip.subclip(start, end)
+                    else:
+                        clip = clip.subclip(start)
+                    clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    clip.close()
+                    return f"裁剪完成: {output_path}"
+                elif action == "speed":
+                    factor = float(params.get("factor", 1.0))
+                    from moviepy import VideoFileClip
+                    from moviepy import vfx
+                    clip = VideoFileClip(input_path)
+                    clip = clip.with_effects([vfx.MultiplySpeed(factor)])
+                    clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    clip.close()
+                    return f"调速完成 (x{factor}): {output_path}"
+                elif action == "resize":
+                    width = params.get("width", 0)
+                    height = params.get("height", 0)
+                    from moviepy import VideoFileClip
+                    from moviepy import vfx
+                    clip = VideoFileClip(input_path)
+                    if width and height:
+                        clip = clip.resized((width, height))
+                    elif width:
+                        clip = clip.resized(width=width)
+                    elif height:
+                        clip = clip.resized(height=height)
+                    clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+                    clip.close()
+                    return f"缩放完成: {output_path}"
+                elif action == "audio":
+                    from moviepy import VideoFileClip
+                    clip = VideoFileClip(input_path)
+                    audio_output = output_path or input_path + ".mp3"
+                    if clip.audio:
+                        clip.audio.write_audiofile(audio_output)
+                    clip.close()
+                    return f"音频提取完成: {audio_output}"
+                elif action == "transition":
+                    return "转场操作需要两个视频文件,请使用 concat 或 FFmpeg xfade 滤镜手动执行"
+                else:
+                    return f"未知操作: {action}, 支持: trim/speed/resize/audio/info"
+            except ImportError as _e:
+                return f"缺少依赖: {str(_e)}, 请先安装: pip install moviepy --break-system-packages"
+            except Exception as _e:
+                return f"视频剪辑失败: {str(_e)}"
+
         # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
         elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
             try:

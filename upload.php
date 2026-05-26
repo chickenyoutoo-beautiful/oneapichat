@@ -102,9 +102,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $imageRaw = $data['image'];
-        if (preg_match('/^data:image\/(\w+);base64,(.+)$/s', $imageRaw, $matches)) {
-            $ext = strtolower($matches[1]);
-            $imageData = base64_decode($matches[2]);
+        if (preg_match('/^data:(image|video)\/(\w+);base64,(.+)$/s', $imageRaw, $matches)) {
+            $ext = strtolower($matches[2]);
+            $imageData = base64_decode($matches[3]);
         } else {
             $imageData = base64_decode($imageRaw);
             $ext = 'png';
@@ -117,14 +117,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // 验证文件类型（只允许常见图片格式）
-    $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif'];
+    // 验证文件类型（常见图片格式 + 视频格式）
+    $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif', 'mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
+    $videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
     if (!in_array($ext, $allowedExts)) {
         $ext = 'png'; // 未知扩展名默认 png
     }
+    $isVideo = in_array($ext, $videoExts);
 
-    // 检查是否为真实图片（svg 除外）
-    if (!in_array($ext, ['svg'])) {
+    // 检查是否为真实图片或视频
+    if ($isVideo) {
+        // 视频: 基本检查
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $detectedMime = finfo_buffer($finfo, $imageData);
+        finfo_close($finfo);
+        $validVideoMimes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/x-flv', 'video/x-ms-wmv'];
+        $allowed = false;
+        foreach ($validVideoMimes as $vm) {
+            if (strpos($detectedMime, $vm) === 0) { $allowed = true; break; }
+        }
+        if (!$allowed) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid video type: ' . $detectedMime]);
+            exit;
+        }
+    } else if (!in_array($ext, ['svg'])) {
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $detectedMime = finfo_buffer($finfo, $imageData);
         finfo_close($finfo);
@@ -140,11 +157,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 限制文件大小: 10MB
-    $maxSize = 10 * 1024 * 1024;
+    // 限制文件大小: 200MB (视频需要更大容量)
+    $maxSize = $isVideo ? 200 * 1024 * 1024 : 10 * 1024 * 1024;
     if (strlen($imageData) > $maxSize) {
+        $typeLabel = $isVideo ? 'Video' : 'Image';
+        $maxLabel = $isVideo ? '200MB' : '10MB';
         http_response_code(413);
-        echo json_encode(['error' => 'Image too large (max 10MB)']);
+        echo json_encode(['error' => $typeLabel . ' too large (max ' . $maxLabel . ')']);
         exit;
     }
 
