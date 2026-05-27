@@ -958,6 +958,177 @@ def _apply_compose(input_path, output_path, params):
     return f"✅ 视频已生成并发布: {url}\n(字幕{len(subtitle_overlays)}条 + {len(tts_segments)}段配音, 原音保留{bg_volume*100:.0f}%)"
 
 
+# ═══════════════════════════════════════════════════════
+# 新增视频处理功能 (2026-05-28)
+# ═══════════════════════════════════════════════════════
+
+def _apply_crop(input_path, output_path, params):
+    """画面裁剪 - 指定区域或比例"""
+    x = int(params.get("x", 0))
+    y = int(params.get("y", 0))
+    w = params.get("w", params.get("width", 0))
+    h = params.get("h", params.get("height", 0))
+    ratio = params.get("ratio", "")  # "16:9", "1:1", "9:16"
+    probe = json.loads(subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_streams",input_path],
+                        capture_output=True, text=True).stdout)
+    vw = int(probe['streams'][0]['width'])
+    vh = int(probe['streams'][0]['height'])
+    if ratio:
+        rw, rh = map(int, ratio.split(":"))
+        target_ratio = rw / rh
+        current_ratio = vw / vh
+        if current_ratio > target_ratio:
+            new_w = int(vh * target_ratio)
+            x = (vw - new_w) // 2
+            w = new_w; h = vh
+        else:
+            new_h = int(vw / target_ratio)
+            y = (vh - new_h) // 2
+            w = vw; h = new_h
+    if not w or not h:
+        return "错误: 需要 width/height 或 ratio 参数"
+    cmd = ["ffmpeg","-y","-i",input_path,"-vf",f"crop={w}:{h}:{x}:{y}",
+           "-c:v","libx264","-preset","fast","-c:a","aac",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return f"裁剪失败: {r.stderr[-300:]}"
+    return f"裁剪完成 ({w}x{h}): {output_path}"
+
+def _apply_reverse(input_path, output_path, params):
+    """视频倒放"""
+    cmd = ["ffmpeg","-y","-i",input_path,"-vf","reverse","-af","areverse",
+           "-c:v","libx264","-preset","fast","-c:a","aac",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return f"倒放失败: {r.stderr[-300:]}"
+    return f"倒放完成: {output_path}"
+
+def _apply_mute(input_path, output_path, params):
+    """去除音频（静音）"""
+    cmd = ["ffmpeg","-y","-i",input_path,"-an","-c:v","libx264","-preset","fast",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return f"静音失败: {r.stderr[-300:]}"
+    return f"静音完成: {output_path}"
+
+def _apply_bgm(input_path, output_path, params):
+    """添加背景音乐"""
+    bgm_path = params.get("bgm_path", "")
+    volume = float(params.get("volume", 0.3))
+    orig_volume = float(params.get("orig_volume", 1.0))
+    fade_out = float(params.get("fade_out", 2))
+    if not bgm_path or not os.path.exists(bgm_path):
+        return f"错误: BGM 文件不存在: {bgm_path}"
+    probe = json.loads(subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",input_path],
+                        capture_output=True, text=True).stdout)
+    video_dur = float(probe['format']['duration'])
+    filter_line = f"[1:a]aloop=loop=-1:size=2e9,atrim=0:{video_dur}[bgm]"
+    if fade_out > 0:
+        filter_line += f";[bgm]afade=t=out:st={video_dur-fade_out}:d={fade_out}[bgmf]"
+        bgm_lbl = "[bgmf]"
+    else:
+        bgm_lbl = "[bgm]"
+    full = filter_line + f";[0:a]volume={orig_volume}[orig];[orig]{bgm_lbl}amix=inputs=2:duration=first:weights=1 {volume}"
+    cmd = ["ffmpeg","-y","-i",input_path,"-i",bgm_path,"-filter_complex",full,
+           "-c:v","libx264","-preset","fast","-c:a","aac",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return f"BGM添加失败: {r.stderr[-300:]}"
+    return f"BGM添加完成 (音量{volume}): {output_path}"
+
+def _apply_enhance(input_path, output_path, params):
+    """自动增强 - 亮度/对比度/饱和度/锐化 + 预设"""
+    brightness = float(params.get("brightness", 0))
+    contrast = float(params.get("contrast", 1.0))
+    saturation = float(params.get("saturation", 1.0))
+    sharpen = float(params.get("sharpen", 0))
+    preset = params.get("preset", "")
+    if preset:
+        presets = {
+            "vivid": {"contrast": 1.2, "saturation": 1.3, "sharpen": 1.0},
+            "cinematic": {"contrast": 1.15, "saturation": 1.1, "sharpen": 0.5},
+            "warm": {"saturation": 1.2, "brightness": 0.05},
+            "cool": {"saturation": 1.1, "brightness": -0.03},
+            "hdr": {"contrast": 1.3, "saturation": 1.4, "sharpen": 2.0},
+        }
+        p = presets.get(preset, {})
+        brightness = p.get("brightness", brightness)
+        contrast = p.get("contrast", contrast)
+        saturation = p.get("saturation", saturation)
+        sharpen = p.get("sharpen", sharpen)
+    filters = []
+    if brightness != 0 or contrast != 1.0 or saturation != 1.0:
+        filters.append(f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}")
+    if sharpen > 0:
+        filters.append(f"unsharp=5:5:{sharpen}:5:5:0")
+    if not filters:
+        return "错误: 无增强参数"
+    vf = ",".join(filters)
+    cmd = ["ffmpeg","-y","-i",input_path,"-vf",vf,"-c:v","libx264","-preset","fast","-c:a","aac",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return f"增强失败: {r.stderr[-300:]}"
+    return f"增强完成 ({preset or '自定义'}): {output_path}"
+
+def _apply_gif(input_path, output_path, params):
+    """视频转 GIF"""
+    start = float(params.get("start", 0))
+    duration = float(params.get("duration", 5))
+    fps = int(params.get("fps", 10))
+    width = int(params.get("width", 480))
+    cmd = ["ffmpeg","-y","-ss",str(start),"-t",str(duration),"-i",input_path,
+           "-vf",f"fps={fps},scale={width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+           "-loop","0",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return f"GIF失败: {r.stderr[-300:]}"
+    try:
+        fn = 'gif_' + hashlib.md5(output_path.encode()).hexdigest()[:8] + '.gif'
+        dest_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, fn)
+        shutil.copy2(output_path, dest)
+        os.chmod(dest, 0o644)
+        return f"GIF完成: https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
+    except:
+        return f"GIF完成: {output_path}"
+
+def _apply_silent_cut(input_path, output_path, params):
+    """智能切除静音片段"""
+    threshold = params.get("threshold", "-30dB")
+    min_silence = float(params.get("min_silence", 1.0))
+    cmd = ["ffmpeg","-y","-i",input_path,
+           "-af",f"silenceremove=stop_periods=-1:stop_duration={min_silence}:stop_threshold={threshold}",
+           "-c:v","libx264","-preset","fast","-c:a","aac",output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return f"静音切除失败: {r.stderr[-300:]}"
+    return f"静音切除完成: {output_path}"
+
+def _apply_subtitle_style(input_path, output_path, params):
+    """
+    字幕风格预设 — bilibili/variety/minimal/bold/neon/typewriter
+    内部调用 compose 实现
+    """
+    timeline = params.get("timeline", [])
+    style = params.get("style", "bilibili")
+    styles = {
+        "bilibili": {"fontsize":36,"color":"white","bg":True,"bg_color":"#fb7299","bg_opacity":0.75,"bg_radius":14,"stroke_width":0,"font":"noto-sans-bold"},
+        "variety": {"fontsize":42,"color":"#ffe066","bg":True,"bg_color":"#000000","bg_opacity":0.65,"bg_radius":8,"stroke_width":2,"stroke_color":"#f59e0b","font":"noto-sans-bold"},
+        "minimal": {"fontsize":32,"color":"white","bg":False,"stroke_width":1,"stroke_color":"#00000080","font":"noto-sans-regular"},
+        "bold": {"fontsize":48,"color":"#ff4444","bg":True,"bg_color":"#000000","bg_opacity":0.8,"bg_radius":6,"stroke_width":3,"stroke_color":"black","font":"noto-sans-bold"},
+        "neon": {"fontsize":38,"color":"#00ff88","bg":True,"bg_color":"#0a0a1a","bg_opacity":0.7,"bg_radius":20,"stroke_width":2,"stroke_color":"#00cc66","font":"noto-sans-bold"},
+        "typewriter": {"fontsize":28,"color":"#cccccc","bg":True,"bg_color":"#1a1a1a","bg_opacity":0.85,"bg_radius":4,"stroke_width":0,"font":"noto-sans-regular"},
+    }
+    s = styles.get(style, styles["bilibili"])
+    for k in ["fontsize","color","bg","bg_color","bg_opacity","bg_radius","stroke_width","stroke_color","font"]:
+        if k in params:
+            s[k] = params[k]
+    compose_params = dict(params)
+    compose_params.update(s)
+    return _apply_compose(input_path, output_path, compose_params)
+
+
 def _hex_to_rgba(hex_color, alpha):
     """#RRGGBB 或 #RRGGBBAA → (R,G,B,A)"""
     h = hex_color.lstrip('#')
@@ -1900,6 +2071,22 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     return _apply_ffmpeg_filter(input_path, output_path, params)
                 elif action in ("transition", "video_transition"):
                     return _apply_ffmpeg_transition(input_path, output_path, params)
+                elif action == "crop":
+                    return _apply_crop(input_path, output_path, params)
+                elif action == "reverse":
+                    return _apply_reverse(input_path, output_path, params)
+                elif action == "mute":
+                    return _apply_mute(input_path, output_path, params)
+                elif action == "bgm":
+                    return _apply_bgm(input_path, output_path, params)
+                elif action == "enhance":
+                    return _apply_enhance(input_path, output_path, params)
+                elif action == "gif":
+                    return _apply_gif(input_path, output_path, params)
+                elif action == "silent_cut":
+                    return _apply_silent_cut(input_path, output_path, params)
+                elif action == "style":
+                    return _apply_subtitle_style(input_path, output_path, params)
                 elif action == "tts":
                     return _apply_tts(params)
                 elif action == "voice":
@@ -1915,7 +2102,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 elif action == "compose":
                     return _apply_compose(input_path, output_path, params)
                 else:
-                    return f"未知操作: {action}, 支持: trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/compose/frames/info"
+                    return f"未知操作: {action}, 支持: compose/crop/reverse/mute/bgm/enhance/gif/silent_cut/style/trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/frames/info"
             except ImportError as _e:
                 return f"缺少依赖: {str(_e)}, 请先安装: pip install moviepy --break-system-packages"
             except Exception as _e:
@@ -3634,6 +3821,22 @@ async def video_edit_endpoint(request: Request):
             return {"result": _apply_voice_to_video(input_path, audio_path2, output_path, params)}
         elif action == "compose":
             return {"result": _apply_compose(input_path, output_path, params)}
+        elif action == "crop":
+            return {"result": _apply_crop(input_path, output_path, params)}
+        elif action == "reverse":
+            return {"result": _apply_reverse(input_path, output_path, params)}
+        elif action == "mute":
+            return {"result": _apply_mute(input_path, output_path, params)}
+        elif action == "bgm":
+            return {"result": _apply_bgm(input_path, output_path, params)}
+        elif action == "enhance":
+            return {"result": _apply_enhance(input_path, output_path, params)}
+        elif action == "gif":
+            return {"result": _apply_gif(input_path, output_path, params)}
+        elif action == "silent_cut":
+            return {"result": _apply_silent_cut(input_path, output_path, params)}
+        elif action == "style":
+            return {"result": _apply_subtitle_style(input_path, output_path, params)}
         elif action == "frames":
             # 提取关键帧并返回 base64 数组
             count = int(params.get("count", 3))
