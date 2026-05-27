@@ -217,41 +217,37 @@ switch ($method) {
                 echo json_encode(['error' => 'Chat not found']);
             }
         } else {
+            // ★ chat_id=all: 返回完整聊天数据（前端 restoreUserData 期望 chats 对象映射）
             $chats = [];
             $pattern = $dataDir . $namespace . '_*.json';
             $files = glob($pattern);
             if ($files === false) {
-                echo json_encode(['chats' => []]);
+                echo json_encode(['chats' => (object)[]]);
                 break;
             }
             foreach ($files as $file) {
                 $basename = basename($file, '.json');
+                // 跳过 config 文件和非all文件（但保留 all 的完整数据优先）
+                if (strpos($basename, 'config_') === 0) continue;
                 $chatIdFromFile = substr($basename, strlen($namespace) + 1);
-                $content = @json_decode(@file_get_contents($file), true);
-                if ($content && isset($content['messages'])) {
-                    // 生成标题：使用第一条用户消息
-                    $title = $content['title'] ?? null;
-                    if (!$title && !empty($content['messages'])) {
-                        foreach ($content['messages'] as $msg) {
-                            if (($msg['role'] ?? '') === 'user' && !empty($msg['content'])) {
-                                $text = is_string($msg['content']) ? $msg['content'] : 
-                                       (is_array($msg['content']) ? ($msg['content'][0]['text'] ?? '') : '');
-                                $title = mb_strlen($text) > 30 ? mb_substr($text, 0, 30) . '...' : $text;
-                                break;
+                // ★ all.json 包含完整聊天映射，优先级最高
+                if ($chatIdFromFile === 'all') {
+                    $allContent = @json_decode(@file_get_contents($file), true);
+                    if ($allContent && isset($allContent['chats'])) {
+                        foreach ($allContent['chats'] as $cid => $cdata) {
+                            if (isset($cdata['messages'])) {
+                                $chats[$cid] = $cdata;
                             }
                         }
                     }
-                    $chats[] = [
-                        'chat_id' => $chatIdFromFile,
-                        'title' => $title ?: '新对话',
-                        'message_count' => count($content['messages']),
-                        'updated_at' => $content['updated_at'] ?? $content['created_at'] ?? null
-                    ];
+                    continue;
+                }
+                // 单个聊天文件（也包含完整 messages）
+                $content = @json_decode(@file_get_contents($file), true);
+                if ($content && isset($content['messages'])) {
+                    $chats[$chatIdFromFile] = $content;
                 }
             }
-            usort($chats, function($a, $b) {
-                return strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? '');
-            });
             echo json_encode(['chats' => $chats], JSON_UNESCAPED_UNICODE);
         }
         break;

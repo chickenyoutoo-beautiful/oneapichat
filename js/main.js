@@ -2333,6 +2333,26 @@ async function restoreUserData() {
 
     var uid = localStorage.getItem('authUserId') || '';
 
+    // ★ 安全隔离: 检查本地 chats 是否有不属于当前用户的数据
+    //     (修复 bfcache/竞态条件导致切换账号后旧数据残留)
+    if (uid) {
+        var foreignChatIds = [];
+        for (var _cid in chats) {
+            var _cUid = chats[_cid].userId;
+            // 如果有 userId 标记且不等于当前用户 → 标记为外来数据
+            if (_cUid && _cUid !== uid) {
+                foreignChatIds.push(_cid);
+            }
+        }
+        if (foreignChatIds.length > 0) {
+            console.warn('[restoreUserData] 发现', foreignChatIds.length, '个不属于当前用户的对话,清除:', foreignChatIds);
+            for (var _fi = 0; _fi < foreignChatIds.length; _fi++) {
+                delete chats[foreignChatIds[_fi]];
+            }
+            slimSaveChats();
+        }
+    }
+
     // 0. 迁移旧聊天记录:给没有 userId 的打上当前用户标签
     if (uid) {
         var migrated = 0;
@@ -15489,6 +15509,12 @@ function initializeApp() {
                     localStorage.setItem('_savedInputText', _inputEl.value.trim());
                 }
             } catch(e) {}
+            // ★ If _skipUnloadSave is set, skip all saves (login/register/logout transitioning)
+            // ★ 必须最先检查,避免 slimSaveChats 在切换账号时将旧数据写入 localStorage
+            if (localStorage.getItem('_skipUnloadSave')) {
+                localStorage.removeItem('_skipUnloadSave');
+                return;
+            }
             // ★ 保存未完成的流式消息(包含用户消息,用于刷新后继续生成)
             try {
                 for (var __cid in chats) {
@@ -15518,11 +15544,6 @@ function initializeApp() {
             } catch(e) {}
             slimSaveChats();
             try { localStorage.setItem('lastChatId', currentChatId || ''); } catch(e) {}
-            // ★ If _skipUnloadSave is set, skip all server saves (login/register/logout transitioning)
-            if (localStorage.getItem('_skipUnloadSave')) {
-                localStorage.removeItem('_skipUnloadSave');
-                return;
-            }
             // ★ 保存聊天记录到服务器(使用 sendBeacon,保证页面关闭时请求送达)
             var token = localStorage.getItem('authToken');
             if (token && chats && Object.keys(chats).length > 0) {
@@ -15534,6 +15555,8 @@ function initializeApp() {
             }
         });
         window.addEventListener('pagehide', function() {
+            // ★ 切换账号时不保存旧 chats 到 localStorage
+            if (localStorage.getItem('_skipUnloadSave')) return;
             slimSaveChats();
         });
 
