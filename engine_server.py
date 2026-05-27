@@ -3554,8 +3554,8 @@ async def video_edit_endpoint(request: Request):
             end = params.get("end", None)
             from moviepy import VideoFileClip
             clip = VideoFileClip(input_path)
-            if end: clip = clip.subclip(start, end)
-            else: clip = clip.subclip(start)
+            if end: clip = clip.subclipped(start, end)
+            else: clip = clip.subclipped(start)
             clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
             clip.close()
             return {"result": f"裁剪完成: {output_path}"}
