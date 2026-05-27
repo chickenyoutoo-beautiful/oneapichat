@@ -482,16 +482,38 @@ window.VISION_API_KEY = '';
             </summary>
             <div class="details-content">
             <div class="config-field">
+                <label class="config-label">提供商</label>
+                <select id="visionProvider" class="config-input config-select" onchange="window.onVisionProviderChange()">
+                    <option value="minimax">MiniMax VLM</option>
+                    <option value="openai">OpenAI Vision</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+            <!-- MiniMax 专用配置 -->
+            <div class="config-field" id="visionKeyField">
+                <label class="config-label">MiniMax API Key</label>
+                <input type="text" id="visionApiKey" autocomplete="off" class="config-input masked-key" placeholder="MiniMax 密钥">
+            </div>
+            <div class="config-field" id="visionUrlField">
+                <label class="config-label">MiniMax API 地址</label>
+                <input type="text" id="visionApiUrl" placeholder="如: https://api.minimaxi.com" class="config-input">
+            </div>
+            <!-- OpenAI 专用配置 -->
+            <div class="config-field" id="visionOAKeyField" style="display:none;">
+                <label class="config-label">OpenAI API Key</label>
+                <input type="text" id="visionApiKeyOpenAI" autocomplete="off" class="config-input masked-key" placeholder="OpenAI 密钥">
+            </div>
+            <div class="config-field" id="visionOAUrlField" style="display:none;">
+                <label class="config-label">OpenAI API 地址</label>
+                <input type="text" id="visionApiUrlOpenAI" placeholder="如: https://api.openai.com/v1" class="config-input">
+            </div>
+            <!-- 自定义配置（始终显示模型输入框）-->
+            <div class="config-field" id="visionModelField">
                 <label class="config-label">模型</label>
-                <input type="text" id="visionModel" placeholder="如: deepseek-chat" class="config-input">
+                <input type="text" id="visionModel" placeholder="如: MiniMax-VL-01" class="config-input">
             </div>
-            <div class="config-field">
-                <label class="config-label">API 地址</label>
-                <input type="text" id="visionApiUrl" placeholder="如: https://api.minimaxi.com (留空则用通用 API)" class="config-input">
-            </div>
-            <div class="config-field">
-                <label class="config-label">API Key</label>
-                <input type="text" id="visionApiKey" autocomplete="off" class="config-input masked-key" placeholder="视觉理解专用密钥">
+            <div id="visionProviderHint" class="config-hint" style="font-size:12px;color:#666;margin-top:4px;">
+                MiniMax: 使用 coding-plan-vlm 端点的视觉理解能力。OpenAI: 使用 GPT-4o 等视觉模型。自定义: 设置自己的 API 地址和模型。
             </div>
             </div>
             </details>
@@ -654,7 +676,7 @@ window.VISION_API_KEY = '';
                         </div>
                         <div class="flex items-center justify-between py-2">
                             <span class="text-xs text-gray-500 whitespace-nowrap">引擎</span>
-                            <select id="searchProvider" class="config-input text-xs" style="width:auto;min-width:80px;font-size:11px;padding:4px 8px;"><option value="duckduckgo">DuckDuckGo</option><option value="brave">Brave</option><option value="google">Google</option><option value="tavily">Tavily</option></select>
+                            <select id="searchProvider" class="config-input text-xs" style="width:auto;min-width:80px;font-size:11px;padding:4px 8px;"><option value="duckduckgo">DuckDuckGo</option><option value="brave">Brave</option><option value="google">Google</option><option value="tavily">Tavily</option><option value="minimax">MiniMax(复用聊天Key)</option></select>
                         </div>
                         <div class="flex items-center gap-[10px] py-2">
                             <span class="text-xs text-gray-500 whitespace-nowrap" style="width:48px;flex-shrink:0;">API Key</span>

@@ -522,80 +522,170 @@ def _apply_voice_to_video(video_path, audio_path, output_path, params):
 
 def _apply_compose(input_path, output_path, params):
     """
-    组合: 精美字幕 + 逐句TTS配音 + 原视频背景音保留
-    timeline: [{start:0, end:2.5, text:"你好"}, ...]
+    compose v3 — 纯 ffmpeg 管线: 字幕烧录 + 逐句配音 + 原音保留 + 零帧率变化
     """
-    import tempfile as _tmp, json as _json
+    import tempfile as _tmp, json as _json, shutil, hashlib
     timeline = params.get("timeline", [])
     if not timeline or not isinstance(timeline, list):
         return "错误: compose 需要 timeline 数组"
 
-    # ── 样式参数 ──
-    fs = int(params.get("fontsize", 28))
-    ft = params.get("font", "noto-sans-bold")
-    tc = params.get("color", "white")
-    voice_id = params.get("voice_id", "female-yujie")
-    bg_enabled = params.get("bg", True)
-    bg_opacity = float(params.get("bg_opacity", 0.5))
-    bg_color = params.get("bg_color", "#1a1a2e")
-    bg_radius = int(params.get("bg_radius", 12))
-    stroke_width = int(params.get("stroke_width", 1))
-    stroke_color = params.get("stroke_color", "#00000080")
-    y_margin = int(params.get("y_margin", 40))  # 字幕距底部的距离
-    tts_volume = float(params.get("tts_volume", 1.0))
-    bg_volume = float(params.get("bg_volume", 0.3))  # 原音频保留比例
+    # 全局默认值
+    default_fs = int(params.get("fontsize", 28))
+    default_font = params.get("font", "noto-sans-bold")
+    default_color = params.get("color", "white")
+    default_bg_enabled = params.get("bg", True)
+    default_bg_opacity = float(params.get("bg_opacity", 0.5))
+    default_bg_color = params.get("bg_color", "#1a1a2e")
+    default_bg_radius = int(params.get("bg_radius", 12))
+    default_stroke_w = int(params.get("stroke_width", 1))
+    default_stroke_c = params.get("stroke_color", "#00000080")
+    default_y_margin = int(params.get("y_margin", 40))
+    global_voice_id = params.get("voice_id", "female-yujie")
+    bg_volume = float(params.get("bg_volume", 0.3))
 
-    # Step 1: 逐条渲染字幕 PNG (Pillow, 精美样式)
+    # ── 弹幕参数 ──
+    _dmk_pngs_to_clean = []
+    danmaku_enabled = params.get("danmaku", False)
+    danmaku_rows = int(params.get("danmaku_rows", 2))       # 同时显示几行弹幕
+    danmaku_speed = float(params.get("danmaku_speed", 300))  # 像素/秒
+    danmaku_fontsize = int(params.get("danmaku_fontsize", default_fs))
+    danmaku_color = params.get("danmaku_color", "#ffffff")
+    danmaku_stroke_w = int(params.get("danmaku_stroke_w", 1))
+    danmaku_stroke_c = params.get("danmaku_stroke_c", "#000000")
+    danmaku_opacity = float(params.get("danmaku_opacity", 0.85))
+    danmaku_random_color = params.get("danmaku_random_color", False)  # 每条弹幕随机颜色
+    danmaku_random_y = params.get("danmaku_random_y", False)          # 随机行位置
+    
+    # 弹幕随机颜色池
+    _danmaku_colors = [
+        "#ffffff", "#ff6b6b", "#ffd93d", "#6bcb77", "#4d96ff",
+        "#ff7eb3", "#7bed9f", "#e056fd", "#f0932b", "#22a6b3",
+        "#eb4d4b", "#6ab04c", "#e84118", "#fbc531", "#58b19f",
+        "#c44569", "#cf6a87", "#786fa6", "#f19066", "#e66767"
+    ]
+    import random as _random
+
+    # ── 滤镜: compose 支持直接应用滤镜再叠加字幕 ──
+    filter_type = params.get("filter", params.get("filter_type", ""))
+    if filter_type and filter_type != "none":
+        # 对输入视频先应用滤镜, 结果作为后续字幕叠加的输入
+        _filtered_path = _tmp.mktemp(suffix='_filtered.mp4')
+        _filter_params = dict(params)
+        _filter_params["type"] = filter_type
+        _fr = _apply_ffmpeg_filter(input_path, _filtered_path, _filter_params)
+        if "失败" in _fr:
+            return _fr
+        input_path = _filtered_path
+        _filtered_input = True
+    else:
+        _filtered_input = False
+
+    # Step 1: 逐条渲染字幕为带时间戳的 PNG 图片
     from PIL import Image, ImageDraw, ImageFont
-    font_path = SUBTITLE_FONTS.get(ft, DEFAULT_FONT)
+    font_path = SUBTITLE_FONTS.get(default_font, DEFAULT_FONT)
     try:
-        pil_font = ImageFont.truetype(font_path, fs)
+        pil_font = ImageFont.truetype(font_path, default_fs)
     except:
-        pil_font = ImageFont.truetype(DEFAULT_FONT, fs)
+        pil_font = ImageFont.truetype(DEFAULT_FONT, default_fs)
+    # ★ emoji 回退字体: Symbola 支持所有 Unicode emoji (Pillow 兼容)
+    _emoji_font_path = "/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf"
+    _emoji_font = None
+    if os.path.exists(_emoji_font_path):
+        try:
+            _emoji_font = ImageFont.truetype(_emoji_font_path, default_fs)
+        except:
+            pass
 
-    subtitle_pngs = []
+    def _is_emoji(ch):
+        """判断字符是否为 emoji (Unicode emoji 范围)"""
+        cp = ord(ch)
+        # Emoticons, Dingbats, Misc Symbols, Supplemental Symbols, Transport, etc
+        return (0x1F300 <= cp <= 0x1F9FF or  # Emoticons, Misc, Supplemental, Symbols&Pictographs, etc
+                0x2600 <= cp <= 0x27BF or   # Misc Symbols, Dingbats
+                0x2300 <= cp <= 0x23FF or   # Misc Technical
+                0x2B50 <= cp <= 0x2B55 or   # Star, etc
+                0x2702 <= cp <= 0x27B0 or   # Dingbats
+                0x200D == cp or cp == 0xFE0F)  # ZWJ, Variation Selector
+
+    def _render_text_emoji(draw, xy, text, main_font, color, sw, sf):
+        """逐字渲染: emoji 用 Symbola 回退"""
+        x0, y0 = xy
+        for ch in text:
+            if _is_emoji(ch) and _emoji_font:
+                ch_font = _emoji_font
+            elif main_font.getmask(ch):
+                ch_font = main_font
+            else:
+                ch_font = _emoji_font or main_font
+            draw.text((x0, y0), ch, font=ch_font, fill=color,
+                      stroke_width=sw if sw > 0 else 0, stroke_fill=sf)
+            x0 += ch_font.getlength(ch)
+
+    subtitle_overlays = []  # [(png_path, start_sec, end_sec), ...]
+    danmaku_overlays = []  # [(text, start, end, fontsize, sw, sc), ...] 延迟到 Step 3 渲染
     for i, seg in enumerate(timeline):
         t = seg.get("text", "").strip()
         if not t:
-            subtitle_pngs.append(None)
             continue
-        # 渲染单行/多行字幕
+        seg_fs = int(seg.get("fontsize", default_fs))
+        seg_color = seg.get("color", default_color)
+        seg_bg = seg.get("bg", default_bg_enabled)
+        seg_bg_color = seg.get("bg_color", default_bg_color)
+        seg_bg_opacity = float(seg.get("bg_opacity", default_bg_opacity))
+        seg_bg_r = int(seg.get("bg_radius", default_bg_radius))
+        seg_sw = int(seg.get("stroke_width", default_stroke_w))
+        seg_sc = seg.get("stroke_color", default_stroke_c)
+        seg_ym = int(seg.get("y_margin", default_y_margin))
+
+        # 每句可用不同字号→需要新字体对象
+        try:
+            _font = ImageFont.truetype(font_path, seg_fs)
+        except:
+            _font = pil_font
+
         lines = t.split('\n')
         line_imgs = []
         max_w = 0; total_h = 0
-        padding_x = 30; padding_y = 16
+        px = 24; py = 14
         for line in lines:
             line = line.strip()
             if not line: line = ' '
-            bbox = pil_font.getbbox(line)
-            lw = bbox[2] - bbox[0] + 4  # 额外给描边留空间
-            lh = bbox[3] - bbox[1] + 4
-            # 单行背景: 文字宽+内边距, 文字高+内边距
-            img_w = lw + padding_x * 2
-            img_h = lh + padding_y
-            img = Image.new('RGBA', (img_w, img_h), (0, 0, 0, 0))
+            # 混合 bbox: emoji 用 Symbola, 其他用主字体
+            _lw = 0; _lh = 0
+            for ch in line:
+                _cf = _emoji_font if (_is_emoji(ch) and _emoji_font) else _font
+                _cb = _cf.getbbox(ch)
+                _lw += _cb[2] - _cb[0] + 1
+                _lh = max(_lh, _cb[3] - _cb[1] + 4)
+            iw = _lw + px * 2
+            ih = _lh + py
+            img = Image.new('RGBA', (iw, ih), (0,0,0,0))
             draw = ImageDraw.Draw(img)
-            # 圆角背景
-            if bg_enabled:
-                _rgba = _hex_to_rgba(bg_color, bg_opacity)
-                _draw_rounded_rect(draw, (0, 0, img_w, img_h), bg_radius, _rgba)
-            # 文字
-            draw.text((padding_x, padding_y // 2 - 2), line, font=pil_font, fill=tc,
-                      stroke_width=stroke_width, stroke_fill=stroke_color)
+            if seg_bg:
+                _rgba = _hex_to_rgba(seg_bg_color, seg_bg_opacity)
+                _draw_rounded_rect(draw, (0,0,iw,ih), seg_bg_r, _rgba)
+            _render_text_emoji(draw, (px, py//2-2), line, _font, seg_color, seg_sw, seg_sc)
             line_imgs.append(img)
-            max_w = max(max_w, img_w)
-            total_h += img_h
+            max_w = max(max_w, iw)
+            total_h += ih
 
-        # 合并多行到一张图
-        final_img = Image.new('RGBA', (max_w, total_h + 4), (0, 0, 0, 0))
+        final_img = Image.new('RGBA', (max_w, total_h+4), (0,0,0,0))
         cy = 2
         for img in line_imgs:
-            final_img.paste(img, ((max_w - img.width) // 2, cy), img)
+            final_img.paste(img, ((max_w-img.width)//2, cy), img)
             cy += img.height
 
         png_path = _tmp.mktemp(suffix=f'_sub{i}.png')
         final_img.save(png_path)
-        subtitle_pngs.append((png_path, float(seg.get("start", 0)), float(seg.get("end", seg.get("start", 0) + 3))))
+        start_t = float(seg.get("start", 0))
+        end_t = float(seg.get("end", start_t + 3))
+        
+        # 检查是否为弹幕模式
+        is_danmaku = danmaku_enabled and seg.get("danmaku", False)
+        if is_danmaku:
+            danmaku_overlays.append((t, start_t, end_t, seg_fs, seg_sw, seg_sc))
+        else:
+            subtitle_overlays.append((png_path, start_t, end_t, seg_ym, final_img.height))
 
     # Step 2: 逐句 TTS
     mmx_bin = "/home/naujtrats/.npm-global/bin/mmx"
@@ -610,96 +700,262 @@ def _apply_compose(input_path, output_path, params):
         end = seg.get("end", start + 3)
         window_dur = end - start
         char_count = len(t.replace(' ', '').replace('\n', ''))
-        estimated_speed = round(char_count / (window_dur * 4), 1) if window_dur > 0 else 1.0
-        speed = max(0.7, min(1.5, estimated_speed))
-        # ★ 每条字幕可有独立音色, 未指定用全局 voice_id
-        seg_voice = seg.get("voice_id", voice_id)
+        est_speed = round(char_count/(window_dur*4), 1) if window_dur > 0 else 1.0
+        speed = max(0.7, min(1.5, est_speed))
+        seg_voice = seg.get("voice_id", global_voice_id)
 
         audio_out = _tmp.mktemp(suffix=f'_seg{i}.m4a')
         _before = set(glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3")))
-        cmd = [mmx_bin, "--region", "cn", "speech", "synthesize",
-               "--text", t, "--voice", seg_voice,
-               "--speed", str(speed), "--output", audio_out]
+        cmd = [mmx_bin, "--region","cn","speech","synthesize",
+               "--text",t,"--voice",seg_voice,"--speed",str(speed),"--output",audio_out]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=PROJECT_ROOT)
         if r.returncode != 0:
             continue
         _after = set(glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3")))
         _new = list(_after - _before)
         if _new:
-            import shutil
             shutil.move(max(_new, key=os.path.getmtime), audio_out)
         else:
-            _speech_files = glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3"))
-            if _speech_files:
-                import shutil
-                shutil.copy(max(_speech_files, key=os.path.getmtime), audio_out)
+            _sf = glob.glob(os.path.join(PROJECT_ROOT, "speech_*.mp3"))
+            if _sf:
+                shutil.copy(max(_sf, key=os.path.getmtime), audio_out)
 
-        r_info = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", audio_out],
-            capture_output=True, text=True, timeout=10)
-        actual_dur = float(_json.loads(r_info.stdout).get("format", {}).get("duration", 1))
-
+        r_info = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",audio_out],
+                               capture_output=True, text=True, timeout=10)
+        actual_dur = float(_json.loads(r_info.stdout).get("format",{}).get("duration",1))
         if actual_dur > window_dur:
             trimmed = _tmp.mktemp(suffix=f'_seg{i}_trim.m4a')
-            subprocess.run(["ffmpeg", "-y", "-i", audio_out, "-ss", "0", "-t", str(window_dur),
-                           "-c:a", "aac", trimmed], capture_output=True, timeout=15)
+            subprocess.run(["ffmpeg","-y","-i",audio_out,"-ss","0","-t",str(window_dur),
+                           "-c:a","aac",trimmed], capture_output=True, timeout=15)
             try: os.unlink(audio_out)
             except: pass
             audio_out = trimmed
-            actual_dur = window_dur
+        tts_segments.append((audio_out, float(start)))
 
-        tts_segments.append((audio_out, float(start), actual_dur))
+    # Step 3: ffmpeg 混合 — overlay 字幕 + amix 音频(原音+TTS)
+    import ffmpeg as _fm
 
-    # Step 3: 叠加字幕 PNG 到视频 (moviepy 逐段精确时间轴)
-    from moviepy import VideoFileClip, CompositeVideoClip, ImageClip, concatenate_videoclips
-    from moviepy import AudioFileClip, CompositeAudioClip
+    # 获取视频信息
+    probe = _fm.probe(input_path)
+    vw = int(probe['streams'][0]['width'])
+    vh = int(probe['streams'][0]['height'])
 
-    clip = VideoFileClip(input_path)
-    video_w, video_h = clip.w, clip.h
-    duration = clip.duration
+    # ── 分辨率兼容处理: 确保宽高为偶数(编码器要求), 非标准比例自动扩边 ──
+    _needs_resize = False
+    _target_w, _target_h = vw, vh
+    
+    # 检查是否为偶数
+    if vw % 2 != 0 or vh % 2 != 0:
+        _target_w = vw + (vw % 2)
+        _target_h = vh + (vh % 2)
+        _needs_resize = True
+    
+    # 检查是否超过编码器常见上限(1080p以上用 high profile)
+    _high_res = _target_w > 1920 or _target_h > 1080
+    
+    # 检查宽高比是否标准(16:9, 4:3, 1:1, 9:16, 3:4, 3:2 等常见比例)
+    _ratio = _target_w / _target_h if _target_h > 0 else 1
+    _standard_ratios = [16/9, 9/16, 4/3, 3/4, 1/1, 3/2, 2/3, 21/9, 9/21, 1.91/1, 1/1.91]
+    _is_standard = any(abs(_ratio - r) / r < 0.02 for r in _standard_ratios)
+    
+    # 非标准比例 → 自动缩放到最近的标准 16:9 或保持宽高比但确保兼容
+    if not _is_standard and params.get("auto_fix_ratio", True):
+        # 保持原比例,只做 pad 到标准分辨率(加黑边)
+        _pad_w = _target_w
+        _pad_h = _target_h
+        if abs(_ratio - 16/9) < abs(_ratio - 4/3):
+            # 接近16:9 →  pad 到精确 16:9
+            _pad_w = _target_w
+            _pad_h = int(_target_w * 9 / 16)
+            if _pad_h < _target_h: _pad_w, _pad_h = int(_target_h * 16 / 9), _target_h
+        else:
+            # 接近4:3 → pad 到精确 4:3
+            _pad_w = _target_w
+            _pad_h = int(_target_w * 3 / 4)
+            if _pad_h < _target_h: _pad_w, _pad_h = int(_target_h * 4 / 3), _target_h
+        # 确保偶数
+        _pad_w += _pad_w % 2
+        _pad_h += _pad_h % 2
+        if _pad_w != _target_w or _pad_h != _target_h:
+            _needs_resize = True
+            _pad_w, _pad_h = _target_w, _target_h  # 保持原始分辨率,只确保偶数
+    
+    vid = _fm.input(input_path)
+    video_stream = vid.video
+    
+    # ★ 如果没有音频流,提前创建空音轨防止 amix 报错
+    has_audio = False
+    try:
+        has_audio = vid.audio is not None
+    except:
+        pass
+    
+    audio_streams = []
+    if has_audio:
+        audio_streams.append(vid.audio.filter('volume', bg_volume))
+    
+    # 非偶数分辨率 → 先 scale
+    if _needs_resize and params.get("auto_fix_ratio", True):
+        from math import ceil
+        _fix_w = int(ceil(vw / 2) * 2)
+        _fix_h = int(ceil(vh / 2) * 2)
+        if _fix_w != vw or _fix_h != vh:
+            video_stream = video_stream.filter('scale', _fix_w, _fix_h)
 
-    # 构建字幕 clips
-    subtitle_clips = []
-    for png_path, start_t, end_t in subtitle_pngs:
-        if png_path is None:
-            continue
-        dur = max(0.1, end_t - start_t)
-        sc = ImageClip(png_path).with_duration(dur).with_start(start_t)
-        # 位置: 距离底部 y_margin px
-        img_h = Image.open(png_path).height
-        sc = sc.with_position(("center", video_h - y_margin - img_h))
-        subtitle_clips.append(sc)
+    # ── 字幕 overlay 链 ──
+    current_v = video_stream
+    for png_path, st, et, ym, imgh in subtitle_overlays:
+        dur = max(0.05, et - st)
+        # overlay: PNG → 半透明叠加, 仅在时间窗口内显示
+        overlay_img = _fm.input(png_path)
+        y_pos = f"{vh - ym - imgh}"
+        x_pos = f"(main_w-overlay_w)/2"
+        current_v = current_v.overlay(
+            overlay_img,
+            x=x_pos,
+            y=y_pos,
+            enable=f"between(t,{st},{et})",
+            format='auto'
+        )
+    
+    # ── 弹幕 overlay: 从右到左飞过 ──
+    if danmaku_overlays:
+        _danmaku_height = danmaku_fontsize + 16  # 每行弹幕高度
+        _danmaku_row_h = _danmaku_height + 8      # 行间距
+        _danmaku_top_margin = int(vh * 0.05)       # 顶部留白 5%
+        # 每行弹幕用不同的 y 偏移, 自动分配行号
+        _dmk_row_counter = 0
+        _dmk_y_offset_pool = list(range(danmaku_rows)) * 100  # 循环分配行号
+        for idx, (dtext, dst, det, dfs, dsw, dsc) in enumerate(danmaku_overlays):
+            # 渲染弹幕文字到定宽 PNG
+            try:
+                _dmk_font = ImageFont.truetype(font_path, dfs)
+            except:
+                _dmk_font = pil_font
+            # 计算文字渲染宽度
+            _dmk_tw = 0
+            for ch in dtext:
+                _cf = _emoji_font if (_is_emoji(ch) and _emoji_font) else _dmk_font
+                _dmk_tw += _cf.getbbox(ch)[2] - _cf.getbbox(ch)[0] + 1
+            _dmk_tw += 20  # padding
+            # 弹幕 PNG: 宽度=视频宽度(方便右到左滑动), 高度=文字行高
+            _dmk_pad = int(vw * 0.12)  # 额外右边空白让文字滑入
+            _dmk_pw = vw + _dmk_tw + _dmk_pad
+            _dmk_ph = _danmaku_height
+            
+            dmg = Image.new('RGBA', (_dmk_pw, _dmk_ph), (0,0,0,0))
+            dd = ImageDraw.Draw(dmg)
+            
+            # 弹幕颜色: 随机 or 固定
+            if danmaku_random_color:
+                _dmkc = _random.choice(_danmaku_colors)
+            else:
+                _dmkc = danmaku_color
+            
+            # 渲染带描边的文字（无背景,弹幕是纯文字浮在画面上）
+            _render_text_emoji(dd, (8, 4), dtext, _dmk_font, _dmkc, dsw, dsc)
+            
+            # 透明度调整: 对整个 PNG 应用 alpha
+            if danmaku_opacity < 0.99:
+                _ra = dmg.split()[-1].point(lambda x: int(x * danmaku_opacity))
+                dmg.putalpha(_ra)
+            
+            _dmk_png = _tmp.mktemp(suffix=f'_dmk{idx}.png')
+            dmg.save(_dmk_png)
+            
+            # 分配行号
+            if danmaku_random_y:
+                _row = _random.randint(0, danmaku_rows - 1)
+            else:
+                _row = _dmk_y_offset_pool[_dmk_row_counter % len(_dmk_y_offset_pool)]
+                _dmk_row_counter += 1
+            
+            _dy = _danmaku_top_margin + _row * _danmaku_row_h
+            _ddur = max(0.1, det - dst)
+            
+            # 弹幕速度: 从右边缘外 (+vw 位置) 到左边缘外 (-文字宽度位置)
+            # x = W - (t - dst) * speed  其中 speed = (vw + _dmk_tw + 50) / _ddur
+            _travel_dist = vw + _dmk_tw + 50  # 总行程(从右侧外到左侧外)
+            _spd = _travel_dist / _ddur if _ddur > 0 else danmaku_speed
+            
+            _dmk_inp = _fm.input(_dmk_png)
+            current_v = current_v.overlay(
+                _dmk_inp,
+                x=f"(W) - (t-{dst})*{_spd} - 0",
+                y=f"{_dy}",
+                enable=f"between(t,{dst},{det})",
+                format='auto',
+                shortest=1
+            )
+            _dmk_pngs_to_clean.append(_dmk_png)
 
-    # 构建音频
-    audio_clips = []
-    if clip.audio:
-        original_audio = clip.audio.with_volume_scaled(bg_volume)
-        audio_clips.append(original_audio)
-    for ap, offset, dur in tts_segments:
-        ac = AudioFileClip(ap).with_start(offset).with_volume_scaled(tts_volume)
-        if ac.duration > dur:
-            ac = ac.subclipped(0, dur)
-        audio_clips.append(ac)
+    # 音频处理: 各段 TTS 按 start 对齐 + 原音
+    for ap, offset in tts_segments:
+        seg_input = _fm.input(ap).audio
+        # adelay 延迟到对应时间点
+        delayed = seg_input.filter('adelay', f"{int(offset*1000)}|{int(offset*1000)}")
+        audio_streams.append(delayed)
 
-    # 合成
-    video_layers = [clip] + subtitle_clips
-    final_video = CompositeVideoClip(video_layers, size=(video_w, video_h))
-    if audio_clips:
-        final_audio = CompositeAudioClip(audio_clips)
-        final_video = final_video.with_audio(final_audio)
+    if len(audio_streams) > 1:
+        aud = _fm.filter(audio_streams, 'amix', inputs=len(audio_streams), duration='longest',
+                        dropout_transition=2, normalize=False)
+    elif len(audio_streams) == 1:
+        aud = audio_streams[0]
+    else:
+        aud = None
 
-    final_video.write_videofile(output_path, codec="libx264", audio_codec="aac",
-                                fps=clip.fps, preset="fast")
-    clip.close()
-    final_video.close()
-    for _, _, _ in subtitle_pngs:
-        try: os.unlink(_[0])
+    # ── 兼容性编码参数: 支持高分辨率 + 非标准比例 ──
+    output_args = {
+        'c:v': 'libx264', 'preset': 'fast', 'crf': 23,
+        'pix_fmt': 'yuv420p',               # 保证全平台兼容
+        'max_muxing_queue_size': 2048,       # 防止大分辨率卡住
+        'vsync': 'cfr',                       # 固定帧率
+    }
+    # 高分辨率(超过1080p)用 high profile + level 4.1+
+    if _high_res:
+        output_args['profile:v'] = 'high'
+        if max(_target_w, _target_h) > 1920:
+            output_args['level'] = '4.2'
+        if max(_target_w, _target_h) > 2560:
+            output_args['level'] = '5.0'
+        if max(_target_w, _target_h) > 3840:
+            output_args['level'] = '5.2'
+    else:
+        output_args['profile:v'] = 'main'
+        output_args['level'] = '4.0'
+    
+    if aud is not None:
+        output_args['c:a'] = 'aac'
+        out = _fm.output(current_v, aud, output_path, **output_args)
+    else:
+        out = _fm.output(current_v, output_path, **output_args)
+
+    out = out.overwrite_output()
+    out.run(capture_stderr=True, quiet=True)
+
+    # Step 4: 清理 + 自动复制到 shared 目录 + 返回 URL
+    for png,_,_,_,_ in subtitle_overlays:
+        try: os.unlink(png)
         except: pass
-    for ap, _, _ in tts_segments:
+    for _dp in _dmk_pngs_to_clean:
+        try: os.unlink(_dp)
+        except: pass
+    for ap,_ in tts_segments:
         try: os.unlink(ap)
         except: pass
 
-    return f"compose 完成 (字幕{len(timeline)}条 + {len(tts_segments)}段配音, 背景音保留{bg_volume*100:.0f}%): {output_path}"
+    fn = 'push_' + hashlib.md5(output_path.encode()).hexdigest()[:8] + '.mp4'
+    dest_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, fn)
+    try:
+        shutil.copy2(output_path, dest)
+        os.chmod(dest, 0o644)
+        url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
+    except Exception:
+        url = output_path
+
+    return f"✅ 视频已生成并发布: {url}\n(字幕{len(subtitle_overlays)}条 + {len(tts_segments)}段配音, 原音保留{bg_volume*100:.0f}%)"
 
 
 def _hex_to_rgba(hex_color, alpha):

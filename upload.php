@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // 限制文件大小: 300MB
-    $maxSize = $isVideo ? 300 * 1024 * 1024 : 10 * 1024 * 1024;
+    $maxSize = $isVideo ? 4096 * 1024 * 1024 : 4096 * 1024 * 1024;
     if (strlen($imageData) > $maxSize) {
         $typeLabel = $isVideo ? 'Video' : 'Image';
         $maxLabel = $isVideo ? '300MB' : '10MB';

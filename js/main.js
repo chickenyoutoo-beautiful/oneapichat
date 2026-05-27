@@ -135,6 +135,11 @@ window.analyzeImage = async function(imageInput, focus) {
     // 获取配置
     const storedVisionUrl = localStorage.getItem('visionApiUrl');
     const visionApiUrl = storedVisionUrl || DEFAULT_CONFIG.visionApiUrl || '/mcp';
+    // ★ 限流保护: 如果 60 秒内遇到过 Token Plan 限流,直接抛错不请求
+    if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 60000) {
+        throw new Error('⚠️ MiniMax API 限流保护中,请 60 秒后再试');
+    }
+
     // ★ 智能判断: 直连模式还是 MCP 代理模式
     var isDirectApi = visionApiUrl.toLowerCase().indexOf('/mcp') === -1;
 
@@ -321,6 +326,11 @@ window.analyzeImage = async function(imageInput, focus) {
         }
 
         if (error && error instanceof Error) {
+            // ★ MiniMax Token Plan 限流: 设置限流标记 + 友好提示
+            if (error.message && error.message.includes('Token Plan')) {
+                window.__minimaxRateLimited = Date.now();
+                throw new Error('⚠️ MiniMax API 限流（Token Plan）。建议: 1) 升级 MiniMax 套餐 2) 切换其他模型 3) 稍后再试');
+            }
             throw error;
         } else {
             throw new Error('图片分析失败: ' + String(error));
@@ -351,12 +361,31 @@ window.analyzeVideo = async function(videoInput, query) {
         if (!frData.error && frData.result) {
             var frJson = JSON.parse(frData.result);
             var frames = frJson.frames || [];
-            var promises = frames.map(function(f, fi) {
-                return window.analyzeImage(f, '第'+(fi+1)+'/'+frames.length+'帧。'+(query||'描述画面内容'))
-                    .then(function(d) { return '**第'+(fi+1)+'帧:** '+(d||'分析完成'); })
-                    .catch(function() { return '第'+(fi+1)+'帧: 分析失败'; });
-            });
-            frameAnalyses = await Promise.all(promises);
+            // ★ 智能分批并发: 每批最多 N 个并行请求,适配 MiniMax Token Plan 限流(RPM=20)
+            //    免费用户 20 RPM, 预留 5 给其他调用, 每批最多 15 个并行
+            var _batchSize = Math.min(15, Math.max(1, Math.floor(frames.length / 2)));
+            // 动态调整: 如果之前遇到过限流(60秒内), 用更保守的批次
+            if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 30000) {
+                _batchSize = 5;
+            } else if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 60000) {
+                _batchSize = 10;
+            }
+            for (var _bi = 0; _bi < frames.length; _bi += _batchSize) {
+                var _batch = frames.slice(_bi, _bi + _batchSize);
+                var _batchPromises = _batch.map(function(f, fi) {
+                    var _absIdx = _bi + fi;
+                    return window.analyzeImage(f, '第' + (_absIdx + 1) + '/' + frames.length + '帧。' + (query || '描述画面内容'))
+                        .then(function(d) { return '**第' + (_absIdx + 1) + '帧:** ' + (d || '分析完成'); })
+                        .catch(function() { return '第' + (_absIdx + 1) + '帧: 分析失败'; });
+                });
+                var _batchResults = await Promise.all(_batchPromises);
+                frameAnalyses = frameAnalyses.concat(_batchResults);
+                // ★ 限流保护: 如果检测到限流标记(某帧触发了), 当前批完成后等待 5 秒再发下一批
+                if (window.__minimaxRateLimited && _bi + _batchSize < frames.length) {
+                    console.warn('[analyzeVideo] 限流标记检测到,等待 5 秒再发下一批');
+                    await new Promise(function(r) { setTimeout(r, 5000); });
+                }
+            }
         }
     } catch(e) {}
     
@@ -450,7 +479,7 @@ function clearAuthToken() {
 }
 
 const MOBILE_BREAKPOINT = 786;
-const MAX_FILE_SIZE = 300 * 1024 * 1024;
+const MAX_FILE_SIZE = 4096 * 1024 * 1024;
 
 // ★ 图片压缩配置: 最大宽/高和压缩质量
 const IMAGE_COMPRESS_MAX_DIM = 2048;      // 最大边 2048px
@@ -1707,7 +1736,7 @@ const VIDEO_EDIT_TOOL = {
             type: "object",
             properties: {
                 action: { type: "string", description: "操作: compose trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info。compose=字幕+逐句TTS配音+视频精确对齐, 推荐用于配音场景" },
-                params: { type: "object", description: "compose:{timeline:[{start:0,end:2.5,text:'你好',voice_id:'female-yujie'}],voice_id:'female-yujie',fontsize:28,font:'noto-sans-bold',bg_opacity:0.5,bg_color:'#1a1a2e',bg_radius:12,bg_volume:0.3} 每条字幕可单独指定voice_id实现多角色切换。默认音色可选:male-qn-qingse/male-qn-jingying/female-shaonv/female-yujie/presenter_male/presenter_female等" },
+                params: { type: "object", description: "compose:{timeline:[{start:0,end:2.5,text:'你好',voice_id:'female-yujie',danmaku:false}],voice_id:'female-yujie',fontsize:28,font:'noto-sans-bold',bg_opacity:0.5,bg_color:'#1a1a2e',bg_radius:12,bg_volume:0.3,filter:'sepia'|'vintage'|'bw'|'grain'|'vignette'|'hue'|'eq'|'boxblur',auto_fix_ratio:true,danmaku:true,danmaku_rows:2,danmaku_speed:300,danmaku_fontsize:28,danmaku_color:'#ffffff',danmaku_opacity:0.85,danmaku_random_color:true,danmaku_random_y:true} 一次完成字幕+逐句配音+滤镜+原音频保留。每条字幕可单独指定voice_id实现多角色切换。默认音色:male-qn-qingse/male-qn-jingying/female-shaonv/female-yujie/presenter_male/presenter_female等。auto_fix_ratio=true时自动修复非标准分辨率(如1920x1280)。danmaku=true开启弹幕模式,每条字幕的danmaku:true标记为弹幕从右到左飞过,danmaku_rows控制同时显示行数,danmaku_random_color每条随机颜色,danmaku_random_y随机行位置" },
                 input_path: { type: "string", description: "输入视频路径。用户上传视频后,消息中会标注「服务器路径: /oneapichat/uploads/...」,直接用这个路径即可,无需搜索。" },
                 output_path: { type: "string", description: "输出路径(可选)" }
             },
@@ -1812,9 +1841,31 @@ const WIN_TOOLS = [
     { type: "function", function: { name: "win_screenshot", description: "截取Windows桌面当前画面,返回base64图片。用于查看模拟器/游戏是否正常运行、确认操作结果。", parameters: { type: "object", properties: { format: { type: "string", description: "图片格式 png 或 jpg,默认png" } }, required: [] } } },
 ];
 
+// ==================== MiniMax CLI 工具 ====================
+const MMX_TOOLS = [
+    { type: "function", function: { name: "mmx_chat", description: "通过 MiniMax 语言模型对话。用 MiniMax 模型回答用户问题，支持流式输出。适用于与主线模型不同的场景或需要多模型对比。", parameters: { type: "object", properties: { message: { type: "string", description: "用户消息" }, system: { type: "string", description: "系统提示词(可选)" }, max_tokens: { type: "integer", description: "最大生成token数,默认4096" } }, required: ["message"] } } },
+    { type: "function", function: { name: "mmx_image", description: "使用 MiniMax image-01 生成图片。支持自定义宽高比和批量生成。", parameters: { type: "object", properties: { prompt: { type: "string", description: "图片描述" }, aspect_ratio: { type: "string", description: "宽高比，如 16:9, 1:1, 9:16，默认1:1" }, n: { type: "integer", description: "生成数量，默认1，最大4" } }, required: ["prompt"] } } },
+    { type: "function", function: { name: "mmx_video", description: "使用 MiniMax Hailuo 生成视频。异步任务，返回任务ID。", parameters: { type: "object", properties: { prompt: { type: "string", description: "视频描述，如'夕阳下，一只猫坐在窗边望向远方'" } }, required: ["prompt"] } } },
+    { type: "function", function: { name: "mmx_speech", description: "使用 MiniMax 语音合成，将文字转为语音。", parameters: { type: "object", properties: { text: { type: "string", description: "要朗读的文字" }, voice: { type: "string", description: "音色ID，可选: female-yujie(默认)/female-shaonv/male-qn-qingse/male-qn-jingying/female-chengshu/female-tianmei/male-qn-badao/male-qn-daxuesheng" } }, required: ["text"] } } },
+    { type: "function", function: { name: "mmx_voices", description: "列出 MiniMax 语音合成可用的所有音色列表。", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "mmx_music", description: "用户说'生成/创作/创作一首歌/音乐/歌曲'时,必须调用此工具！★ 使用 MiniMax 生成音乐，会自动根据 prompt 创作歌词并生成完整歌曲。★ 纯旋律: instrumental=true。★ 提供歌词: lyrics=歌词。★ 默认(推荐): 只传 prompt,自动创作歌词+音乐。", parameters: { type: "object", properties: { prompt: { type: "string", description: "音乐风格描述，如 '轻快爵士风格，主题是夏天的海边'。必须描述风格/主题/情绪" }, lyrics: { type: "string", description: "歌词(可选)。支持 [Verse][Chorus][Bridge] 等结构标签。不传则自动生成歌词。" }, instrumental: { type: "boolean", description: "纯音乐无歌词，默认false" } }, required: ["prompt"] } } },
+    { type: "function", function: { name: "mmx_vision", description: "使用 MiniMax VLM 分析图片内容。", parameters: { type: "object", properties: { image: { type: "string", description: "图片URL或base64" }, prompt: { type: "string", description: "关于图片的问题，默认'描述这张图片'" } }, required: ["image"] } } },
+    { type: "function", function: { name: "mmx_quota", description: "查看 MiniMax Token Plan 的剩余用量和配额信息。", parameters: { type: "object", properties: {}, required: [] } } },
+];
+
 // 注册
 (function() {
     WIN_TOOLS.forEach(function(t) {
+        toolRegistry.register(t.function.name, {
+            name: t.function.name,
+            description: t.function.description,
+        });
+    });
+})();
+
+// ==================== MiniMax CLI 工具注册 ====================
+(function() {
+    MMX_TOOLS.forEach(function(t) {
         toolRegistry.register(t.function.name, {
             name: t.function.name,
             description: t.function.description,
@@ -1893,6 +1944,51 @@ async function uploadImageToServer(base64Data) {
         return null;
     } catch (e) {
         console.warn('[uploadImageToServer] 上传失败:', e.message);
+        return null;
+    }
+}
+
+/**
+ * 用 multipart/form-data 直接上传视频 Blob（避免 base64 内存爆炸）
+ * 大视频（>50MB）不再读到 JS 内存中，直接以 Blob 流式上传
+ */
+async function uploadVideoBlob(file, progressFn) {
+    try {
+        var formData = new FormData();
+        formData.append('image', file, file.name);
+        const token = getAuthToken();
+        var url = SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token);
+        
+        // 用 XMLHttpRequest 以支持上传进度
+        var result = await new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url, true);
+            xhr.withCredentials = true;
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable && typeof progressFn === 'function') {
+                    var pct = 30 + Math.round((e.loaded / e.total) * 55); // 30%~85%
+                    progressFn(pct, '上传中 ' + Math.round(e.loaded / e.total * 100) + '%');
+                }
+            };
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        resolve(data.url || null);
+                    } catch(e) { reject(new Error('解析响应失败')); }
+                } else {
+                    reject(new Error('HTTP ' + xhr.status));
+                }
+            };
+            xhr.onerror = function() { reject(new Error('网络错误')); };
+            xhr.send(formData);
+        });
+        if (result && !result.startsWith('http')) {
+            result = window.location.origin + result;
+        }
+        return result;
+    } catch (e) {
+        console.warn('[uploadVideoBlob] 失败:', e.message);
         return null;
     }
 }
@@ -2437,6 +2533,11 @@ const DEFAULT_CONFIG = {
         '   - 如需查看搜索结果中链接的详细内容,使用 web_fetch 工具。\n' +
         '   - web_fetch 支持批量并行抓取(最多5个URL): 将感兴趣的链接URL数组传入 urls 参数即可。\n' +
         '   - 典型流程: web_search → 分析结果 → web_fetch 深入查看 → 综合回答。\n' +
+        '4.5 【MiniMax 多模态能力 — 你可以直接调用!】\n' +
+        '   - mmx_music: 用户说 生成音乐/歌曲/创作一首歌 时调用。只需 prompt 描述风格即可。\n' +
+        '   - mmx_speech: 需要语音朗读/配音时调用,支持多种音色。\n' +
+        '   - mmx_image: 文生图(备用,主力还是 generate_image)。\n' +
+        '   - mmx_chat: 用 MiniMax 模型对话(适合对比答案或用不同模型)。\n' +
         '5. 【重要-图片生成规则】\n' +
         '   【关键规则】当用户上传了图片时:\n' +
         '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
@@ -3866,13 +3967,37 @@ async function processSelectedFiles(fileList) {
                     updateFilePreviewUI();
                 }, 600);
             } else if (isVideo) {
-                _setProgress(20, '读取视频中...');
-                var base64 = await fileToBase64(file);
-                var dataUrl = 'data:' + file.type + ';base64,' + base64;
-                var fileObj = { name: file.name, content: dataUrl, size: file.size, isVideo: true, type: file.type };
-                _setProgress(60, '上传视频中...');
-                var srvUrl = await uploadImageToServer(dataUrl);
-                if (srvUrl) fileObj.serverUrl = srvUrl;
+                _setProgress(5, '准备上传...');
+                // ★ 直接 Blob 上传: 避免 FileReader.readAsDataURL 将大视频全部读入内存
+                //    30MB+ 视频用 base64 会导致浏览器内存溢出崩溃
+                var fileObj = { name: file.name, isVideo: true, type: file.type, size: file.size };
+                _setProgress(30, '上传视频中...');
+                try {
+                    var srvUrl = await uploadVideoBlob(file, _setProgress);
+                    if (srvUrl) {
+                        fileObj.serverUrl = srvUrl;
+                        fileObj.content = srvUrl; // 存 URL 而非 base64,节省内存
+                        _setProgress(95, '上传完成');
+                    } else {
+                        // 降级: 小视频走 base64
+                        _setProgress(40, '降级读取...');
+                        var base64 = await fileToBase64(file);
+                        var dataUrl = 'data:' + file.type + ';base64,' + base64;
+                        fileObj.content = dataUrl;
+                        _setProgress(80, '上传(base64)...');
+                        srvUrl = await uploadImageToServer(dataUrl);
+                        if (srvUrl) fileObj.serverUrl = srvUrl;
+                    }
+                } catch(e) {
+                    console.warn('[video] Blob上传失败,走base64:', e.message);
+                    _setProgress(40, '降级读取...');
+                    var base64 = await fileToBase64(file);
+                    var dataUrl = 'data:' + file.type + ';base64,' + base64;
+                    fileObj.content = dataUrl;
+                    _setProgress(80, '上传(base64)...');
+                    srvUrl = await uploadImageToServer(dataUrl);
+                    if (srvUrl) fileObj.serverUrl = srvUrl;
+                }
                 pendingFiles.push(fileObj);
                 _setDone();
                 setTimeout(function() {
@@ -4441,6 +4566,59 @@ function toggleImageProviderFields() {
     }
 }
 
+// ===== 视觉理解提供商切换 =====
+window.onVisionProviderChange = function() {
+    var provider = getEl('visionProvider')?.value || 'minimax';
+    var keyInput = getEl('visionApiKey');
+    var urlInput = getEl('visionApiUrl');
+    var oaKeyInput = getEl('visionApiKeyOpenAI');
+    var oaUrlInput = getEl('visionApiUrlOpenAI');
+    var modelInput = getEl('visionModel');
+    var hintEl = getEl('visionProviderHint');
+    
+    // 切换前保存当前值到对应提供商的 localStorage
+    if (window._lastVisionProvider && window._lastVisionProvider !== provider) {
+        if (window._lastVisionProvider === 'minimax') {
+            localStorage.setItem('visionApiKey', encrypt(getVal('visionApiKey') || ''));
+            localStorage.setItem('visionApiUrl', getVal('visionApiUrl') || '');
+        } else if (window._lastVisionProvider === 'openai') {
+            localStorage.setItem('visionApiKeyOpenAI', encrypt(getVal('visionApiKeyOpenAI') || ''));
+            localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || '');
+        }
+    }
+    window._lastVisionProvider = provider;
+    localStorage.setItem('visionProvider', provider);
+    
+    // 切换字段可见性
+    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'] };
+    Object.keys(fields).forEach(function(k) {
+        fields[k].forEach(function(id) {
+            var el = getEl(id); if (el) el.style.display = k === provider ? '' : 'none';
+        });
+    });
+    
+    // 恢复对应提供商的配置值
+    if (provider === 'openai') {
+        var _storedKey = decrypt(localStorage.getItem('visionApiKeyOpenAI') || '') || '';
+        var _storedUrl = localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1';
+        if (oaKeyInput) oaKeyInput.value = _storedKey;
+        if (oaUrlInput) oaUrlInput.value = _storedUrl;
+        if (modelInput) modelInput.value = 'gpt-4o';
+        if (hintEl) hintEl.textContent = 'OpenAI: 使用 GPT-4o 等视觉模型。使用独立的 API Key。';
+    } else if (provider === 'minimax') {
+        var _storedKey = decrypt(localStorage.getItem('visionApiKey') || '') || '';
+        var _storedUrl = localStorage.getItem('visionApiUrl') || 'https://api.minimaxi.com/v1/coding_plan/vlm';
+        if (keyInput) keyInput.value = _storedKey;
+        if (urlInput) urlInput.value = _storedUrl;
+        if (modelInput) modelInput.value = 'MiniMax-VL-01';
+        if (hintEl) hintEl.textContent = 'MiniMax: 使用 coding-plan-vlm 端点的视觉理解能力。';
+    } else {
+        // 自定义
+        if (hintEl) hintEl.textContent = '自定义: 设置自己的 API 地址和模型。';
+    }
+    window.saveConfig();
+};
+
 // 图片上传按钮 - 触发图片选择(仅图片,移动端友好)
 // 图片上传功能已整合到文件上传中
 
@@ -4571,7 +4749,7 @@ function bindSearchEvents() {
 }
 
 // ★ 搜索引擎提供商切换 (参照主模型 onProviderChange)
-const SEARCH_PROVIDER_KEY_MAP = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily' };
+const SEARCH_PROVIDER_KEY_MAP = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily', minimax: 'searchApiKeyMiniMax' };
 
 window.onSearchProviderChange = function() {
     var provider = getVal('searchProvider') || 'duckduckgo';
@@ -5627,7 +5805,7 @@ function startAgentPanelRefresh() {
             // ★ 保持选中状态,只更新内容(不覆盖已渲染的聊天历史)
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
+                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
                     .then(function(r) { return r.json(); })
                     .then(function(agents) {
                         var a = agents[_selectedAgentName];
@@ -5722,7 +5900,7 @@ window._refreshAllAgentLists = async function() {
     var token = getAuthToken();
     if (!token) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) });
         var agents = await r.json();
         // 验证返回的数据是有效对象
         if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
@@ -5790,7 +5968,7 @@ window.selectAgentChat = function(agentName) {
         var token = getAuthToken();
         if (!token) { msgArea.innerHTML = '<div class="text-xs text-gray-400">请先登录</div>'; return; }
         msgArea.innerHTML = '<div class="text-xs text-gray-400">获取中...</div>';
-        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
+        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
@@ -5841,7 +6019,7 @@ window.mainAgentReply = function() {
     }
     var token = getAuthToken();
     if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(12000) })
+    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) {
@@ -6480,7 +6658,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(12000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(300000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -6495,7 +6673,7 @@ window.deleteCron = async function(name) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(12000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(300000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -6679,7 +6857,7 @@ window._processAgentNotifyQueue = async function() {
             }
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(12000) }).catch(function() {});
+                fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(300000) }).catch(function() {});
             }
             if (nextExecId !== null && nextExecId !== execId) {
                 window._pendingNotifyExecId = null;
@@ -6772,7 +6950,7 @@ function fetchWithRetry(url, options, maxRetries) {
     maxRetries = maxRetries || 3;
     return new Promise(function(resolve, reject) {
         var attempt = 0;
-        var timeoutMs = (options && options.timeout) || 15000;
+        var timeoutMs = (options && options.timeout) || 300000;
         function tryFetch() {
             attempt++;
             var ctrl = new AbortController();
@@ -6863,9 +7041,9 @@ window.deleteAgent = async function(name) {
     // 异步删除 (不阻塞 UI)
     var token = getAuthToken();
     if (!token) return;
-    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(8000) })
+    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
         .then(function() {
-            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(12000) });
+            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(300000) });
         })
         .then(function() { window._refreshAllAgentLists(); })
         .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
@@ -6909,7 +7087,7 @@ window.refreshEngineStatus = async function() {
     text.textContent = '检查中...';
 
     try {
-        var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(15000) });
+        var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
         var data = await resp.json();
 
         if (data.ok || data.status === 'ok' || data.status === 'running') {
@@ -6928,7 +7106,7 @@ window.refreshEngineStatus = async function() {
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(12000) });
+            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
             var cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
@@ -6954,7 +7132,7 @@ window.refreshEngineStatus = async function() {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
         try {
-            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(12000) });
+            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
             var agentData = await agentResp.json();
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
@@ -7515,7 +7693,10 @@ function saveConfig(showFeedback = false) {
         localStorage.setItem('visionModel', getVal('visionModel') || '');
     localStorage.setItem('visionApiUrl', getVal('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '');
     localStorage.setItem('visionApiKey', encrypt(getVal('visionApiKey') || ''));
-    localStorage.setItem('imageModel', getVal('imageModel') || '');
+    localStorage.setItem('visionProvider', getEl('visionProvider')?.value || 'minimax');
+    localStorage.setItem('visionApiKeyOpenAI', encrypt(getVal('visionApiKeyOpenAI') || ''));
+    localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
+    localStorage.setItem('imageModel', getEl('imageModel')?.value || '');
     localStorage.setItem('imageApiKey', encrypt(getVal('imageApiKey') || ''));
     localStorage.setItem('imageBaseUrl', getVal('imageBaseUrl') || '');
     localStorage.setItem('imageApiKeyOpenrouter', encrypt(getVal('imageApiKeyOpenrouter') || ''));
@@ -8716,6 +8897,14 @@ async function performWebSearch(query, signal, type = 'web') {
         } catch (e) {
             throw e;
         }
+    } else if (provider === 'minimax') {
+        // MiniMax 搜索通过服务器端 CLI 调用
+        // MiniMax 搜索通过服务器端 CLI 调用,传 API Key(从聊天模型配置复用)
+        var _mmxApiKey = (function(){
+            var _k = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
+            try { return decrypt(_k) || _k; } catch(e) { return _k; }
+        })();
+        url = SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(_mmxApiKey);
     } else {
         url = SEARCH_PROXY
             ? `${SEARCH_PROXY}?engine=duckduckgo&q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`
@@ -8777,6 +8966,15 @@ function parseSearchResults(data, provider, type = 'web') {
                 snippet: r.raw_content || r.content || ''
             })));
         }
+    } else if (provider === 'minimax') {
+        // MiniMax Search: { results: [{ title, link, snippet, date }] }
+        if (data.results && Array.isArray(data.results)) {
+            results.push(...data.results.slice(0, 5).map(r => ({
+                title: r.title || '无标题',
+                url: r.link || '',
+                snippet: r.snippet || ''
+            })));
+        }
     }
     return results;
 }
@@ -8810,7 +9008,7 @@ async function performWebFetch(urls) {
     }).slice(0, 5);
     if (validUrls.length === 0) return { results: [], error: 'No valid HTTP URLs (或全部被反爬保护)' };
 
-    const TIMEOUT_MS = 12000;
+    const TIMEOUT_MS = 300000;
 
     const results = await Promise.all(validUrls.map(async function(url) {
         try {
@@ -8984,6 +9182,15 @@ function stopGenerationForChat(chatId) {
     userAbortMap[chatId] = true; // 标记用户主动停止,不再重试
     cleanupStreamState(chatId);  // ★ 清理RAF渲染循环
     abortExistingRequest(chatId);
+    // ★ 中断所有正在运行的工具调用
+    if (window.__toolAbortControllers) {
+        Object.keys(window.__toolAbortControllers).forEach(function(k) {
+            if (k.startsWith(chatId)) {
+                try { window.__toolAbortControllers[k].abort(); } catch(e) {}
+                delete window.__toolAbortControllers[k];
+            }
+        });
+    }
     // ★ 用户停止后也要处理队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
         setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
@@ -11245,6 +11452,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
             SRC_TOOLS.forEach(function(t) { tools.push(t); });
             WIN_TOOLS.forEach(function(t) { tools.push(t); });
         }
+        // ===== MiniMax CLI 工具(始终注册,不受Agent模式影响) =====
+        if (typeof MMX_TOOLS !== 'undefined') {
+            MMX_TOOLS.forEach(function(t) { tools.push(t); });
+        }
         // ★ 添加自定义技能到工具列表
         (function() {
             var _customSkills = [];
@@ -11754,7 +11965,7 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                 body.messages.push(assistantMsg);
 
                 // 工具调用函数(使用独立的AbortController)
-                async function executeToolCallForRetry(tc) {
+                async function executeToolCallForRetry(tc, abortSignal) {
                     const func = tc.function;
                     let args;
                     try {
@@ -12090,7 +12301,11 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 var _pRes = await fetch('/oneapichat/engine_api.php?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
                                 var _pData = await _pRes.json();
                                 if (_pData.ok && _pData.url) {
+                                    // ★ 直接追加在 tool_result 中, 并注入到 pendingMsg.content
                                     _pushMsg += '\n📥 ' + _pData.url;
+                                    if (pendingMsg) {
+                                        pendingMsg.content = (pendingMsg.content || '') + '\n📥 ' + _pData.url;
+                                    }
                                 } else {
                                     _pushMsg += '\n⚠️ 文件无法分享: ' + (_pData.error || '文件不存在');
                                 }
@@ -12691,6 +12906,71 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                                 toolResult = { result: r };
                             }
                         }
+                    } else if (func.name.startsWith('mmx_')) {
+                        // MiniMax CLI 工具：mmx_chat/mmx_image/mmx_video/mmx_speech/mmx_voices/mmx_music/mmx_vision/mmx_quota
+                        var _mmxCmd = func.name.replace('mmx_', '');
+                        
+                        // ★ 定义 appendAudioToChat（如尚未定义）
+                        if (typeof window.appendAudioToChat !== 'function') {
+                            window.appendAudioToChat = function(url, label) {
+                                var cid2 = currentChatId;
+                                if (!cid2 || !chats[cid2]) return;
+                                var audioTag = '<audio controls style="width:100%%;max-width:400px;margin:8px 0;"><source src="' + url + '" type="audio/mpeg"></audio><br><a href="' + url + '" target="_blank" download>⬇️ 下载</a>';
+                                appendMessage('assistant', '### ' + label + '\n' + audioTag);
+                            };
+                        }
+                        var _mmxKey2 = (function(){
+                            var _k = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
+                            try { return decrypt(_k) || _k; } catch(e) { return _k; }
+                        })();
+                        var _mmxUrl = SERVER_API_BASE + '/engine_api.php?action=mmx&resource=' + _mmxCmd + '&cmd=' + _mmxCmd + '&api_key=' + encodeURIComponent(_mmxKey2);
+                        if (args.message) _mmxUrl += '&message=' + encodeURIComponent(args.message);
+                        if (args.system) _mmxUrl += '&system=' + encodeURIComponent(args.system);
+                        if (args.prompt) _mmxUrl += '&prompt=' + encodeURIComponent(args.prompt);
+                        if (args.text) _mmxUrl += '&text=' + encodeURIComponent(args.text);
+                        if (args.voice) _mmxUrl += '&voice=' + encodeURIComponent(args.voice);
+                        if (args.image) _mmxUrl += '&image=' + encodeURIComponent(args.image);
+                        if (args.lyrics) _mmxUrl += '&lyrics=' + encodeURIComponent(args.lyrics);
+                        if (args.aspect_ratio) _mmxUrl += '&aspect_ratio=' + encodeURIComponent(args.aspect_ratio);
+                        if (args.n) _mmxUrl += '&n=' + parseInt(args.n);
+                        if (args.instrumental === true) _mmxUrl += '&instrumental=true';
+                        if (args.max_tokens) _mmxUrl += '&max_tokens=' + parseInt(args.max_tokens);
+                        try {
+                            var _mmxCtrl = new AbortController();
+                            if (abortSignal) {
+                                abortSignal.addEventListener('abort', function() { _mmxCtrl.abort(); }, { once: true });
+                            }
+                            var _to = setTimeout(function() { _mmxCtrl.abort(); }, 300000); // 5分钟超时
+                            var _mmxResp = await fetch(_mmxUrl, { signal: _mmxCtrl.signal });
+                            clearTimeout(_to);
+                            // speech 和 music: 生成后自动返回音频 URL
+                            if (_mmxCmd === 'speech' || _mmxCmd === 'music') {
+                                var _mmxText = await _mmxResp.text();
+                                try {
+                                    var _mmxJson = JSON.parse(_mmxText);
+                                    var _audioUrl = _mmxJson?.result?.url || '';
+                                    if (_audioUrl) {
+                                        toolResult = { result: '✅ ' + (_mmxCmd === 'speech' ? '语音' : '音乐') + '已生成: ' + _audioUrl };
+                                        // ★ 附加文件到当前对话,让用户直接看到播放器
+                                        if (typeof window.appendAudioToChat === 'function') {
+                                            window.appendAudioToChat(_mmxJson.result.url, (_mmxCmd === 'music' ? '🎵 生成的音乐' : '🔊 生成的语音'));
+                                        }
+                                    } else {
+                                        toolResult = { result: _mmxJson.result || JSON.stringify(_mmxJson) };
+                                    }
+                                } catch(e) {
+                                    toolResult = { result: _mmxText };
+                                }
+                            } else {
+                                var _mmxData = await _mmxResp.json();
+                                var _mmxRes = _mmxData.result || _mmxData;
+                                var _formatted = typeof _mmxRes === 'object' ? JSON.stringify(_mmxRes, null, 2) : String(_mmxRes);
+                                toolResult = { result: _formatted };
+                            }
+                        } catch (_mmxErr) {
+                            console.error('[mmx] 请求失败:', _mmxErr.message);
+                            toolResult = { error: 'MiniMax CLI 调用失败: ' + (_mmxErr.message || '未知错误') };
+                        }
                     } else if (func.name === 'video_edit') {
                         var _srcEnginePath = args.input_path || '';
                         // ★ 智能补全: 如果没传 input_path,从当前聊天的上传文件里找
@@ -12724,6 +13004,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         try {
                             var _ctlr = new AbortController();
                             var _to = setTimeout(function() { _ctlr.abort(); }, 600000); // 10分钟超时
+                            // ★ 如果用户停止,同时 abort 这个 fetch
+                            if (abortSignal) {
+                                abortSignal.addEventListener('abort', function() { _ctlr.abort(); }, { once: true });
+                            }
                             var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody), signal: _ctlr.signal });
                             clearTimeout(_to);
                             var _veditData = await _veditResp.json();
@@ -13093,9 +13377,35 @@ window.useAlternativeVisionModel = function() {
                             _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
                         }
                     } catch(e) {}
+                    // ★ 用户停止检测: 每次工具调用前检查
+                    if (userAbortMap[chatId]) {
+                        console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
+                        if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted');
+                        body.messages.push({
+                            role: 'tool',
+                            tool_call_id: tc.id || 'tc_' + Date.now(),
+                            content: '[用户已中断操作]'
+                        });
+                        continue;
+                    }
+
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running');
 
-                    const toolResult = await executeToolCallForRetry(tc);
+                    // ★ 传递工具调用的 abort 信号,让 fetch 也能被中断
+                    var _toolAbortCtrl = new AbortController();
+                    var _toolAbortKey = chatId + '_tool_' + Date.now();
+                    window.__toolAbortControllers = window.__toolAbortControllers || {};
+                    window.__toolAbortControllers[_toolAbortKey] = _toolAbortCtrl;
+                    
+                    // 如果用户中止,同时 abort 工具请求
+                    if (userAbortMap[chatId]) {
+                        _toolAbortCtrl.abort();
+                    }
+                    
+                    const toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
+                    
+                    // 清理控制器
+                    delete window.__toolAbortControllers[_toolAbortKey];
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success');
                     // ★ 记录统计
                     if (tc.function && tc.function.name) toolCallStats.record(tc.function.name, !!toolResult.error, toolResult.error || '');
@@ -14427,6 +14737,14 @@ function initializeConfig() {
     const storedVisionKey = decrypt(localStorage.getItem('visionApiKey') || '');
     const cleanVisionKey = (storedVisionKey && storedVisionKey !== 'not-needed') ? storedVisionKey : '';
     setVal('visionApiKey', cleanVisionKey || '');
+    // 视觉理解提供商
+    var _visionProvider = localStorage.getItem('visionProvider') || 'minimax';
+    if (getEl('visionProvider')) getEl('visionProvider').value = _visionProvider;
+    window._lastVisionProvider = _visionProvider;
+    // 加载 OpenAI Vision 的配置
+    const storedOAKey = decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
+    setVal('visionApiKeyOpenAI', (storedOAKey && storedOAKey !== 'not-needed') ? storedOAKey : '');
+    setVal('visionApiUrlOpenAI', localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
     const storedImageKey = decrypt(localStorage.getItem('imageApiKey') || '');
     const cleanImageKey = (storedImageKey && storedImageKey !== 'not-needed') ? storedImageKey : '';
     setVal('imageApiKey', cleanImageKey || '');
@@ -15361,7 +15679,7 @@ function uploadToRAG(file, onDone) {
     };
     xhr.onerror = function() { if (pb) pb.style.display = 'none'; showToast('网络错误', 'error'); doneFn(); };
     xhr.ontimeout = function() { if (pb) pb.style.display = 'none'; showToast('上传超时,请重试', 'error'); doneFn(); };
-    xhr.timeout = 120000;
+    xhr.timeout = 300000; // 5分钟超时
     xhr.send(formData);
 }
 
@@ -16104,7 +16422,7 @@ window.checkAgentNotifications = function() {
     }
 
     // 先获取引擎心跳(cron通知等)
-    fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+    fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(300000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.error) return;
@@ -16127,7 +16445,7 @@ window.checkAgentNotifications = function() {
         }).catch(function() {});
 
     // ★ 同时获取子代理完成通知(新功能)
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(300000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) return;

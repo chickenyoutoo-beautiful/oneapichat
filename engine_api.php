@@ -26,6 +26,34 @@ function _engine_verifyAuthToken($token) {
 $action = $_GET['action'] ?? '';
 $engine_url = 'http://127.0.0.1:8766';
 
+// ── /engine/video_edit POST 转发 ──
+$requestUri = $_SERVER['REQUEST_URI'] ?? '';
+$requestPath = parse_url($requestUri, PHP_URL_PATH) ?? '';
+if (str_ends_with($requestPath, '/engine/video_edit') && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $body = file_get_contents('php://input');
+    $ch = curl_init($engine_url . '/engine/video_edit');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 600,
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    if ($err) {
+        http_response_code(502);
+        echo json_encode(['error' => 'Engine unreachable: ' . $err]);
+    } else {
+        http_response_code($httpCode);
+        echo $resp;
+    }
+    exit;
+}
+
 // ★ 优先从 HTTP Header 读取 auth_token (避免 URL 明文传输)
 $authHeader = '';
 if (function_exists('getallheaders')) {
@@ -238,6 +266,96 @@ switch ($action) {
         echo @file_get_contents($engine_url . '/engine/sys/info?') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
+    case 'mmx':
+        $resource = $_GET['resource'] ?? '';
+        $cmd = $_GET['cmd'] ?? '';
+        $prompt = $_GET['prompt'] ?? '';
+        $outFile = $_GET['out'] ?? '';
+        if (!$resource || !$cmd) { echo json_encode(['error' => '需要 resource 和 cmd 参数']); exit; }
+        // Key 优先级: 请求参数(前端传) > 服务器配置
+        $mmxKey = $_GET['api_key'] ?? '';
+        $mmxRegion = $_GET['region'] ?? 'cn';
+        if (!$mmxKey) {
+            $cfg = @json_decode(@file_get_contents(__DIR__ . '/.mmx_config.json'), true);
+            if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
+        }
+        if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
+        $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
+        // 直接通过 --api-key 传参（key 已验证只有安全字符）
+        $apiKeyFlag = '--api-key ' . $mmxKey;
+        $regionFlag = '--region ' . $mmxRegion;
+        $extraFlags = '--non-interactive --output json ' . $apiKeyFlag . ' ' . $regionFlag;
+        if ($prompt) $extraFlags .= ' --prompt ' . escapeshellarg($prompt);
+        if ($cmd === 'chat') {
+            $system = $_GET['system'] ?? '';
+            $message = $_GET['message'] ?? $prompt;
+            if (!$message) { echo json_encode(['error' => 'chat 需要 message 或 prompt 参数']); exit; }
+            $fullCmd = "{$mmxBin} text chat --message " . escapeshellarg($message) . " --max-tokens 4096 {$extraFlags} 2>&1";
+            if ($system) $fullCmd = "{$mmxBin} text chat --message " . escapeshellarg($message) . " --system " . escapeshellarg($system) . " --max-tokens 4096 {$extraFlags} 2>&1";
+        } elseif ($cmd === 'image') {
+            $aspect = $_GET['aspect_ratio'] ?? '1:1';
+            $n = intval($_GET['n'] ?? 1);
+            $fullCmd = "{$mmxBin} image generate --aspect-ratio {$aspect} --n {$n} {$extraFlags} 2>&1";
+        } elseif ($cmd === 'video') {
+            $fullCmd = "{$mmxBin} video generate --no-wait --quiet {$extraFlags} 2>&1";
+        } elseif ($cmd === 'speech') {
+            $voice = $_GET['voice'] ?? 'female-yujie';
+            $text = $_GET['text'] ?? $prompt;
+            if (!$text) { echo json_encode(['error' => 'speech 需要 text 或 prompt 参数']); exit; }
+            $sharedDir = __DIR__ . '/uploads/shared/';
+            if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
+            $outPath = $sharedDir . 'speech_' . substr(md5($text . time()), 0, 12) . '.mp3';
+            $fullCmd = "{$mmxBin} speech synthesize --text " . escapeshellarg($text) . " --voice " . escapeshellarg($voice) . " --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
+        } elseif ($cmd === 'voices') {
+            $fullCmd = "{$mmxBin} speech voices {$extraFlags} 2>&1";
+        } elseif ($cmd === 'music') {
+            $lyrics = $_GET['lyrics'] ?? '';
+            $instrumental = $_GET['instrumental'] ?? '';
+            $extra = '';
+            // ★ 自动歌词优化: 如果没有传歌词,又不是纯音乐模式,则自动生成歌词
+            if ($lyrics) {
+                $extra .= ' --lyrics ' . escapeshellarg($lyrics);
+            } elseif ($instrumental !== 'true') {
+                $extra .= ' --lyrics-optimizer';
+            }
+            if ($instrumental === 'true') $extra .= ' --instrumental';
+            $sharedDir = __DIR__ . '/uploads/shared/';
+            if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
+            $outPath = $sharedDir . 'music_' . substr(md5(time()), 0, 12) . '.mp3';
+            $fullCmd = "{$mmxBin} music generate {$extra} --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
+        } elseif ($cmd === 'vision') {
+            $image = $_GET['image'] ?? '';
+            if (!$image) { echo json_encode(['error' => 'vision 需要 image 参数']); exit; }
+            $fullCmd = "{$mmxBin} vision describe --image " . escapeshellarg($image) . " {$extraFlags} 2>&1";
+        } elseif ($cmd === 'quota') {
+            $fullCmd = "{$mmxBin} quota show {$extraFlags} 2>&1";
+        } elseif ($cmd === 'search') {
+            $q = $_GET['q'] ?? $prompt;
+            if (!$q) { echo json_encode(['error' => 'search 需要 q 或 prompt 参数']); exit; }
+            $limit = intval($_GET['limit'] ?? 5);
+            $fullCmd = "{$mmxBin} search query " . escapeshellarg($q) . " --limit {$limit} {$extraFlags} 2>&1";
+        } else {
+            echo json_encode(['error' => "未知命令: {$cmd}, 支持: chat/image/video/speech/voices/music/vision/search/quota"]); exit;
+        }
+        $output = shell_exec($fullCmd);
+        if ($output === null || trim($output) === '') {
+            echo json_encode(['error' => 'mmx CLI 未响应']);
+        } else {
+            $parsed = json_decode($output, true);
+            // speech/music: 检查文件是否生成成功，优先返回 URL
+            if (($cmd === 'speech' || $cmd === 'music') && file_exists($outPath) && filesize($outPath) > 100) {
+                $fn = basename($outPath);
+                $url = '/oneapichat/uploads/shared/' . rawurlencode($fn);
+                $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . 'naujtrats.xyz' . $url;
+                echo json_encode(['result' => ['url' => $fullUrl, 'path' => $url, 'size' => filesize($outPath)], 'raw' => $output]);
+            } elseif ($parsed !== null) {
+                echo json_encode(['result' => $parsed, 'raw' => $output]);
+            } else {
+                echo json_encode(['result' => $output]);
+            }
+        }
+        break;
+
     default:
         echo json_encode(['error' => 'unknown action']);
 
@@ -388,6 +506,41 @@ switch ($action) {
         break;
 
     // ★ engine_push 文件复制到 uploads
+    case 'minimax_search':
+        $query = $_GET['q'] ?? '';
+        $limit = intval($_GET['limit'] ?? 5);
+        if ($limit < 1) $limit = 1;
+        if ($limit > 20) $limit = 20;
+        if (!$query) { echo json_encode(['error' => '缺少查询词 q']); exit; }
+        $escapedQuery = escapeshellarg($query);
+        $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
+        // Key 优先级: 请求参数(前端传) > 服务器配置
+        $mmxKey = $_GET['api_key'] ?? '';
+        $mmxRegion = $_GET['region'] ?? 'cn';
+        if (!$mmxKey) {
+            $cfg = @json_decode(@file_get_contents(__DIR__ . '/.mmx_config.json'), true);
+            if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
+        }
+        if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
+        $escapedKey = escapeshellarg($mmxKey);
+        $escapedRegion = escapeshellarg($mmxRegion);
+        $cmd = "{$mmxBin} search query {$escapedQuery} --limit {$limit} --api-key {$escapedKey} --region {$escapedRegion} 2>&1";
+        $output = shell_exec($cmd);
+        if ($output === null || trim($output) === '') {
+            echo json_encode(['error' => '搜索服务未响应']);
+        } else {
+            $parsed = json_decode($output, true);
+            if ($parsed && isset($parsed['organic']) && is_array($parsed['organic'])) {
+                echo json_encode(['results' => $parsed['organic'], 'status' => 'ok']);
+            } elseif ($parsed && isset($parsed['base_resp']['status_msg'])) {
+                echo json_encode(['error' => $parsed['base_resp']['status_msg']]);
+            } else {
+                // 原始输出是 JSON 但格式不同,直接返回
+                echo $output;
+            }
+        }
+        break;
+
     case 'push_file':
         $srcPath = $_GET['path'] ?? '';
         if (!$srcPath) { echo json_encode(['ok'=>false,'error'=>'缺少path']); exit; }

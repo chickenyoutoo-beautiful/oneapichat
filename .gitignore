@@ -40,3 +40,13 @@ __pycache__/
 backups/
 config.ini
 config.ini.template
+__pycache__/
+*.pyc
+*.mp3
+*.mp4
+.mmx_config.json
+chat_data/
+uploads/
+speech_*
+music_*
+minimax-output/

@@ -200,6 +200,9 @@ switch ($method) {
     case 'GET':
         $chatId = isset($_GET['chat_id']) ? preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['chat_id']) : null;
         
+        // ★ chat_id=all 时列出所有聊天（前端 loadChatsFromServer 使用）
+        if ($chatId === 'all') $chatId = null;
+        
         if ($chatId) {
             if (strlen($chatId) < 1 || strlen($chatId) > 128) {
                 http_response_code(400);
