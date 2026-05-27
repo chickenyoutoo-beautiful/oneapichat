@@ -176,7 +176,69 @@ switch ($method) {
     case 'POST':
         if (!$input) jsonError(400, '无效的请求数据');
 
-        if ($action === 'register') {
+        if ($action === 'send_reg_code') {
+            $email = trim($input['email'] ?? '');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError(400, '邮箱格式不正确');
+
+            // 检查是否已注册
+            $users = readJson($usersFile);
+            foreach ($users as $u) {
+                if (($u['email'] ?? '') === $email) jsonError(409, '该邮箱已被注册');
+            }
+
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $codeFile = $usersDir . 'reg_codes.json';
+            $regCodes = readJson($codeFile);
+            $regCodes[$email] = ['code' => $code, 'time' => time()];
+            writeJson($codeFile, $regCodes);
+
+            require_once __DIR__ . '/mailer.php';
+            if (sendVerificationCode($email, $code)) {
+                jsonSuccess(['message' => '验证码已发送到 ' . $email]);
+            } else {
+                jsonSuccess(['message' => '验证码: ' . $code, 'debug_code' => $code]);
+            }
+
+        } elseif ($action === 'send_reset') {
+            $email = trim($input['email'] ?? '');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError(400, '邮箱格式不正确');
+            $users = readJson($usersFile);
+            $userId = null;
+            foreach ($users as $id => $u) {
+                if (($u['email'] ?? '') === $email) { $userId = $id; break; }
+            }
+            if (!$userId) jsonError(404, '该邮箱未注册');
+            $resetToken = bin2hex(random_bytes(32));
+            $users[$userId]['reset_token'] = $resetToken;
+            $users[$userId]['reset_token_time'] = time();
+            writeJson($usersFile, $users);
+            $resetLink = 'https://naujtrats.xyz/oneapichat/reset_password.html?token=' . $resetToken;
+            require_once __DIR__ . '/mailer.php';
+            $sent = sendResetMail($email, $resetLink);
+            if ($sent) {
+                jsonSuccess(['message' => '重置链接已发送到 ' . $email]);
+            } else {
+                jsonSuccess(['message' => '重置链接: ' . $resetLink]);
+            }
+        } elseif ($action === 'reset_password') {
+            $resetToken = trim($input['token'] ?? '');
+            $newPassword = trim($input['password'] ?? '');
+            if (strlen($resetToken) < 10) jsonError(400, '无效的重置链接');
+            if (strlen($newPassword) < 6) jsonError(400, '新密码至少6位');
+            $users = readJson($usersFile);
+            $userId = null;
+            foreach ($users as $id => $u) {
+                if (($u['reset_token'] ?? '') === $resetToken) {
+                    if (time() - ($u['reset_token_time'] ?? 0) > 3600) jsonError(400, '重置链接已过期（1小时）');
+                    $userId = $id; break;
+                }
+            }
+            if (!$userId) jsonError(400, '无效或已过期的重置链接');
+            $users[$userId]['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+            unset($users[$userId]['reset_token'], $users[$userId]['reset_token_time']);
+            writeJson($usersFile, $users);
+            jsonSuccess(['message' => '密码已重置，请重新登录']);
+        } elseif ($action === 'register') {
             // jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
@@ -195,11 +257,35 @@ switch ($method) {
                 }
             }
 
+            $email = trim($input['email'] ?? '');
+            $code = trim($input['code'] ?? '');
+            if (!$email) jsonError(400, '请填写邮箱');
+
+            // 验证邮箱验证码
+            $codeFile = $usersDir . 'reg_codes.json';
+            $regCodes = readJson($codeFile);
+            $saved = $regCodes[$email] ?? null;
+            if (!$saved || time() - ($saved['time'] ?? 0) > 600) {
+                jsonError(400, '验证码已过期，请重新发送');
+            }
+            if (($saved['code'] ?? '') !== $code) {
+                jsonError(400, '验证码错误');
+            }
+            unset($regCodes[$email]);
+            writeJson($codeFile, $regCodes);
+
             $userId = generateUserId();
+            foreach ($users as $u) {
+                if (($u['email'] ?? '') === $email) {
+                    jsonError(409, '该邮箱已被注册');
+                }
+            }
             $users[$userId] = [
                 'username' => $username,
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-                'created_at' => date('c')
+                'created_at' => date('c'),
+                'email' => $email ?: null,
+                'role' => 'user'
             ];
             if (!writeJson($usersFile, $users)) {
                 jsonError(500, '创建用户失败');
@@ -220,17 +306,19 @@ switch ($method) {
             ]);
 
         } elseif ($action === 'login') {
-            $username = cleanUsername($input['username'] ?? '');
+            $login = trim($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
+            $username = cleanUsername($login);
 
-            if (empty($username) || empty($password)) {
-                jsonError(400, '请输入用户名和密码');
+            if (empty($login) || empty($password)) {
+                jsonError(400, '请输入用户名/邮箱和密码');
             }
 
             $users = readJson($usersFile);
             $userId = null;
             foreach ($users as $id => $u) {
-                if ($u['username'] === $username) {
+                // 支持用户名或邮箱登录
+                if ($u['username'] === $login || ($u['email'] ?? '') === $login) {
                     if (password_verify($password, $u['password_hash'])) {
                         $userId = $id;
                     }
@@ -239,7 +327,7 @@ switch ($method) {
             }
 
             if (!$userId) {
-                jsonError(401, '用户名或密码错误');
+                jsonError(401, '用户名/邮箱或密码错误');
             }
 
             $token = generateToken();
@@ -306,6 +394,86 @@ switch ($method) {
             }
 
             jsonSuccess(['username' => $users[$userId]['username'], 'message' => '更新成功']);
+
+        } elseif ($action === 'send_verify_code') {
+            $token = $input['token'] ?? '';
+            $email = trim($input['email'] ?? '');
+            if (empty($token)) jsonError(401, '未登录');
+            $userId = verifyToken($token);
+            if (!$userId) jsonError(401, '登录已过期');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError(400, '邮箱格式不正确');
+
+            $users = readJson($usersFile);
+            // 检查邮箱是否已被其他用户绑定
+            foreach ($users as $id => $u) {
+                if ($id !== $userId && ($u['email'] ?? '') === $email) {
+                    jsonError(409, '该邮箱已被其他账号绑定');
+                }
+            }
+
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $users[$userId]['verify_code'] = $code;
+            $users[$userId]['verify_code_time'] = time();
+            $users[$userId]['pending_email'] = $email;
+            writeJson($usersFile, $users);
+
+            require_once __DIR__ . '/mailer.php';
+            if (sendVerificationCode($email, $code)) {
+                jsonSuccess(['message' => '验证码已发送到 ' . $email]);
+            } else {
+                // SMTP 不可用，debug 模式：返回验证码给前端
+                jsonSuccess(['message' => '验证码: ' . $code . '（调试模式，请尽快配置SMTP）', 'debug_code' => $code]);
+            }
+
+        } elseif ($action === 'bind_email') {
+            $token = $input['token'] ?? '';
+            $code = trim($input['code'] ?? '');
+            if (empty($token)) jsonError(401, '未登录');
+            $userId = verifyToken($token);
+            if (!$userId) jsonError(401, '登录已过期');
+            if (strlen($code) !== 6) jsonError(400, '验证码格式不正确');
+
+            $users = readJson($usersFile);
+            $userData = $users[$userId] ?? null;
+            if (!$userData) jsonError(404, '用户不存在');
+
+            $savedCode = $userData['verify_code'] ?? '';
+            $codeTime = $userData['verify_code_time'] ?? 0;
+            if (time() - $codeTime > 600) jsonError(400, '验证码已过期，请重新发送');
+            if ($savedCode !== $code) jsonError(400, '验证码错误');
+
+            $newEmail = $userData['pending_email'] ?? '';
+            $users[$userId]['email'] = $newEmail;
+            unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email']);
+            writeJson($usersFile, $users);
+
+            jsonSuccess(['email' => $newEmail, 'message' => '邮箱绑定成功']);
+        } elseif ($action === 'unbind_email') {
+            $token = $input['token'] ?? '';
+            if (empty($token)) jsonError(401, '未登录');
+            $userId = verifyToken($token);
+            if (!$userId) jsonError(401, '登录已过期');
+            $users = readJson($usersFile);
+            if (!isset($users[$userId])) jsonError(404, '用户不存在');
+            $users[$userId]['email'] = null;
+            unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email']);
+            writeJson($usersFile, $users);
+            jsonSuccess(['message' => '邮箱已解绑']);
+        } elseif ($action === 'delete_account') {
+            $token = $input['token'] ?? '';
+            if (empty($token)) jsonError(401, '未登录');
+            $userId = verifyToken($token);
+            if (!$userId) jsonError(401, '登录已过期');
+            $users = readJson($usersFile);
+            if (!isset($users[$userId])) jsonError(404, '用户不存在');
+            unset($users[$userId]);
+            writeJson($usersFile, $users);
+            $sessions = readJson($sessionsFile);
+            foreach ($sessions as $t => $info) {
+                if (($info['user_id'] ?? '') === $userId) unset($sessions[$t]);
+            }
+            writeJson($sessionsFile, $sessions);
+            jsonSuccess(['message' => '账号已注销']);
 
         } else {
             jsonError(400, '未知操作');

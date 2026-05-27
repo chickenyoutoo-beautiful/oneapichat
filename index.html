@@ -96,7 +96,7 @@ window.VISION_API_KEY = '';
                 <input type="password" style="position:absolute;left:-9999px;top:-9999px" autocomplete="new-password" name="fake_password">
                 <div class="auth-field">
                     <label class="auth-label">用户名</label>
-                    <input type="text" id="authLoginUsername" class="auth-input" placeholder="用户名" autocomplete="nope" name="login_user">
+                    <input type="text" id="authLoginUsername" class="auth-input" placeholder="用户名 / 邮箱" autocomplete="nope" name="login_user">
                 </div>
                 <div class="auth-field">
                     <label class="auth-label">密码</label>
@@ -133,6 +133,16 @@ window.VISION_API_KEY = '';
                 <div class="auth-field">
                     <label class="auth-label">确认密码</label>
                     <input type="password" id="authRegConfirm" class="auth-input" placeholder="确认密码" autocomplete="nope" name="reg_confirm">
+                </div>
+                <div class="auth-field">
+                    <label class="auth-label">邮箱</label>
+                    <input type="email" id="authRegEmail" class="auth-input" placeholder="your@email.com" autocomplete="email">
+                </div>
+                <div class="auth-field">
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="sendOACRegCode()" id="authRegSendCode" style="padding:10px 14px;border:1px solid #d1d5db;border-radius:10px;background:transparent;color:#6b7280;font-size:12px;cursor:pointer;white-space:nowrap;">发送验证码</button>
+                        <input type="text" id="authRegVCode" class="auth-input" placeholder="6位验证码" maxlength="6" style="flex:1;">
+                    </div>
                 </div>
                 <button id="authRegBtn" class="auth-submit" onclick="performAuthRegister()">注 册</button>
             </div>
@@ -1067,6 +1077,41 @@ async function performAuthLogin() {
     finally { btn.disabled = false; btn.textContent = orig; }
 }
 
+function sendOACRegCode() {
+    var email = document.getElementById('authRegEmail').value.trim();
+    var btn = document.getElementById('authRegSendCode');
+    if (!email) { authError('请先填写邮箱'); return; }
+    if (sendOACCoolDown > 0) return;
+    btn.disabled = true;
+    sendOACCoolDown = 60;
+    btn.textContent = sendOACCoolDown + 's';
+    var timer = setInterval(function(){
+        sendOACCoolDown--;
+        btn.textContent = sendOACCoolDown + 's';
+        if (sendOACCoolDown <= 0) {
+            clearInterval(timer);
+            btn.textContent = '重新发送';
+            btn.disabled = false;
+        }
+    }, 1000);
+    fetch(SERVER_API_BASE + '/auth.php?action=send_reg_code', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (!d.success) {
+            clearInterval(timer); sendOACCoolDown=0; btn.textContent='发送验证码'; btn.disabled=false;
+            authError(d.error || '发送失败');
+        } else {
+            authError('');
+        }
+    }).catch(function(e){
+        clearInterval(timer); sendOACCoolDown=0; btn.textContent='发送验证码'; btn.disabled=false;
+        authError('网络错误: ' + e.message);
+    });
+}
+var sendOACCoolDown = 0;
+var oaRegEmailVerified = false;
+
 async function performAuthRegister() {
     const btn = document.getElementById('authRegBtn');
     const orig = btn.textContent.trim();
@@ -1076,13 +1121,17 @@ async function performAuthRegister() {
         const username = document.getElementById('authRegUsername').value.trim();
         const password = document.getElementById('authRegPassword').value;
         const confirm = document.getElementById('authRegConfirm').value;
+        const email = document.getElementById('authRegEmail').value.trim();
+        const vcode = document.getElementById('authRegVCode').value.trim();
         if (!username || !password) { authError('请填写用户名和密码'); btn.disabled = false; btn.textContent = orig; return; }
         if (password !== confirm) { authError('两次密码不一致'); btn.disabled = false; btn.textContent = orig; return; }
         if (username.length < 2) { authError('用户名至少2个字符'); btn.disabled = false; btn.textContent = orig; return; }
         if (password.length < 6) { authError('密码至少6位'); btn.disabled = false; btn.textContent = orig; return; }
+        if (!email) { authError('请填写邮箱'); btn.disabled = false; btn.textContent = orig; return; }
+        if (!vcode) { authError('请输入邮箱验证码'); btn.disabled = false; btn.textContent = orig; return; }
         const resp = await fetch(SERVER_API_BASE + '/auth.php?action=register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({ username, password, email, code: vcode })
         });
         if (!resp.ok) { authError('网络错误 (HTTP ' + resp.status + ')，请检查代理设置'); btn.disabled = false; btn.textContent = orig; return; }
         let data;
@@ -1132,17 +1181,72 @@ async function performAuthRegister() {
 }
 
 function updateAuthHeaderBtn() {
-    const btn = document.getElementById('authHeaderBtn');
-    const user = localStorage.getItem('authUsername');
+    var btn = document.getElementById('authHeaderBtn');
+    var user = localStorage.getItem('authUsername');
     if (!btn) return;
-    if (user) {
-        btn.textContent = user;
-        btn.onclick = () => { if (confirm('确定退出登录？')) { logout(); } };
-    } else {
+    if (!user) {
         btn.textContent = '登录';
         btn.onclick = showAuthOverlay;
+        btn.className = 'px-4 py-2 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full transition shadow-sm';
+        return;
     }
+    var initial = user.charAt(0).toUpperCase();
+    var isRoot = user === 'root';
+    var grad = isRoot ? 'linear-gradient(135deg,#38bdf8,#818cf8)' : 'linear-gradient(135deg,#667eea,#764ba2)';
+    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+        '<span style="width:22px;height:22px;border-radius:50%;background:' + grad + ';display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;">' + initial + '</span>' +
+        '<span style="color:currentColor;">' + user + '</span>' +
+        '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+    '</span>';
+    btn.className = 'px-4 py-2 text-xs font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full transition shadow-sm cursor-pointer';
+    btn.style.position = 'relative';
+    btn.onclick = function(e) { e.stopPropagation(); toggleOneapiUserMenu(); };
+    // 创建下拉菜单
+    if (!document.getElementById('oneapiUserDropdown')) {
+        var dd = document.createElement('div');
+        dd.id = 'oneapiUserDropdown';
+        dd.className = 'oneapi-dropdown';
+        dd.style.cssText = 'display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:6px;min-width:140px;box-shadow:0 10px 40px rgba(0,0,0,0.12);z-index:99999;';
+        dd.innerHTML =
+            '<a href="/oneapichat/profile.html" class="oneapi-dropdown-item" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;font-size:0.82rem;text-decoration:none;color:inherit;transition:background 0.15s;">' +
+                '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' +
+                '个人中心' +
+            '</a>' +
+            '<span onclick="if(confirm(\'确定退出登录？\')){logout();}" class="oneapi-dropdown-item" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;font-size:0.82rem;cursor:pointer;color:inherit;transition:background 0.15s;">' +
+                '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+                '退出登录' +
+            '</span>';
+        btn.appendChild(dd);
+    }
+    // 暗色适配
+    applyDropdownTheme();
 }
+function applyDropdownTheme() {
+    var dd = document.getElementById('oneapiUserDropdown');
+    if (!dd) return;
+    var isDark = document.documentElement.classList.contains('dark');
+    dd.style.background = isDark ? '#1f2937' : '#fff';
+    dd.style.borderColor = isDark ? '#374151' : '#e5e7eb';
+    dd.style.boxShadow = isDark ? '0 10px 40px rgba(0,0,0,0.4)' : '0 10px 40px rgba(0,0,0,0.12)';
+    var items = dd.querySelectorAll('a, span');
+    var color = isDark ? '#e5e7eb' : '#374151';
+    var hoverBg = isDark ? '#374151' : '#f3f4f6';
+    items.forEach(function(it) {
+        it.style.color = color;
+        it.onmouseenter = function(){ this.style.background = hoverBg; };
+        it.onmouseleave = function(){ this.style.background = ''; };
+    });
+}
+
+function toggleOneapiUserMenu() {
+    var dd = document.getElementById('oneapiUserDropdown');
+    if (dd) dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+}
+document.addEventListener('click', function(e) {
+    var dd = document.getElementById('oneapiUserDropdown');
+    var btn = document.getElementById('authHeaderBtn');
+    if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) dd.style.display = 'none';
+});
 
 function logout() {
     var token = localStorage.getItem('authToken');

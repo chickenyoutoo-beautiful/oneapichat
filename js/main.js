@@ -1873,10 +1873,48 @@ const MMX_TOOLS = [
     });
 })();
 
+// ==================== Cloudreve 云盘工具 ====================
+const CLOUDREVE_TOOLS = [
+    // 认证
+    { type: "function", function: { name: "cr_login", description: "登录 Cloudreve 云盘。传入邮箱和密码获取访问令牌。登录成功后会自动保存凭据，后续操作无需重复登录。", parameters: { type: "object", properties: { email: { type: "string", description: "Cloudreve 注册邮箱" }, password: { type: "string", description: "Cloudreve 密码" } }, required: ["email","password"] } } },
+    { type: "function", function: { name: "cr_user_info", description: "获取当前 Cloudreve 用户信息（昵称、邮箱、用户组、注册时间等）。", parameters: { type: "object", properties: {}, required: [] } } },
+    // 文件浏览
+    { type: "function", function: { name: "cr_list_files", description: "列出 Cloudreve 云盘中的文件和文件夹。传入路径可浏览子目录（如 'documents' 或 'documents/2024'），不传则显示根目录。返回文件名、类型、大小、修改时间。", parameters: { type: "object", properties: { path: { type: "string", description: "目录路径，相对于根目录。如 'photos' 或 'photos/2024'，留空显示根目录" } }, required: [] } } },
+    { type: "function", function: { name: "cr_search_files", description: "在 Cloudreve 云盘中搜索文件（按关键词）。", parameters: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] } } },
+    // 文件操作
+    { type: "function", function: { name: "cr_create_folder", description: "在 Cloudreve 云盘中创建文件夹。", parameters: { type: "object", properties: { name: { type: "string", description: "文件夹名称" }, parent: { type: "string", description: "父目录路径（相对于根目录），如 'documents'。留空则在根目录创建" } }, required: ["name"] } } },
+    { type: "function", function: { name: "cr_rename", description: "重命名 Cloudreve 云盘中的文件或文件夹。", parameters: { type: "object", properties: { path: { type: "string", description: "文件/文件夹的当前路径（相对于根目录），如 'old_name.txt' 或 'documents/old'" }, new_name: { type: "string", description: "新名称（只改文件名，不包含路径）" } }, required: ["path","new_name"] } } },
+    { type: "function", function: { name: "cr_move", description: "移动 Cloudreve 云盘中的文件或文件夹到其他目录。支持批量移动（逗号分隔多个路径）。", parameters: { type: "object", properties: { paths: { type: "string", description: "源文件路径，逗号分隔多个。如 'file1.txt' 或 'a.txt,b.txt,foldername'" }, dst: { type: "string", description: "目标目录路径，如 'documents' 或 'documents/sub'。根目录用空字符串" } }, required: ["paths","dst"] } } },
+    { type: "function", function: { name: "cr_copy", description: "复制 Cloudreve 云盘中的文件或文件夹。支持批量复制（逗号分隔多个路径）。", parameters: { type: "object", properties: { paths: { type: "string", description: "源文件路径，逗号分隔多个" }, dst: { type: "string", description: "目标目录路径" } }, required: ["paths","dst"] } } },
+    { type: "function", function: { name: "cr_delete", description: "删除 Cloudreve 云盘中的文件或文件夹。⚠️ 此操作不可逆！支持批量删除（逗号分隔多个路径）。", parameters: { type: "object", properties: { paths: { type: "string", description: "要删除的文件/文件夹路径，逗号分隔多个。如 'old_file.txt' 或 'a.txt,folder1,folder2'" } }, required: ["paths"] } } },
+    // 分享
+    { type: "function", function: { name: "cr_list_shares", description: "列出 Cloudreve 云盘中我创建的所有分享链接。返回链接URL、密码状态、浏览次数、下载次数、过期时间等。", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "cr_create_share", description: "为 Cloudreve 云盘中的文件/文件夹创建分享链接。可选设置密码和过期天数。", parameters: { type: "object", properties: { path: { type: "string", description: "要分享的文件/文件夹路径（相对于根目录）" }, password: { type: "string", description: "分享密码（可选，留空为公开分享）" }, expire: { type: "integer", description: "过期天数（可选，0=永久有效）" } }, required: ["path"] } } },
+    { type: "function", function: { name: "cr_delete_share", description: "删除 Cloudreve 云盘中的分享链接。", parameters: { type: "object", properties: { id: { type: "string", description: "分享链接ID（从 cr_list_shares 获取）" } }, required: ["id"] } } },
+    // 存储
+    { type: "function", function: { name: "cr_storage_info", description: "查看 Cloudreve 云盘的存储使用情况（已用/总量/剩余空间）。", parameters: { type: "object", properties: {}, required: [] } } },
+    // WebDAV
+    { type: "function", function: { name: "cr_webdav_list", description: "列出 Cloudreve 云盘的 WebDAV 账号。", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "cr_webdav_create", description: "创建 Cloudreve WebDAV 账号，用于通过 WebDAV 协议访问云盘文件。", parameters: { type: "object", properties: { path: { type: "string", description: "WebDAV 挂载路径，默认'/'表示根目录" } }, required: [] } } },
+    { type: "function", function: { name: "cr_webdav_delete", description: "删除 Cloudreve WebDAV 账号。", parameters: { type: "object", properties: { id: { type: "string", description: "WebDAV 账号ID（从 cr_webdav_list 获取）" } }, required: ["id"] } } },
+    // 总览
+    { type: "function", function: { name: "cr_overview", description: "获取 Cloudreve 云盘总览：用户信息、存储空间使用、根目录文件统计、分享数量、服务器版本。一站式查看云盘状态。", parameters: { type: "object", properties: {}, required: [] } } },
+];
+
 // ==================== 工具注册 ====================
 // 在工具注册表注册
 (function() {
     SRC_TOOLS.forEach(function(t) {
+        toolRegistry.register(t.function.name, {
+            name: t.function.name,
+            description: t.function.description,
+        });
+    });
+})();
+
+// ==================== Cloudreve 工具注册 ====================
+(function() {
+    CLOUDREVE_TOOLS.forEach(function(t) {
         toolRegistry.register(t.function.name, {
             name: t.function.name,
             description: t.function.description,
@@ -2242,13 +2280,12 @@ async function loadConfigFromServer() {
             return false;
         };
         for (var k in config) {
-            var _skipKeys = ['baseUrlProvider','apiKey','baseUrl'];
-            // ★ model 字段写入前额外校验:不接受提示语或过短的值
+            // model 字段写入前额外校验:不接受提示语或过短的值
             if (k === 'model' && _invalidModel(config[k])) {
                 console.log('[loadConfigFromServer] 跳过无效 model:', config[k]);
                 continue;
             }
-            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && _skipKeys.indexOf(k) === -1) {
+            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') {
                 try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
         }
@@ -4396,6 +4433,8 @@ window.toggleDarkMode = function (init = false) {
     sun?.classList.toggle('hidden', !dark);
     const theme = getEl('hljsTheme');
     if (theme) theme.href = dark ? 'lib/atom-one-dark.min.css' : 'lib/atom-one-light.min.css';
+    // 同步下拉菜单暗色适配
+    if (typeof applyDropdownTheme === 'function') applyDropdownTheme();
 };
 
 function isMobile() {
@@ -7246,7 +7285,8 @@ const _TOOL_CATEGORIES = [
     { label: '🤖 引擎/Agent', keys: ['ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL'], agentOnly: true },
     { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] },
     { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] },
-    { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL','WIN_SCREENSHOT_TOOL'], agentOnly: true }
+    { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL','WIN_SCREENSHOT_TOOL'], agentOnly: true },
+    { label: '☁️ Cloudreve 云盘', keys: ['CR_LOGIN_TOOL','CR_USER_INFO_TOOL','CR_LIST_FILES_TOOL','CR_SEARCH_FILES_TOOL','CR_CREATE_FOLDER_TOOL','CR_RENAME_TOOL','CR_MOVE_TOOL','CR_COPY_TOOL','CR_DELETE_TOOL','CR_LIST_SHARES_TOOL','CR_CREATE_SHARE_TOOL','CR_DELETE_SHARE_TOOL','CR_STORAGE_INFO_TOOL','CR_WEBDAV_LIST_TOOL','CR_WEBDAV_CREATE_TOOL','CR_WEBDAV_DELETE_TOOL','CR_OVERVIEW_TOOL'] }
 ];
 
 // ── 工具显示名映射 ──
@@ -7272,7 +7312,18 @@ const _TOOL_LABELS = {
     'SRC_CHECK_UPGRADE_TOOL': 'SRC检查更新', 'SRC_DO_UPGRADE_TOOL': 'SRC执行升级',
     'WIN_INFO_TOOL': 'Win系统信息', 'WIN_PROCESSES_TOOL': 'Win进程列表', 'WIN_KILL_TOOL': 'Win结束进程',
     'WIN_START_TOOL': 'Win启动程序', 'WIN_RESTART_TOOL': 'Win重启程序', 'WIN_FILE_TOOL': 'Win文件操作',
-    'WIN_SCREENSHOT_TOOL': 'Win截图'
+    'WIN_SCREENSHOT_TOOL': 'Win截图',
+    // Cloudreve
+    'CR_LOGIN_TOOL': '登录', 'CR_USER_INFO_TOOL': '用户信息',
+    'CR_LIST_FILES_TOOL': '文件列表', 'CR_SEARCH_FILES_TOOL': '文件搜索',
+    'CR_CREATE_FOLDER_TOOL': '创建文件夹', 'CR_RENAME_TOOL': '重命名',
+    'CR_MOVE_TOOL': '移动', 'CR_COPY_TOOL': '复制', 'CR_DELETE_TOOL': '删除 ⚠️',
+    'CR_LIST_SHARES_TOOL': '分享列表', 'CR_CREATE_SHARE_TOOL': '创建分享',
+    'CR_DELETE_SHARE_TOOL': '删除分享',
+    'CR_STORAGE_INFO_TOOL': '存储空间',
+    'CR_WEBDAV_LIST_TOOL': 'WebDAV列表', 'CR_WEBDAV_CREATE_TOOL': '创建WebDAV',
+    'CR_WEBDAV_DELETE_TOOL': '删除WebDAV',
+    'CR_OVERVIEW_TOOL': '总览'
 };
 
 // ── 动态渲染工具面板 ──
@@ -11456,6 +11507,10 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
         if (typeof MMX_TOOLS !== 'undefined') {
             MMX_TOOLS.forEach(function(t) { tools.push(t); });
         }
+        // ===== Cloudreve 云盘工具(始终注册) =====
+        if (typeof CLOUDREVE_TOOLS !== 'undefined') {
+            CLOUDREVE_TOOLS.forEach(function(t) { tools.push(t); });
+        }
         // ★ 添加自定义技能到工具列表
         (function() {
             var _customSkills = [];
@@ -12313,6 +12368,62 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                         }
                         toolResult = { result: '✅ ' + _pushMsg };
                     }
+                    // ===== Cloudreve 云盘工具 =====
+                     else if (func.name === 'cr_login') {
+                        toolResult = await cloudreveApiHandler('login', args);
+                     }
+                     else if (func.name === 'cr_user_info') {
+                        toolResult = await cloudreveApiHandler('user_info', args);
+                     }
+                     else if (func.name === 'cr_list_files') {
+                        toolResult = await cloudreveApiHandler('list_files', args);
+                     }
+                     else if (func.name === 'cr_search_files') {
+                        toolResult = await cloudreveApiHandler('search_files', args);
+                     }
+                     else if (func.name === 'cr_create_folder') {
+                        toolResult = await cloudreveApiHandler('create_folder', args);
+                     }
+                     else if (func.name === 'cr_rename') {
+                        toolResult = await cloudreveApiHandler('rename', args);
+                     }
+                     else if (func.name === 'cr_move') {
+                        toolResult = await cloudreveApiHandler('move', args);
+                     }
+                     else if (func.name === 'cr_copy') {
+                        toolResult = await cloudreveApiHandler('copy', args);
+                     }
+                     else if (func.name === 'cr_delete') {
+                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                            var approved = await requestToolApproval(func.name, args);
+                            if (!approved) { toolResult = { error: '用户拒绝了删除操作' }; }
+                            else { toolResult = await cloudreveApiHandler('delete', args); }
+                        } else { toolResult = await cloudreveApiHandler('delete', args); }
+                     }
+                     else if (func.name === 'cr_list_shares') {
+                        toolResult = await cloudreveApiHandler('list_shares', args);
+                     }
+                     else if (func.name === 'cr_create_share') {
+                        toolResult = await cloudreveApiHandler('create_share', args);
+                     }
+                     else if (func.name === 'cr_delete_share') {
+                        toolResult = await cloudreveApiHandler('delete_share', args);
+                     }
+                     else if (func.name === 'cr_storage_info') {
+                        toolResult = await cloudreveApiHandler('storage_info', args);
+                     }
+                     else if (func.name === 'cr_webdav_list') {
+                        toolResult = await cloudreveApiHandler('webdav_list', args);
+                     }
+                     else if (func.name === 'cr_webdav_create') {
+                        toolResult = await cloudreveApiHandler('webdav_create', args);
+                     }
+                     else if (func.name === 'cr_webdav_delete') {
+                        toolResult = await cloudreveApiHandler('webdav_delete', args);
+                     }
+                     else if (func.name === 'cr_overview') {
+                        toolResult = await cloudreveApiHandler('overview', args);
+                     }
                     // ===== SRC 星穹铁道工具 (完整版) =====
                      else if (func.name === 'src_status') {
                         var r = await _srcApi('/status?config_name=src');
@@ -15819,6 +15930,33 @@ async function chaoxingToolHandler(action, ids, username, password) {
         return { error: '未知操作' };
     } catch(e) {
         return { error: '刷课API错误: ' + e.message };
+    }
+}
+
+// ==================== Cloudreve 云盘 API 处理器 ====================
+async function cloudreveApiHandler(action, args) {
+    var token = localStorage.getItem('authToken') || '';
+    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
+    var base = '/oneapichat/cloudreve_api.php?action=' + action + authSuffix;
+
+    // 拼接额外参数
+    if (args) {
+        for (var k in args) {
+            if (args.hasOwnProperty(k) && args[k] !== undefined && args[k] !== '') {
+                base += '&' + k + '=' + encodeURIComponent(args[k]);
+            }
+        }
+    }
+
+    try {
+        var r = await fetch(base, { signal: AbortSignal.timeout(30000) });
+        var d = await r.json();
+        if (d.success) {
+            return { result: JSON.stringify(d, null, 2) };
+        }
+        return { error: d.error || d.msg || '操作失败' };
+    } catch(e) {
+        return { error: 'Cloudreve API 错误: ' + e.message };
     }
 }
 
