@@ -2106,8 +2106,14 @@ async function saveChatsToServer() {
 
         // ★ 合并:先读服务器已有数据,再合并本地聊天,防止多窗口覆盖
         // ★ 防丢失:如果本地聊天数过少,视为异常,不强制覆盖服务器
-        var _localCount = Object.keys(chats).length;
-        var mergedChats = JSON.parse(JSON.stringify(chats));
+        // ★ 排除 Agent 聊天(_agent_main),防止泄漏到服务器
+        var _localCount = 0;
+        var mergedChats = {};
+        for (var _cid in chats) {
+            if (_cid === AGENT_CHAT_ID || _cid === '_agent_main') continue;
+            mergedChats[_cid] = JSON.parse(JSON.stringify(chats[_cid]));
+            _localCount++;
+        }
         // ★ 保留完整图片数据(不压缩,服务器备份需要完整 base64)
         console.log('[save] 本地聊天数:', Object.keys(mergedChats).length);
         var _serverChats = {};  // 用于防误覆盖检查
@@ -2383,9 +2389,15 @@ async function restoreUserData() {
                 ]);
                 if (_serverChats && typeof _serverChats === 'object' && Object.keys(_serverChats).length > 0) {
                     // ★ 合并:本地优先(最新数据),服务器补充缺失项
-                    var merged = JSON.parse(JSON.stringify(chats));
+                    // ★ 排除 Agent 聊天
+                    var merged = {};
+                    for (var _cid2 in chats) {
+                        if (_cid2 === AGENT_CHAT_ID || _cid2 === '_agent_main') continue;
+                        merged[_cid2] = JSON.parse(JSON.stringify(chats[_cid2]));
+                    }
                     var added = 0;
                     for (var _scid in _serverChats) {
+                        if (_scid === AGENT_CHAT_ID || _scid === '_agent_main') continue;
                         if (_deletedChatIds && _deletedChatIds[_scid]) continue; // 跳过已删除
                         var _sc = _serverChats[_scid];
                         if (!merged[_scid]) {
@@ -14266,16 +14278,18 @@ function saveChats() {
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
 function compressChatsForStorage(chatsObj) {
     // ★ 精简副本:保留图片等完整数据,仅在 localStorage 超出配额时降级
-    const slim = {};
-    const chatIds = Object.keys(chatsObj).sort((a, b) => {
-        const ta = chatsObj[a].updated_at || '';
-        const tb = chatsObj[b].updated_at || '';
+    var slim = {};
+    var chatIds = Object.keys(chatsObj).sort(function(a, b) {
+        var ta = chatsObj[a].updated_at || '';
+        var tb = chatsObj[b].updated_at || '';
         return tb.localeCompare(ta); // 最新的排前面
     });
 
-    // 保留最近 N 个聊天的完整数据
+    // 保留最近 N 个聊天的完整数据（排除 Agent 聊天，防止泄漏到普通模式）
     const MAX_CHATS = 50;
     chatIds.forEach((id, idx) => {
+        // ★ 排除 Agent 独立聊天
+        if (id === AGENT_CHAT_ID || id === '_agent_main') return;
         const chat = chatsObj[id];
         // 保留所有聊天的完整消息,不做截断
         slim[id] = JSON.parse(JSON.stringify(chat));

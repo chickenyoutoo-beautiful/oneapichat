@@ -1822,9 +1822,9 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     from moviepy import VideoFileClip
                     clip = VideoFileClip(input_path)
                     if end:
-                        clip = clip.subclip(start, end)
+                        clip = clip.subclipped(start, end)
                     else:
-                        clip = clip.subclip(start)
+                        clip = clip.subclipped(start)
                     clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
                     clip.close()
                     return f"裁剪完成: {output_path}"
