@@ -1893,11 +1893,6 @@ const CLOUDREVE_TOOLS = [
     { type: "function", function: { name: "cr_delete_share", description: "删除 Cloudreve 云盘中的分享链接。", parameters: { type: "object", properties: { id: { type: "string", description: "分享链接ID（从 cr_list_shares 获取）" } }, required: ["id"] } } },
     // 存储
     { type: "function", function: { name: "cr_storage_info", description: "查看 Cloudreve 云盘的存储使用情况（已用/总量/剩余空间）。", parameters: { type: "object", properties: {}, required: [] } } },
-    // WebDAV
-    { type: "function", function: { name: "cr_webdav_list", description: "列出 Cloudreve 云盘的 WebDAV 账号。", parameters: { type: "object", properties: {}, required: [] } } },
-    { type: "function", function: { name: "cr_webdav_create", description: "创建 Cloudreve WebDAV 账号，用于通过 WebDAV 协议访问云盘文件。", parameters: { type: "object", properties: { path: { type: "string", description: "WebDAV 挂载路径，默认'/'表示根目录" } }, required: [] } } },
-    { type: "function", function: { name: "cr_webdav_delete", description: "删除 Cloudreve WebDAV 账号。", parameters: { type: "object", properties: { id: { type: "string", description: "WebDAV 账号ID（从 cr_webdav_list 获取）" } }, required: ["id"] } } },
-    // 总览
     { type: "function", function: { name: "cr_overview", description: "获取 Cloudreve 云盘总览：用户信息、存储空间使用、根目录文件统计、分享数量、服务器版本。一站式查看云盘状态。", parameters: { type: "object", properties: {}, required: [] } } },
 ];
 
@@ -7318,7 +7313,7 @@ const _TOOL_CATEGORIES = [
     { label: '🧠 AI 自主控制', keys: ['ASK_AGENT_TOOL','AUTONOMOUS_MODE_TOOL'] },
     { label: '🎮 SRC 星穹铁道', keys: ['SRC_STATUS_TOOL','SRC_DASHBOARD_TOOL','SRC_START_TOOL','SRC_STOP_TOOL','SRC_GET_TASKS_TOOL','SRC_TOGGLE_TASK_TOOL','SRC_GET_CONFIG_TOOL','SRC_SET_CONFIG_TOOL','SRC_GET_LOGS_TOOL','SRC_CHECK_UPGRADE_TOOL','SRC_DO_UPGRADE_TOOL'] },
     { label: '🪟 Windows 本机', keys: ['WIN_INFO_TOOL','WIN_PROCESSES_TOOL','WIN_KILL_TOOL','WIN_START_TOOL','WIN_RESTART_TOOL','WIN_FILE_TOOL','WIN_SCREENSHOT_TOOL'], agentOnly: true },
-    { label: '☁️ Cloudreve 云盘', keys: ['CR_LOGIN_TOOL','CR_USER_INFO_TOOL','CR_LIST_FILES_TOOL','CR_SEARCH_FILES_TOOL','CR_CREATE_FOLDER_TOOL','CR_RENAME_TOOL','CR_MOVE_TOOL','CR_COPY_TOOL','CR_DELETE_TOOL','CR_LIST_SHARES_TOOL','CR_CREATE_SHARE_TOOL','CR_DELETE_SHARE_TOOL','CR_STORAGE_INFO_TOOL','CR_WEBDAV_LIST_TOOL','CR_WEBDAV_CREATE_TOOL','CR_WEBDAV_DELETE_TOOL','CR_OVERVIEW_TOOL'] }
+    { label: '☁️ Cloudreve 云盘', keys: ['CR_LOGIN_TOOL','CR_USER_INFO_TOOL','CR_LIST_FILES_TOOL','CR_SEARCH_FILES_TOOL','CR_CREATE_FOLDER_TOOL','CR_RENAME_TOOL','CR_MOVE_TOOL','CR_COPY_TOOL','CR_DELETE_TOOL','CR_LIST_SHARES_TOOL','CR_CREATE_SHARE_TOOL','CR_DELETE_SHARE_TOOL','CR_STORAGE_INFO_TOOL','CR_OVERVIEW_TOOL'] }
 ];
 
 // ── 工具显示名映射 ──
@@ -7353,8 +7348,6 @@ const _TOOL_LABELS = {
     'CR_LIST_SHARES_TOOL': '分享列表', 'CR_CREATE_SHARE_TOOL': '创建分享',
     'CR_DELETE_SHARE_TOOL': '删除分享',
     'CR_STORAGE_INFO_TOOL': '存储空间',
-    'CR_WEBDAV_LIST_TOOL': 'WebDAV列表', 'CR_WEBDAV_CREATE_TOOL': '创建WebDAV',
-    'CR_WEBDAV_DELETE_TOOL': '删除WebDAV',
     'CR_OVERVIEW_TOOL': '总览'
 };
 
@@ -12444,15 +12437,6 @@ window.sendMessage = async function (skipUserAdd = false, userTextForRegen = nul
                      else if (func.name === 'cr_storage_info') {
                         toolResult = await cloudreveApiHandler('storage_info', args);
                      }
-                     else if (func.name === 'cr_webdav_list') {
-                        toolResult = await cloudreveApiHandler('webdav_list', args);
-                     }
-                     else if (func.name === 'cr_webdav_create') {
-                        toolResult = await cloudreveApiHandler('webdav_create', args);
-                     }
-                     else if (func.name === 'cr_webdav_delete') {
-                        toolResult = await cloudreveApiHandler('webdav_delete', args);
-                     }
                      else if (func.name === 'cr_overview') {
                         toolResult = await cloudreveApiHandler('overview', args);
                      }
@@ -15986,7 +15970,7 @@ async function cloudreveApiHandler(action, args) {
     }
 
     try {
-        var r = await fetch(base, { signal: AbortSignal.timeout(30000) });
+        var r = await fetch(base, { signal: AbortSignal.timeout(60000) });
         var d = await r.json();
         if (d.success) {
             return { result: JSON.stringify(d, null, 2) };

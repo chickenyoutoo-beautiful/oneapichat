@@ -45,7 +45,7 @@ function cr_get($url, $token = '') {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
+        CURLOPT_TIMEOUT => 5,
         CURLOPT_HTTPHEADER => array_filter([
             'Host: ' . $hostHeader,
             $token ? 'Authorization: Bearer ' . $token : null,
@@ -63,7 +63,7 @@ function cr_post($url, $data, $token = '') {
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode($data),
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
+        CURLOPT_TIMEOUT => 5,
         CURLOPT_HTTPHEADER => array_filter([
             'Content-Type: application/json',
             'Host: ' . $hostHeader,
@@ -82,7 +82,7 @@ function cr_put($url, $data, $token = '') {
         CURLOPT_CUSTOMREQUEST => 'PUT',
         CURLOPT_POSTFIELDS => json_encode($data),
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
+        CURLOPT_TIMEOUT => 5,
         CURLOPT_HTTPHEADER => array_filter([
             'Content-Type: application/json',
             'Host: ' . $hostHeader,
@@ -101,7 +101,7 @@ function cr_delete($url, $data, $token = '') {
         CURLOPT_CUSTOMREQUEST => 'DELETE',
         CURLOPT_POSTFIELDS => json_encode($data),
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
+        CURLOPT_TIMEOUT => 5,
         CURLOPT_HTTPHEADER => array_filter([
             'Content-Type: application/json',
             'Host: ' . $hostHeader,
@@ -114,34 +114,61 @@ function cr_delete($url, $data, $token = '') {
 }
 
 // ── 获取 Cloudreve access_token (从当前用户凭据) ──
+// ── Token 缓存（文件级，跨请求有效）──
+function cr_getCachedToken($email) {
+    $cacheFile = '/tmp/cloudreve_token_' . md5($email) . '.json';
+    if (file_exists($cacheFile)) {
+        $cache = @json_decode(@file_get_contents($cacheFile), true);
+        if ($cache && ($cache['expires'] ?? 0) > time() + 60) {
+            return $cache['token'] ?? '';
+        }
+    }
+    return '';
+}
+
+function cr_cacheToken($email, $token, $expiresIn = 3600) {
+    $cacheFile = '/tmp/cloudreve_token_' . md5($email) . '.json';
+    @file_put_contents($cacheFile, json_encode([
+        'token' => $token,
+        'expires' => time() + $expiresIn,
+        'email' => $email,
+    ]), LOCK_EX);
+}
+
 function cr_getAccessToken($uid) {
-    // 尝试从临时文件中找最近的有效 token
+    // ★ 优化: 只取最新的一个凭据文件，不做全遍历
     $tmpFiles = glob('/tmp/cloudreve_login_*.json');
-    $bestToken = '';
-    $bestTime = 0;
-    foreach ($tmpFiles as $f) {
-        $data = @json_decode(@file_get_contents($f), true);
-        if ($data && ($data['created'] ?? 0) > $bestTime) {
-            // 用凭据重新登录获取 token
-            $email = $data['email'] ?? '';
-            $password = $data['password'] ?? '';
-            if ($email && $password) {
-                $resp = cr_post('http://127.0.0.1:5212/api/v4/session/token', [
-                    'email' => $email,
-                    'password' => $password,
-                ]);
-                if (($resp['code'] ?? -1) === 0) {
-                    return $resp['data']['token']['access_token'] ?? '';
-                }
-            }
+    if (empty($tmpFiles)) return '';
+    
+    // 按修改时间排序，取最新的
+    usort($tmpFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
+    $bestFile = $tmpFiles[0];
+    
+    $data = @json_decode(@file_get_contents($bestFile), true);
+    if (!$data) return '';
+    
+    $email = $data['email'] ?? '';
+    $password = $data['password'] ?? '';
+    if (!$email || !$password) return '';
+    
+    // ★ 先查缓存
+    $cached = cr_getCachedToken($email);
+    if ($cached) return $cached;
+    
+    // 缓存未命中 → 登录获取新 token
+    $resp = cr_post('http://127.0.0.1:5212/api/v4/session/token', [
+        'email' => $email,
+        'password' => $password,
+    ]);
+    
+    if (($resp['code'] ?? -1) === 0) {
+        $token = $resp['data']['token']['access_token'] ?? '';
+        if ($token) {
+            cr_cacheToken($email, $token, 3500); // 缓存 58 分钟
+            return $token;
         }
     }
     
-    // 回退：从数据库读取用户凭据
-    $db = '/opt/cloudreve/data/cloudreve.db';
-    if (file_exists($db)) {
-        // 无法直接获取密码（加密的），返回空
-    }
     return '';
 }
 
