@@ -685,21 +685,41 @@ function requireRoot(e, url) {
 // ★ 云盘：已登录即可访问（自动同步 Cloudreve 账号）
 function openCloudreve(e) {
     e.stopPropagation();
-    // 不需要 root 权限，所有登录用户均可访问
     if (!localStorage.getItem('authToken')) {
         showLoginModal('请先登录以访问云盘', 'cloudreve');
         return;
     }
-    // 先同步 Cloudreve 账号，然后跳转
-    var username = localStorage.getItem('authUsername') || '';
+    // 有 login_token 直接跳转
     var loginToken = localStorage.getItem('_cloudLoginToken');
     if (loginToken) {
         localStorage.removeItem('_cloudLoginToken');
         window.open('/oneapichat/cloudreve_login.php?t=' + encodeURIComponent(loginToken), '_blank');
         return;
     }
-    // 无 token → 直接打开（让用户在 Cloudreve 页面登录）
-    window.open('https://cloudreve.naujtrats.xyz', '_blank');
+    // 无 token → 用主页凭据主动同步注册 Cloudreve 账号
+    var username = localStorage.getItem('authUsername') || '';
+    var email = localStorage.getItem('authUserEmail') || (username + '@naujtrats.xyz');
+    var password = sessionStorage.getItem('_authPassword') || '';
+    // 密码在 localStorage 中没有存储，需要在登录时保存
+    // 如果密码为空，回退到直接打开 Cloudreve
+    if (!password) {
+        // 尝试从 sessionStorage 或 cookie 获取（安全考虑不存明文密码到 localStorage）
+        // 回退：通过 cloudreve_login.php 无 token 直接打开
+        window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        return;
+    }
+    // 主动同步
+    syncCloudreve(username, password, email).then(function(d) {
+        var token2 = localStorage.getItem('_cloudLoginToken');
+        if (token2) {
+            localStorage.removeItem('_cloudLoginToken');
+            window.open('/oneapichat/cloudreve_login.php?t=' + encodeURIComponent(token2), '_blank');
+        } else {
+            window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        }
+    }).catch(function() {
+        window.open('https://cloudreve.naujtrats.xyz', '_blank');
+    });
 }
 
 // ★ OpenClaw 标签：登录才可点击
@@ -842,6 +862,9 @@ async function handleModalAuth() {
             localStorage.setItem('authToken', data.token);
             localStorage.setItem('authUsername', data.username);
             localStorage.setItem('authUserId', data.user_id);
+            // 保存邮箱和密码到 sessionStorage（用于后续同步 Cloudreve）
+            if (email) localStorage.setItem('authUserEmail', email);
+            sessionStorage.setItem('_authPassword', password);
             // 同步到 Cloudreve 网盘（拿回 login_token）— 必须 await
             await syncCloudreve(username, password, email);
 
