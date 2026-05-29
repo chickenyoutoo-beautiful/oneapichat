@@ -11160,6 +11160,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // 系统内队列调用(processMsgQueue):等待
         if (skipUserAdd) {
             // ★ 系统内队列调用(非用户直接推入),AI 忙时不做任何事,等 finally
+        }
             return;
     }
 
@@ -14047,7 +14048,6 @@ window.useAlternativeVisionModel = function() {
         else saveOngoingChatsSnapshot();
     }
 };
-}
 
 // ==================== 对话管理 ====================
 function saveOngoingChatsSnapshot() {
