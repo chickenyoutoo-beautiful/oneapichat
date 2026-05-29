@@ -6874,9 +6874,12 @@ window.pushAgentResultToTask = function(taskId, agentName, status, result, error
         if (typeof window._legacyTrigger === 'function') window._legacyTrigger(agentName);
         return;
     }
-    task.subResults[agentName] = { status: status || 'completed', result: result || '', error: error || '' };
+    var normalizedStatus = status || 'completed';
+    // 将 engine 的状态标准化：running/idle → completed, error → failed
+    if (normalizedStatus === 'idle' || normalizedStatus === 'running') normalizedStatus = 'completed';
+    task.subResults[agentName] = { status: normalizedStatus, result: result || '', error: error || '' };
     if (task.agents[agentName]) {
-        task.agents[agentName].status = status || 'completed';
+        task.agents[agentName].status = normalizedStatus;
     }
     console.log('[Task] ' + taskId + ' 子代理完成: ' + agentName + ' = ' + (status || 'completed'));
     
@@ -6895,7 +6898,7 @@ window._checkTaskCompletion = function(taskId) {
     
     // 检查是否所有子代理都完成了（completed/failed）
     var allDone = agentNames.every(function(name) {
-        return task.agents[name].status === 'completed' || task.agents[name].status === 'failed';
+        return task.agents[name].status === 'completed' || task.agents[name].status === 'failed' || task.agents[name].status === 'idle' || task.agents[name].status === 'error';
     });
     
     console.log('[Task] ' + taskId + ' allDone=' + allDone + ' agents=' + JSON.stringify(agentNames.map(function(n){return n+':'+task.agents[n].status})));
@@ -6994,8 +6997,39 @@ window.getRunningAgentsForTask = function(taskId) {
     });
 };
 
-// 旧接口: triggerAgentAutoReplyForSubAgent 保留但重写为基于任务的版本
-window._legacyTrigger = null;  // 旧系统的引用
+// triggerAgentAutoReplyForSubAgent: 被 mainAgentReply 按钮和新通知系统调用
+// 作为 pushAgentResultToTask 的降级：当没有 task 时，创建临时 task 然后触发回复
+window.triggerAgentAutoReplyForSubAgent = function(agentName) {
+    // 尝试找到包含此 agent 的 task
+    if (window._tasks && typeof window._tasks === 'object') {
+        for (var _tId in window._tasks) {
+            var _t = window._tasks[_tId];
+            if (_t && _t.agents && _t.agents[agentName] && !_t.mainResponded) {
+                // 状态可能还是 running，手动标记为 completed
+                if (_t.agents[agentName].status === 'running' || _t.agents[agentName].status === 'idle') {
+                    _t.agents[agentName].status = 'completed';
+                }
+                var stored = (window._pendingSubAgentResultsData || {})[agentName];
+                if (stored && !_t.subResults[agentName]) {
+                    _t.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '' };
+                }
+                window._checkTaskCompletion(_tId);
+                return;
+            }
+        }
+    }
+    // 降级: 无 task → 创建新 task 然后直接触发回复
+    var taskId = window.createTask('[系统] 子代理 ' + agentName + ' 完成', currentChatId);
+    var task = window._tasks[taskId];
+    var stored = (window._pendingSubAgentResultsData || {})[agentName];
+    task.agents[agentName] = { status: 'completed', role: 'general', createdAt: Date.now() };
+    if (stored) {
+        task.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '' };
+    }
+    window._triggerMainAgentForTask(taskId);
+};
+
+window._legacyTrigger = window.triggerAgentAutoReplyForSubAgent;
 window._agentNotifyQueue = [];
 window._pendingSubAgentResultsData = {};  // 保留兼容
 
@@ -11104,7 +11138,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         window._lastMsgTaskId = window.createTask(_msgText, currentChatId);
         console.log('[Agent] 新任务批次开始,taskId=' + window._lastMsgTaskId);
     }
-    console.log("[DEBUG] sendMessage proceeding, skipAdd=" + skipUserAdd + ", isTyping=" + !!isTypingMap[currentChatId] + ", agent=" + isAgentToolsActive());
 
     if (!rateLimit.allowed()) {
         showToast('请求过于频繁', 'warning');
@@ -11142,7 +11175,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     const chatId = currentChatId;
     if (!chatId) return;
-    console.log("[DEBUG] modelVal check passed:", modelVal);
     if (isTypingMap[chatId]) {
         // ★ AI 正在生成:仅在 agent/plan 模式下推入队列
         if (!skipUserAdd && userTextForRegen && userTextForRegen.length > 0 && isAgentToolsActive()) {
@@ -13965,7 +13997,6 @@ window.useAlternativeVisionModel = function() {
     }
 
     try {
-        console.log("[DEBUG] About to call attemptRequestWithFreshAbort, model=" + (getVal("modelSelect")||"null") + ", baseUrl=" + (getVal("baseUrl")||"null") + ", apiKey=" + (getVal("apiKey")?"***":"EMPTY"));
         await attemptRequestWithFreshAbort(0, abortMain, timeoutId);
     } catch (e) {
         // ★ 智能错误恢复: image_url 格式错误 → 自动切换为分析工具模式重试
