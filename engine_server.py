@@ -3999,15 +3999,11 @@ async def video_edit_endpoint(request: Request):
             cmd = ["ffmpeg", "-y", "-i", input_path, "-vframes", str(count),
                    "-vf", f"fps=1/{interval},scale={scale}:-1",
                    "-f", "image2pipe", "-q:v", "3", "-vcodec", "mjpeg", "-"]
-            r = subprocess.run(cmd, capture_output=True, timeout=60)
+            r = subprocess.run(cmd, capture_output=True, timeout=120)
             if r.returncode != 0 or len(r.stdout) < 100:
                 return JSONResponse({"error": f"截图失败: {r.stderr.decode()[:200]}"}, status_code=500)
-            from moviepy import VideoFileClip
-            clip = VideoFileClip(input_path)
-            frame_count = 0
             frames = []
             pos = 0; buf = r.stdout
-            clips_total = []
             while pos < len(buf) - 4:
                 soi = buf.find(b'\xff\xd8', pos)
                 if soi < 0: break
@@ -4016,7 +4012,6 @@ async def video_edit_endpoint(request: Request):
                 jpg = buf[soi:eoi+2]
                 frames.append("data:image/jpeg;base64," + b64.b64encode(jpg).decode())
                 pos = eoi + 2
-            clip.close()
             return {"result": json.dumps({"frames": frames, "count": len(frames)})}
         else:
             return JSONResponse({"error": f"未知操作: {action}"}, status_code=400)
