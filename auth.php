@@ -302,7 +302,8 @@ switch ($method) {
             jsonSuccess([
                 'token' => $token,
                 'username' => $username,
-                'user_id' => $userId
+                'user_id' => $userId,
+                'role' => 'user'
             ]);
 
         } elseif ($action === 'login') {
@@ -338,10 +339,13 @@ switch ($method) {
             ];
             writeJson($sessionsFile, $sessions);
 
+            // 从数据库读取真实 role
+            $role = $users[$userId]['role'] ?? 'user';
             jsonSuccess([
                 'token' => $token,
-                'username' => $username,
-                'user_id' => $userId
+                'username' => $users[$userId]['username'] ?? $username,
+                'user_id' => $userId,
+                'role' => $role
             ]);
 
         } elseif ($action === 'logout') {
@@ -490,6 +494,7 @@ switch ($method) {
             }
             $users = readJson($usersFile);
             $username = $users[$userId]['username'] ?? '未知用户';
+            $role = $users[$userId]['role'] ?? 'user';
             // ★ 更新最后活跃时间 (带保护: 用户数据为空时跳过写入)
             if (!empty($users[$userId]) && !empty($users[$userId]['username'])) {
                 $users[$userId]['last_active'] = date('c');
@@ -498,7 +503,8 @@ switch ($method) {
             echo json_encode([
                 'valid' => true,
                 'username' => $username,
-                'user_id' => $userId
+                'user_id' => $userId,
+                'role' => $role
             ]);
             exit;
         } elseif ($action === 'get_profile') {

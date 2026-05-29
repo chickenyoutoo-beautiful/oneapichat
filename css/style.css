@@ -416,6 +416,42 @@ header, #chatBox {
 .stop-btn.visible { opacity: 1; pointer-events: auto; }
 .send-btn:hover, .stop-btn:hover { transform: scale(1.1); }
 
+/* ===== 输入框上方消息队列栏 ===== */
+.queue-bar {
+    display: none; margin: 0 auto 6px auto; width: 85%; max-width: 720px;
+    position: relative;
+}
+.queue-bar:not(.hidden) { display: block; }
+.queue-bar-inner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 10px;
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border: 1px solid #f59e0b;
+    font-size: 12px; color: #92400e;
+}
+.dark .queue-bar-inner {
+    background: linear-gradient(135deg, #451a03, #78350f);
+    border-color: #d97706;
+    color: #fde68a;
+}
+.queue-bar-icon { display: flex; align-items: center; flex-shrink: 0; }
+.queue-bar-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-bar-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 20px; border-radius: 10px;
+    background: #ef4444; color: white;
+    font-size: 11px; font-weight: 700; padding: 0 6px;
+}
+.queue-bar-badge.hidden { display: none; }
+.queue-push-btn {
+    flex-shrink: 0; padding: 4px 12px; border-radius: 6px;
+    background: #f59e0b; color: white; font-size: 11px; font-weight: 600;
+    border: none; cursor: pointer; transition: all 0.15s;
+}
+.queue-push-btn:hover { background: #d97706; transform: scale(1.03); }
+.queue-push-btn:active { transform: scale(0.95); }
+
+
 /* ===== 文件预览 ===== */
 .file-preview-container {
     display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;

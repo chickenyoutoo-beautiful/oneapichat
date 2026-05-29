@@ -1,12 +1,13 @@
 <?php
 /**
- * Cloudreve 自动登录跳转 v3
- * 策略：通过 Cookie 跨子域共享 token，Cloudreve 首页加载时自动登录
+ * Cloudreve 自动登录桥接 v6
+ * 直接用 cr_login 参数跳转，让 Cloudreve 的 SPA 内联脚本处理
  */
 $tmpToken = $_GET['t'] ?? '';
 if (!$tmpToken) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
 
 $tmpFile = "/tmp/cloudreve_login_" . preg_replace('/[^a-f0-9]/', '', $tmpToken) . ".json";
+error_log("[cr_login] tmpFile: $tmpFile exists: " . (file_exists($tmpFile) ? 'yes' : 'no'));
 if (!file_exists($tmpFile)) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
 
 $creds = json_decode(file_get_contents($tmpFile), true);
@@ -16,6 +17,12 @@ $email = $creds['email'] ?? '';
 $password = $creds['password'] ?? '';
 if (!$email || !$password) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
 
+// ★ 短密码兼容处理（同 cloudreve_sync.php 逻辑）
+if (strlen($password) < 6) {
+    $password = 'cr_' . substr(base64_encode($password), 0, 14);
+}
+
+// 调用 Cloudreve API 获取 token
 $ch = curl_init('http://127.0.0.1:5212/api/v4/session/token');
 curl_setopt_array($ch, [
     CURLOPT_POST => true,
@@ -23,30 +30,20 @@ curl_setopt_array($ch, [
     CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Host: cloudreve.naujtrats.xyz'],
     CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5,
 ]);
-$data = json_decode(curl_exec($ch), true);
+$body = curl_exec($ch);
+$info = curl_getinfo($ch);
 curl_close($ch);
 
-if (($data['code'] ?? 1) !== 0) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
-
+$data = json_decode($body, true);
+$code = $data['code'] ?? 1;
 $accessToken = $data['data']['token']['access_token'] ?? '';
-$refreshToken = $data['data']['token']['refresh_token'] ?? '';
+error_log("[cr_login] API http_code={$info['http_code']} code=$code token_len=" . strlen($accessToken));
 
-// ★ 构建 Cloudreve session 数据
-$session = json_encode([
-    'sessions' => ['' => ['access_token' => $accessToken, 'refresh_token' => $refreshToken]],
-    'anonymousSettings' => new stdClass(),
-    'anonymousUser' => null,
-]);
+if ($code !== 0) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
+if (!$accessToken) { header('Location: https://cloudreve.naujtrats.xyz'); exit; }
 
-// ★ 通过 Cookie 传递（跨 .naujtrats.xyz 子域共享）
-// Cloudreve 通过 API /api/v4/user/me 验证 token
-// Cookie 只是让 Cloudreve 前端读取
-
-// ★ 最终方案：HTML bridge —— 打开 Cloudreve 主页并通过 postMessage/iframe 写入 localStorage
-// 更简单：直接在 cloudreve 域名下执行登录
-$tokenEncoded = urlencode($accessToken);
-$redirectUrl = 'https://cloudreve.naujtrats.xyz/?cr_login=' . $tokenEncoded;
-
-// ★ 直接 302 跳转，依赖 Nginx sub_filter 注入的 JS
+// ★ 直接用 cr_login 参数跳转，Cloudreve 的 SPA sub_filter 脚本会处理
+$redirectUrl = 'https://cloudreve.naujtrats.xyz/?cr_login=' . urlencode($accessToken);
+error_log("[cr_login] redirect: $redirectUrl");
 header("Location: {$redirectUrl}");
 exit;

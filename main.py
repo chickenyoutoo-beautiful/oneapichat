@@ -2,6 +2,7 @@
 import argparse
 import configparser
 from api.logger import logger
+import sys
 from api.base import Chaoxing, Account
 from api.exceptions import LoginError, FormatError, JSONDecodeError,MaxRollBackError
 from api.answer import Tiku
@@ -109,7 +110,7 @@ if __name__ == '__main__':
                 course_task = all_course
                 _study_mode = False
                 # 直接跳到考试部分
-            else:
+            elif sys.stdin.isatty():
                 print("*" * 10 + "课程列表" + "*" * 10)
                 for course in all_course:
                     print(f"ID: {course['courseId']} 课程名: {course['title']}")
@@ -118,6 +119,8 @@ if __name__ == '__main__':
                     course_list = input("请输入想要学习的课程列表,以逗号分隔,例: 2151141,189191,198198\n").split(",")
                 except Exception as e:
                     raise FormatError("输入格式错误") from e
+            else:
+                raise FormatError("配置中未设置课程列表(course_list)，请在刷课页面选择课程后点开始")
         # 筛选需要学习的课程（考试模式下 course_task 已直接设为 all_course）
         if not cli_args.exam:
             for course in all_course:

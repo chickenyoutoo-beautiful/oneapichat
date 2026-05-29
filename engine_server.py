@@ -1722,9 +1722,13 @@ def agent_create(
     # 验证角色名
     if role not in AGENT_ROLES:
         role = "general"
+    # ★ 注入当前时间到 prompt,让子代理知道真实时间,避免搜出过时信息
+    now_cn = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    tz_str = "Asia/Shanghai (UTC+8)"
+    time_tag = f"\n\n[系统] 当前真实时间: {now_cn} (时区: {tz_str}), 所有搜索关键词应包含最新年份日期。"
     agent_data = {
         "name": name,
-        "prompt": prompt,
+        "prompt": prompt + time_tag,
         "role": role,
         "status": "idle",
         "created": datetime.now().isoformat()
@@ -1781,49 +1785,168 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not query:
                 return "错误:缺少 query 参数"
             try:
-                # 用主聊配置的 Tavily API Key
-                tavily_key = ""
+                # 从主聊配置读取搜索 Provider 和对应的 API Key
+                search_provider = "tavily"  # 默认
+                search_api_key = ""
                 try:
-                    main_cfg = _get_main_chat_config(user_id)
-                    # 从原始 JSON 中读取存储的 Tavily key
-                    config_path = f"chat_data/config_user_{user_id}.json"
+                    config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
                     with open(config_path) as f:
                         raw_cfg = json.load(f)
-                    stored = raw_cfg.get("searchApiKeyTavily", "") or raw_cfg.get("searchApiKey", "") or ""
+                    # 读取搜索 Provider (用户可能在配置中选择 brave/google/tavily/duckduckgo)
+                    raw_provider = raw_cfg.get("searchProvider", "") or ""
+                    if raw_provider and raw_provider != "not-needed":
+                        search_provider = raw_provider
+                    # 读取对应 Provider 的 API Key
+                    provider_key_fields = {
+                        "tavily": "searchApiKeyTavily",
+                        "brave": "searchApiKeyBrave",
+                        "google": "searchApiKeyGoogle",
+                    }
+                    key_field = provider_key_fields.get(search_provider, "searchApiKey")
+                    stored = raw_cfg.get(key_field, "") or raw_cfg.get("searchApiKey", "") or ""
                     if stored:
                         decrypted = _decrypt_xor(stored)
                         if decrypted:
-                            tavily_key = decrypted
+                            search_api_key = decrypted
                 except:
                     pass
 
-                if not tavily_key:
-                    return f"搜索出错: 未找到 Tavily API Key (请先在设置中配置搜索API Key)"
+                # DuckDuckGo 不需要 API Key,直接转发
+                if search_provider == "duckduckgo":
+                    try:
+                        from duckduckgo_search import DDGS
+                        with DDGS() as ddgs:
+                            ddgs_results = list(ddgs.text(query, max_results=8))
+                        if not ddgs_results:
+                            return f'搜索 "{query}" 无结果。请更换关键词重试。'
+                        lines = []
+                        for res in ddgs_results[:8]:
+                            title = res.get("title", "")
+                            url = res.get("href", res.get("link", ""))
+                            content = res.get("body", res.get("snippet", ""))[:200].replace("\n", " ")
+                            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                            lines.append(f"- [{title}]({url})\n  {content}")
+                        return f"搜索结果 (provider: {search_provider}, query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                    except ImportError:
+                        # duckduckgo_search 未安装,回退至 Tavily
+                        search_provider = "tavily"
+                    except Exception as e:
+                        return f"搜索出错 ({search_provider}): {str(e)}\n请稍后重试或更换关键词。"
 
-                r = requests.post(
-                    "https://api.tavily.com/search",
-                    json={
-                        "api_key": tavily_key,
-                        "query": query,
-                        "search_depth": "basic",
-                        "max_results": 8,
-                        "include_answer": False
-                    },
-                    timeout=15
-                )
-                data = r.json()
-                results = data.get("results", [])
-                if not results:
+                # Tavily 搜索 (失败时自动回退到 MiniMax CLI 搜索)
+                def _try_tavily(q):
+                    if not search_api_key:
+                        return None
+                    try:
+                        r = requests.post(
+                            "https://api.tavily.com/search",
+                            json={
+                                "api_key": search_api_key,
+                                "query": q,
+                                "search_depth": "advanced",
+                                "max_results": 10,
+                                "include_answer": True
+                            },
+                            timeout=20
+                        )
+                        if r.status_code != 200:
+                            return None  # 401/429/500 → 回退
+                        data = r.json()
+                        results = data.get("results", [])
+                        answer = data.get("answer", "") or ""
+                        if not results:
+                            if answer:
+                                return f"搜索结果 (query: {q}):\n[摘要] {answer[:500]}\n\n注: 未搜索到具体网页结果,以上为 AI 摘要。"
+                            return None  # 空结果 → 回退
+                        lines = []
+                        for res in results[:8]:
+                            title = res.get("title", "")
+                            url = res.get("url", "")
+                            content = res.get("content", "")[:200].replace("\n", " ")
+                            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                            lines.append(f"- [{title}]({url})\n  {content}")
+                        return f"搜索结果 (provider: tavily, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                    except:
+                        return None
+
+                # MiniMax CLI 搜索回退
+                def _try_minimax_search(q):
+                    try:
+                        import subprocess as _subprocess
+                        # ★ 自动给搜索词追加当前日期,提升搜索相关性
+                        today_str = datetime.now().strftime("%Y年%m月%d日")
+                        if today_str[:4] not in q:
+                            q = q + f" {today_str}"
+                        r = _subprocess.run(
+                            ["mmx", "search", "query", "--q", q, "--output", "json"],
+                            capture_output=True, text=True, timeout=30
+                        )
+                        if r.returncode != 0:
+                            return None
+                        data = json.loads(r.stdout)
+                        organic = data.get("organic", [])
+                        if not organic:
+                            return None
+                        lines = []
+                        for res in organic[:8]:
+                            title = res.get("title", "")
+                            url = res.get("link", "")
+                            content = res.get("snippet", res.get("body", ""))[:200].replace("\n", " ")
+                            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                            lines.append(f"- [{title}]({url})\n  {content}")
+                        return f"搜索结果 (provider: minimax, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                    except Exception as _mmx_e2:
+                        return None
+
+                if search_provider == "tavily":
+                    result = _try_tavily(query)
+                    if result:
+                        return result
+                    # Tavily 失败 → 回退 MiniMax CLI
+                    mmx_result = _try_minimax_search(query)
+                    if mmx_result:
+                        return mmx_result
                     return f'搜索 "{query}" 无结果。请更换关键词重试。'
 
-                lines = []
-                for res in results[:8]:
-                    title = res.get("title", "")
-                    url = res.get("url", "")
-                    content = res.get("content", "")[:200].replace("\n", " ")
-                    content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
-                    lines.append(f"- [{title}]({url})\n  {content}")
-                return f"搜索结果 (query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                # Brave 搜索
+                if search_provider == "brave":
+                    if not search_api_key:
+                        return f"搜索出错: 未找到 Brave API Key (请先在设置中配置搜索API Key)"
+                    headers = {"Accept": "application/json", "X-Subscription-Token": search_api_key}
+                    r = requests.get(
+                        f"https://api.search.brave.com/res/v1/web/search?q={requests.utils.quote(query)}&count=8&safesearch=off",
+                        headers=headers, timeout=15
+                    )
+                    data = r.json()
+                    results = data.get("web", {}).get("results", [])
+                    if not results:
+                        return f'搜索 "{query}" 无结果。请更换关键词重试。'
+                    lines = []
+                    for res in results[:8]:
+                        title = res.get("title", "")
+                        url = res.get("url", "")
+                        content = res.get("description", "")[:200].replace("\n", " ")
+                        content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                        lines.append(f"- [{title}]({url})\n  {content}")
+                    return f"搜索结果 (provider: {search_provider}, query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+
+                # 兜底: 不支持的 provider (如 minimax) 统一先用 MiniMax CLI 搜索
+                print(f"[web_search] 走兜底, search_provider={search_provider}, query={query[:50]}", flush=True)
+                try:
+                    mmx_result = _try_minimax_search(query)
+                    print(f"[web_search] _try_minimax_search 结果: {str(mmx_result)[:100] if mmx_result else 'None'}", flush=True)
+                    if mmx_result:
+                        return mmx_result
+                except Exception as _mmx_e:
+                    print(f"[web_search] _try_minimax_search 异常: {_mmx_e}", flush=True)
+                # MiniMax 也无结果时,再试试 Tavily
+                print(f"[web_search] 尝试 Tavily 兜底", flush=True)
+                tavily_result = _try_tavily(query)
+                print(f"[web_search] _try_tavily 结果: {str(tavily_result)[:100] if tavily_result else 'None'}", flush=True)
+                if tavily_result:
+                    return tavily_result
+                print(f"[web_search] 全部搜索失败,返回无结果", flush=True)
+                return f'搜索 "{query}" 无结果。请更换关键词重试。'
             except Exception as e:
                 return f"搜索出错: {str(e)}\n请稍后重试或更换关键词。"
         elif tool_name == "web_fetch":
@@ -2126,7 +2249,17 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return json.dumps(_d, ensure_ascii=False)
             except Exception as _e:
                 return f"工具执行失败: {str(_e)}"
-        return "未知工具"
+        # 遇到未知工具时 not-sub-tool, 先尝试通过 engine/heartbeat 转发给主系统
+        try:
+            _engine_url = "http://127.0.0.1:8766/engine/agent/heartbeat?user_id=" + str(user_id) + "&tool_name=" + str(tool_name) + "&args=" + str(json.dumps(args))
+            _r = requests.get(_engine_url, timeout=10)
+            if _r.ok:
+                _d = _r.json()
+                if _d.get("ok") or _d.get("result"):
+                    return json.dumps(_d.get("result", _d), ensure_ascii=False)
+        except:
+            pass
+        return f"[警告: 当前环境不支持 {tool_name} 工具] 跳过此操作,请用 web_search/web_fetch 替代"
 
     def _run():
         _lock = _get_agent_store_lock(user_id)
@@ -2193,14 +2326,27 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
 
                 for tc in msg.tool_calls:
                     tool_name = tc.function.name
-                    tool_args = json.loads(tc.function.arguments)
-                    result = _execute_tool(tool_name, tool_args)
+                    try:
+                        tool_args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError as _je:
+                        # ★ 工具参数解析失败时降级为"跳过并通知"
+                        result_parts.append(f"[工具: {tool_name}] 参数解析失败: 跳过")
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"[错误] {tool_name} 参数解析失败: {str(_je)}, 请检查参数格式后重试"})
+                        continue
+                    try:
+                        result = _execute_tool(tool_name, tool_args)
+                    except Exception as _te:
+                        result = f"[工具执行异常] {tool_name}: {str(_te)[:200]}"
+                    # ★ 日志追踪: 工具名称 + 结果概要
+                    result_preview = str(result)[:80].replace('\n', ' ')
+                    print(f"[子代理:{name}] 工具调用: {tool_name} -> {result_preview}", flush=True)
                     # ★ 全局净化：移除所有控制字符和 unicode surrogate
                     if isinstance(result, str):
                         result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', result)
                         if len(result) > 8000:
                             result = result[:8000] + '...(截断)'
-                    result_parts.append(f"[工具: {tool_name}] {str(result)[:500]}")
+                    # ★ 工具结果保存到 result_parts(用于最终 agent 结果),截断到 2000 字符供 AI 分析
+                    result_parts.append(f"[工具: {tool_name}] {str(result)[:2000]}")
                     # ★ put 结果时再做一次安全包装
                     safe_content = str(result) if result else '(empty)'
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": safe_content})
@@ -2294,7 +2440,7 @@ def _get_main_chat_config(user_id: str) -> dict:
     result = {"api_key": "", "base_url": "", "model": ""}
     if not user_id:
         return result
-    config_path = f"chat_data/config_user_{user_id}.json"
+    config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
     try:
         with open(config_path) as f:
             cfg = json.load(f)
@@ -3587,23 +3733,29 @@ def agent_memory_delete(key: str = Query(...), user_id: str = Query("")):
 # ==================== 浏览器工具 ====================
 
 @app.on_event("startup")
-async def _startup_browser():
-    """启动时初始化浏览器连接并注册浏览器工具"""
-    # 注册浏览器工具到全局注册表
+def _startup_browser():
+    """启动时注册浏览器工具,并异步初始化浏览器连接(不阻塞启动)"""
+    # 注册浏览器工具到全局注册表(同步操作,不阻塞)
     try:
         from engine.tool_registry import register_browser_tools
         register_browser_tools(tool_registry)
         print("[引擎] 浏览器工具已注册")
     except Exception as e:
         print(f"[引擎] 浏览器工具注册失败: {e}")
-    # 连接浏览器
+    # 浏览器连接放到后台任务,不阻塞启动
     try:
-        from engine.browser import get_browser_manager
-        bm = get_browser_manager()
-        await bm.connect()
-        print("[引擎] 浏览器管理器已初始化")
+        import asyncio
+        async def _lazy_init_browser():
+            try:
+                from engine.browser import get_browser_manager
+                bm = get_browser_manager()
+                await bm.connect()
+                print("[引擎] 浏览器管理器已初始化")
+            except Exception as e:
+                print(f"[引擎] 浏览器管理器初始化失败(可忽略): {e}")
+        asyncio.ensure_future(_lazy_init_browser())
     except Exception as e:
-        print(f"[引擎] 浏览器管理器初始化失败(可忽略): {e}")
+        print(f"[引擎] 浏览器后台初始化失败: {e}")
 
 
 @app.get("/engine/browser/status")

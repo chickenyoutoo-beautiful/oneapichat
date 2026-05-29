@@ -734,8 +734,8 @@ switch ($action) {
         // 使用独立 config
         $config_path = ensureUserConfig($userId);
         $ini = file_get_contents($config_path);
-        $ini = preg_replace('/username = .*/', 'username = ' . $user, $ini);
-        $ini = preg_replace('/password = .*/', 'password = ' . $pass, $ini);
+        $ini = preg_replace('/^username\s*=\s*.*/m', 'username = ' . $user, $ini);
+        $ini = preg_replace('/^password\s*=\s*.*/m', 'password = ' . $pass, $ini);
         file_put_contents($config_path, $ini);
 
         // 清理缓存
