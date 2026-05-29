@@ -1731,12 +1731,12 @@ const VIDEO_EDIT_TOOL = {
     type: "function",
     function: {
         name: "video_edit",
-        description: "🎬 全能视频剪辑工厂。支持字幕+配音+滤镜+转场+弹幕一站式制作，也支持单一操作。剪辑流程：先 info 查看视频信息 → 选择操作 → 输出。\n\n🔥 推荐主操作 compose（一键生成带字幕配音的成品视频）：\n- 自动TTS逐句配音（支持多角色切换 voice_id）\n- 精确时间轴字幕（SRT烧录，支持中英文+emoji）\n- 6种预设字幕风格 style: bilibili(粉)/variety(综艺黄)/minimal(简约白)/bold(粗红)/neon(赛博绿)/typewriter(打字机灰)\n- 弹幕模式 danmaku（从右到左飞过，随机颜色/位置）\n- 保留原音频+配音混合\n- 视频滤镜 filter（sepia/vintage/bw/grain/vignette/hue/eq/boxblur）\n\n📐 其他操作：crop(画面裁剪,支持比例16:9/1:1等) reverse(倒放) mute(去原声) bgm(背景音乐) enhance(自动增强: vivid/cinematic/hdr预设) gif(视频转GIF) silent_cut(切静音) trim(裁剪时间段) concat(多段拼接) speed(调速) resize(缩放) overlay(画中画) text(字幕) rotate(旋转) audio(提取音频) tts(纯语音合成) voice(配音) frames(提取帧) info(查看视频信息)",
+        description: "🎬 全能视频剪辑工厂。支持字幕+配音+滤镜+转场+弹幕一站式制作，也支持单一操作。剪辑流程：先 info 查看视频信息 → 选择操作 → 输出。🎤 新增 stt(语音转文字): 从视频提取音频后用 AI 转为文字字幕。\n\n🔥 推荐主操作 compose（一键生成带字幕配音的成品视频）：\n- 自动TTS逐句配音（支持多角色切换 voice_id）\n- 精确时间轴字幕（SRT烧录，支持中英文+emoji）\n- 6种预设字幕风格 style: bilibili(粉)/variety(综艺黄)/minimal(简约白)/bold(粗红)/neon(赛博绿)/typewriter(打字机灰)\n- 弹幕模式 danmaku（从右到左飞过，随机颜色/位置）\n- 保留原音频+配音混合\n- 视频滤镜 filter（sepia/vintage/bw/grain/vignette/hue/eq/boxblur）\n\n📐 其他操作：crop(画面裁剪,支持比例16:9/1:1等) reverse(倒放) mute(去原声) bgm(背景音乐) enhance(自动增强: vivid/cinematic/hdr预设) gif(视频转GIF) silent_cut(切静音) trim(裁剪时间段) concat(多段拼接) speed(调速) resize(缩放) overlay(画中画) text(字幕) rotate(旋转) audio(提取音频) tts(纯语音合成) voice(配音) frames(提取帧) info(查看视频信息)",
         parameters: {
             type: "object",
             properties: {
-                action: { type: "string", description: "操作: compose(推荐) trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info crop reverse mute bgm enhance gif silent_cut style" },
-                params: { type: "object", description: "各行动参数：\n⭐ compose(一键成品): {timeline:[{start:0,end:2.5,text:'台词',voice_id:'female-yujie',danmaku:false,fontsize:28,color:'white',bg_color:'#1a1a2e'}],style:'bilibili',voice_id:'female-yujie',fontsize:28,bg_volume:0.3,filter:'sepia',danmaku:true,danmaku_random_color:true}\n✂️ trim: {start:5,end:30}\n📐 crop: {ratio:'16:9'} 或 {w:1080,h:720,x:0,y:0}\n🎨 enhance: {preset:'vivid'|'cinematic'|'hdr'|'warm'|'cool'}\n🎵 bgm: {bgm_path:'/path/to/bgm.mp3',volume:0.2}\n🎞️ gif: {start:10,duration:3,fps:12,width:480}\n🎤 tts: {text:'文本',voice_id:'female-yujie'}\n🔊 voice: 同tts+input_path\n🪄 style: {timeline:[...],style:'bilibili'}\n🔄 concat: {files:['path1','path2']}\n⏩ speed: {factor:2.0}\n📏 resize: {width:1920,height:1080}\n🖼️ overlay: {overlay_path:'水印.png',x:10,y:10,scale:0.3}\n🔄 rotate: {angle:90}\n🔇 mute: {}\n🔙 reverse: {}\n✂️ silent_cut: {threshold:'-25dB'}\n🎬 video_filter: {type:'sepia'}\n📊 info: {}\n🖼️ frames: {count:5,duration:30,scale:640}" },
+                action: { type: "string", description: "操作: compose(推荐) trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info crop reverse mute bgm enhance gif silent_cut style stt(语音转文字)" },
+                params: { type: "object", description: "operation params. See action list above for details." },
                 input_path: { type: "string", description: "输入视频路径。用户上传视频后,消息中会标注「服务器路径: /oneapichat/uploads/...」,直接用这个路径即可" },
                 output_path: { type: "string", description: "输出路径(可选)" }
             },
@@ -13289,6 +13289,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             toolResult = { error: 'MiniMax CLI 调用失败: ' + (_mmxErr.message || '未知错误') };
                         }
                     } else if (func.name === 'video_edit') {
+                        // ★ STT action: 特殊处理
+                        if (args.action === 'stt') {
+                            try {
+                                var _sttBody = { action: 'stt', params: { language: args.params?.language || 'zh' }, input_path: args.input_path };
+                                var _sttResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_sttBody) });
+                                var _sttData = await _sttResp.json();
+                                if (_sttData.error) { toolResult = { error: _sttData.error }; }
+                                else if (_sttData.result) { toolResult = { result: '🎤 **语音识别结果:**\n' + _sttData.result }; }
+                                else { toolResult = { error: 'STT返回为空' }; }
+                            } catch(e) { toolResult = { error: 'STT请求失败: ' + e.message }; }
+                            return toolResult;
+                        }
                         var _srcEnginePath = args.input_path || '';
                         // ★ 智能补全: 如果没传 input_path,从当前聊天的上传文件里找
                         if (!_srcEnginePath && chats[chatId]) {

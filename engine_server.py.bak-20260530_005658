@@ -481,79 +481,6 @@ def _apply_tts(params):
     except Exception as e:
         return f"TTS 异常 (mmx): {str(e)}"
 
-
-def _get_video_duration(input_path):
-    """获取视频时长(秒), 失败返回 0"""
-    try:
-        r = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",input_path],
-                          capture_output=True, text=True, timeout=15)
-        info = json.loads(r.stdout)
-        return float(info.get("format", {}).get("duration", 0))
-    except: return 0
-
-def _smart_timeout(input_path, base=120):
-    """根据视频时长智能调整 timeout: 每 60 秒视频加 30 秒"""
-    dur = _get_video_duration(input_path)
-    return max(base, int(base + dur * 0.5))
-
-def _ffmpeg_edit(input_path, output_path, vf="", af="", extra_args=None, action_label="编辑"):
-    """通用 ffmpeg 编辑：-vf 视频滤镜, -af 音频滤镜, extra_args 额外参数"""
-    timeout = _smart_timeout(input_path)
-    cmd = ["ffmpeg","-y","-i",input_path]
-    if vf: cmd += ["-vf", vf]
-    if af: cmd += ["-af", af]
-    if extra_args: cmd += extra_args
-    cmd += ["-c:v","libx264","-preset","ultrafast","-c:a","aac","-movflags","+faststart",output_path]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0:
-        return f"{action_label}失败: {r.stderr[-200:]}"
-    return f"{action_label}完成: {output_path}"
-
-def _stt_transcribe(input_path, language="zh"):
-    """语音转文字: 提取音频后用 whisper 或 MiniMax STT API"""
-    # 提取音频
-    audio_path = input_path + ".wav"
-    r = subprocess.run(["ffmpeg","-y","-i",input_path,"-vn","-acodec","pcm_s16le","-ar","16000","-ac","1",audio_path],
-                      capture_output=True, text=True, timeout=60)
-    if r.returncode != 0 or not os.path.exists(audio_path):
-        return {"error": f"音频提取失败: {r.stderr[:100]}"}
-    
-    transcript = ""
-    # 1. 尝试 faster-whisper
-    try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
-        segments, info = model.transcribe(audio_path, language=language, beam_size=5)
-        for seg in segments:
-            transcript += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
-    except (ImportError, Exception):
-        # 2. 尝试 MiniMax STT API (如果配置了)
-        try:
-            tts_key = _get_decrypted_key("ttsApiKey") or _get_decrypted_key("visionApiKey")
-            if tts_key:
-                import base64 as b64
-                with open(audio_path,"rb") as f:
-                    audio_b64 = b64.b64encode(f.read()).decode()
-                resp = requests.post(
-                    "https://api.minimaxi.com/v1/speech_transcription",
-                    headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"},
-                    json={"model":"speech-01","audio":audio_b64,"language":language},
-                    timeout=120
-                )
-                if resp.ok:
-                    data = resp.json()
-                    transcript = data.get("text","") or data.get("transcript","")
-        except Exception:
-            transcript = "(STT服务不可用，请安装 faster-whisper: pip install faster-whisper)"
-    
-    try: os.remove(audio_path)
-    except: pass
-    
-    return {
-        "result": transcript.strip() or "(无语音内容)",
-        "duration": _get_video_duration(input_path)
-    }
-
 def _apply_voice_to_video(video_path, audio_path, output_path, params):
     """将音频混入视频(FFmpeg),保持原视频速度不变"""
     volume = float(params.get("volume", 1.0))
@@ -3963,79 +3890,73 @@ async def video_edit_endpoint(request: Request):
             return {"result": r.stdout}
         elif action == "trim":
             start = params.get("start", 0)
-            end = params.get("end", "")
-            extra = []
-            if end: extra += ["-t", str(float(end) - float(start))]
-            extra += ["-ss", str(start)]
-            return {"result": _ffmpeg_edit(input_path, output_path, extra_args=extra, action_label="裁剪")}
+            end = params.get("end", None)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if end: clip = clip.subclipped(start, end)
+            else: clip = clip.subclipped(start)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"裁剪完成: {output_path}"}
         elif action == "speed":
             factor = float(params.get("factor", 1.0))
-            atempo = "atempo=" + str(factor)
-            if factor > 2: atempo = "atempo=2.0,atempo=" + str(factor/2)
-            vf = f"setpts={1/factor}*PTS"
-            af = atempo
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=vf, af=af, action_label="调速")}
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.MultiplySpeed(factor)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"调速完成 (x{factor}): {output_path}"}
         elif action == "resize":
-            w = params.get("width", 0); h = params.get("height", 0)
-            if w and h: scale = f"scale={w}:{h}"
-            elif w: scale = f"scale={w}:-1"
-            elif h: scale = f"scale=-1:{h}"
-            else: scale = "scale=1280:-1"
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=scale, action_label="缩放")}
+            width = params.get("width", 0); height = params.get("height", 0)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if width and height: clip = clip.resized((width, height))
+            elif width: clip = clip.resized(width=width)
+            elif height: clip = clip.resized(height=height)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"缩放完成: {output_path}"}
         elif action == "audio":
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
             audio_output = output_path + ".mp3" if not output_path.endswith(".mp3") else output_path
-            r = subprocess.run(["ffmpeg","-y","-i",input_path,"-vn","-acodec","libmp3lame","-q:a","2",audio_output],
-                             capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            if r.returncode != 0:
-                return {"result": f"音频提取失败: {r.stderr[-200:]}"}
+            if clip.audio: clip.audio.write_audiofile(audio_output)
+            clip.close()
             return {"result": f"音频提取完成: {audio_output}"}
         elif action == "concat":
             files = params.get("files", [])
             if not files: return JSONResponse({"error": "concat 需要 files 数组"}, status_code=400)
-            # 用 ffmpeg concat demuxer
-            import tempfile
-            flist = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-            for f in files:
-                # 转换相对路径
-                fp = f
-                if fp.startswith("/oneapichat/"): fp = PROJECT_ROOT + "/" + fp.replace("/oneapichat/", "", 1)
-                flist.write(f"file '{fp}'\n")
-            flist.close()
-            extra = ["-f","concat","-safe","0","-i",flist.name,"-c","copy"]
-            r = subprocess.run(["ffmpeg","-y"] + extra + ["-c:v","libx264","-c:a","aac",output_path],
-                             capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            try: os.unlink(flist.name)
-            except: pass
-            if r.returncode != 0:
-                return {"result": f"拼接失败: {r.stderr[-200:]}"}
+            from moviepy import VideoFileClip, concatenate_videoclips
+            clips = [VideoFileClip(f) for f in files]
+            final = concatenate_videoclips(clips, method="compose")
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            for c in clips: c.close()
+            final.close()
             return {"result": f"拼接完成: {output_path}"}
         elif action == "overlay":
             overlay_path = params.get("overlay_path", "")
             if not overlay_path or not os.path.exists(overlay_path):
-                # 转换相对路径
-                if overlay_path.startswith("/oneapichat/"):
-                    overlay_path = PROJECT_ROOT + "/" + overlay_path.replace("/oneapichat/", "", 1)
-            if not os.path.exists(overlay_path):
                 return JSONResponse({"error": "overlay_path 无效"}, status_code=400)
-            x = params.get("x", 10); y = params.get("y", 10)
-            vf = f"[1]scale=iw*0.3:-1[ov];[0][ov]overlay={x}:{y}"
-            r = subprocess.run([
-                "ffmpeg","-y","-i",input_path,"-i",overlay_path,
-                "-filter_complex",vf,"-c:v","libx264","-preset","ultrafast","-c:a","aac",output_path
-            ], capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            if r.returncode != 0:
-                return {"result": f"画中画失败: {r.stderr[-200:]}"}
+            x, y = params.get("x", 10), params.get("y", 10)
+            scale = params.get("scale", 0.3)
+            from moviepy import VideoFileClip, CompositeVideoClip
+            clip = VideoFileClip(input_path)
+            ov = VideoFileClip(overlay_path).resized(scale).with_position((x, y))
+            final = CompositeVideoClip([clip, ov])
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close(); ov.close(); final.close()
             return {"result": f"画中画完成: {output_path}"}
         elif action == "text":
             result = _apply_subtitle(input_path, output_path, params)
             return {"result": result}
         elif action == "rotate":
             angle = float(params.get("angle", 90))
-            rotations = {"90":"transpose=1","180":"transpose=2,transpose=2","270":"transpose=2","-90":"transpose=2"}
-            vf = rotations.get(str(int(angle)), f"rotate={angle}*PI/180")
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=vf, action_label="旋转")}
-        elif action == "stt":
-            return _stt_transcribe(input_path, params.get("language","zh"))
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.Rotate(angle)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"旋转完成 ({angle}°): {output_path}"}
         elif action in ("filter", "video_filter"):
             return {"result": _apply_ffmpeg_filter(input_path, output_path, params)}
         elif action in ("transition", "video_transition"):
