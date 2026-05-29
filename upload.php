@@ -214,6 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $finalSize = strlen($imageData);
     }
     if ($writeOk) {
+        @chmod($filepath, 0644);  // 确保 engine 进程可读
         $url = '/oneapichat/uploads/' . $subDir . '/' . rawurlencode($filename);
         echo json_encode([
             'url' => $url,
