@@ -14044,6 +14044,7 @@ window.useAlternativeVisionModel = function() {
         else saveOngoingChatsSnapshot();
     }
 };
+}
 
 // ==================== 对话管理 ====================
 function saveOngoingChatsSnapshot() {
@@ -16841,4 +16842,3 @@ window.appendAgentSystemMessage = function(text, source) {
 
 // 已移至 restoreUserData 完成后延迟启动
 
-}
