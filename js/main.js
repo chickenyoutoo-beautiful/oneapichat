@@ -11104,6 +11104,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         window._lastMsgTaskId = window.createTask(_msgText, currentChatId);
         console.log('[Agent] 新任务批次开始,taskId=' + window._lastMsgTaskId);
     }
+    console.log("[DEBUG] sendMessage proceeding, skipAdd=" + skipUserAdd + ", isTyping=" + !!isTypingMap[currentChatId] + ", agent=" + isAgentToolsActive());
 
     if (!rateLimit.allowed()) {
         showToast('请求过于频繁', 'warning');
@@ -11141,6 +11142,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     const chatId = currentChatId;
     if (!chatId) return;
+    console.log("[DEBUG] modelVal check passed:", modelVal);
     if (isTypingMap[chatId]) {
         // ★ AI 正在生成:仅在 agent/plan 模式下推入队列
         if (!skipUserAdd && userTextForRegen && userTextForRegen.length > 0 && isAgentToolsActive()) {
@@ -13962,6 +13964,7 @@ window.useAlternativeVisionModel = function() {
     }
 
     try {
+        console.log("[DEBUG] About to call attemptRequestWithFreshAbort, model=" + (getVal("modelSelect")||"null") + ", baseUrl=" + (getVal("baseUrl")||"null") + ", apiKey=" + (getVal("apiKey")?"***":"EMPTY"));
         await attemptRequestWithFreshAbort(0, abortMain, timeoutId);
     } catch (e) {
         // ★ 智能错误恢复: image_url 格式错误 → 自动切换为分析工具模式重试
@@ -16842,3 +16845,5 @@ window.appendAgentSystemMessage = function(text, source) {
 
 // 已移至 restoreUserData 完成后延迟启动
 
+
+// MARKER_CACHE_TEST_v2
