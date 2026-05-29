@@ -491,10 +491,10 @@ def _get_video_duration(input_path):
         return float(info.get("format", {}).get("duration", 0))
     except: return 0
 
-def _smart_timeout(input_path, base=120):
-    """根据视频时长智能调整 timeout: 每 60 秒视频加 30 秒"""
+def _smart_timeout(input_path, base=300):
+    """根据视频时长智能调整 timeout: 每 60 秒视频加 60 秒,最少 300 秒"""
     dur = _get_video_duration(input_path)
-    return max(base, int(base + dur * 0.5))
+    return max(base, int(base + dur * 1.0))
 
 def _ffmpeg_edit(input_path, output_path, vf="", af="", extra_args=None, action_label="编辑"):
     """通用 ffmpeg 编辑：-vf 视频滤镜, -af 音频滤镜, extra_args 额外参数"""
@@ -506,7 +506,11 @@ def _ffmpeg_edit(input_path, output_path, vf="", af="", extra_args=None, action_
     cmd += ["-c:v","libx264","-preset","ultrafast","-c:a","aac","-movflags","+faststart",output_path]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
-        return f"{action_label}失败: {r.stderr[-200:]}"
+        err_detail = r.stderr[-500:] if r.stderr else "(no stderr)"
+        # 也看 stdout 最后几行
+        if r.stdout: err_detail += "\nstdout: " + r.stdout[-200:]
+        logger.error(f"[{action_label}] CMD: {' '.join(cmd[-8:])}\nERR: {err_detail}")
+        return f"{action_label}失败: {err_detail}"
     return f"{action_label}完成: {output_path}"
 
 def _stt_transcribe(input_path, language="zh"):
