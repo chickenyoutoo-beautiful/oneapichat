@@ -11113,13 +11113,17 @@ window._drainQueue = async function() {
         console.warn('[Queue] sendMessage error:', e);
     }
     window._isQueueMessage = false;
+    // ★ 在 sendMessage 返回后立即释放,让 finally 中的 _drainQueue 能执行
     window._isQueueProcessing = false;
     window._updateQueueUI();
     
     // 当前消息发完 → 排下一条 (sendMessage 的 finally 也会调 _drainQueue)
-    if (window._messageQueue.length > 0) {
-        setTimeout(function() { window._drainQueue(); }, 1000);
-    }
+    // ★ 不用 setTimeout,finish 中的 _drainQueue 已经处理了
+    setTimeout(function() {
+        if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
+            window._drainQueue();
+        }
+    }, 2000);
 };
 
 window._updateQueueUI = function() {
