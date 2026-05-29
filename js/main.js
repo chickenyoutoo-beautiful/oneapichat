@@ -101,8 +101,13 @@ function _renderMarkdownWithMath(text) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
     const protected = _protectMath(text);
     const html = marked.parse(protected);
-    // ★ 所有链接打开新标签页
-    var result = _restoreMath(html);
+    // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify）
+    result = result.replace(/(?<!["'=])(https?:\/\/[^\s<>"']+)(?!["'])/gi, function(url) {
+        // 清理尾部标点
+        var cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
+        return '<a href="' + cleanUrl + '" target="_blank" rel="noopener">' + cleanUrl + '</a>';
+    });
+    // ★ 所有已经存在的链接打开新标签页
     result = result.replace(/<a /g, '<a target="_blank" rel="noopener" ');
     return result;
 }
