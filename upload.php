@@ -76,6 +76,7 @@ function safePath($baseDir, $filename) {
     return (strpos($fullPath, $realBase) === 0) ? $fullPath : false;
 }
 
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $filename = '';
     $imageData = null;
@@ -135,9 +136,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 检查是否为真实图片或视频
     if ($isVideo) {
-        // 视频: 基本检查
+        // 视频: 基本检查（大文件从 tmp 文件检测）
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $detectedMime = finfo_buffer($finfo, $imageData);
+        if ($imageData === null && isset($tmpFile)) {
+            $detectedMime = finfo_file($finfo, $tmpFile);
+        } else {
+            $detectedMime = finfo_buffer($finfo, $imageData);
+        }
         finfo_close($finfo);
         $validVideoMimes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/x-flv', 'video/x-ms-wmv'];
         $allowed = false;
@@ -151,7 +156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else if (!in_array($ext, ['svg'])) {
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $detectedMime = finfo_buffer($finfo, $imageData);
+        if ($imageData === null && isset($tmpFile)) {
+            $detectedMime = finfo_file($finfo, $tmpFile);
+        } else {
+            $detectedMime = finfo_buffer($finfo, $imageData);
+        }
         finfo_close($finfo);
         $validMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'image/x-icon'];
         $allowed = false;
@@ -165,8 +174,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 限制文件大小: 300MB (大文件模式走 filesize)
-    $maxSize = $isVideo ? 4096 * 1024 * 1024 : 4096 * 1024 * 1024;
+    // 限制文件大小: 2GB (大文件模式走 filesize)
+    $maxSize = 2 * 1024 * 1024 * 1024;
     if ($imageData === null) {
         // 大文件模式：使用 filesize 检查
         $checkSize = filesize($tmpFile);
