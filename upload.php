@@ -84,9 +84,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 支持 multipart/form-data 和 base64 JSON
     if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
         $tmpFile = $_FILES['image']['tmp_name'];
-        $imageData = @file_get_contents($tmpFile);
         $origName = $_FILES['image']['name'];
         $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        // 大文件(>50MB)直接移动，不读到内存
+        $fileSize = filesize($tmpFile);
+        if ($fileSize > 50 * 1024 * 1024) {
+            $imageData = null; // 不读入内存
+        } else {
+            $imageData = @file_get_contents($tmpFile);
+        }
     } else {
         $input = file_get_contents('php://input');
         if ($input === false || $input === '') {
@@ -111,7 +117,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if (!$imageData || strlen($imageData) === 0) {
+    if ($imageData === null) {
+        // 大文件模式：直接从 tmp 文件移动到目标位置
+    } else if (!$imageData || strlen($imageData) === 0) {
         http_response_code(400);
         echo json_encode(['error' => 'Invalid or empty image data']);
         exit;
@@ -157,9 +165,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 限制文件大小: 300MB
+    // 限制文件大小: 300MB (大文件模式走 filesize)
     $maxSize = $isVideo ? 4096 * 1024 * 1024 : 4096 * 1024 * 1024;
-    if (strlen($imageData) > $maxSize) {
+    if ($imageData === null) {
+        // 大文件模式：使用 filesize 检查
+        $checkSize = filesize($tmpFile);
+    } else {
+        $checkSize = strlen($imageData);
+    }
+    if ($checkSize > $maxSize) {
         $typeLabel = $isVideo ? 'Video' : 'Image';
         $maxLabel = $isVideo ? '300MB' : '10MB';
         http_response_code(413);
@@ -168,7 +182,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // 安全生成文件名（防遍历、防重复）
-    $hash = substr(hash('sha256', $imageData), 0, 12);
+    if ($imageData === null) {
+        $hash = substr(hash_file('sha256', $tmpFile), 0, 12);
+    } else {
+        $hash = substr(hash('sha256', $imageData), 0, 12);
+    }
     $filename = 'img_' . $hash . '.' . $ext;
     $filepath = safePath($uploadDir, $filename);
     if ($filepath === false) {
@@ -177,12 +195,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if (file_put_contents($filepath, $imageData, LOCK_EX) !== false) {
+    $writeOk = false;
+    if ($imageData === null) {
+        // 大文件：直接移动临时文件
+        $writeOk = rename($tmpFile, $filepath);
+        $finalSize = $writeOk ? filesize($filepath) : 0;
+    } else {
+        $writeOk = file_put_contents($filepath, $imageData, LOCK_EX) !== false;
+        $finalSize = strlen($imageData);
+    }
+    if ($writeOk) {
         $url = '/oneapichat/uploads/' . $subDir . '/' . rawurlencode($filename);
         echo json_encode([
             'url' => $url,
             'path' => $filepath,
-            'size' => strlen($imageData),
+            'size' => $finalSize,
             'type' => $ext
         ]);
     } else {
