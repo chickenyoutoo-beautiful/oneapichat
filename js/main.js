@@ -399,9 +399,9 @@ window.analyzeVideo = async function(videoInput, query) {
         result += '\n**关键帧分析(' + frameAnalyses.length + '帧):**\n';
         frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
     }
-    // ★ 缓存分析结果(30分钟内复用)
+    // ★ 缓存分析结果(30分钟内复用) - 只在成功提取到帧时才缓存
     try {
-        if (currentChatId && chats[currentChatId]) {
+        if (currentChatId && chats[currentChatId] && frameAnalyses.length > 0) {
             if (!chats[currentChatId].videoAnalyses) chats[currentChatId].videoAnalyses = {};
             chats[currentChatId].videoAnalyses[enginePath] = {
                 time: Date.now(), duration: duration,
@@ -2581,6 +2581,21 @@ async function restoreUserData() {
 
 
     console.log('[restoreUserData] 恢复完成');
+    // ★ 清理空的视频分析缓存（之前因权限/内存问题写入的空缓存）
+    try {
+        for (var _cid in chats) {
+            if (chats[_cid].videoAnalyses) {
+                var _cleaned = false;
+                for (var _ck in chats[_cid].videoAnalyses) {
+                    if (!chats[_cid].videoAnalyses[_ck].frames || chats[_cid].videoAnalyses[_ck].frames.length === 0) {
+                        delete chats[_cid].videoAnalyses[_ck];
+                        _cleaned = true;
+                    }
+                }
+                if (_cleaned) slimSaveChats();
+            }
+        }
+    } catch(e) {}
     // ★ 延迟启动 Agent 通知轮询, 避免和主数据加载竞争 abort
     setTimeout(function() { window.startAgentNotificationPolling(); }, 2000);
 
