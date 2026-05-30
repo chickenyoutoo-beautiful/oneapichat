@@ -9910,7 +9910,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
             localStorage.setItem('_activeStreamTs', Date.now());
         } catch(e) {}
     }
-    // 定期保存到 localStorage._savedPartial(防刷新丢失, 后端进度备用)
+    // 定期保存到 localStorage._savedPartial(防刷新丢失)
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (fullText || reasoningText) {
@@ -9922,7 +9922,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                 }));
             } catch(e) {}
         }
-    }, 2000);
+    }, 500);
 
     while (!finished) {
         let readResult;
@@ -10064,6 +10064,14 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     // ★ 流式内容定期保存到 localStorage(防止刷新丢失)
     // 把 timer 挂在 pendingMsg 上,方便外部清理
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
+    // 找到对应的用户消息
+    var _userMsgForPartial = null;
+    if (chats[chatId]) {
+        var _umsgs = chats[chatId].messages;
+        for (var _ui = _umsgs.length - 1; _ui >= 0; _ui--) {
+            if (_umsgs[_ui].role === 'user') { _userMsgForPartial = _umsgs[_ui]; break; }
+        }
+    }
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (pendingMsg.content || pendingMsg.reasoning) {
             try {
@@ -10071,6 +10079,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     chatId: chatId,
                     content: pendingMsg.content || '',
                     reasoning: pendingMsg.reasoning || '',
+                    userText: _userMsgForPartial ? _userMsgForPartial.text : '',
+                    userFiles: _userMsgForPartial ? (_userMsgForPartial.files || []) : [],
                     time: Date.now()
                 }));
             } catch(e) {}
@@ -15845,59 +15855,38 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 续接未完成的流 — 从后端重新连接活跃流
+        // ★ 刷新后重发未完成消息(真正的续接:重新发送用户消息)
         try {
-            var _rMsgId = localStorage.getItem('_activeStreamMsgId');
-            if (_rMsgId) {
-                var _rTs = parseInt(localStorage.getItem('_activeStreamTs') || '0', 10);
-                if (Date.now() - _rTs > 120000) {
-                    localStorage.removeItem('_activeStreamMsgId');
-                    localStorage.removeItem('_activeStreamChatId');
-                    localStorage.removeItem('_activeStreamTs');
-                } else {
-                    // 异步续接——不阻塞页面渲染
-                    (function _resumeStream() {
-                        var _token = localStorage.getItem('authToken');
-                        var _url = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat') + '/engine_api.php?action=stream_resume&msg_id=' + encodeURIComponent(_rMsgId);
-                        if (_token) _url += '&auth_token=' + encodeURIComponent(_token);
-                        fetch(_url).then(function(r) { return r.json(); }).then(function(d) {
-                            if (d && d.active && !d.finished) {
-                                // 流还在:重新发起流式请求接续
-                                showToast('🔄 续接中...', 'info', 5000);
-                                // 清掉旧的 partial 气泡,用新的 SSE 连接重新接收
-                                var _cid = d.chat_id || localStorage.getItem('_activeStreamChatId');
-                                if (_cid && chats[_cid]) {
-                                    chats[_cid].messages = chats[_cid].messages.filter(function(m) { return !m._recovered && !m.partial; });
-                                    slimSaveChats();
-                                    if (currentChatId === _cid) loadChat(_cid);
-                                }
-                                // 标记需要重新连接(由 sendMessage 逻辑处理)
-                                window._resumeStreamInfo = { msgId: _rMsgId, chatId: _cid };
-                            } else if (d && d.finished) {
-                                // 流已结束:从 SQLite 恢复最终内容
-                                var _cid = localStorage.getItem('_activeStreamChatId');
-                                if (_cid && chats[_cid] && d.full_text) {
-                                    chats[_cid].messages.push({
-                                        role: 'assistant',
-                                        content: d.full_text,
-                                        reasoning: d.reasoning_text || '',
-                                        time: Date.now()
-                                    });
-                                    slimSaveChats();
-                                    if (currentChatId === _cid) loadChat(_cid);
-                                    showToast('✅ 续接完成', 'success', 3000);
-                                }
-                            }
-                            localStorage.removeItem('_activeStreamMsgId');
-                            localStorage.removeItem('_activeStreamChatId');
-                            localStorage.removeItem('_activeStreamTs');
-                        }).catch(function(e) {
-                            console.warn('[Resume] 续接检查失败:', e.message);
+            var _spMsg = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
+            var _rId = localStorage.getItem('_activeStreamMsgId');
+            if (_spMsg && _spMsg.chatId && _spMsg.userText && _rId) {
+                var _spAge = Date.now() - (_spMsg.time || 0);
+                if (_spAge < 300000) {
+                    if (chats[_spMsg.chatId]) {
+                        chats[_spMsg.chatId].messages = chats[_spMsg.chatId].messages.filter(function(m) {
+                            return !m._recovered && !m.partial;
                         });
-                    })();
+                        slimSaveChats();
+                    }
+                    setTimeout(function() {
+                        if (chats[_spMsg.chatId] && currentChatId !== _spMsg.chatId) {
+                            loadChat(_spMsg.chatId);
+                        }
+                        showToast('🔄 正在续接...', 'info', 4000);
+                        try {
+                            pendingFiles = (_spMsg.userFiles || []).map(function(f) {
+                                return { name: f.name, content: null, isImage: false, type: f.type, size: f.size };
+                            });
+                        } catch(e) { pendingFiles = []; }
+                        window.sendMessage(true, _spMsg.userText, _spMsg.userFiles || []).catch(function(){});
+                    }, 1500);
                 }
+                localStorage.removeItem('_savedPartial');
+                localStorage.removeItem('_activeStreamMsgId');
+                localStorage.removeItem('_activeStreamChatId');
+                localStorage.removeItem('_activeStreamTs');
             }
-        } catch(e) { console.warn('[Recover] 恢复出错:', e.message); }
+        } catch(e) { console.warn('[Resume] 续接失败:', e.message); }
 
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {
