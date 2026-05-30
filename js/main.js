@@ -14905,9 +14905,12 @@ window.loadChat = function (id) {
         if (_spAge2 < 300000) {
             window._pendingRecovery = savedPartial;
         }
+        // ★ 只清理本地的 _savedPartial(_pendingRecovery 已保存)
+        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+    } else {
+        // 即便没续接数据也清理残留
+        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
     }
-    // ★ 清理 localStorage,避免下次重复恢复
-    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
 
     // ★ Agent 模式: 加载记忆/人格/身份,注入 system prompt
     if (id === AGENT_CHAT_ID) {
