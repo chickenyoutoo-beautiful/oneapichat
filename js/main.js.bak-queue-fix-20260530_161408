@@ -101,16 +101,10 @@ function _renderMarkdownWithMath(text) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
     const protected = _protectMath(text);
     const html = marked.parse(protected);
-    // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify）
-    var tempHtml = _restoreMath(html);
-    tempHtml = tempHtml.replace(/(?<!["'=])(https?:\/\/[^\s<>"']+)(?!["'])/gi, function(url) {
-        // 清理尾部标点
-        var cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
-        return '<a href="' + cleanUrl + '" target="_blank" rel="noopener">' + cleanUrl + '</a>';
-    });
-    // ★ 所有已经存在的链接打开新标签页
-    tempHtml = tempHtml.replace(/<a /g, '<a target="_blank" rel="noopener" ');
-    return tempHtml;
+    // ★ 所有链接打开新标签页
+    var result = _restoreMath(html);
+    result = result.replace(/<a /g, '<a target="_blank" rel="noopener" ');
+    return result;
 }
 
 // 一键修复配置
@@ -405,9 +399,9 @@ window.analyzeVideo = async function(videoInput, query) {
         result += '\n**关键帧分析(' + frameAnalyses.length + '帧):**\n';
         frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
     }
-    // ★ 缓存分析结果(30分钟内复用) - 只在成功提取到帧时才缓存
+    // ★ 缓存分析结果(30分钟内复用)
     try {
-        if (currentChatId && chats[currentChatId] && frameAnalyses.length > 0) {
+        if (currentChatId && chats[currentChatId]) {
             if (!chats[currentChatId].videoAnalyses) chats[currentChatId].videoAnalyses = {};
             chats[currentChatId].videoAnalyses[enginePath] = {
                 time: Date.now(), duration: duration,
@@ -1737,12 +1731,12 @@ const VIDEO_EDIT_TOOL = {
     type: "function",
     function: {
         name: "video_edit",
-        description: "🎬 全能视频剪辑工厂。支持字幕+配音+滤镜+转场+弹幕一站式制作，也支持单一操作。剪辑流程：先 info 查看视频信息 → 选择操作 → 输出。🎤 新增 stt(语音转文字): 从视频提取音频后用 AI 转为文字字幕。\n\n🔥 推荐主操作 compose（一键生成带字幕配音的成品视频）：\n- 自动TTS逐句配音（支持多角色切换 voice_id）\n- 精确时间轴字幕（SRT烧录，支持中英文+emoji）\n- 6种预设字幕风格 style: bilibili(粉)/variety(综艺黄)/minimal(简约白)/bold(粗红)/neon(赛博绿)/typewriter(打字机灰)\n- 弹幕模式 danmaku（从右到左飞过，随机颜色/位置）\n- 保留原音频+配音混合\n- 视频滤镜 filter（sepia/vintage/bw/grain/vignette/hue/eq/boxblur）\n\n📐 其他操作：crop(画面裁剪,支持比例16:9/1:1等) reverse(倒放) mute(去原声) bgm(背景音乐) enhance(自动增强: vivid/cinematic/hdr预设) gif(视频转GIF) silent_cut(切静音) trim(裁剪时间段) concat(多段拼接) speed(调速) resize(缩放) overlay(画中画) text(字幕) rotate(旋转) audio(提取音频) tts(纯语音合成) voice(配音) frames(提取帧) info(查看视频信息)",
+        description: "🎬 全能视频剪辑工厂。支持字幕+配音+滤镜+转场+弹幕一站式制作，也支持单一操作。剪辑流程：先 info 查看视频信息 → 选择操作 → 输出。\n\n🔥 推荐主操作 compose（一键生成带字幕配音的成品视频）：\n- 自动TTS逐句配音（支持多角色切换 voice_id）\n- 精确时间轴字幕（SRT烧录，支持中英文+emoji）\n- 6种预设字幕风格 style: bilibili(粉)/variety(综艺黄)/minimal(简约白)/bold(粗红)/neon(赛博绿)/typewriter(打字机灰)\n- 弹幕模式 danmaku（从右到左飞过，随机颜色/位置）\n- 保留原音频+配音混合\n- 视频滤镜 filter（sepia/vintage/bw/grain/vignette/hue/eq/boxblur）\n\n📐 其他操作：crop(画面裁剪,支持比例16:9/1:1等) reverse(倒放) mute(去原声) bgm(背景音乐) enhance(自动增强: vivid/cinematic/hdr预设) gif(视频转GIF) silent_cut(切静音) trim(裁剪时间段) concat(多段拼接) speed(调速) resize(缩放) overlay(画中画) text(字幕) rotate(旋转) audio(提取音频) tts(纯语音合成) voice(配音) frames(提取帧) info(查看视频信息)",
         parameters: {
             type: "object",
             properties: {
-                action: { type: "string", description: "操作: compose(推荐) trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info crop reverse mute bgm enhance gif silent_cut style stt(语音转文字)" },
-                params: { type: "object", description: "operation params. See action list above for details." },
+                action: { type: "string", description: "操作: compose(推荐) trim concat speed resize overlay text audio rotate filter video_filter transition video_transition tts voice frames info crop reverse mute bgm enhance gif silent_cut style" },
+                params: { type: "object", description: "各行动参数：\n⭐ compose(一键成品): {timeline:[{start:0,end:2.5,text:'台词',voice_id:'female-yujie',danmaku:false,fontsize:28,color:'white',bg_color:'#1a1a2e'}],style:'bilibili',voice_id:'female-yujie',fontsize:28,bg_volume:0.3,filter:'sepia',danmaku:true,danmaku_random_color:true}\n✂️ trim: {start:5,end:30}\n📐 crop: {ratio:'16:9'} 或 {w:1080,h:720,x:0,y:0}\n🎨 enhance: {preset:'vivid'|'cinematic'|'hdr'|'warm'|'cool'}\n🎵 bgm: {bgm_path:'/path/to/bgm.mp3',volume:0.2}\n🎞️ gif: {start:10,duration:3,fps:12,width:480}\n🎤 tts: {text:'文本',voice_id:'female-yujie'}\n🔊 voice: 同tts+input_path\n🪄 style: {timeline:[...],style:'bilibili'}\n🔄 concat: {files:['path1','path2']}\n⏩ speed: {factor:2.0}\n📏 resize: {width:1920,height:1080}\n🖼️ overlay: {overlay_path:'水印.png',x:10,y:10,scale:0.3}\n🔄 rotate: {angle:90}\n🔇 mute: {}\n🔙 reverse: {}\n✂️ silent_cut: {threshold:'-25dB'}\n🎬 video_filter: {type:'sepia'}\n📊 info: {}\n🖼️ frames: {count:5,duration:30,scale:640}" },
                 input_path: { type: "string", description: "输入视频路径。用户上传视频后,消息中会标注「服务器路径: /oneapichat/uploads/...」,直接用这个路径即可" },
                 output_path: { type: "string", description: "输出路径(可选)" }
             },
@@ -2587,21 +2581,6 @@ async function restoreUserData() {
 
 
     console.log('[restoreUserData] 恢复完成');
-    // ★ 清理空的视频分析缓存（之前因权限/内存问题写入的空缓存）
-    try {
-        for (var _cid in chats) {
-            if (chats[_cid].videoAnalyses) {
-                var _cleaned = false;
-                for (var _ck in chats[_cid].videoAnalyses) {
-                    if (!chats[_cid].videoAnalyses[_ck].frames || chats[_cid].videoAnalyses[_ck].frames.length === 0) {
-                        delete chats[_cid].videoAnalyses[_ck];
-                        _cleaned = true;
-                    }
-                }
-                if (_cleaned) slimSaveChats();
-            }
-        }
-    } catch(e) {}
     // ★ 延迟启动 Agent 通知轮询, 避免和主数据加载竞争 abort
     setTimeout(function() { window.startAgentNotificationPolling(); }, 2000);
 
@@ -6208,15 +6187,6 @@ function updateAgentUI() {
     var isActive = mode !== 'off';  // ★ plan/agent/yolo 都算激活
     // 更新三模式选择器按钮
     updateModeSelector(mode);
-    // ★ 更新主按钮上的文字
-    var mainBtn = document.getElementById('agentMainBtn');
-    if (mainBtn) {
-        var lbl = mainBtn.querySelector('.agent-btn-label');
-        if (lbl) {
-            var texts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
-            lbl.textContent = texts[mode] || 'Agent';
-        }
-    }
     // Header Agent 按钮圆点
     var splitBtn = getEl('agentSplitBtn');
     if (splitBtn) {
@@ -11063,85 +11033,32 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
     return false;
 };
 
-/* ===== 消息队列系统 (持久化版) =====
+/* ===== 消息队列系统 (OpenClaw 风格) =====
  * 
  * 设计原则:
  * - 不打断当前 AI 生成,消息推入队列等待
  * - 等当前 turn 完成(sendMessage 的 finally)后,_drainQueue 自动处理下一条
  * - 每条消息都有 id 防止重复入队
  * - AI 空闲时立即处理,AI 忙时排队等待
- * - 队列持久化到 sessionStorage,刷新页面不丢失
- * - 所有模式(agent/普通)都支持队列
  */
 window._messageQueue = [];
 window._queueIdCounter = 0;
 window._isQueueProcessing = false;
 
-/* 持久化 key */
-window._QUEUE_STORAGE_KEY = 'oc_queue_' + window.location.hostname;
-
-/** 持久化队列到 sessionStorage */
-window._saveQueue = function() {
-    try {
-        var data = window._messageQueue.map(function(item) {
-            // files 只存文件名和类型,不存 base64 内容
-            var safeFiles = (item.files || []).map(function(f) {
-                return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
-            });
-            return { id: item.id, text: item.text, files: safeFiles };
-        });
-        sessionStorage.setItem(window._QUEUE_STORAGE_KEY, JSON.stringify(data));
-    } catch(e) {
-        console.warn('[Queue] save failed:', e);
-    }
-};
-
-/** 页面加载时从 sessionStorage 恢复队列 */
-window._loadQueue = function() {
-    try {
-        var raw = sessionStorage.getItem(window._QUEUE_STORAGE_KEY);
-        if (!raw) return false;
-        var data = JSON.parse(raw);
-        if (!Array.isArray(data) || data.length === 0) return false;
-        window._messageQueue = data;
-        // 恢复 id 计数器
-        var maxId = 0;
-        data.forEach(function(item) { if (item.id > maxId) maxId = item.id; });
-        window._queueIdCounter = maxId;
-        console.log('[Queue] 从 sessionStorage 恢复 ' + data.length + ' 条消息');
-        return true;
-    } catch(e) {
-        console.warn('[Queue] load failed:', e);
-        return false;
-    }
-};
-
-/** 清理持久化队列 */
-window._clearPersistedQueue = function() {
-    try { sessionStorage.removeItem(window._QUEUE_STORAGE_KEY); } catch(e) {}
-};
-
 /** 推入消息到队列 (不打断当前生成) */
 window.pushToMsgQueue = function() {
+    if (!isAgentToolsActive()) return;
     var input = $.userInput;
     var text = input ? input.value.trim() : '';
     if (!text && (!pendingFiles || pendingFiles.length === 0)) return;
     
-    // 保存当前文件列表(只存元数据)
-    var safeFiles = (pendingFiles || []).map(function(f) {
-        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
-    });
-    
-    var qItem = {
+    window._messageQueue.push({
         id: ++window._queueIdCounter,
         text: text,
-        files: safeFiles
-    };
-    window._messageQueue.push(qItem);
-    
+        files: pendingFiles ? [].concat(pendingFiles) : []
+    });
     if (input) { input.value = ''; window.autoResize(input); }
     clearAllFiles();
-    window._saveQueue();
     window._updateQueueUI();
     showToast('📥 已加入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
     
@@ -11151,32 +11068,26 @@ window.pushToMsgQueue = function() {
     }
 };
 
-/** 排干队列 — 逐一发送排队消息 */
+/** 排干队列 — 只在下一条消息且 AI 空闲时调用 */
 window._drainQueue = async function() {
-    if (window._isQueueProcessing) return;
+    if (!isAgentToolsActive()) { window._messageQueue = []; window._isQueueProcessing = false; window._updateQueueUI(); return; }
+    if (window._isQueueProcessing) return;  // 正在处理中,等完成
     if (window._messageQueue.length === 0) {
-        window._isQueueProcessing = false;
-        window._clearPersistedQueue();
-        window._updateQueueUI();
-        return;
+        window._isQueueProcessing = false; window._updateQueueUI(); return;
     }
     if (isTypingMap[currentChatId]) {
+        // AI 正忙:等 sendMessage 的 finally 中调用
         return;
     }
     
     window._isQueueProcessing = true;
     var item = window._messageQueue.shift();
-    window._saveQueue();
+    pendingFiles = item.files || [];
     
-    // 队列消息的文件只存了元数据,恢复为 sendMessage 能用的格式
-    var queueFiles = item.files ? item.files.map(function(f) {
-        return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
-    }) : [];
-    
+    // 标记为队列消息,让 sendMessage 跳过 Task 创建
     window._isQueueMessage = true;
     try {
-        // skipUserAdd=true: text 从 userTextForRegen 取值,不从输入框取
-        await window.sendMessage(true, item.text, queueFiles);
+        await window.sendMessage(false, item.text);
     } catch(e) {
         console.warn('[Queue] sendMessage error:', e);
     }
@@ -11184,101 +11095,38 @@ window._drainQueue = async function() {
     window._isQueueProcessing = false;
     window._updateQueueUI();
     
-    // 下条消息(等当前 typping 状态清掉再发)
-    setTimeout(function() {
-        if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
-            window._drainQueue();
-        }
-    }, 500);
-};
-
-/** 处理 document 点击: 点浮窗外则折叠队列 */
-window._handleQueueDocClick = function(e) {
-    var qBar = getEl('queueBar');
-    if (!qBar || qBar.classList.contains('hidden')) return;
-    if (qBar.classList.contains('collapsed')) return;
-    // 点击在浮窗内部不处理
-    if (qBar.contains(e.target)) return;
-    // 点击浮窗外的元素 → 折叠
-    qBar.classList.add('collapsed');
-};
-
-/** 切换折叠/展开 */
-window._toggleQueueCollapse = function() {
-    var qBar = getEl('queueBar');
-    if (qBar) qBar.classList.toggle('collapsed');
-};
-
-/** 清空所有队列消息 */
-window._clearAllQueue = function() {
-    window._messageQueue = [];
-    window._clearPersistedQueue();
-    window._updateQueueUI();
-    showToast('🗑️ 消息队列已清空', 'info', 1500);
-};
-
-/** 移除单条队列消息 */
-window._removeQueueItem = function(id) {
-    window._messageQueue = window._messageQueue.filter(function(item) { return item.id !== id; });
-    window._saveQueue();
-    window._updateQueueUI();
+    // 当前消息发完 → 排下一条 (sendMessage 的 finally 也会调 _drainQueue)
+    if (window._messageQueue.length > 0) {
+        setTimeout(function() { window._drainQueue(); }, 1000);
+    }
 };
 
 window._updateQueueUI = function() {
+    // ★ 仅在 agent/plan 模式下显示队列
+    if (!isAgentToolsActive()) {
+        var qBar = getEl('queueBar');
+        if (qBar) qBar.classList.add('hidden');
+        return;
+    }
     var qBar = getEl('queueBar');
+    var qText = getEl('queueBarText');
     var qBadge = getEl('queueBarBadge');
-    var qList = getEl('queueMsgList');
-    var qSummary = getEl('queueCollapsedSummary');
     var qCount = window._messageQueue.length;
     
-    // 有队列消息就显示,不依赖 isTypingMap(让用户随时看到队列)
-    var showBar = qCount > 0;
+    // AI生成中且队列不为空时显示队列栏
+    var aiBusy = isTypingMap[currentChatId];
+    var showBar = aiBusy && qCount > 0;
     if (qBar) qBar.classList.toggle('hidden', !showBar);
     
+    if (qText) {
+        if (qCount === 0) qText.textContent = '消息队列';
+        else if (qCount === 1) qText.textContent = '1 条消息排队中';
+        else qText.textContent = qCount + ' 条消息排队中';
+    }
     if (qBadge) {
         qBadge.textContent = qCount || '';
         qBadge.classList.toggle('hidden', qCount === 0);
     }
-    
-    // 折叠状态摘要
-    if (qSummary) {
-        if (qCount === 0) {
-            qSummary.textContent = '';
-        } else if (qCount === 1) {
-            var _firstText = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 20);
-            qSummary.textContent = '— ' + _firstText + (window._messageQueue[0].text && window._messageQueue[0].text.length > 20 ? '...' : '');
-        } else {
-            var _first2 = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 15);
-            qSummary.textContent = '— ' + _first2 + '... 等' + qCount + '条';
-        }
-    }
-    
-    if (!qList) return;
-    
-    if (qCount === 0) {
-        qList.innerHTML = '';
-        return;
-    }
-    
-    var html = '';
-    window._messageQueue.forEach(function(item, idx) {
-        var text = (item.text || '').substring(0, 80);
-        if ((item.text || '').length > 80) text += '...';
-        var fileIcon = '';
-        if (item.files && item.files.length > 0) {
-            fileIcon = '<span class="queue-msg-file">' +
-                '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>' +
-                item.files.length +
-                '</span>';
-        }
-        html += '<div class="queue-msg-item" title="' + (item.text || '').replace(/"/g,'&quot;') + '">' +
-            '<span class="queue-msg-idx">' + (idx + 1) + '</span>' +
-            '<span class="queue-msg-text">' + escapeHtml(text || '(空消息)') + '</span>' +
-            fileIcon +
-            '<button class="queue-msg-remove" onclick="window._removeQueueItem(' + item.id + ')" title="移除此消息">✕</button>' +
-            '</div>';
-    });
-    qList.innerHTML = html;
 };
 
 window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesForRegen) {
@@ -11291,8 +11139,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         console.log('[Agent] 新任务批次开始,taskId=' + window._lastMsgTaskId);
     }
 
-    // 队列消息绕过 rateLimit(_drainQueue 本身已有 2s 延迟)
-    if (!window._isQueueMessage && !rateLimit.allowed()) {
+    if (!rateLimit.allowed()) {
         showToast('请求过于频繁', 'warning');
         return;
     }
@@ -11329,28 +11176,24 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     const chatId = currentChatId;
     if (!chatId) return;
     if (isTypingMap[chatId]) {
-        // ★ AI 正在生成:所有模式都推入队列
-        if (!skipUserAdd) {
-            var _inputEl = $.userInput;
-            var _qText = userTextForRegen || (_inputEl ? _inputEl.value.trim() : '');
-            if (_qText || (pendingFiles && pendingFiles.length > 0)) {
-                var safeFiles = (pendingFiles || []).map(function(f) {
-                    return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
-                });
-                var _qId = ++window._queueIdCounter;
-                window._messageQueue.push({ id: _qId, text: _qText, files: safeFiles });
-                
-                pendingFiles = [];
-                if (_inputEl) { _inputEl.value = ''; window.autoResize(_inputEl); }
-                window._saveQueue();
-                window._updateQueueUI();
-                showToast('⏳ 已推入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
-            }
+        // ★ AI 正在生成:仅在 agent/plan 模式下推入队列
+        if (!skipUserAdd && userTextForRegen && userTextForRegen.length > 0 && isAgentToolsActive()) {
+            window._messageQueue.push({ text: userTextForRegen, files: pendingFiles ? [].concat(pendingFiles) : [] });
+            pendingFiles = [];
+            window._updateQueueUI();
+            showToast('⏳ 已推入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
             return;
         }
-        // 系统内队列调用:忙时不做任何事,等 finally
-        // 由 finally 中的 _drainQueue 处理
-        return;
+        // ★ 非 agent 模式:仍然弹"正在生成"
+        if (!isAgentToolsActive()) {
+            showToast('⏳ 正在生成中...', 'warning');
+            return;
+        }
+        // 系统内队列调用(processMsgQueue):等待
+        if (skipUserAdd) {
+            // ★ 系统内队列调用(非用户直接推入),AI 忙时不做任何事,等 finally
+        }
+            return;
     }
 
     const input = $.userInput;
@@ -11437,21 +11280,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (currentChatId === chatId) loadChat(chatId);
         // 输入框已在前面清空
         clearAllFiles();
-    } else if (window._isQueueMessage) {
-        // ★ 队列消息:插入聊天记录并立即渲染到界面
-        var _qFiles = (files && files.length > 0) ? files.map(function(f) {
-            return { name: f.name, content: f.content || null, serverUrl: f.serverUrl || '', size: f.size || 0, type: f.type || (f.isImage ? 'image/' : '') };
-        }) : [];
-        chats[chatId].messages.push({ role: 'user', text: text, files: _qFiles });
-        slimSaveChats();
-        if (chats[chatId].title === '新对话') {
-            chats[chatId].title = text ? text.slice(0, 10) : (_qFiles.length ? '文件消息' : '新对话');
-        }
-        // ★ 立即追加用户气泡到界面
-        if (currentChatId === chatId) {
-            appendMessage('user', text, _qFiles, null, null, null, false);
-            setTimeout(function() { autoScrollToBottom('queue'); }, 30);
-        }
     }
 
     // 创建占位气泡
@@ -13446,18 +13274,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             toolResult = { error: 'MiniMax CLI 调用失败: ' + (_mmxErr.message || '未知错误') };
                         }
                     } else if (func.name === 'video_edit') {
-                        // ★ STT action: 特殊处理
-                        if (args.action === 'stt') {
-                            try {
-                                var _sttBody = { action: 'stt', params: { language: args.params?.language || 'zh' }, input_path: args.input_path };
-                                var _sttResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_sttBody) });
-                                var _sttData = await _sttResp.json();
-                                if (_sttData.error) { toolResult = { error: _sttData.error }; }
-                                else if (_sttData.result) { toolResult = { result: '🎤 **语音识别结果:**\n' + _sttData.result }; }
-                                else { toolResult = { error: 'STT返回为空' }; }
-                            } catch(e) { toolResult = { error: 'STT请求失败: ' + e.message }; }
-                            return toolResult;
-                        }
                         var _srcEnginePath = args.input_path || '';
                         // ★ 智能补全: 如果没传 input_path,从当前聊天的上传文件里找
                         if (!_srcEnginePath && chats[chatId]) {
@@ -14227,12 +14043,13 @@ window.useAlternativeVisionModel = function() {
         chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary || m._agentNotification);
         delete isTypingMap[chatId];
         // ★ agent模式:AI生成结束,关闭队列轮询 + 处理下一条
-        // AI生成结束:处理队列下一条消息
-        if (window._queuePollTimer) {
-            clearInterval(window._queuePollTimer);
-            window._queuePollTimer = null;
+        if (isAgentToolsActive()) {
+            if (window._queuePollTimer) {
+                clearInterval(window._queuePollTimer);
+                window._queuePollTimer = null;
+            }
+            setTimeout(function() { window._drainQueue(); }, 300);
         }
-        setTimeout(function() { window._drainQueue(); }, 300);
         // ★ 停止流渲染 RAF 循环
         cleanupStreamState(chatId);
         delete abortControllerMap[chatId];
@@ -15424,8 +15241,6 @@ function initAgentConfig() {
 
 function setupEventListeners() {
     window.addEventListener('resize', handleResize);
-    // ★ 队列浮窗:点击外部区域折叠
-    document.addEventListener('click', window._handleQueueDocClick);
 
     if ($.chatBox) {
         $.chatBox.addEventListener('scroll', throttle(() => {
@@ -15498,7 +15313,12 @@ function setupEventListeners() {
                 }
                 e.preventDefault();
                 if (isTypingMap[currentChatId]) {
-                    window.pushToMsgQueue();
+                    // ★ AI生成中:agent模式推入队列,普通模式弹"正在生成"
+                    if (isAgentToolsActive()) {
+                        window.pushToMsgQueue();
+                        return;
+                    }
+                    showToast('⏳ 正在生成中...', 'warning');
                     return;
                 }
                 sendMessage();
@@ -15842,23 +15662,6 @@ function initializeApp() {
             })();
         } catch(e) { console.warn('[AutoRecover] 出错:', e.message); }
 
-        // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
-        try {
-            if (window._loadQueue && window._loadQueue()) {
-                var _queueLen = window._messageQueue.length;
-                console.log('[Queue] 恢复 ' + _queueLen + ' 条队列消息');
-                // 如果 AI 当前空闲且有队列消息,自动开始处理
-                if (!isTypingMap[currentChatId] && _queueLen > 0) {
-                    setTimeout(function() { window._drainQueue(); }, 1500);
-                }
-                // 更新队列UI
-                window._updateQueueUI();
-                if (_queueLen > 0) {
-                    showToast('📦 发现 ' + _queueLen + ' 条待发送消息,正在恢复...', 'info', 3000);
-                }
-            }
-        } catch(e) { console.warn('[Queue] 恢复失败:', e); }
-
         // ★ 周期自动保存:每30秒保存一次聊天(确保未开新会话时数据不丢)
         setInterval(function() {
             if (currentChatId && chats[currentChatId] && chats[currentChatId].messages && chats[currentChatId].messages.length > 1) {
@@ -15929,8 +15732,6 @@ function initializeApp() {
                     break;
                 }
             } catch(e) {}
-            // ★ 保存消息队列到 sessionStorage(刷新后恢复)
-            window._saveQueue();
             slimSaveChats();
             try { localStorage.setItem('lastChatId', currentChatId || ''); } catch(e) {}
             // ★ 保存聊天记录到服务器(使用 sendBeacon,保证页面关闭时请求送达)
@@ -15946,7 +15747,6 @@ function initializeApp() {
         window.addEventListener('pagehide', function() {
             // ★ 切换账号时不保存旧 chats 到 localStorage
             if (localStorage.getItem('_skipUnloadSave')) return;
-            window._saveQueue();
             slimSaveChats();
         });
 

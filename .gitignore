@@ -45,3 +45,8 @@ test_php.php
 undefined
 uploads/
 users/*.json
+uploads/*.mp4
+uploads/*.webm
+uploads/*.mov
+uploads/*.mkv
+uploads/*.flv

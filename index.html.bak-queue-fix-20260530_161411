@@ -305,28 +305,16 @@ window.VISION_API_KEY = '';
             <div id="agentBanner" class="agent-banner hidden"></div>
             <div id="filePreviewContainer" class="file-preview-container hidden"></div>
             <!-- ★ 消息队列栏 (AI生成时显示) -->
-
 <div id="queueBar" class="queue-bar hidden">
-    <div class="queue-bar-header" onclick="window._toggleQueueCollapse()" title="点击折叠/展开">
-        <div class="queue-bar-header-left">
-            <svg class="queue-collapse-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 9l6 6 6-6"/>
-            </svg>
+    <div class="queue-bar-inner">
+        <span class="queue-bar-icon">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <path d="M9 12l2 2 4-4"/>
+                <path d="M12 5v14m-7-7l7-7 7 7"></path>
             </svg>
-            <span class="queue-bar-title">消息队列</span>
-            <span id="queueBarBadge" class="queue-bar-badge hidden">0</span>
-            <span class="queue-collapsed-summary" id="queueCollapsedSummary"></span>
-        </div>
-        <div class="queue-bar-header-right" onclick="event.stopPropagation()">
-            <button onclick="window.pushToMsgQueue()" id="queuePushBtn" class="queue-push-btn">⇥ 推入队列</button>
-            <button onclick="window._clearAllQueue()" class="queue-clear-btn" title="清空队列">✕</button>
-        </div>
-    </div>
-    <div class="queue-bar-body">
-        <div id="queueMsgList" class="queue-msg-list"></div>
+        </span>
+        <span class="queue-bar-text" id="queueBarText">消息队列</span>
+        <span id="queueBarBadge" class="queue-bar-badge hidden">0</span>
+        <button onclick="window.pushToMsgQueue()" id="queuePushBtn" class="queue-push-btn">⇥ 推入队列</button>
     </div>
 </div>
 <div class="input-wrapper">

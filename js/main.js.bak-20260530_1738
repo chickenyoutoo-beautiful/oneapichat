@@ -5201,12 +5201,23 @@ function setAgentMode(mode) {
             $.sidebar?.classList.remove('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
         }
-        // 切换到 agent 聊天时切回普通模式,恢复上次普通聊天
-        if (currentChatId && currentChatId === '_agent_main') {
-            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== '_agent_main'; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
-            if (restoreId && chats[restoreId]) {
+        // 切回普通模式: 恢复上次普通聊天
+        var restoreId = lastNormalChatId;
+        if (!restoreId || !chats[restoreId]) {
+            restoreId = Object.keys(chats).filter(function(id) {
+                return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
+            }).sort(function(a,b) {
+                return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+            })[0];
+        }
+        if (restoreId && chats[restoreId]) {
+            // 等退出动画播完再切换
+            setTimeout(function() {
+                currentChatId = restoreId;
                 loadChat(restoreId);
-            }
+                renderChatHistory();
+                updateHeaderTitle();
+            }, 750);
         }
     }
     // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
@@ -6433,8 +6444,28 @@ window._setupAgentPopup = function() {
             tapTimer = setTimeout(function() { lastTap = 0; }, 450);
         });
     } else {
-        mainBtn.addEventListener('click', function() {
-            window.toggleAgentMode();
+        // ★ 桌面端: 单击切换模式, Agent 激活时双击关闭
+        var _desktopClickTimer = null;
+        mainBtn.addEventListener('click', function(e) {
+            var curMode = getAgentMode();
+            if (_desktopClickTimer) {
+                // 第二次点击: 直接切换
+                clearTimeout(_desktopClickTimer);
+                _desktopClickTimer = null;
+                if (curMode !== 'off') {
+                    setAgentMode('off');
+                } else {
+                    setAgentMode('agent');
+                }
+                return;
+            }
+            // 第一次点击: 延迟执行,等第二次点击
+            _desktopClickTimer = setTimeout(function() {
+                _desktopClickTimer = null;
+                var m = getAgentMode();
+                var newMode = (m === 'off' || !m) ? 'agent' : 'off';
+                setAgentMode(newMode);
+            }, 250);
         });
         wrapper.addEventListener('mouseenter', function() {
             if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
