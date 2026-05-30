@@ -5206,6 +5206,7 @@ function setAgentMode(mode) {
             var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== '_agent_main'; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
             if (restoreId && chats[restoreId]) {
                 loadChat(restoreId);
+                window._updateQueueUI();
             }
         }
     }
@@ -11188,10 +11189,12 @@ window.pushToMsgQueue = function() {
     }
 };
 
-/** 排干指定聊天的队列 */
+/** 排干当前聊天的队列(只在当前聊天 AI 空闲时,不切换聊天) */
 window._drainQueue = async function(chatId) {
     chatId = chatId || currentChatId;
     if (window._queueProcessingChatId) return;
+    // 只处理当前正在看的聊天(其他聊天队列不动,等用户切回去再排)
+    if (chatId !== currentChatId) return;
     var q = window._getChatQueue(chatId);
     if (!q || q.length === 0) {
         window._updateQueueUI();
@@ -11207,12 +11210,6 @@ window._drainQueue = async function(chatId) {
         return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
     }) : [];
     
-    var savedChatId = currentChatId;
-    if (currentChatId !== chatId && chats[chatId]) {
-        currentChatId = chatId;
-        loadChat(chatId);
-    }
-    
     window._isQueueMessage = true;
     try {
         await window.sendMessage(true, item.text, queueFiles);
@@ -11222,15 +11219,9 @@ window._drainQueue = async function(chatId) {
     window._isQueueMessage = false;
     window._queueProcessingChatId = null;
     
-    // 切回之前的聊天(如果用户没手动切换)
-    if (currentChatId === chatId && savedChatId !== chatId && chats[savedChatId]) {
-        currentChatId = savedChatId;
-        loadChat(savedChatId);
-    }
-    
     window._updateQueueUI();
     
-    // 下条消息
+    // 下条消息(当前聊天)
     setTimeout(function() {
         if (window._getChatQueue(chatId).length > 0 && !isTypingMap[chatId]) {
             window._drainQueue(chatId);
