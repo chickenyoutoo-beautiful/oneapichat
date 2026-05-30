@@ -11063,52 +11063,65 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
     return false;
 };
 
-/* ===== 消息队列系统 (持久化版) =====
+/* ===== 消息队列系统 (持久化版,按聊天隔离) =====
  * 
  * 设计原则:
  * - 不打断当前 AI 生成,消息推入队列等待
- * - 等当前 turn 完成(sendMessage 的 finally)后,_drainQueue 自动处理下一条
- * - 每条消息都有 id 防止重复入队
- * - AI 空闲时立即处理,AI 忙时排队等待
+ * - 队列按 chatId 分组,切换聊天时队列不跟随
+ * - 只排干当前聊天的队列,其他聊天的队列在后台等待
  * - 队列持久化到 sessionStorage,刷新页面不丢失
  * - 所有模式(agent/普通)都支持队列
  */
-window._messageQueue = [];
+/** 总计数器(跨聊天) */
 window._queueIdCounter = 0;
-window._isQueueProcessing = false;
+/** 按 chatId 分组的队列: { chatId: [{id,text,files},...] } */
+window._queuesByChat = {};
+/** 当前聊天是否正在处理队列 */
+window._queueProcessingChatId = null;
 
 /* 持久化 key */
 window._QUEUE_STORAGE_KEY = 'oc_queue_' + window.location.hostname;
 
-/** 持久化队列到 sessionStorage */
+/** 持久化到 sessionStorage */
 window._saveQueue = function() {
     try {
-        var data = window._messageQueue.map(function(item) {
-            // files 只存文件名和类型,不存 base64 内容
-            var safeFiles = (item.files || []).map(function(f) {
-                return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
-            });
-            return { id: item.id, text: item.text, files: safeFiles };
+        var flat = {};
+        Object.keys(window._queuesByChat).forEach(function(cid) {
+            if (window._queuesByChat[cid].length > 0) {
+                flat[cid] = window._queuesByChat[cid].map(function(item) {
+                    var safeFiles = (item.files || []).map(function(f) {
+                        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
+                    });
+                    return { id: item.id, text: item.text, files: safeFiles };
+                });
+            }
         });
-        sessionStorage.setItem(window._QUEUE_STORAGE_KEY, JSON.stringify(data));
+        sessionStorage.setItem(window._QUEUE_STORAGE_KEY, JSON.stringify(flat));
     } catch(e) {
         console.warn('[Queue] save failed:', e);
     }
 };
 
-/** 页面加载时从 sessionStorage 恢复队列 */
+/** 页面加载时恢复 */
 window._loadQueue = function() {
     try {
         var raw = sessionStorage.getItem(window._QUEUE_STORAGE_KEY);
         if (!raw) return false;
         var data = JSON.parse(raw);
-        if (!Array.isArray(data) || data.length === 0) return false;
-        window._messageQueue = data;
-        // 恢复 id 计数器
+        if (!data || typeof data !== 'object') return false;
+        var keys = Object.keys(data);
+        if (keys.length === 0) return false;
+        window._queuesByChat = data;
         var maxId = 0;
-        data.forEach(function(item) { if (item.id > maxId) maxId = item.id; });
+        keys.forEach(function(cid) {
+            (data[cid] || []).forEach(function(item) {
+                if (item.id > maxId) maxId = item.id;
+            });
+        });
         window._queueIdCounter = maxId;
-        console.log('[Queue] 从 sessionStorage 恢复 ' + data.length + ' 条消息');
+        var total = 0;
+        keys.forEach(function(cid) { total += (data[cid] || []).length; });
+        console.log('[Queue] 恢复 ' + total + ' 条消息, 分布在 ' + keys.length + ' 个聊天中');
         return true;
     } catch(e) {
         console.warn('[Queue] load failed:', e);
@@ -11116,9 +11129,30 @@ window._loadQueue = function() {
     }
 };
 
-/** 清理持久化队列 */
+/** 清理持久化 */
 window._clearPersistedQueue = function() {
     try { sessionStorage.removeItem(window._QUEUE_STORAGE_KEY); } catch(e) {}
+};
+
+/** 获取指定聊天的队列,没有则创建 */
+window._getChatQueue = function(chatId) {
+    if (!window._queuesByChat[chatId]) window._queuesByChat[chatId] = [];
+    return window._queuesByChat[chatId];
+};
+
+/** 获取当前聊天队列的总数(用于 UI 显示) */
+window._getCurrentQueueCount = function() {
+    var q = window._getChatQueue(currentChatId);
+    return q ? q.length : 0;
+};
+
+/** 获取所有聊天队列总数 */
+window._getTotalQueueCount = function() {
+    var total = 0;
+    Object.keys(window._queuesByChat).forEach(function(cid) {
+        total += (window._queuesByChat[cid] || []).length;
+    });
+    return total;
 };
 
 /** 推入消息到队列 (不打断当前生成) */
@@ -11126,8 +11160,9 @@ window.pushToMsgQueue = function() {
     var input = $.userInput;
     var text = input ? input.value.trim() : '';
     if (!text && (!pendingFiles || pendingFiles.length === 0)) return;
+    var chatId = currentChatId;
+    if (!chatId) return;
     
-    // 保存当前文件列表(只存元数据)
     var safeFiles = (pendingFiles || []).map(function(f) {
         return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
     });
@@ -11135,93 +11170,72 @@ window.pushToMsgQueue = function() {
     var qItem = {
         id: ++window._queueIdCounter,
         text: text,
-        files: safeFiles
+        files: safeFiles,
+        chatId: chatId
     };
-    window._messageQueue.push(qItem);
+    window._getChatQueue(chatId).push(qItem);
     
     if (input) { input.value = ''; window.autoResize(input); }
     clearAllFiles();
     window._saveQueue();
     window._updateQueueUI();
-    showToast('📥 已加入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
+    var count = window._getCurrentQueueCount();
+    showToast('📥 已加入消息队列 (当前聊天 ' + count + ' 条)', 'info', 2000);
     
-    // 如果 AI 空闲,立即处理
-    if (!isTypingMap[currentChatId]) {
-        window._drainQueue();
+    // 当前聊天 AI 空闲,立即处理
+    if (!isTypingMap[chatId]) {
+        window._drainQueue(chatId);
     }
 };
 
-/** 排干队列 — 逐一发送排队消息 */
-window._drainQueue = async function() {
-    if (window._isQueueProcessing) return;
-    if (window._messageQueue.length === 0) {
-        window._isQueueProcessing = false;
-        window._clearPersistedQueue();
+/** 排干指定聊天的队列 */
+window._drainQueue = async function(chatId) {
+    chatId = chatId || currentChatId;
+    if (window._queueProcessingChatId) return;
+    var q = window._getChatQueue(chatId);
+    if (!q || q.length === 0) {
         window._updateQueueUI();
         return;
     }
-    if (isTypingMap[currentChatId]) {
-        return;
-    }
+    if (isTypingMap[chatId]) return;
     
-    window._isQueueProcessing = true;
-    var item = window._messageQueue.shift();
+    window._queueProcessingChatId = chatId;
+    var item = q.shift();
     window._saveQueue();
     
-    // 队列消息的文件只存了元数据,恢复为 sendMessage 能用的格式
     var queueFiles = item.files ? item.files.map(function(f) {
         return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
     }) : [];
     
+    var savedChatId = currentChatId;
+    if (currentChatId !== chatId && chats[chatId]) {
+        currentChatId = chatId;
+        loadChat(chatId);
+    }
+    
     window._isQueueMessage = true;
     try {
-        // skipUserAdd=true: text 从 userTextForRegen 取值,不从输入框取
         await window.sendMessage(true, item.text, queueFiles);
     } catch(e) {
         console.warn('[Queue] sendMessage error:', e);
     }
     window._isQueueMessage = false;
-    window._isQueueProcessing = false;
+    window._queueProcessingChatId = null;
+    
+    // 切回之前的聊天(如果用户没手动切换)
+    if (currentChatId === chatId && savedChatId !== chatId && chats[savedChatId]) {
+        currentChatId = savedChatId;
+        loadChat(savedChatId);
+    }
+    
     window._updateQueueUI();
     
-    // 下条消息(等当前 typping 状态清掉再发)
+    // 下条消息
     setTimeout(function() {
-        if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
-            window._drainQueue();
+        if (window._getChatQueue(chatId).length > 0 && !isTypingMap[chatId]) {
+            window._drainQueue(chatId);
         }
     }, 500);
-};
-
-/** 处理 document 点击: 点浮窗外则折叠队列 */
-window._handleQueueDocClick = function(e) {
-    var qBar = getEl('queueBar');
-    if (!qBar || qBar.classList.contains('hidden')) return;
-    if (qBar.classList.contains('collapsed')) return;
-    // 点击在浮窗内部不处理
-    if (qBar.contains(e.target)) return;
-    // 点击浮窗外的元素 → 折叠
-    qBar.classList.add('collapsed');
-};
-
-/** 切换折叠/展开 */
-window._toggleQueueCollapse = function() {
-    var qBar = getEl('queueBar');
-    if (qBar) qBar.classList.toggle('collapsed');
-};
-
-/** 清空所有队列消息 */
-window._clearAllQueue = function() {
-    window._messageQueue = [];
-    window._clearPersistedQueue();
-    window._updateQueueUI();
-    showToast('🗑️ 消息队列已清空', 'info', 1500);
-};
-
-/** 移除单条队列消息 */
-window._removeQueueItem = function(id) {
-    window._messageQueue = window._messageQueue.filter(function(item) { return item.id !== id; });
-    window._saveQueue();
-    window._updateQueueUI();
 };
 
 window._updateQueueUI = function() {
@@ -11229,9 +11243,12 @@ window._updateQueueUI = function() {
     var qBadge = getEl('queueBarBadge');
     var qList = getEl('queueMsgList');
     var qSummary = getEl('queueCollapsedSummary');
-    var qCount = window._messageQueue.length;
+    var qArr = window._getChatQueue(currentChatId);
+    var qCount = qArr.length;
+    // 也显示其他聊天有多少在排队
+    var totalCount = window._getTotalQueueCount();
     
-    // 有队列消息就显示,不依赖 isTypingMap(让用户随时看到队列)
+    // 有队列消息就显示
     var showBar = qCount > 0;
     if (qBar) qBar.classList.toggle('hidden', !showBar);
     
@@ -11242,13 +11259,15 @@ window._updateQueueUI = function() {
     
     // 折叠状态摘要
     if (qSummary) {
-        if (qCount === 0) {
+        if (qCount === 0 && totalCount === 0) {
             qSummary.textContent = '';
+        } else if (qCount === 0 && totalCount > 0) {
+            qSummary.textContent = '— 其他聊天 ' + totalCount + ' 条排队中';
         } else if (qCount === 1) {
-            var _firstText = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 20);
-            qSummary.textContent = '— ' + _firstText + (window._messageQueue[0].text && window._messageQueue[0].text.length > 20 ? '...' : '');
+            var _firstText = (qArr[0] && qArr[0].text || '').substring(0, 20);
+            qSummary.textContent = '— ' + _firstText + (qArr[0].text && qArr[0].text.length > 20 ? '...' : '');
         } else {
-            var _first2 = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 15);
+            var _first2 = (qArr[0] && qArr[0].text || '').substring(0, 15);
             qSummary.textContent = '— ' + _first2 + '... 等' + qCount + '条';
         }
     }
@@ -11261,7 +11280,7 @@ window._updateQueueUI = function() {
     }
     
     var html = '';
-    window._messageQueue.forEach(function(item, idx) {
+    qArr.forEach(function(item, idx) {
         var text = (item.text || '').substring(0, 80);
         if ((item.text || '').length > 80) text += '...';
         var fileIcon = '';
@@ -11279,6 +11298,40 @@ window._updateQueueUI = function() {
             '</div>';
     });
     qList.innerHTML = html;
+};
+
+/** 处理 document 点击: 点浮窗外则折叠队列 */
+window._handleQueueDocClick = function(e) {
+    var qBar = getEl('queueBar');
+    if (!qBar || qBar.classList.contains('hidden')) return;
+    if (qBar.classList.contains('collapsed')) return;
+    if (qBar.contains(e.target)) return;
+    qBar.classList.add('collapsed');
+};
+
+/** 切换折叠/展开 */
+window._toggleQueueCollapse = function() {
+    var qBar = getEl('queueBar');
+    if (qBar) qBar.classList.toggle('collapsed');
+};
+
+/** 清空当前聊天队列 */
+window._clearAllQueue = function() {
+    delete window._queuesByChat[currentChatId];
+    window._saveQueue();
+    window._updateQueueUI();
+    showToast('🗑️ 当前聊天队列已清空', 'info', 1500);
+};
+
+/** 移除单条队列消息(跨聊天查找) */
+window._removeQueueItem = function(id) {
+    Object.keys(window._queuesByChat).forEach(function(cid) {
+        if (window._queuesByChat[cid]) {
+            window._queuesByChat[cid] = window._queuesByChat[cid].filter(function(item) { return item.id !== id; });
+        }
+    });
+    window._saveQueue();
+    window._updateQueueUI();
 };
 
 window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesForRegen) {
@@ -11338,13 +11391,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
                 });
                 var _qId = ++window._queueIdCounter;
-                window._messageQueue.push({ id: _qId, text: _qText, files: safeFiles });
+                window._getChatQueue(chatId).push({ id: _qId, text: _qText, files: safeFiles, chatId: chatId });
                 
                 pendingFiles = [];
                 if (_inputEl) { _inputEl.value = ''; window.autoResize(_inputEl); }
                 window._saveQueue();
                 window._updateQueueUI();
-                showToast('⏳ 已推入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
+                showToast('⏳ 已推入消息队列 (当前聊天 ' + window._getChatQueue(chatId).length + ' 条)', 'info', 2000);
             }
             return;
         }
@@ -14232,7 +14285,7 @@ window.useAlternativeVisionModel = function() {
             clearInterval(window._queuePollTimer);
             window._queuePollTimer = null;
         }
-        setTimeout(function() { window._drainQueue(); }, 300);
+        setTimeout(function() { window._drainQueue(chatId); }, 300);
         // ★ 停止流渲染 RAF 循环
         cleanupStreamState(chatId);
         delete abortControllerMap[chatId];
@@ -15845,11 +15898,11 @@ function initializeApp() {
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {
             if (window._loadQueue && window._loadQueue()) {
-                var _queueLen = window._messageQueue.length;
+                var _queueLen = window._getTotalQueueCount();
                 console.log('[Queue] 恢复 ' + _queueLen + ' 条队列消息');
                 // 如果 AI 当前空闲且有队列消息,自动开始处理
                 if (!isTypingMap[currentChatId] && _queueLen > 0) {
-                    setTimeout(function() { window._drainQueue(); }, 1500);
+                    setTimeout(function() { window._drainQueue(currentChatId); }, 1500);
                 }
                 // 更新队列UI
                 window._updateQueueUI();
