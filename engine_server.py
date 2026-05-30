@@ -3478,6 +3478,10 @@ _heartbeat_html = """
 import threading
 import queue
 
+# 全局活跃流管理 {msg_id: {queue, thread, cache:[], finished:bool, chat_id, user_id}}
+_active_streams = {}
+_active_streams_lock = threading.Lock()
+
 def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id: str):
     """在后台线程中将 OpenAI 流式响应转为 SSE，实时保存进度到 SQLite"""
     from openai import OpenAI
@@ -3570,7 +3574,7 @@ async def chat_stream(request: Request, user_id: str = Query("")):
     """
     后端流式聊天端点:
     - 接收消息，转发给 OpenAI，流式返回 SSE
-    - 实时将进度保存到 SQLite（刷新恢复）
+    - 活跃流注册到 _active_streams（支持续接）
     """
     try:
         body = await request.json()
@@ -3584,35 +3588,73 @@ async def chat_stream(request: Request, user_id: str = Query("")):
     if not request_data.get('api_key'):
         return {"error": "api_key required"}
 
-    # 启动后台线程执行流式请求（避免 FastAPI 线程阻塞）
-    result_queue = queue.Queue()
-    t = threading.Thread(target=_run_stream, args=(request_data, chat_id, msg_id, user_id, result_queue), daemon=True)
-    t.start()
+    # 如果已有同 msg_id 的活跃流,复用(续接)
+    resume = body.get('resume', False)
+    with _active_streams_lock:
+        existing = _active_streams.get(msg_id)
+        if resume and existing:
+            result_queue = existing['queue']
+            cache = existing['cache']
+        else:
+            result_queue = queue.Queue()
+            cache = []
+            t = threading.Thread(target=_run_stream, args=(request_data, chat_id, msg_id, user_id, result_queue), daemon=True)
+            _active_streams[msg_id] = {
+                'queue': result_queue,
+                'thread': t,
+                'cache': cache,
+                'chat_id': chat_id,
+                'user_id': user_id,
+                'started': time.time()
+            }
+            t.start()
 
     async def event_generator():
-        # 前端通过 EventSource 接收 SSE
-        while True:
-            try:
-                status, data = result_queue.get(timeout=60)
-                if status == 'error':
-                    yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
+        try:
+            # 先发送已缓存的内容(续接时跳过已收到的)
+            for c in list(cache):
+                yield c
+
+            while True:
+                try:
+                    status, data = result_queue.get(timeout=60)
+                    if status == 'error':
+                        yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
+                        break
+                    elif status == 'done':
+                        break
+                    elif status == 'chunk':
+                        cache.append(data)
+                        yield data
+                        await asyncio.sleep(0.001)
+                except queue.Empty:
+                    yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"
                     break
-                elif status == 'done':
-                    break
-                elif status == 'chunk':
-                    yield data
-                    await asyncio.sleep(0.001)
-            except queue.Empty:
-                yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"
-                break
+        finally:
+            with _active_streams_lock:
+                _active_streams.pop(msg_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-@app.get("/engine/chat/progress/{msg_id}")
-async def chat_progress(msg_id: str, user_id: str = Query("")):
-    """查询流式进度（用于刷新恢复）"""
+@app.get("/engine/chat/status/{msg_id}")
+async def chat_status(msg_id: str, user_id: str = Query("")):
+    """检查流是否活跃（续接判断）"""
+    with _active_streams_lock:
+        stream = _active_streams.get(msg_id)
+        if stream:
+            return {
+                'active': True,
+                'chat_id': stream['chat_id'],
+                'cached': len(stream['cache']),
+                'started': stream['started'],
+                'alive': stream['thread'].is_alive()
+            }
+    # 再看 SQLite 进度
     store = get_chat_store(user_id)
-    return store.get_progress(msg_id)
+    progress = store.get_progress(msg_id)
+    if progress and progress.get('finished'):
+        return {'active': False, 'finished': True, 'full_text': progress['full_text']}
+    return {'active': False, 'finished': False}
 
 
 # ==================== Agent 记忆/人格/身份/心跳 系统 ====================
