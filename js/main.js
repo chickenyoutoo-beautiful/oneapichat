@@ -15886,7 +15886,7 @@ function initializeApp() {
                 try {
                     var _token = localStorage.getItem('authToken');
                     var _url = '/oneapichat/engine_api.php?action=stream_progress&msg_id=' + encodeURIComponent(_msgId);
-                    if (_token) _url += '&token=' + encodeURIComponent(_token);
+                    if (_token) _url += '&auth_token=' + encodeURIComponent(_token);
                     var _resp = await fetch(_url);
                     if (!_resp.ok) return;
                     var _data = await _resp.json();
