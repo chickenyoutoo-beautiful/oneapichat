@@ -10075,7 +10075,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                 }));
             } catch(e) {}
         }
-    }, 2000);
+    }, 500);
     // 工具调用相关
     let toolCalls = [];
     let currentToolCall = null;
@@ -15845,100 +15845,30 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 回退方案: 用旧的 localStorage _savedPartial 恢复内容
-        var _autoRecoverFallback = function() {
-            var _rec = window._pendingRecovery;
-            if (!_rec) return;
-            window._pendingRecovery = null;
-            if (!chats[_rec.chatId]) return;
-            var _msgs = chats[_rec.chatId].messages;
-            for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
-                if (_msgs[_ri].role === 'assistant' && _msgs[_ri].partial) {
-                    _msgs[_ri].content = _rec.content || '';
-                    _msgs[_ri].reasoning = _rec.reasoning || '';
-                    _msgs[_ri]._recovered = true;
-                    delete _msgs[_ri].partial;
-                    break;
-                }
-            }
-            slimSaveChats();
-            if (currentChatId === _rec.chatId) loadChat(currentChatId);
-            localStorage.removeItem('_activeStreamMsgId');
-            localStorage.removeItem('_activeStreamChatId');
-            showToast('📋 已从本地缓存恢复', 'info', 3000);
-        };
-
-        // ★ 从后端恢复未完成的流式消息(利用 ChatStore SQLite 进度)
+        // ★ 从 localStorage _savedPartial 恢复未完成的流式内容
         try {
-            (async function _recoverFromBackend() {
-                var _msgId = localStorage.getItem('_activeStreamMsgId');
-                var _cid = localStorage.getItem('_activeStreamChatId');
-                if (!_msgId || !_cid) return;
-                var _ts = parseInt(localStorage.getItem('_activeStreamTs') || '0', 10);
-                var _age = Date.now() - _ts;
-                // 超过2分钟的旧流不恢复
-                if (_ts && _age > 120000) {
-                    localStorage.removeItem('_activeStreamMsgId');
-                    localStorage.removeItem('_activeStreamChatId');
-                    localStorage.removeItem('_activeStreamTs');
-                    return;
-                }
-                try {
-                    var _token = localStorage.getItem('authToken');
-                    var _url = '/oneapichat/engine_api.php?action=stream_progress&msg_id=' + encodeURIComponent(_msgId);
-                    if (_token) _url += '&auth_token=' + encodeURIComponent(_token);
-                    var _resp = await fetch(_url);
-                    if (!_resp.ok) return;
-                    var _data = await _resp.json();
-                    if (!_data || !_data.full_text) {
-                        console.log('[Recover] 后端无无进度数据, 回退到本地');
-                        _autoRecoverFallback();
-                        return;
-                    }
-                    
-                    // 把恢复的内容注入到聊天记录
-                    if (!chats[_cid]) return;
-                    var _msgs = chats[_cid].messages;
-                    var _found = false;
-                    for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
-                        var _m = _msgs[_ri];
-                        if (_m.role === 'assistant' && (_m.partial || _m._recovered)) {
-                            _m.content = _data.full_text || '';
-                            _m.reasoning = _data.reasoning_text || '';
-                            _m._recovered = true;
-                            if (_data.finished) {
-                                delete _m.partial;
-                                _m.usage = _data.usage;
-                                _m.tool_calls = _data.tool_calls;
-                            } else {
-                                _m.partial = true;
-                            }
-                            _found = true;
+            var _sp = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
+            if (_sp && _sp.chatId && (_sp.content || _sp.reasoning)) {
+                var _spAge = Date.now() - (_sp.time || 0);
+                if (_spAge < 120000 && chats[_sp.chatId]) {
+                    var _spMsgs = chats[_sp.chatId].messages;
+                    for (var _spi = _spMsgs.length - 1; _spi >= 0; _spi--) {
+                        if (_spMsgs[_spi].role === 'assistant' && _spMsgs[_spi]._recovered) {
+                            _spMsgs[_spi].content = _sp.content || '';
+                            _spMsgs[_spi].reasoning = _sp.reasoning || '';
                             break;
                         }
                     }
-                    if (!_found) {
-                        // 没有 partial 消息可恢复, 回退
-                        _autoRecoverFallback();
-                        return;
-                    }
                     slimSaveChats();
-                    if (currentChatId === _cid) {
-                        loadChat(currentChatId);
-                    }
-                    if (_data.finished) {
-                        localStorage.removeItem('_activeStreamMsgId');
-                        localStorage.removeItem('_activeStreamChatId');
-                        localStorage.removeItem('_activeStreamTs');
-                        showToast('✅ 已恢复上次对话内容', 'success', 3000);
-                    }
-                    console.log('[Recover] 从后端恢复 ' + (_data.full_text || '').length + ' 字符, finished=' + _data.finished);
-                } catch(e) {
-                    console.warn('[Recover] 后端恢复失败, 回退:', e.message);
-                    _autoRecoverFallback();
+                    if (currentChatId === _sp.chatId) loadChat(currentChatId);
+                    showToast('📋 已恢复 ' + ((_sp.content || '').length) + ' 字符的对话内容', 'info', 3000);
                 }
-            })();
-        } catch(e) { console.warn('[Recover] 出错:', e.message); }
+                localStorage.removeItem('_savedPartial');
+                localStorage.removeItem('_activeStreamMsgId');
+                localStorage.removeItem('_activeStreamChatId');
+                localStorage.removeItem('_activeStreamTs');
+            }
+        } catch(e) { console.warn('[Recover] 本地恢复失败:', e.message); }
 
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {
