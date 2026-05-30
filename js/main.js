@@ -14899,14 +14899,11 @@ window.loadChat = function (id) {
             });
         }
     } catch(e) {}
-    // ★ 标记待恢复:仅当流式确实在进行中(有内容且最近)才触发自动续生
-    if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
-        var _age = Date.now() - (savedPartial.time || 0);
-        var _hasContent = (savedPartial.content && savedPartial.content.length > 0) || (savedPartial.reasoning && savedPartial.reasoning.length > 0);
-        if (_hasContent && _age < 120000) {
+    // ★ 标记待恢复:仅当有用户消息且5分钟内才重发续接
+    if (savedPartial && savedPartial.chatId === id && savedPartial.userText) {
+        var _spAge2 = Date.now() - (savedPartial.time || 0);
+        if (_spAge2 < 300000) {
             window._pendingRecovery = savedPartial;
-        } else {
-            console.log('[loadChat] 跳过过期或不完整的partial恢复, age=' + (_age/1000).toFixed(1) + 's');
         }
     }
     // ★ 清理 localStorage,避免下次重复恢复
@@ -15855,11 +15852,10 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 刷新后重发未完成消息(真正的续接:重新发送用户消息)
+        // ★ 刷新后重发未完成消息(从 _pendingRecovery 获取)
         try {
-            var _spMsg = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
-            var _rId = localStorage.getItem('_activeStreamMsgId');
-            if (_spMsg && _spMsg.chatId && _spMsg.userText && _rId) {
+            var _spMsg = window._pendingRecovery;
+            if (_spMsg && _spMsg.chatId && _spMsg.userText) {
                 var _spAge = Date.now() - (_spMsg.time || 0);
                 if (_spAge < 300000) {
                     if (chats[_spMsg.chatId]) {
@@ -15881,7 +15877,6 @@ function initializeApp() {
                         window.sendMessage(true, _spMsg.userText, _spMsg.userFiles || []).catch(function(){});
                     }, 1500);
                 }
-                localStorage.removeItem('_savedPartial');
                 localStorage.removeItem('_activeStreamMsgId');
                 localStorage.removeItem('_activeStreamChatId');
                 localStorage.removeItem('_activeStreamTs');
