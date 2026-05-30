@@ -9902,7 +9902,15 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
     let usage = null;
     let finished = false;
 
-    // 定期保存到 localStorage._savedPartial(防刷新丢失)
+    // ★ 保存当前流式消息的 msgId(刷新后通过后端API恢复)
+    if (msgId) {
+        try {
+            localStorage.setItem('_activeStreamMsgId', msgId);
+            localStorage.setItem('_activeStreamChatId', chatId || '');
+            localStorage.setItem('_activeStreamTs', Date.now());
+        } catch(e) {}
+    }
+    // 定期保存到 localStorage._savedPartial(防刷新丢失, 后端进度备用)
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (fullText || reasoningText) {
@@ -10036,6 +10044,8 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
     // 清理 savedPartial 和 msg_id 标记
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+    try { localStorage.removeItem('_activeStreamMsgId'); } catch(e) {}
+    try { localStorage.removeItem('_activeStreamChatId'); } catch(e) {}
     try { localStorage.removeItem('_lastStreamMsgId_' + chatId); } catch(e) {}
 
     return { fullText, reasoningText, usage, toolCalls };
@@ -15835,56 +15845,100 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 自动续生:检测到刷新前未完成的流式(仅当后端 SSE 未恢复时才触发)
+        // ★ 回退方案: 用旧的 localStorage _savedPartial 恢复内容
+        var _autoRecoverFallback = function() {
+            var _rec = window._pendingRecovery;
+            if (!_rec) return;
+            window._pendingRecovery = null;
+            if (!chats[_rec.chatId]) return;
+            var _msgs = chats[_rec.chatId].messages;
+            for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
+                if (_msgs[_ri].role === 'assistant' && _msgs[_ri].partial) {
+                    _msgs[_ri].content = _rec.content || '';
+                    _msgs[_ri].reasoning = _rec.reasoning || '';
+                    _msgs[_ri]._recovered = true;
+                    delete _msgs[_ri].partial;
+                    break;
+                }
+            }
+            slimSaveChats();
+            if (currentChatId === _rec.chatId) loadChat(currentChatId);
+            localStorage.removeItem('_activeStreamMsgId');
+            localStorage.removeItem('_activeStreamChatId');
+            showToast('📋 已从本地缓存恢复', 'info', 3000);
+        };
+
+        // ★ 从后端恢复未完成的流式消息(利用 ChatStore SQLite 进度)
         try {
-            (function _autoRecover() {
-                if (!window._pendingRecovery) return;
-                // ★ 后端 SSE 恢复过就不再从头重发
-                if (window._backendRecovered) { window._pendingRecovery = null; return; }
-                var _rec = window._pendingRecovery;
-                window._pendingRecovery = null;
-                // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<120秒)
-                var _age = Date.now() - (_rec.time || 0);
-                var _hasRealContent = (_rec.content && _rec.content.length > 0) || (_rec.reasoning && _rec.reasoning.length > 0);
-                if (!_hasRealContent || _age > 120000) {
-                    console.log('[AutoRecover] 跳过: 内容不足或超120秒, age=' + (_age/1000).toFixed(1) + 's');
+            (async function _recoverFromBackend() {
+                var _msgId = localStorage.getItem('_activeStreamMsgId');
+                var _cid = localStorage.getItem('_activeStreamChatId');
+                if (!_msgId || !_cid) return;
+                var _ts = parseInt(localStorage.getItem('_activeStreamTs') || '0', 10);
+                var _age = Date.now() - _ts;
+                // 超过2分钟的旧流不恢复
+                if (_ts && _age > 120000) {
+                    localStorage.removeItem('_activeStreamMsgId');
+                    localStorage.removeItem('_activeStreamChatId');
+                    localStorage.removeItem('_activeStreamTs');
                     return;
                 }
-                setTimeout(function() {
-                    if (!chats[_rec.chatId]) return;
-                    // 找到用户最后一条消息
-                    var _msgs = chats[_rec.chatId].messages;
-                    var _userText = '', _userFiles = [];
-                    var _prevPartialContent = '', _prevPartialReasoning = '';
+                try {
+                    var _token = localStorage.getItem('authToken');
+                    var _url = '/oneapichat/engine_api.php?action=stream_progress&msg_id=' + encodeURIComponent(_msgId);
+                    if (_token) _url += '&token=' + encodeURIComponent(_token);
+                    var _resp = await fetch(_url);
+                    if (!_resp.ok) return;
+                    var _data = await _resp.json();
+                    if (!_data || !_data.full_text) {
+                        console.log('[Recover] 后端无无进度数据, 回退到本地');
+                        _autoRecoverFallback();
+                        return;
+                    }
+                    
+                    // 把恢复的内容注入到聊天记录
+                    if (!chats[_cid]) return;
+                    var _msgs = chats[_cid].messages;
+                    var _found = false;
                     for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
-                        if (_msgs[_ri].role === 'user') {
-                            _userText = _msgs[_ri].text || '';
-                            _userFiles = _msgs[_ri].files || [];
+                        var _m = _msgs[_ri];
+                        if (_m.role === 'assistant' && (_m.partial || _m._recovered)) {
+                            _m.content = _data.full_text || '';
+                            _m.reasoning = _data.reasoning_text || '';
+                            _m._recovered = true;
+                            if (_data.finished) {
+                                delete _m.partial;
+                                _m.usage = _data.usage;
+                                _m.tool_calls = _data.tool_calls;
+                            } else {
+                                _m.partial = true;
+                            }
+                            _found = true;
                             break;
                         }
-                        if (_msgs[_ri]._recovered) {
-                            _prevPartialContent = _msgs[_ri].content || '';
-                            _prevPartialReasoning = _msgs[_ri].reasoning || '';
-                        }
                     }
-                    if (!_userText && !_userFiles.length && !_prevPartialContent) return;
-                    // ★ 关键:在重新生成前,移除旧的 _recovered 消息(避免新旧混合)
-                    chats[_rec.chatId].messages = _msgs.filter(function(m) { return !m._recovered; });
-                    // ★ 将已流出的部分内容注入为系统上下文,让AI从停下的地方继续
-                    if (_prevPartialContent) {
-                        var _ctxMsg = '以下是之前已生成但未完成的内容,请在此基础上继续,不要重新开始:\n\n' + _prevPartialContent.substring(-1000);
-                        if (_prevPartialReasoning) {
-                            _ctxMsg = '之前的思考过程:\n' + _prevPartialReasoning.substring(-800) + '\n\n已生成但未完成的内容:\n' + _prevPartialContent.substring(-1000) + '\n\n请继续。不要重复前面已有的内容。';
-                        }
-                        window.__internalAgentContext = _ctxMsg;
+                    if (!_found) {
+                        // 没有 partial 消息可恢复, 回退
+                        _autoRecoverFallback();
+                        return;
                     }
-                    showToast('🔄 正在继续生成...', 'info', 4000);
-                    sendMessage(true, _userText, _userFiles).catch(function(e) {
-                        console.warn('[AutoRecover] 续生失败:', e.message);
-                    });
-                }, 500);
+                    slimSaveChats();
+                    if (currentChatId === _cid) {
+                        loadChat(currentChatId);
+                    }
+                    if (_data.finished) {
+                        localStorage.removeItem('_activeStreamMsgId');
+                        localStorage.removeItem('_activeStreamChatId');
+                        localStorage.removeItem('_activeStreamTs');
+                        showToast('✅ 已恢复上次对话内容', 'success', 3000);
+                    }
+                    console.log('[Recover] 从后端恢复 ' + (_data.full_text || '').length + ' 字符, finished=' + _data.finished);
+                } catch(e) {
+                    console.warn('[Recover] 后端恢复失败, 回退:', e.message);
+                    _autoRecoverFallback();
+                }
             })();
-        } catch(e) { console.warn('[AutoRecover] 出错:', e.message); }
+        } catch(e) { console.warn('[Recover] 出错:', e.message); }
 
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {

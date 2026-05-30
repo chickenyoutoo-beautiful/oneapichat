@@ -356,6 +356,14 @@ switch ($action) {
         }
         break;
 
+    case 'stream_progress':
+        $msg_id = $_GET['msg_id'] ?? '';
+        if (!$msg_id) { echo json_encode(['error' => 'missing msg_id']); exit; }
+        $url = $engine_url . '/engine/chat/progress/' . urlencode($msg_id) . $userParam;
+        $resp = @file_get_contents($url);
+        echo $resp ?: json_encode(['error' => 'unreachable']);
+        break;
+
     default:
         echo json_encode(['error' => 'unknown action']);
 
