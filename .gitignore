@@ -45,6 +45,9 @@ test_php.php
 undefined
 uploads/
 users/*.json
+# AI 生成的图片
+image_*.jpg
+image_*.png
 uploads/*.mp4
 uploads/*.webm
 uploads/*.mov

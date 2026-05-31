@@ -169,11 +169,10 @@ window.analyzeImage = async function(imageInput, focus) {
                     image_url: _compressed
                 };
             } catch(e) {
+                // ★ 直连模式下载失败时,不能传 HTTP URL (MiniMax 会报 invalid image URL)
+                // 直接抛错让上层降级处理
                 console.warn('[analyzeImage] 下载/压缩失败:', e.message);
-                requestBody = {
-                    prompt: focus || '请详细描述这张图片的所有内容,包括物体、场景、文字等可见信息。',
-                    image_url: imageInput
-                };
+                throw new Error('图片下载失败,请重试或使用 MCP 代理模式: ' + e.message);
             }
         } else {
             // MCP 代理模式: 直接传 URL,服务端下载
@@ -1688,6 +1687,10 @@ const IMAGE_I2I_TOOL_DEFINITION = {
                 seed: {
                     type: "integer",
                     description: "随机种子。★ n>1时不要传seed,否则所有图一样。"
+                },
+                mask_image: {
+                    type: "string",
+                    description: "【可选,GPT Image原生支持】遮罩图URL或base64,用于精确指定要修改的区域。仅用于图生图模式。"
                 }
             },
             required: ["prompt"]
@@ -1947,8 +1950,31 @@ function cleanImageUrl(url) {
     return url;
 }
 
-async function uploadImageToServer(base64Data) {
+async function uploadImageToServer(imageInput) {
     try {
+        var base64Data = imageInput;
+
+        // ★ 如果输入是 HTTP(S) URL,先下载转为 base64 (OpenRouter 等返回 CDN URL)
+        if (imageInput && (imageInput.startsWith('http://') || imageInput.startsWith('https://'))) {
+            try {
+                var _dlResp = await fetch(imageInput);
+                if (!_dlResp.ok) {
+                    console.warn('[uploadImageToServer] 下载图片失败:', _dlResp.status);
+                    return null;
+                }
+                var _blob = await _dlResp.blob();
+                base64Data = await new Promise(function(resolve, reject) {
+                    var reader = new FileReader();
+                    reader.onload = function() { resolve(reader.result); };
+                    reader.onerror = function() { reject(new Error('FileReader failed')); };
+                    reader.readAsDataURL(_blob);
+                });
+            } catch (e) {
+                console.warn('[uploadImageToServer] 下载/转换图片失败:', e.message);
+                return null;
+            }
+        }
+
         // 提取 MIME 类型和实际数据
         let mimeType = 'image/png';
         let actualData = base64Data;
@@ -1961,6 +1987,8 @@ async function uploadImageToServer(base64Data) {
             }
         }
 
+        console.log('[uploadImageToServer] 上传中... 数据长度:', (base64Data || '').length, 'chars');
+
         const token = getAuthToken();
         const response = await fetch(SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token), {
             method: 'POST',
@@ -1972,17 +2000,27 @@ async function uploadImageToServer(base64Data) {
             })
         });
 
+        console.log('[uploadImageToServer] HTTP:', response.status, 'Content-Type:', response.headers.get('content-type'));
+
         if (response.ok) {
-            const result = await response.json();
-            if (result.url) {
-                // result.url 已经以 /oneapichat 开头,无需再加 SERVER_API_BASE
-                return result.url;
+            const text = await response.text();
+            console.log('[uploadImageToServer] 响应前100字符:', text.substring(0, 100));
+            try {
+                const result = JSON.parse(text);
+                if (result.url) {
+                    console.log('[uploadImageToServer] ✅ 上传成功:', result.url);
+                    return result.url;
+                }
+                console.warn('[uploadImageToServer] JSON无url字段:', JSON.stringify(result).substring(0, 200));
+            } catch(jsonErr) {
+                console.error('[uploadImageToServer] JSON解析失败,响应不是JSON:', jsonErr.message);
+                console.error('[uploadImageToServer] 完整响应:', text.substring(0, 500));
             }
         }
-        console.warn('[uploadImageToServer] 上传失败,状态:', response.status);
+        console.warn('[uploadImageToServer] ❌ 上传失败,状态:', response.status);
         return null;
     } catch (e) {
-        console.warn('[uploadImageToServer] 上传失败:', e.message);
+        console.error('[uploadImageToServer] ❌ 异常:', e.message);
         return null;
     }
 }
@@ -2427,8 +2465,37 @@ async function restoreUserData() {
                             added++;
                         } else {
                             var _mc = merged[_scid];
-                            // ★ 修复: 服务器有更多消息时用服务器数据补充本地
-                            if (_sc.messages && (!_mc.messages || _sc.messages.length > _mc.messages.length)) {
+                            // ★ 修复: 服务器有更多消息时,优先保留本地消息的图片数据
+                            if (_sc.messages && _mc.messages) {
+                                // 如果服务器消息更多,说明有新消息,用服务器数据补充
+                                // 但要保留本地消息中的 generatedImages (服务器备份可能丢失图片数据)
+                                if (_sc.messages.length > _mc.messages.length) {
+                                    // 先保存本地消息中的图片数据
+                                    var _localImages = {};
+                                    for (var _li = 0; _li < _mc.messages.length; _li++) {
+                                        var _lm = _mc.messages[_li];
+                                        if (_lm.generatedImages && _lm.generatedImages.length > 0) {
+                                            _localImages[_li] = _lm.generatedImages.slice();
+                                        }
+                                        if (_lm.generatedImage) {
+                                            _localImages['_single_' + _li] = _lm.generatedImage;
+                                        }
+                                    }
+                                    // 使用服务器消息
+                                    _mc.messages = _sc.messages;
+                                    // 恢复本地图片数据到对应位置
+                                    for (var _li2 = 0; _li2 < Math.min(_mc.messages.length, Object.keys(_localImages).length); _li2++) {
+                                        if (_localImages[_li2]) {
+                                            _mc.messages[_li2].generatedImages = _localImages[_li2];
+                                        }
+                                        if (_localImages['_single_' + _li2]) {
+                                            _mc.messages[_li2].generatedImage = _localImages['_single_' + _li2];
+                                        }
+                                    }
+                                } else if (_sc.messages.length === _mc.messages.length) {
+                                    // 消息数相同 — 保留本地图片数据,不从服务器覆盖
+                                }
+                            } else if (_sc.messages && !_mc.messages) {
                                 _mc.messages = _sc.messages;
                             }
                             // 图片数据恢复
@@ -2482,7 +2549,11 @@ async function restoreUserData() {
         // 硬编码已知不支持工具的模型(即使 models.js 未加载也能生效)
         var _builtinNoTools = [
             'deepseek-reasoner', 'deepseek-r1', 'qwq', 'qwq-',
-            'grok-3-reasoning', 'grok-3-reasoner'
+            'grok-3-reasoning', 'grok-3-reasoner',
+            // 图像生成模型不支持工具调用
+            'gpt-5.4-image', 'gpt-4o-image', 'image-01', 'image-02',
+            'dall-e', 'dalle', 'imagen', 'flux', 'midjourney',
+            'stable-diffusion', 'stable-diffusion-xl', 'sdxl'
         ];
         for (var _bni = 0; _bni < _builtinNoTools.length; _bni++) {
             var _bn = _builtinNoTools[_bni].toLowerCase();
@@ -2976,6 +3047,13 @@ function _flushStreamRender_batched(chatId, st) {
     if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
         mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
+        // ★ 隐藏流式渲染中加载失败的图片(模型可能在文本中引用过期的CDN URL)
+        mb.querySelectorAll('img').forEach(function(_img) {
+            if (!_img._hasOnerror) {
+                _img._hasOnerror = true;
+                _img.addEventListener('error', function() { this.style.display = 'none'; });
+            }
+        });
     } catch(e) {
         mb.textContent = text;
     }
@@ -4943,6 +5021,7 @@ function loadSearchConfig() {
     var ragChecked = localStorage.getItem('ragEnabled') !== 'false';
     setChecked('ragToggle', ragChecked);
     window.RAG_ENABLED = ragChecked;
+    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
     setVal('aiSearchJudgeModel', localStorage.getItem('aiSearchJudgeModel') || 'deepseek-chat');
     setVal('aiSearchJudgePrompt', localStorage.getItem('aiSearchJudgePrompt') || DEFAULT_CONFIG.aiSearchJudgePrompt);
     setVal('searchProvider', localStorage.getItem('searchProvider') || 'duckduckgo');
@@ -5201,13 +5280,23 @@ function setAgentMode(mode) {
             $.sidebar?.classList.remove('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
         }
-        // 切换到 agent 聊天时切回普通模式,恢复上次普通聊天
-        if (currentChatId && currentChatId === '_agent_main') {
-            var restoreId = lastNormalChatId || Object.keys(chats).filter(function(id) { return id !== '_agent_main'; }).sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
-            if (restoreId && chats[restoreId]) {
+        // 切回普通模式: 恢复上次普通聊天
+        var restoreId = lastNormalChatId;
+        if (!restoreId || !chats[restoreId]) {
+            restoreId = Object.keys(chats).filter(function(id) {
+                return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
+            }).sort(function(a,b) {
+                return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+            })[0];
+        }
+        if (restoreId && chats[restoreId]) {
+            // 等退出动画播完再切换
+            setTimeout(function() {
+                currentChatId = restoreId;
                 loadChat(restoreId);
-                window._updateQueueUI();
-            }
+                renderChatHistory();
+                updateHeaderTitle();
+            }, 750);
         }
     }
     // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
@@ -5646,8 +5735,8 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     // 用廉价模型,但必须用 DeepSeek API(不能走 MiniMax)
     var key = localStorage.getItem('apiKey') || '';
     var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
-    if (baseUrl.includes('minimaxi.com')) {
-        // MiniMax 不兼容,用免费/廉价后备
+    if (baseUrl.includes('minimaxi.com') || baseUrl.includes('openrouter.ai')) {
+        // MiniMax/OpenRouter 不兼容 deepseek-chat 模型,跳过
         return;
     }
     var model = 'deepseek-chat';
@@ -5965,7 +6054,7 @@ function startAgentPanelRefresh() {
             // ★ 保持选中状态,只更新内容(不覆盖已渲染的聊天历史)
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
+                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
                     .then(function(r) { return r.json(); })
                     .then(function(agents) {
                         var a = agents[_selectedAgentName];
@@ -6060,7 +6149,7 @@ window._refreshAllAgentLists = async function() {
     var token = getAuthToken();
     if (!token) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
         var agents = await r.json();
         // 验证返回的数据是有效对象
         if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
@@ -6128,7 +6217,7 @@ window.selectAgentChat = function(agentName) {
         var token = getAuthToken();
         if (!token) { msgArea.innerHTML = '<div class="text-xs text-gray-400">请先登录</div>'; return; }
         msgArea.innerHTML = '<div class="text-xs text-gray-400">获取中...</div>';
-        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
+        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
@@ -6179,7 +6268,7 @@ window.mainAgentReply = function() {
     }
     var token = getAuthToken();
     if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
+    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) {
@@ -6434,8 +6523,28 @@ window._setupAgentPopup = function() {
             tapTimer = setTimeout(function() { lastTap = 0; }, 450);
         });
     } else {
-        mainBtn.addEventListener('click', function() {
-            window.toggleAgentMode();
+        // ★ 桌面端: 单击切换模式, Agent 激活时双击关闭
+        var _desktopClickTimer = null;
+        mainBtn.addEventListener('click', function(e) {
+            var curMode = getAgentMode();
+            if (_desktopClickTimer) {
+                // 第二次点击: 直接切换
+                clearTimeout(_desktopClickTimer);
+                _desktopClickTimer = null;
+                if (curMode !== 'off') {
+                    setAgentMode('off');
+                } else {
+                    setAgentMode('agent');
+                }
+                return;
+            }
+            // 第一次点击: 延迟执行,等第二次点击
+            _desktopClickTimer = setTimeout(function() {
+                _desktopClickTimer = null;
+                var m = getAgentMode();
+                var newMode = (m === 'off' || !m) ? 'agent' : 'off';
+                setAgentMode(newMode);
+            }, 250);
         });
         wrapper.addEventListener('mouseenter', function() {
             if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
@@ -6827,7 +6936,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(300000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -6842,7 +6951,7 @@ window.deleteCron = async function(name) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(300000) });
+        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -7009,7 +7118,7 @@ window._triggerMainAgentForTask = function(taskId) {
     setTimeout(function() {
         var token = getAuthToken();
         if (token) {
-            fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(300000) }).catch(function() {});
+            fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) }).catch(function() {});
         }
         // 清理任务: mainResponded后30秒删除
         setTimeout(function() {
@@ -7171,9 +7280,9 @@ window.deleteAgent = async function(name) {
     // 异步删除 (不阻塞 UI)
     var token = getAuthToken();
     if (!token) return;
-    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(300000) })
+    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
         .then(function() {
-            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(300000) });
+            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
         })
         .then(function() { window._refreshAllAgentLists(); })
         .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
@@ -7217,7 +7326,7 @@ window.refreshEngineStatus = async function() {
     text.textContent = '检查中...';
 
     try {
-        var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
+        var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
         var data = await resp.json();
 
         if (data.ok || data.status === 'ok' || data.status === 'running') {
@@ -7236,7 +7345,7 @@ window.refreshEngineStatus = async function() {
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
+            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
             var cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
@@ -7262,7 +7371,7 @@ window.refreshEngineStatus = async function() {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
         try {
-            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(300000) });
+            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
             var agentData = await agentResp.json();
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
@@ -8491,7 +8600,7 @@ function _renderWebFetchUrls(bubble, urls) {
     bubble.appendChild(container);
 }
 
-function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null) {
+function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false) {
     // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
     const safeStr = (val) => {
         if (val === null || val === undefined) return '';
@@ -8714,6 +8823,14 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     }
     bubble.appendChild(contentDiv);
 
+    // ★ 如果消息仍在生成中(partial),显示加载动画
+    if (partial && role === 'assistant') {
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'msg-loading-indicator';
+        loadingEl.innerHTML = '<span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>';
+        bubble.appendChild(loadingEl);
+    }
+
     // 如果有生成的图片,显示在内容下方
     const allImages = generatedImages || (generatedImage ? [generatedImage] : []);
     if (allImages.length > 0) {
@@ -8752,7 +8869,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     wrapper.appendChild(bubble);
 
-    // 操作按钮
+    // 操作按钮 — 放在气泡内部,自然对齐气泡右边缘
     const actions = document.createElement('div');
     actions.className = 'msg-actions';
 
@@ -8770,10 +8887,9 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     };
     actions.appendChild(copyBtn);
 
-    if (isLast) {
-        if (role === 'user') {
-            // 编辑按钮
-            const editBtn = document.createElement('div');
+    if (role === 'user') {
+        // 编辑按钮 — 所有用户消息都显示
+        const editBtn = document.createElement('div');
             editBtn.className = 'msg-action-btn edit-btn';
             editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
             editBtn.onclick = (e) => {
@@ -8815,7 +8931,6 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
             };
             actions.appendChild(regenBtn);
-        }
     }
 
     if (actions.children.length) wrapper.appendChild(actions);
@@ -9888,6 +10003,189 @@ function adjustMaxTokens(model, requestedTokens, estimated) {
 }
 
 
+// ═══════════════════════════════════════════════════════════
+// 可恢复流式模块 — 流走后端引擎，刷新后可续接
+// 通过高级设置中的 "可恢复流式传输" 开关控制
+// ═══════════════════════════════════════════════════════════
+var ResumeStream = (function() {
+    var _active = {};
+    var _base = window.location.origin;
+
+    function _clean() {
+        try { localStorage.removeItem('_rs_sid'); } catch(e) {}
+        try { localStorage.removeItem('_rs_cid'); } catch(e) {}
+        try { localStorage.removeItem('_rs_ts'); } catch(e) {}
+    }
+
+    function _savePending() {
+        var pid = 'pending_' + Date.now();
+        try { localStorage.setItem('_rs_sid', pid); localStorage.setItem('_rs_cid', 'pending'); localStorage.setItem('_rs_ts', Date.now()); } catch(e) {}
+    }
+
+    function _saveReal(sid, cid) {
+        try { localStorage.setItem('_rs_sid', sid); localStorage.setItem('_rs_cid', cid); localStorage.setItem('_rs_ts', Date.now()); } catch(e) {}
+    }
+
+    async function _readSSE(sid, chatId, pendingMsg, isResume) {
+        var resp;
+        try { resp = await fetch(_base + '/engine/chat/stream/' + encodeURIComponent(sid)); } catch(e) { return null; }
+        if (!resp.ok) { _clean(); return null; }
+        if ((resp.headers.get('content-type')||'').includes('json')) { _clean(); return null; }
+
+        var reader;
+        try { reader = resp.body.getReader(); } catch(e) { return null; }
+        if (isResume) { try { showToast('🔄 续接流式输出...', 'info'); } catch(e) {} }
+
+        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, start=Date.now();
+        // ★ 5秒内无内容就显示生成中提示
+        var _noContentTimer = setTimeout(function() {
+            if (!full && !tcList.length) {
+                pendingMsg.content = '🎨 正在生成图片，请耐心等待...';
+                applyStreamRender(chatId, '🎨 正在生成图片，请耐心等待...');
+            }
+        }, 5000);
+        var timer = setInterval(function(){
+            if (full||reasoning) {
+                try { localStorage.setItem('_savedPartial', JSON.stringify({chatId:chatId, content:full, reasoning:reasoning, streamId:sid, time:Date.now()})); } catch(e) {}
+            }
+        }, 500);
+
+        while (!done) {
+            if (Date.now() - start > 180000) break;
+            var rr;
+            try { rr = await reader.read(); } catch(e) { break; }
+            done = rr.done;
+            if (rr.value) buf += new TextDecoder().decode(rr.value, {stream:true});
+            var lines = buf.split('\n'); buf = lines.pop()||'';
+            var ev = '';
+            for (var i=0; i<lines.length; i++) {
+                var ln = lines[i].trim();
+                if (!ln) continue;
+                if (ln.startsWith('event: ')) { ev = ln.substring(7); continue; }
+                if (!ln.startsWith('data: ')) continue;
+                var js = ln.substring(6); if (!js) continue;
+                try {
+                    var d = JSON.parse(js);
+                    if (ev==='content' || (d.delta && !d.full_text && !d.error)) {
+                        var dl = d.delta||'';
+                        if (dl) {
+                            if (_noContentTimer) { clearTimeout(_noContentTimer); _noContentTimer = null; }
+                            full+=dl; pendingMsg.content=full; applyStreamRender(chatId, full);
+                        }
+                    } else if (ev==='reasoning') {
+                        var rd = d.delta||'';
+                        if (rd) { reasoning+=rd; pendingMsg.reasoning=reasoning; }
+                    } else if (ev==='tool_call'||d.function) {
+                        tcList.push(d.function?d:d);
+                    } else if (ev==='done'||d.full_text!==undefined) {
+                        full=d.full_text||full; reasoning=d.reasoning_text||reasoning;
+                        if (d.tool_calls) tcList=d.tool_calls;
+                        if (d.usage) usage=d.usage;
+                        done=true;
+                    } else if (ev==='error'||d.error) {
+                        full='';  // 错误不算有效内容
+                        console.warn('[RS] stream error:', d.error);
+                        done=true;
+                    }
+                    ev='';
+                } catch(e) {}
+            }
+        }
+        clearInterval(timer);
+        if (_noContentTimer) { clearTimeout(_noContentTimer); _noContentTimer = null; }
+        try { cleanupStreamState(chatId); } catch(e) {}
+        _clean();
+        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList};
+    }
+
+    return {
+        create: async function(messages, config, chatId, pendingMsg) {
+            if (_active[chatId]) return null;
+            _active[chatId]=true;
+            _savePending();
+            try {
+                var token = localStorage.getItem('authToken')||'';
+                var cr = await fetch(_base+'/oneapichat/engine_api.php?action=chat_create', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+                    body:JSON.stringify({
+                        messages:messages, model:config.model, api_key:config.apiKey||'',
+                        base_url:config.baseUrl||'', chat_id:chatId,
+                        temperature:config.temp||0.7, max_tokens:config.tokens||4096,
+                        tools:(config.tools&&config.tools.length)?config.tools:undefined
+                    }),
+                    signal:AbortSignal.timeout(15000)
+                });
+                if (!cr.ok) { _clean(); return null; }
+                var cd = await cr.json();
+                var sid = cd.stream_id;
+                if (!sid) { _clean(); return null; }
+                _saveReal(sid, chatId);
+                return await _readSSE(sid, chatId, pendingMsg, false);
+            } catch(e) { _clean(); return null; }
+            finally { delete _active[chatId]; }
+        },
+
+        resume: async function(chatId) {
+            var sid = '';
+            try { sid = localStorage.getItem('_rs_sid')||''; } catch(e) {}
+            if (!sid) return false;
+            if (sid.indexOf('pending_')===0) {
+                var pts = parseInt(localStorage.getItem('_rs_ts')||'0');
+                if (Date.now()-pts > 5000) { _clean(); return false; }
+                return false;  // pending太新，不是真的断线
+            }
+            var scid = '';
+            try { scid = localStorage.getItem('_rs_cid')||''; } catch(e) {}
+            if (chatId && scid && scid!=='pending' && chatId!==scid) return false;
+            var ts = parseInt(localStorage.getItem('_rs_ts')||'0');
+            if (Date.now()-ts > 300000) { _clean(); return false; }
+
+            if (_active[chatId]) return false;
+            _active[chatId]=true;
+            try {
+                if (!chats[chatId]) { _clean(); return false; }
+                var msgs = chats[chatId].messages;
+                var pi = msgs.findIndex(function(m){return m.partial;});
+                if (pi===-1) {
+                    var pm = {role:'assistant',content:'',reasoning:'',partial:true,_recovered:true};
+                    try {
+                        var sp = JSON.parse(localStorage.getItem('_savedPartial')||'null');
+                        if (sp&&sp.content) pm.content=sp.content;
+                    } catch(e) {}
+                    msgs.push(pm);
+                }
+                var pm = msgs[msgs.length-1];
+                if (!pm||!pm.partial) { _clean(); return false; }
+
+                if (currentChatId===chatId && !activeBubbleMap[chatId]) {
+                    var c = document.querySelector('.chat-messages')||document.getElementById('chat-messages');
+                    if (c) { var lb = c.querySelector('.message-bubble:last-child'); if (lb) activeBubbleMap[chatId]=lb; }
+                }
+                if (activeBubbleMap[chatId]) activeBubbleMap[chatId].classList.add('typing');
+
+                var result = await _readSSE(sid, chatId, pm, true);
+                if (result && (result.fullText||result.toolCalls.length>0)) {
+                    delete pm.partial;
+                    pm.content=result.fullText||pm.content||'';
+                    pm.reasoning=result.reasoningText||'';
+                    pm.time=Date.now(); pm.usage=result.usage;
+                    if (currentChatId===chatId) loadChat(chatId);
+                    saveChats();
+                    return true;
+                }
+                var fi = msgs.findIndex(function(m){return m.partial&&m._recovered;});
+                if (fi!==-1) msgs.splice(fi,1);
+                return false;
+            } catch(e) { return false; }
+            finally { delete _active[chatId]; }
+        },
+
+        clean: _clean
+    };
+})();
+
+
 // ★ 后端 SSE 处理器:接收 SSE 流式事件,转换为 streamResponse 兼容格式
 // SSE 格式: "event: TYPE\ndata: JSON\n\n"
 // 解析时需要识别 "event:" 行来确定事件类型
@@ -9902,14 +10200,6 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
     let usage = null;
     let finished = false;
 
-    // ★ 保存当前流式消息的 msgId(刷新后通过后端API恢复)
-    if (msgId) {
-        try {
-            localStorage.setItem('_activeStreamMsgId', msgId);
-            localStorage.setItem('_activeStreamChatId', chatId || '');
-            localStorage.setItem('_activeStreamTs', Date.now());
-        } catch(e) {}
-    }
     // 定期保存到 localStorage._savedPartial(防刷新丢失)
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
     pendingMsg._streamSaveTimer = setInterval(function() {
@@ -9922,7 +10212,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                 }));
             } catch(e) {}
         }
-    }, 500);
+    }, 2000);
 
     while (!finished) {
         let readResult;
@@ -10044,8 +10334,6 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
     // 清理 savedPartial 和 msg_id 标记
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-    try { localStorage.removeItem('_activeStreamMsgId'); } catch(e) {}
-    try { localStorage.removeItem('_activeStreamChatId'); } catch(e) {}
     try { localStorage.removeItem('_lastStreamMsgId_' + chatId); } catch(e) {}
 
     return { fullText, reasoningText, usage, toolCalls };
@@ -10064,14 +10352,6 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     // ★ 流式内容定期保存到 localStorage(防止刷新丢失)
     // 把 timer 挂在 pendingMsg 上,方便外部清理
     if (pendingMsg._streamSaveTimer) clearInterval(pendingMsg._streamSaveTimer);
-    // 找到对应的用户消息
-    var _userMsgForPartial = null;
-    if (chats[chatId]) {
-        var _umsgs = chats[chatId].messages;
-        for (var _ui = _umsgs.length - 1; _ui >= 0; _ui--) {
-            if (_umsgs[_ui].role === 'user') { _userMsgForPartial = _umsgs[_ui]; break; }
-        }
-    }
     pendingMsg._streamSaveTimer = setInterval(function() {
         if (pendingMsg.content || pendingMsg.reasoning) {
             try {
@@ -10079,13 +10359,11 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     chatId: chatId,
                     content: pendingMsg.content || '',
                     reasoning: pendingMsg.reasoning || '',
-                    userText: _userMsgForPartial ? _userMsgForPartial.text : '',
-                    userFiles: _userMsgForPartial ? (_userMsgForPartial.files || []) : [],
                     time: Date.now()
                 }));
             } catch(e) {}
         }
-    }, 500);
+    }, 2000);
     // 工具调用相关
     let toolCalls = [];
     let currentToolCall = null;
@@ -10796,6 +11074,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     const msg = choice.message || {};
     const st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
     let fullText = '';
+    var _generatedImages = [];  // ★ 提前声明,供 content 数组提取图片使用
     if (msg.content !== undefined && msg.content !== null) {
         if (typeof msg.content === 'string') {
             fullText = msg.content;
@@ -10804,9 +11083,23 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
             if (ex !== null) {
                 fullText = ex;
             } else if (Array.isArray(msg.content)) {
-                fullText = msg.content.map(c =>
-                    typeof c === 'object' ? (st(c.text) || st(c.content) || st(c.value) || '') : String(c)
-                ).filter(Boolean).join('');
+                // ★ 从数组中提取文本和图片 URL（修复 GPT Image 模型图片不可见）
+                var _textParts = [];
+                for (var _ci = 0; _ci < msg.content.length; _ci++) {
+                    var _cpart = msg.content[_ci];
+                    if (_cpart && typeof _cpart === 'object') {
+                        // 提取 image_url 类型的图片
+                        if (_cpart.type === 'image_url' && _cpart.image_url && _cpart.image_url.url) {
+                            _generatedImages.push(_cpart.image_url.url);
+                        }
+                        // 提取文本
+                        var _t = st(_cpart.text) || st(_cpart.content) || st(_cpart.value);
+                        if (_t) _textParts.push(_t);
+                    } else if (typeof _cpart === 'string') {
+                        _textParts.push(_cpart);
+                    }
+                }
+                fullText = _textParts.join('');
             } else {
                 fullText = Object.values(msg.content).find(v => typeof v === 'string' && v) || '';
             }
@@ -10815,6 +11108,56 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         }
     }
     fullText = (fullText || '').replace(/\[object Object\]/g, '');
+    // ★ 提取图像模型生成的图片 (msg.images 数组 + content 中已提取的)
+    console.log('[ImageModel] handleNonStream: msg.images=', msg.images ? 'present' : 'absent',
+        'msg.content type=', typeof msg.content, 'length=', (typeof msg.content === 'string' ? msg.content.length : 'N/A'));
+    if (msg.images && Array.isArray(msg.images)) {
+        console.log('[ImageModel] msg.images count:', msg.images.length);
+        msg.images.forEach(function(img) {
+            console.log('[ImageModel] image item keys:', Object.keys(img), 'url present:', !!(img.image_url && img.image_url.url));
+            if (img.image_url && img.image_url.url) _generatedImages.push(img.image_url.url);
+            else if (img.url) _generatedImages.push(img.url);
+            else if (typeof img === 'string') _generatedImages.push(img);
+        });
+    }
+    // 备用: content 中的 base64 图片
+    if (_generatedImages.length === 0 && fullText) {
+        var _b64matches = fullText.match(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]{100,}/g);
+        if (_b64matches) _generatedImages = _b64matches;
+    }
+    // 备用: 检查整个 data 对象中是否有图片相关字段
+    if (_generatedImages.length === 0) {
+        if (data.image_url) _generatedImages.push(data.image_url);
+        if (data.url && data.url.startsWith('data:image')) _generatedImages.push(data.url);
+    }
+    console.log('[ImageModel] extracted images:', _generatedImages.length);
+    // ★ 同步到 pendingMsg,供后续渲染使用
+    if (_generatedImages.length > 0) {
+        if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
+        for (var _gi = 0; _gi < _generatedImages.length; _gi++) {
+            if (pendingMsg.generatedImages.indexOf(_generatedImages[_gi]) === -1) {
+                pendingMsg.generatedImages.push(_generatedImages[_gi]);
+                if (_gi === 0) pendingMsg.generatedImage = _generatedImages[_gi];
+                // ★ 上传到服务器,确保刷新后图片不消失 (直接生成路径,同步等待)
+                var _imgHns = _generatedImages[_gi];
+                if (_imgHns && !_imgHns.startsWith(window.location.origin) && !_imgHns.startsWith('/oneapichat')) {
+                    try {
+                        var _srvUrlHns = await uploadImageToServer(_imgHns);
+                        if (_srvUrlHns) {
+                            console.log('[ImageModel] 图片已上传到服务器:', _srvUrlHns);
+                            pendingMsg.generatedImages[_gi] = _srvUrlHns;
+                            if (pendingMsg.generatedImage === _imgHns) pendingMsg.generatedImage = _srvUrlHns;
+                            _generatedImages[_gi] = _srvUrlHns;  // ★ 同时更新返回数组
+                        }
+                    } catch(e) {
+                        console.warn('[ImageModel] 上传直接生成图片失败:', e.message);
+                    }
+                }
+            }
+        }
+        // ★ 图片已保存为服务器URL,立即持久化到 localStorage 防止刷新丢失
+        slimSaveChats();
+    }
     let reasoningText = '';
     let toolCalls = msg.tool_calls || [];
 
@@ -10906,12 +11249,14 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         reasoningText = _htAllThink.trim();
     }
     // ★ 流结束: 取消未执行的节流渲染,直接用最终内容
-    if (_streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
+    if (typeof _streamRenderTimer !== 'undefined' && _streamRenderTimer[chatId]) { clearTimeout(_streamRenderTimer[chatId]); _streamRenderTimer[chatId] = null; }
 
     pendingMsg.content = fullText.replace(/\[object Object\]/g, '');
     pendingMsg.reasoning = reasoningText;
+    delete pendingMsg.partial;  // ★ 标记消息已完成,防止被下次 sendMessage 清理
 
     if (currentChatId === chatId && currentBubble) {
+        try {
         currentBubble.classList.remove('typing');
         const markdownBody = currentBubble.querySelector('.markdown-body');
         if (markdownBody) {
@@ -10952,6 +11297,9 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
             }, 200);
             // ★ 非流式响应完成:如果有生成的图片,渲染到气泡
             if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0 && !currentBubble.querySelector('.generated-images-container')) {
+                // ★ 清除工具执行时留下的占位符
+                var _oldPh = currentBubble.querySelector('#image-placeholder');
+                if (_oldPh) _oldPh.remove();
                 var _imgContNs = document.createElement('div');
                 _imgContNs.className = 'generated-images-container';
                 _imgContNs.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
@@ -10966,15 +11314,20 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                         _imgElNs.decoding = 'async';
                         _imgElNs.style.cssText = 'max-width:' + (pendingMsg.generatedImages.length > 1 ? '160px' : '320px') + ';width:100%;border-radius:8px;display:block;';
                         _imgElNs.setAttribute('loading', 'lazy');
+                        _imgElNs.addEventListener('click', function() { showImageLightbox(pendingMsg.generatedImages, _idx); });
+                        _imgElNs.onerror = function() { this.style.display = 'none'; };
                         _wrapNs.appendChild(_imgElNs);
                         _imgContNs.appendChild(_wrapNs);
                     }, _idx * 50);
                 });
             }
         }
+        } catch(_bubbleErr) {
+            console.error('[handleNonStream] bubble render error:', _bubbleErr.message, _bubbleErr.stack);
+        }
     }
 
-    return { fullText, reasoningText, usage, toolCalls };
+    return { fullText, reasoningText, usage, toolCalls, generatedImages: _generatedImages };
 }
 
 function handleError(e, chatId, pendingMsg, currentBubble) {
@@ -11084,65 +11437,52 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
     return false;
 };
 
-/* ===== 消息队列系统 (持久化版,按聊天隔离) =====
+/* ===== 消息队列系统 (持久化版) =====
  * 
  * 设计原则:
  * - 不打断当前 AI 生成,消息推入队列等待
- * - 队列按 chatId 分组,切换聊天时队列不跟随
- * - 只排干当前聊天的队列,其他聊天的队列在后台等待
+ * - 等当前 turn 完成(sendMessage 的 finally)后,_drainQueue 自动处理下一条
+ * - 每条消息都有 id 防止重复入队
+ * - AI 空闲时立即处理,AI 忙时排队等待
  * - 队列持久化到 sessionStorage,刷新页面不丢失
  * - 所有模式(agent/普通)都支持队列
  */
-/** 总计数器(跨聊天) */
+window._messageQueue = [];
 window._queueIdCounter = 0;
-/** 按 chatId 分组的队列: { chatId: [{id,text,files},...] } */
-window._queuesByChat = {};
-/** 当前聊天是否正在处理队列 */
-window._queueProcessingChatId = null;
+window._isQueueProcessing = false;
 
 /* 持久化 key */
 window._QUEUE_STORAGE_KEY = 'oc_queue_' + window.location.hostname;
 
-/** 持久化到 sessionStorage */
+/** 持久化队列到 sessionStorage */
 window._saveQueue = function() {
     try {
-        var flat = {};
-        Object.keys(window._queuesByChat).forEach(function(cid) {
-            if (window._queuesByChat[cid].length > 0) {
-                flat[cid] = window._queuesByChat[cid].map(function(item) {
-                    var safeFiles = (item.files || []).map(function(f) {
-                        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
-                    });
-                    return { id: item.id, text: item.text, files: safeFiles };
-                });
-            }
+        var data = window._messageQueue.map(function(item) {
+            // files 只存文件名和类型,不存 base64 内容
+            var safeFiles = (item.files || []).map(function(f) {
+                return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
+            });
+            return { id: item.id, text: item.text, files: safeFiles };
         });
-        sessionStorage.setItem(window._QUEUE_STORAGE_KEY, JSON.stringify(flat));
+        sessionStorage.setItem(window._QUEUE_STORAGE_KEY, JSON.stringify(data));
     } catch(e) {
         console.warn('[Queue] save failed:', e);
     }
 };
 
-/** 页面加载时恢复 */
+/** 页面加载时从 sessionStorage 恢复队列 */
 window._loadQueue = function() {
     try {
         var raw = sessionStorage.getItem(window._QUEUE_STORAGE_KEY);
         if (!raw) return false;
         var data = JSON.parse(raw);
-        if (!data || typeof data !== 'object') return false;
-        var keys = Object.keys(data);
-        if (keys.length === 0) return false;
-        window._queuesByChat = data;
+        if (!Array.isArray(data) || data.length === 0) return false;
+        window._messageQueue = data;
+        // 恢复 id 计数器
         var maxId = 0;
-        keys.forEach(function(cid) {
-            (data[cid] || []).forEach(function(item) {
-                if (item.id > maxId) maxId = item.id;
-            });
-        });
+        data.forEach(function(item) { if (item.id > maxId) maxId = item.id; });
         window._queueIdCounter = maxId;
-        var total = 0;
-        keys.forEach(function(cid) { total += (data[cid] || []).length; });
-        console.log('[Queue] 恢复 ' + total + ' 条消息, 分布在 ' + keys.length + ' 个聊天中');
+        console.log('[Queue] 从 sessionStorage 恢复 ' + data.length + ' 条消息');
         return true;
     } catch(e) {
         console.warn('[Queue] load failed:', e);
@@ -11150,30 +11490,9 @@ window._loadQueue = function() {
     }
 };
 
-/** 清理持久化 */
+/** 清理持久化队列 */
 window._clearPersistedQueue = function() {
     try { sessionStorage.removeItem(window._QUEUE_STORAGE_KEY); } catch(e) {}
-};
-
-/** 获取指定聊天的队列,没有则创建 */
-window._getChatQueue = function(chatId) {
-    if (!window._queuesByChat[chatId]) window._queuesByChat[chatId] = [];
-    return window._queuesByChat[chatId];
-};
-
-/** 获取当前聊天队列的总数(用于 UI 显示) */
-window._getCurrentQueueCount = function() {
-    var q = window._getChatQueue(currentChatId);
-    return q ? q.length : 0;
-};
-
-/** 获取所有聊天队列总数 */
-window._getTotalQueueCount = function() {
-    var total = 0;
-    Object.keys(window._queuesByChat).forEach(function(cid) {
-        total += (window._queuesByChat[cid] || []).length;
-    });
-    return total;
 };
 
 /** 推入消息到队列 (不打断当前生成) */
@@ -11181,9 +11500,8 @@ window.pushToMsgQueue = function() {
     var input = $.userInput;
     var text = input ? input.value.trim() : '';
     if (!text && (!pendingFiles || pendingFiles.length === 0)) return;
-    var chatId = currentChatId;
-    if (!chatId) return;
     
+    // 保存当前文件列表(只存元数据)
     var safeFiles = (pendingFiles || []).map(function(f) {
         return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
     });
@@ -11191,62 +11509,93 @@ window.pushToMsgQueue = function() {
     var qItem = {
         id: ++window._queueIdCounter,
         text: text,
-        files: safeFiles,
-        chatId: chatId
+        files: safeFiles
     };
-    window._getChatQueue(chatId).push(qItem);
+    window._messageQueue.push(qItem);
     
     if (input) { input.value = ''; window.autoResize(input); }
     clearAllFiles();
     window._saveQueue();
     window._updateQueueUI();
-    var count = window._getCurrentQueueCount();
-    showToast('📥 已加入消息队列 (当前聊天 ' + count + ' 条)', 'info', 2000);
+    showToast('📥 已加入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
     
-    // 当前聊天 AI 空闲,立即处理
-    if (!isTypingMap[chatId]) {
-        window._drainQueue(chatId);
+    // 如果 AI 空闲,立即处理
+    if (!isTypingMap[currentChatId]) {
+        window._drainQueue();
     }
 };
 
-/** 排干当前聊天的队列(只在当前聊天 AI 空闲时,不切换聊天) */
-window._drainQueue = async function(chatId) {
-    chatId = chatId || currentChatId;
-    if (window._queueProcessingChatId) return;
-    // 只处理当前正在看的聊天(其他聊天队列不动,等用户切回去再排)
-    if (chatId !== currentChatId) return;
-    var q = window._getChatQueue(chatId);
-    if (!q || q.length === 0) {
+/** 排干队列 — 逐一发送排队消息 */
+window._drainQueue = async function() {
+    if (window._isQueueProcessing) return;
+    if (window._messageQueue.length === 0) {
+        window._isQueueProcessing = false;
+        window._clearPersistedQueue();
         window._updateQueueUI();
         return;
     }
-    if (isTypingMap[chatId]) return;
+    if (isTypingMap[currentChatId]) {
+        return;
+    }
     
-    window._queueProcessingChatId = chatId;
-    var item = q.shift();
+    window._isQueueProcessing = true;
+    var item = window._messageQueue.shift();
     window._saveQueue();
     
+    // 队列消息的文件只存了元数据,恢复为 sendMessage 能用的格式
     var queueFiles = item.files ? item.files.map(function(f) {
         return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
     }) : [];
     
     window._isQueueMessage = true;
     try {
+        // skipUserAdd=true: text 从 userTextForRegen 取值,不从输入框取
         await window.sendMessage(true, item.text, queueFiles);
     } catch(e) {
         console.warn('[Queue] sendMessage error:', e);
     }
     window._isQueueMessage = false;
-    window._queueProcessingChatId = null;
-    
+    window._isQueueProcessing = false;
     window._updateQueueUI();
     
-    // 下条消息(当前聊天)
+    // 下条消息(等当前 typping 状态清掉再发)
     setTimeout(function() {
-        if (window._getChatQueue(chatId).length > 0 && !isTypingMap[chatId]) {
-            window._drainQueue(chatId);
+        if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
+            window._drainQueue();
         }
     }, 500);
+};
+
+/** 处理 document 点击: 点浮窗外则折叠队列 */
+window._handleQueueDocClick = function(e) {
+    var qBar = getEl('queueBar');
+    if (!qBar || qBar.classList.contains('hidden')) return;
+    if (qBar.classList.contains('collapsed')) return;
+    // 点击在浮窗内部不处理
+    if (qBar.contains(e.target)) return;
+    // 点击浮窗外的元素 → 折叠
+    qBar.classList.add('collapsed');
+};
+
+/** 切换折叠/展开 */
+window._toggleQueueCollapse = function() {
+    var qBar = getEl('queueBar');
+    if (qBar) qBar.classList.toggle('collapsed');
+};
+
+/** 清空所有队列消息 */
+window._clearAllQueue = function() {
+    window._messageQueue = [];
+    window._clearPersistedQueue();
+    window._updateQueueUI();
+    showToast('🗑️ 消息队列已清空', 'info', 1500);
+};
+
+/** 移除单条队列消息 */
+window._removeQueueItem = function(id) {
+    window._messageQueue = window._messageQueue.filter(function(item) { return item.id !== id; });
+    window._saveQueue();
+    window._updateQueueUI();
 };
 
 window._updateQueueUI = function() {
@@ -11254,12 +11603,9 @@ window._updateQueueUI = function() {
     var qBadge = getEl('queueBarBadge');
     var qList = getEl('queueMsgList');
     var qSummary = getEl('queueCollapsedSummary');
-    var qArr = window._getChatQueue(currentChatId);
-    var qCount = qArr.length;
-    // 也显示其他聊天有多少在排队
-    var totalCount = window._getTotalQueueCount();
+    var qCount = window._messageQueue.length;
     
-    // 有队列消息就显示
+    // 有队列消息就显示,不依赖 isTypingMap(让用户随时看到队列)
     var showBar = qCount > 0;
     if (qBar) qBar.classList.toggle('hidden', !showBar);
     
@@ -11270,15 +11616,13 @@ window._updateQueueUI = function() {
     
     // 折叠状态摘要
     if (qSummary) {
-        if (qCount === 0 && totalCount === 0) {
+        if (qCount === 0) {
             qSummary.textContent = '';
-        } else if (qCount === 0 && totalCount > 0) {
-            qSummary.textContent = '— 其他聊天 ' + totalCount + ' 条排队中';
         } else if (qCount === 1) {
-            var _firstText = (qArr[0] && qArr[0].text || '').substring(0, 20);
-            qSummary.textContent = '— ' + _firstText + (qArr[0].text && qArr[0].text.length > 20 ? '...' : '');
+            var _firstText = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 20);
+            qSummary.textContent = '— ' + _firstText + (window._messageQueue[0].text && window._messageQueue[0].text.length > 20 ? '...' : '');
         } else {
-            var _first2 = (qArr[0] && qArr[0].text || '').substring(0, 15);
+            var _first2 = (window._messageQueue[0] && window._messageQueue[0].text || '').substring(0, 15);
             qSummary.textContent = '— ' + _first2 + '... 等' + qCount + '条';
         }
     }
@@ -11291,7 +11635,7 @@ window._updateQueueUI = function() {
     }
     
     var html = '';
-    qArr.forEach(function(item, idx) {
+    window._messageQueue.forEach(function(item, idx) {
         var text = (item.text || '').substring(0, 80);
         if ((item.text || '').length > 80) text += '...';
         var fileIcon = '';
@@ -11309,40 +11653,6 @@ window._updateQueueUI = function() {
             '</div>';
     });
     qList.innerHTML = html;
-};
-
-/** 处理 document 点击: 点浮窗外则折叠队列 */
-window._handleQueueDocClick = function(e) {
-    var qBar = getEl('queueBar');
-    if (!qBar || qBar.classList.contains('hidden')) return;
-    if (qBar.classList.contains('collapsed')) return;
-    if (qBar.contains(e.target)) return;
-    qBar.classList.add('collapsed');
-};
-
-/** 切换折叠/展开 */
-window._toggleQueueCollapse = function() {
-    var qBar = getEl('queueBar');
-    if (qBar) qBar.classList.toggle('collapsed');
-};
-
-/** 清空当前聊天队列 */
-window._clearAllQueue = function() {
-    delete window._queuesByChat[currentChatId];
-    window._saveQueue();
-    window._updateQueueUI();
-    showToast('🗑️ 当前聊天队列已清空', 'info', 1500);
-};
-
-/** 移除单条队列消息(跨聊天查找) */
-window._removeQueueItem = function(id) {
-    Object.keys(window._queuesByChat).forEach(function(cid) {
-        if (window._queuesByChat[cid]) {
-            window._queuesByChat[cid] = window._queuesByChat[cid].filter(function(item) { return item.id !== id; });
-        }
-    });
-    window._saveQueue();
-    window._updateQueueUI();
 };
 
 window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesForRegen) {
@@ -11402,13 +11712,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
                 });
                 var _qId = ++window._queueIdCounter;
-                window._getChatQueue(chatId).push({ id: _qId, text: _qText, files: safeFiles, chatId: chatId });
+                window._messageQueue.push({ id: _qId, text: _qText, files: safeFiles });
                 
                 pendingFiles = [];
                 if (_inputEl) { _inputEl.value = ''; window.autoResize(_inputEl); }
                 window._saveQueue();
                 window._updateQueueUI();
-                showToast('⏳ 已推入消息队列 (当前聊天 ' + window._getChatQueue(chatId).length + ' 条)', 'info', 2000);
+                showToast('⏳ 已推入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
             }
             return;
         }
@@ -11550,8 +11860,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // ★ 非工具调用模式下:自动分析上传的图片并告诉模型
-    // 当使用不支持工具的模型(如deepseek-r1)时,AI无法调用 analyze_image 工具
-    // 因此需要在上游自动完成图片分析,将结果注入上下文
+    // 手动关闭搜索工具调用 或 模型不支持工具时，AI无法调用 analyze_image
     if (currentMessageHasImages && !useToolCall) {
         var _allImageAnalyses = [];
         var _imageFiles = files ? files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }) : [];
@@ -11796,7 +12105,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }).join(' ');
     const estimated = estimateTokens(totalText);
     // ★ 完全按用户配置,不按模型自动调整
-    const requestedTokens = parseInt(getVal('maxTokens')) || 4096;
+    let requestedTokens = parseInt(getVal('maxTokens')) || 4096;
 
     // 构建请求体
     const body = {
@@ -12114,7 +12423,50 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ 模型配置:集中清理 body 中模型不支持的参数
     _getModelCfg().sanitizeBody(modelName, body);
 
-    const timeout = parseInt(getVal('requestTimeout')) * 1000;
+    // ★ 图像模型需要更长超时 (生成图片可达 2-15 分钟)
+    var _isImageModel = modelName.toLowerCase().indexOf('image') !== -1
+        || modelName.toLowerCase().indexOf('dall-e') !== -1
+        || modelName.toLowerCase().indexOf('imagen') !== -1
+        || modelName.toLowerCase().indexOf('flux') !== -1;
+    // ★ 图像模型: 强制非流式 + 清理历史 base64 图片
+    if (_isImageModel) {
+        // ★ 图像模型不能流式 (流式不返回图片数据)
+        body.stream = false;
+        // ★ 添加 modalities 和 image_config (GPT Image 模型必须)
+        if (!body.modalities) {
+            body.modalities = ['image', 'text'];
+        }
+        if (!body.image_config) {
+            var _imgSize = localStorage.getItem('imageSize') || '1K';
+            var _imgRatio = localStorage.getItem('imageAspectRatio') || '1:1';
+            body.image_config = {
+                aspect_ratio: _imgRatio,
+                image_size: _imgSize
+            };
+        }
+        // 限制 max_tokens 防止 context overflow (模型配置已设 256000,这是安全帽)
+        if (requestedTokens > 256000) {
+            requestedTokens = 256000;
+            body.max_tokens = 256000;
+        }
+        // 清理对话历史中的 base64 图片数据 (大量 token，会导致 context overflow)
+        if (body.messages) {
+            for (var _imi = 0; _imi < body.messages.length; _imi++) {
+                var _imm = body.messages[_imi];
+                if (typeof _imm.content === 'string') {
+                    _imm.content = _imm.content.replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]{100,}/g, '[图片]');
+                } else if (Array.isArray(_imm.content)) {
+                    _imm.content = _imm.content.map(function(c) {
+                        if (c.type === 'image_url' && c.image_url && c.image_url.url) {
+                            if (c.image_url.url.startsWith('data:')) return {type:'text',text:'[图片]'};
+                        }
+                        return c;
+                    });
+                }
+            }
+        }
+    }
+    const timeout = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
     const timeoutId = setTimeout(() => abortMain.abort(), timeout);
     const startTime = Date.now();
 
@@ -12226,7 +12578,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
             // ★ 硬编码终极防护: 已知不支持工具的模型直接剥离 tools
             var _modelStr = (body.model || '').toLowerCase();
-            var _noToolKeywords = ['deepseek-r1', 'deepseek-reasoner', 'qwq'];
+            var _noToolKeywords = ['deepseek-r1', 'deepseek-reasoner', 'qwq',
+                'gpt-5.4-image', 'gpt-4o-image', 'image-01', 'image-02', 'dall-e', 'dalle', 'imagen'];
             if (body.tools && _noToolKeywords.some(function(k){return _modelStr.indexOf(k) !== -1;})) {
                 console.log('[HARD-SAFE] 模型', body.model, '禁止工具,硬编码移除');
                 delete body.tools;
@@ -12254,18 +12607,60 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             }
 
+            // ★ 可恢复流式: 开关打开时走后端引擎
+            // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
+            var useStream = _isImageModel ? false : getChecked('streamToggle');
+            var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
+            var _isContinuation = (toolCallCount > 0); // 工具调用次数>0说明是递归延续
+            var _useRS = useStream && _rsEnabled && !_isContinuation;
+            if (_useRS) {
+                var _rsResult = await ResumeStream.create(
+                    body.messages,
+                    { model: body.model, apiKey: getVal('apiKey'), baseUrl: getVal('baseUrl'),
+                      temp: body.temperature, tokens: body.max_tokens, tools: body.tools },
+                    chatId, pendingMsg
+                );
+                if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
+                    clearTimeout(timeoutIdVal);
+                    usage = _rsResult.usage;
+                    toolCalls = _rsResult.toolCalls || [];
+                    pendingMsg.content = _rsResult.fullText || '';
+                    if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
+                } else {
+                    _useRS = false;
+                }
+            }
+
+            if (!_useRS) {
+            // ★ 图像模型: 显示生成进度 (生成图片可能需要 1-15 分钟)
+            var _imgPlaceholder = null;
+            var _imgTimerInterval = null;
+            if (_isImageModel && currentBubble) {
+                _imgPlaceholder = document.createElement('div');
+                _imgPlaceholder.id = 'image-placeholder';
+                _imgPlaceholder.style.cssText = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
+                _imgPlaceholder.innerHTML = '<div style="font-size:32px;margin-bottom:12px;">🎨</div><div style="font-size:18px;font-weight:600;">正在生成图片...</div><div id="img-gen-timer" style="font-size:13px;margin-top:8px;opacity:0.8;">已等待 0s</div><div style="font-size:11px;margin-top:8px;opacity:0.6;">图像生成最多需要 15 分钟</div>';
+                currentBubble.querySelector('.markdown-body')?.appendChild(_imgPlaceholder);
+                var _imgStart = Date.now();
+                _imgTimerInterval = setInterval(function() {
+                    var el = document.getElementById('img-gen-timer');
+                    if (el) el.textContent = '已等待 ' + Math.floor((Date.now() - _imgStart) / 1000) + 's';
+                }, 1000);
+            }
+
             const res = await fetch(_reqUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
                 body: JSON.stringify(body),
                 signal: abortCtrl.signal
             });
+
+            // ★ 图像模型: 不清除进度条, 等图片实际渲染后再清除
             clearTimeout(timeoutIdVal);
             if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
 
             const model = getVal('modelSelect') || '';
             const isMiniMax = model.toLowerCase().includes('minimax');
-            const useStream = getChecked('streamToggle');
 
             if (useStream) {
                 try {
@@ -12331,12 +12726,69 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             sessionUsage.totalCost += pt2 * 0.5 + ct2 * 2;
                         }
                         toolCalls = _nsResult.toolCalls || [];
+                        if (_nsResult.generatedImages && _nsResult.generatedImages.length > 0) {
+                            if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
+                            for (var _gii2 = 0; _gii2 < _nsResult.generatedImages.length; _gii2++) {
+                                if (pendingMsg.generatedImages.indexOf(_nsResult.generatedImages[_gii2]) === -1) {
+                                    pendingMsg.generatedImages.push(_nsResult.generatedImages[_gii2]);
+                                    if (_gii2 === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _nsResult.generatedImages[_gii2];
+                                    // ★ 上传到服务器,确保刷新后图片不消失
+                                    var _imgSf = _nsResult.generatedImages[_gii2];
+                                    if (_imgSf && !_imgSf.startsWith(window.location.origin) && !_imgSf.startsWith('/oneapichat')) {
+                                        (function(_origSf, _sfIdx) {
+                                            uploadImageToServer(_origSf).then(function(srvUrl) {
+                                                if (srvUrl) {
+                                                    var _pSf = pendingMsg.generatedImages.indexOf(_origSf);
+                                                    if (_pSf !== -1) pendingMsg.generatedImages[_pSf] = srvUrl;
+                                                    if (pendingMsg.generatedImage === _origSf) pendingMsg.generatedImage = srvUrl;
+                                                    var _cSf = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                                    if (_cSf !== -1) {
+                                                        var _cmSf = chats[chatId].messages[_cSf];
+                                                        if (_cmSf.generatedImages && _cmSf.generatedImages[_sfIdx] === _origSf) _cmSf.generatedImages[_sfIdx] = srvUrl;
+                                                        if (_cmSf.generatedImage === _origSf) _cmSf.generatedImage = srvUrl;
+                                                    }
+                                                }
+                                            }).catch(function(e) {
+                                                console.warn('[ImageModel] 上传流式降级图片失败:', e.message);
+                                            });
+                                        })(_imgSf, _gii2);
+                                    }
+                                }
+                            }
+                            // 直接插入 DOM
+                            var _tb2 = currentBubble || activeBubbleMap[chatId];
+                            if (_tb2) {
+                                _tb2.classList.remove('typing');
+                                var _ph2 = _tb2.querySelector('#image-placeholder');
+                                if (_ph2) _ph2.remove();
+                            }
+                        }
                     } else {
                         throw streamErr;
                     }
                 }
             } else {
-                const result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
+                var result;
+                try {
+                    result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
+                } catch(_hnsErr) {
+                    console.error('[sendMessage] handleNonStream crashed:', _hnsErr.message, _hnsErr.stack);
+                    // 兜底: 保证气泡至少可见,如果有提取到的图片也可以渲染
+                    result = { fullText: '', reasoningText: '', usage: null, toolCalls: [], generatedImages: pendingMsg.generatedImages || [] };
+                    // ★ 确保 pendingMsg 有基本内容,防止刷新后消息消失
+                    if (!pendingMsg.content) pendingMsg.content = '(图片生成中发生内部错误,但图片已保存)';
+                    if (currentBubble) {
+                        currentBubble.classList.remove('typing');
+                        var _phHns = currentBubble.querySelector('#image-placeholder');
+                        if (_phHns) _phHns.remove();
+                        // 显示兜底文本
+                        var _mbHns = currentBubble.querySelector('.markdown-body');
+                        if (_mbHns && !_mbHns.textContent.trim()) {
+                            _mbHns.innerHTML = '<p>' + pendingMsg.content + '</p>';
+                        }
+                    }
+                }
+                console.log('[ImageModel DEBUG] result.generatedImages:', result.generatedImages ? result.generatedImages.length : 'undefined/null', 'toolCalls len:', (result.toolCalls || []).length);
                 usage = result.usage;
                 if (usage) {
                     var _pt3 = usage.prompt_tokens || usage.input_tokens || 0;
@@ -12354,7 +12806,79 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     sessionUsage.totalCost += pt3 * 0.5 + ct3 * 2;
                 }
                 toolCalls = result.toolCalls || [];
+                // ★ 图像模型生成的图片 — 直接插入 DOM (不依赖后续渲染)
+                if (result.generatedImages && result.generatedImages.length > 0) {
+                    console.log('[ImageModel] inserting', result.generatedImages.length, 'images into DOM');
+                    if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
+                    // ★ 清除占位符
+                    if (currentBubble) {
+                        var _ph = currentBubble.querySelector('#image-placeholder');
+                        if (_ph) _ph.remove();
+                    }
+                    // ★ 直接插入图片到气泡
+                    var _targetBubble = currentBubble || activeBubbleMap[chatId];
+                    if (_targetBubble) {
+                        var _imgCont = _targetBubble.querySelector('.generated-images-container');
+                        if (!_imgCont) {
+                            _imgCont = document.createElement('div');
+                            _imgCont.className = 'generated-images-container';
+                            _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+                            _targetBubble.appendChild(_imgCont);
+                        }
+                        result.generatedImages.forEach(function(_imgData, _idx) {
+                            // ★ 去重: handleNonStream 内部可能已渲染,避免重复
+                            if (pendingMsg.generatedImages.indexOf(_imgData) === -1) {
+                                pendingMsg.generatedImages.push(_imgData);
+                                if (_idx === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _imgData;
+                                // ★ 上传到服务器,确保刷新后图片不消失 (与 tool call 路径行为一致)
+                                if (_imgData && !_imgData.startsWith(window.location.origin) && !_imgData.startsWith('/oneapichat')) {
+                                    (function(_origUrl, _di) {
+                                        uploadImageToServer(_origUrl).then(function(srvUrl) {
+                                            if (srvUrl) {
+                                                var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
+                                                if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
+                                                if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                                // ★ 同步到 chats
+                                                var _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                                if (_cmi !== -1) {
+                                                    var _cmsg = chats[chatId].messages[_cmi];
+                                                    if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _origUrl) _cmsg.generatedImages[_di] = srvUrl;
+                                                    if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
+                                                }
+                                            }
+                                        }).catch(function(e) {
+                                            console.warn('[ImageModel] 上传直接生成图片失败:', e.message);
+                                        });
+                                    })(_imgData, _idx);
+                                }
+                            }
+                            // ★ 去重 DOM: 检查是否已有相同 src 的图片
+                            var _existingImgs = _imgCont.querySelectorAll('img');
+                            var _alreadyExists = false;
+                            for (var _exi = 0; _exi < _existingImgs.length; _exi++) {
+                                if (_existingImgs[_exi].src === (_imgData.startsWith('data:') ? _imgData : _imgData)) {
+                                    _alreadyExists = true; break;
+                                }
+                            }
+                            if (_alreadyExists) return;
+                            var _wrap = document.createElement('div');
+                            _wrap.style.cssText = 'position:relative;cursor:pointer;';
+                            var _imgEl = document.createElement('img');
+                            _imgEl.src = _imgData.startsWith('data:') ? _imgData : _imgData;
+                            _imgEl.decoding = 'async';
+                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:8px;display:block;';
+                            _imgEl.onerror = function() { _imgEl.style.display = 'none'; };
+                            _wrap.appendChild(_imgEl);
+                            _imgCont.appendChild(_wrap);
+                        });
+                        _targetBubble.classList.remove('typing');
+                    }
+                } else {
+                    console.log('[ImageModel] no images in result');
+                }
             }
+            } // end if (!_useRS)
+
             // 处理工具调用
             if (toolCalls.length > 0) {
                 toolCallCount++;
@@ -13100,7 +13624,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
                 status.textContent = '🎨 正在生成图片...';
 
-                // 添加图片占位符(紫色渐变+脉冲动画)
+                // ★ 添加图片占位符: 先清除旧占位符,避免重复
+                var _oldPh = currentBubble.querySelector('#image-placeholder');
+                if (_oldPh) _oldPh.remove();
                 const placeholder = document.createElement('div');
                 placeholder.id = 'image-placeholder';
                 placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
@@ -13135,15 +13661,34 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     var _imgF = _imgUrlsFinal[_giF];
                     pendingMsg.generatedImages.push(_imgF);
                     if (_giF === 0) pendingMsg.generatedImage = _imgF;
-                    // 异步上传到服务器(不阻塞)
-                    if (_imgF && !_imgF.startsWith(window.location.origin)) {
-                        uploadImageToServer(_imgF).then(function(srvUrl) {
-                            if (srvUrl) console.log('[Image] 已上传生成图片:', srvUrl);
-                        }).catch(function(e) {
-                            console.warn('[Image] 上传生成图片失败:', e.message);
-                        });
+                    // 异步上传到服务器,上传成功后替换为服务器URL(避免localStorage溢出)
+                    if (_imgF && !_imgF.startsWith(window.location.origin) && !_imgF.startsWith('/oneapichat')) {
+                        (function(_origUrl, _idx) {
+                            uploadImageToServer(_origUrl).then(function(srvUrl) {
+                                if (srvUrl) {
+                                    console.log('[Image] 已上传生成图片:', srvUrl);
+                                    // ★ 替换 pendingMsg 中的 base64 为服务器 URL
+                                    var _pos = pendingMsg.generatedImages.indexOf(_origUrl);
+                                    if (_pos !== -1) pendingMsg.generatedImages[_pos] = srvUrl;
+                                    if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                    // ★ 同步到 chats 消息对象
+                                    var _msgIdx = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                    if (_msgIdx !== -1) {
+                                        var _cm = chats[chatId].messages[_msgIdx];
+                                        if (_cm.generatedImages && _cm.generatedImages[_idx] === _origUrl) _cm.generatedImages[_idx] = srvUrl;
+                                        if (_cm.generatedImage === _origUrl) _cm.generatedImage = srvUrl;
+                                    }
+                                    // ★ 图片URL替换后立即保存,防止刷新丢失
+                                    slimSaveChats();
+                                }
+                            }).catch(function(e) {
+                                console.warn('[Image] 上传生成图片失败:', e.message);
+                            });
+                        })(_imgF, _giF);
                     }
                 }
+                // ★ 图片已添加到消息,立即保存到 localStorage 防止刷新丢失
+                slimSaveChats();
                 toolResult = { result: '\u2705 ' + _imgUrlsFinal.length + '\u5f20\u56fe\u7247\u5df2\u751f\u6210' };
             } else {
                 toolResult = { result: '[\u56fe\u7247\u751f\u6210\u5931\u8d25]' };
@@ -13238,7 +13783,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 // ★ 逐张分析所有参考图,构建完整描述
                                 var _allDescs = [];
                                 for (var _ai = 0; _ai < _allImages.length; _ai++) {
-                                    var _imgSrc = _allImages[_ai].serverUrl || _allImages[_ai].content || '';
+                                    // 直连 API 优先 base64 content (HTTP URL 会导致 MiniMax 报 invalid image URL)
+                                    var _imgSrc = (_isDirectVision ? (_allImages[_ai].content || _allImages[_ai].serverUrl) : (_allImages[_ai].serverUrl || _allImages[_ai].content)) || '';
                                     if (!_imgSrc) continue;
                                     if (currentChatId === chatId) {
                                         var _cbI2i = activeBubbleMap[chatId];
@@ -13276,12 +13822,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                     }
                                 }
 
-                                // ★ 调用图生图 API(用第一张图作为主参考,所有描述写入 prompt)
+                                // ★ 调用图生图 API — 传递所有参考图 (GPT Image 原生支持多图)
+                                // 收集所有参考图的 URL
+                                var _allRefUrls = _allImages.map(function(img) {
+                                    return img.serverUrl || img.content || '';
+                                }).filter(function(u) { return u; });
                                 const i2iResult = await window.generateImageI2I(fullPrompt, primaryImage, {
                                     model: args.model || localStorage.getItem('imageModel') || 'image-01',
                                     aspect_ratio: args.aspect_ratio,
                                     seed: args.seed,
-                                    n: args.n
+                                    n: args.n,
+                                    reference_images: _allRefUrls,
+                                    mask_image: args.mask_image || null
                                 });
                                 if (i2iResult) {
                                     if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
@@ -13290,16 +13842,36 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                         var _imgI2i = _imgUrlsI2i[_giI2i];
                                         pendingMsg.generatedImages.push(_imgI2i);
                                         if (_giI2i === 0) pendingMsg.generatedImage = _imgI2i;
-                                        if (_imgI2i && !_imgI2i.startsWith(window.location.origin)) {
-                                            uploadImageToServer(_imgI2i).then(function(srvUrl) {
-                                                if (srvUrl) console.log('[Image] i2i已上传:', srvUrl);
-                                            }).catch(function(e) {
-                                                console.warn('[Image] i2i上传失败:', e.message);
-                                            });
+                                        // 异步上传到服务器,上传成功后替换为服务器URL(避免localStorage溢出)
+                                        if (_imgI2i && !_imgI2i.startsWith(window.location.origin) && !_imgI2i.startsWith('/oneapichat')) {
+                                            (function(_origUrl, _idx) {
+                                                uploadImageToServer(_origUrl).then(function(srvUrl) {
+                                                    if (srvUrl) {
+                                                        console.log('[Image] i2i已上传:', srvUrl);
+                                                        // ★ 替换 pendingMsg 中的 base64 为服务器 URL
+                                                        var _pos = pendingMsg.generatedImages.indexOf(_origUrl);
+                                                        if (_pos !== -1) pendingMsg.generatedImages[_pos] = srvUrl;
+                                                        if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                                        // ★ 同步到 chats 消息对象
+                                                        var _msgIdx = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                                        if (_msgIdx !== -1) {
+                                                            var _cm = chats[chatId].messages[_msgIdx];
+                                                            if (_cm.generatedImages && _cm.generatedImages[_idx] === _origUrl) _cm.generatedImages[_idx] = srvUrl;
+                                                            if (_cm.generatedImage === _origUrl) _cm.generatedImage = srvUrl;
+                                                        }
+                                                        // ★ 图片URL替换后立即保存,防止刷新丢失
+                                                        slimSaveChats();
+                                                    }
+                                                }).catch(function(e) {
+                                                    console.warn('[Image] i2i上传失败:', e.message);
+                                                });
+                                            })(_imgI2i, _giI2i);
                                         }
                                     }
                                     toolResult = { result: '\u2705 \u56fe\u7247\u5df2\u751f\u6210' };
                                 } else {
+                                    // ★ 图片已添加到消息,立即保存到 localStorage 防止刷新丢失
+                                    slimSaveChats();
                                     toolResult = { result: i2iResult };
                                 }
                             } catch (e) {
@@ -13380,12 +13952,26 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                         if (_stImg) _stImg.textContent = '🖼️ 正在分析第' + (imgIdx + 1) + '/' + imageFiles.length + '张图片...';
                                     }
                                 }
-                                // ★ 优先使用服务器URL(已预上传),减小跨代理传输
-                                var analyzeInput = imageFile.content;
-                                if (imageFile.serverUrl && typeof imageFile.serverUrl === 'string') {
-                                    // 将相对URL转为完整URL
-                                    var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
-                                    analyzeInput = fullUrl;
+                                // ★ 根据 API 类型选择最佳图片源:
+                                // 直连 API (MiniMax) 需要 data: URL,否则会报 invalid image URL
+                                // MCP 代理可以用 HTTP URL
+                                var _visUrl = localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '/mcp';
+                                var _isDirectVision = _visUrl.toLowerCase().indexOf('/mcp') === -1;
+                                var analyzeInput;
+                                if (_isDirectVision) {
+                                    // 直连模式: 优先 base64 content, HTTP URL 会导致 MiniMax 报错
+                                    analyzeInput = imageFile.content || '';
+                                    if ((!analyzeInput || !analyzeInput.startsWith('data:')) && imageFile.serverUrl) {
+                                        var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
+                                        analyzeInput = fullUrl;
+                                    }
+                                } else {
+                                    // MCP 代理: 优先服务器 URL
+                                    analyzeInput = imageFile.content || '';
+                                    if (imageFile.serverUrl && typeof imageFile.serverUrl === 'string') {
+                                        var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
+                                        analyzeInput = fullUrl;
+                                    }
                                 }
                                 const analyzeResult = await window.analyzeImage(analyzeInput, focus);
                                 toolResult = { result: analyzeResult };
@@ -13654,6 +14240,84 @@ window.generateImage = async (prompt, options = {}) => {
 };
 
 // ===== OpenRouter GPT Image 2 图像生成 =====
+// ★ 通用图片提取: 支持多种 API 返回格式 (chat/completions, images/generations 等)
+function _extractImagesFromResponse(data) {
+    var imgs = [];
+
+    // 1. chat/completions 格式: choices[0].message.images
+    if (data.choices && data.choices.length > 0) {
+        var msg = data.choices[0].message;
+        if (msg && msg.images && Array.isArray(msg.images)) {
+            msg.images.forEach(function(img) {
+                if (img.image_url && img.image_url.url) imgs.push(img.image_url.url);
+                else if (img.url) imgs.push(img.url);
+                else if (typeof img === 'string') imgs.push(img);
+            });
+        }
+        // 2. chat/completions 格式: content 是数组(含 image_url 部分)
+        if (imgs.length === 0 && msg && Array.isArray(msg.content)) {
+            msg.content.forEach(function(c) {
+                if (c && c.type === 'image_url' && c.image_url && c.image_url.url) {
+                    imgs.push(c.image_url.url);
+                }
+            });
+        }
+        // 3. content 字符串中的 base64
+        if (imgs.length === 0 && msg && typeof msg.content === 'string') {
+            var _bm = msg.content.match(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]{100,}/g);
+            if (_bm) imgs = _bm;
+        }
+    }
+
+    // 4. OpenAI images/generations 格式: data.data[{url, b64_json}]
+    if (imgs.length === 0 && data.data && Array.isArray(data.data)) {
+        data.data.forEach(function(d) {
+            if (d.url) imgs.push(d.url);
+            else if (d.b64_json) imgs.push('data:image/png;base64,' + d.b64_json);
+            else if (d.image_url) imgs.push(d.image_url);
+            else if (typeof d === 'string') imgs.push(d);
+        });
+    }
+
+    // 5. 顶层 images 数组
+    if (imgs.length === 0 && data.images && Array.isArray(data.images)) {
+        data.images.forEach(function(img) {
+            if (img.image_url && img.image_url.url) imgs.push(img.image_url.url);
+            else if (img.url) imgs.push(img.url);
+            else if (typeof img === 'string') imgs.push(img);
+        });
+    }
+
+    // 6. 顶层单图字段
+    if (imgs.length === 0) {
+        if (data.image_url) imgs.push(data.image_url);
+        if (data.url && (data.url.startsWith('http') || data.url.startsWith('data:'))) imgs.push(data.url);
+    }
+
+    // 7. 深度遍历: 搜索所有以 http 开头或 data:image 开头的字符串字段
+    if (imgs.length === 0) {
+        function _deepSearch(obj, depth) {
+            if (!obj || typeof obj !== 'object' || depth > 10) return;
+            if (Array.isArray(obj)) {
+                for (var i = 0; i < obj.length; i++) _deepSearch(obj[i], depth + 1);
+            } else {
+                for (var k in obj) {
+                    if (!obj.hasOwnProperty(k)) continue;
+                    var v = obj[k];
+                    if (typeof v === 'string' && (v.startsWith('http') || v.startsWith('data:image/'))) {
+                        imgs.push(v);
+                    } else if (typeof v === 'object') {
+                        _deepSearch(v, depth + 1);
+                    }
+                }
+            }
+        }
+        _deepSearch(data, 0);
+    }
+
+    return imgs;
+}
+
 async function generateImageOpenRouter(prompt, options = {}) {
     // 获取配置: 使用独立的 imageApiKeyOpenrouter 和 imageBaseUrlOpenrouter
     let baseUrl = (localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api').replace(/\/$/, '');
@@ -13693,7 +14357,8 @@ async function generateImageOpenRouter(prompt, options = {}) {
             ],
             modalities: ['image', 'text'],
             image_config: imageConfig,
-            n: n
+            n: n,
+            stream: false
         };
 
         const response = await fetch(chatUrl, {
@@ -13702,7 +14367,8 @@ async function generateImageOpenRouter(prompt, options = {}) {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + apiKey
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(900000)
         });
 
         if (!response.ok) {
@@ -13717,47 +14383,130 @@ async function generateImageOpenRouter(prompt, options = {}) {
             throw new Error('OpenRouter 错误: ' + (data.error.message || JSON.stringify(data.error)));
         }
 
-        // 从 message.images 提取图片(base64 data URLs)
-        const images = [];
-        if (data.choices && data.choices.length > 0) {
-            const msg = data.choices[0].message;
-            if (msg && msg.images && Array.isArray(msg.images)) {
-                msg.images.forEach(function(img) {
-                    if (img.image_url && img.image_url.url) {
-                        images.push(img.image_url.url);
-                    }
-                });
-            }
-        }
-
-        // 备用: 检查 content 中是否包含图片 URL
-        if (images.length === 0 && data.choices && data.choices.length > 0) {
-            const content = data.choices[0].message.content;
-            if (content) {
-                const dataUrlMatch = content.match(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/);
-                if (dataUrlMatch) {
-                    images.push(dataUrlMatch[0]);
-                }
-            }
-        }
+        // ★ 使用通用提取器支持多种 API 返回格式
+        const images = _extractImagesFromResponse(data);
 
         if (images.length > 0) {
-            return images.length === 1 ? images[0] : images;
+            // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
+            var _uploaded = [];
+            for (var _ui = 0; _ui < images.length; _ui++) {
+                var _srvUrl = await uploadImageToServer(images[_ui]);
+                _uploaded.push(_srvUrl || images[_ui]); // 上传失败则保留原始 URL
+            }
+            return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
         }
 
-        throw new Error('GPT Image 2 未返回图片,响应: ' + JSON.stringify(data).substring(0, 300));
+        throw new Error('GPT Image 2 未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
     } catch (e) {
         console.error('[generateImageOpenRouter] error:', e);
         throw e;
     }
 }
 
+// ★ GPT Image 2 原生图生图 — chat/completions + 多图参考
+async function _gptImageI2I(prompt, primaryImage, options = {}) {
+    let baseUrl = (localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api').replace(/\/$/, '');
+    if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
+    const rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
+    let apiKey = '';
+    try { apiKey = decrypt(rawKey) || ''; } catch(e) {}
+    if (!apiKey) throw new Error('未配置 OpenRouter API Key');
+
+    const model = options.model || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    const chatUrl = baseUrl + '/chat/completions';
+    const n = options.n || 1;
+    const aspectRatio = options.aspect_ratio || '1:1';
+    const imageSize = options.image_size || '1K';
+
+    // 构建带参考图的消息
+    var content = [];
+    // 添加参考图片 (支持多张)
+    var refImages = [];
+    if (options.reference_images && Array.isArray(options.reference_images)) {
+        refImages = options.reference_images;
+    } else if (primaryImage) {
+        refImages = [primaryImage];
+    }
+    for (var ri = 0; ri < refImages.length; ri++) {
+        var img = refImages[ri];
+        // ★ 修复: 将相对路径(如 /oneapichat/uploads/...) 转为完整 URL,否则不会被发送到 API
+        if (img && !img.startsWith('data:') && !img.startsWith('http')) {
+            img = window.location.origin + img;
+        }
+        if (img && (img.startsWith('data:') || img.startsWith('http'))) {
+            content.push({ type: 'image_url', image_url: { url: img, detail: 'high' } });
+        }
+    }
+    // 添加文本提示词 (描述如何编辑/变换参考图)
+    var fullPrompt = prompt || '基于参考图生成新图片';
+    if (refImages.length > 1) {
+        fullPrompt = '参考以下' + refImages.length + '张图片，' + fullPrompt;
+    }
+    content.push({ type: 'text', text: fullPrompt });
+
+    try {
+        const body = {
+            model: model,
+            messages: [{ role: 'user', content: content }],
+            modalities: ['image', 'text'],
+            image_config: { aspect_ratio: aspectRatio, image_size: imageSize },
+            n: n,
+            stream: false
+        };
+
+        // 可选: 遮罩图 (mask)
+        if (options.mask_image && (options.mask_image.startsWith('data:') || options.mask_image.startsWith('http'))) {
+            body.mask_image_url = options.mask_image;
+        }
+
+        const response = await fetch(chatUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(900000)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text().catch(function(){return response.statusText;});
+            throw new Error('GPT Image i2i 请求失败 (' + response.status + '): ' + errText.substring(0, 200));
+        }
+
+        const data = await response.json();
+        if (data.error) {
+            throw new Error('GPT Image 错误: ' + (data.error.message || JSON.stringify(data.error)));
+        }
+
+        // ★ 使用通用提取器支持多种 API 返回格式
+        const images = _extractImagesFromResponse(data);
+
+        if (images.length === 0) throw new Error('GPT Image i2i 未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
+        // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
+        var _uploadedI2i = [];
+        for (var _ui = 0; _ui < images.length; _ui++) {
+            var _srvUrl = await uploadImageToServer(images[_ui]);
+            _uploadedI2i.push(_srvUrl || images[_ui]); // 上传失败则保留原始 URL
+        }
+        return _uploadedI2i.length === 1 ? _uploadedI2i[0] : _uploadedI2i;
+
+    } catch(e) {
+        console.error('[gptImageI2I] error:', e);
+        throw e;
+    }
+}
+
 // ==================== 图生图函数 ===================
 window.generateImageI2I = async (prompt, image, options = {}) => {
-    // ★ 图生图: 仅 MiniMax 原生支持,OpenRouter 降级为文生图
     var _i2i_provider = localStorage.getItem('imageProvider') || 'minimax';
+    var _i2i_model = options.model || localStorage.getItem('imageModel') || 'image-01';
+    var _is_gpt_image = _i2i_model.includes('gpt-5.4-image') || _i2i_model.includes('gpt-4o-image') || _i2i_model.includes('gpt-image');
+
+    // ★ GPT Image 2 原生支持图生图 — 用 chat/completions + 多图参考
+    if (_is_gpt_image && _i2i_provider === 'openrouter') {
+        return await _gptImageI2I(prompt, image, options);
+    }
+
+    // OpenRouter 其他模型降级为文生图
     if (_i2i_provider === 'openrouter') {
-        // OpenRouter 不支持图生图,降级为文生图
         return window.generateImage(prompt, options);
     }
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
@@ -13792,10 +14541,15 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
 
     // 添加图生图参考图 - MiniMax API 格式
     // image 可以是 data:image/...;base64,... 或 http://... URL
-    if (image && (image.startsWith('data:') || image.startsWith('http'))) {
+    // ★ 修复: 将相对路径转为完整 URL
+    var _i2iRefImg = image;
+    if (_i2iRefImg && !_i2iRefImg.startsWith('data:') && !_i2iRefImg.startsWith('http')) {
+        _i2iRefImg = window.location.origin + _i2iRefImg;
+    }
+    if (_i2iRefImg && (_i2iRefImg.startsWith('data:') || _i2iRefImg.startsWith('http'))) {
         requestBody.subject_reference = [{
             type: 'character',
-            image_file: image
+            image_file: _i2iRefImg
         }];
     }
 
@@ -14003,7 +14757,7 @@ window.useAlternativeVisionModel = function() {
                                 }
                             }
                             // 如果生成了图片,确保存入消息对象
-                            if (tc.function.name === 'generate_image' && (pendingMsg.generatedImage || pendingMsg.generatedImages)) {
+                            if ((tc.function.name === 'generate_image' || tc.function.name === 'generate_image_i2i') && (pendingMsg.generatedImage || pendingMsg.generatedImages)) {
                                 const msgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
                                 if (msgIdx !== -1) {
                                     if (pendingMsg.generatedImage) chats[chatId].messages[msgIdx].generatedImage = pendingMsg.generatedImage;
@@ -14079,7 +14833,7 @@ window.useAlternativeVisionModel = function() {
                 const newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutId);
-                const newTimeoutVal = parseInt(getVal('requestTimeout')) * 1000;
+                const newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
                 const newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
 
                 // 继续循环获取下一个响应
@@ -14100,6 +14854,7 @@ window.useAlternativeVisionModel = function() {
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
                 var _bubble = activeBubbleMap[chatId];
+                console.log('[ImageModel] completion: chatId match=', (currentChatId === chatId), 'bubble exists=', !!_bubble, 'hasImages=', !!(pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0));
                 if (_bubble) {
                     var _md = _bubble.querySelector('.markdown-body');
                     if (_md && pendingMsg.content) {
@@ -14108,6 +14863,7 @@ window.useAlternativeVisionModel = function() {
                         _bubble.classList.remove('typing');
                     }
                     // ★ 追加生成的图片到气泡(如果有)
+                    console.log('[ImageModel] render: generatedImages count=', pendingMsg.generatedImages ? pendingMsg.generatedImages.length : 0, 'bubble=', !!_bubble);
                     if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
                         var _existingImg = _bubble.querySelector('.generated-images-container');
                         if (!_existingImg) {
@@ -14115,6 +14871,9 @@ window.useAlternativeVisionModel = function() {
                             _imgCont.className = 'generated-images-container';
                             _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
                             _bubble.appendChild(_imgCont);
+                            // ★ 清除图像生成占位符
+                            var _ph = _bubble.querySelector('#image-placeholder');
+                            if (_ph) _ph.remove();
                             // ★ 异步渲染每张图片,避免卡死
                             pendingMsg.generatedImages.forEach(function(_imgData, _idx) {
                                 setTimeout(function() {
@@ -14138,10 +14897,44 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
             }
+            // ★ 确保最后一条用户消息有编辑按钮(sendMessage 时 isLast=false,缺失)
+            if (currentChatId === chatId) {
+                var _userRows = $.chatMessagesContainer.querySelectorAll('.message-row.user');
+                var _lastUserRow = _userRows[_userRows.length - 1];
+                if (_lastUserRow && !_lastUserRow.querySelector('.edit-btn')) {
+                    var _userBubble = _lastUserRow.querySelector('.bubble.user');
+                    var _userText = _userBubble ? (_userBubble.querySelector('.markdown-body')?.textContent || '') : '';
+                    var _editBtn = document.createElement('div');
+                    _editBtn.className = 'msg-action-btn edit-btn';
+                    _editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
+                    _editBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        var _msgs = chats[chatId].messages;
+                        var _idx = _msgs.findIndex(function(m) { return m.role === 'user' && m.text === _userText; });
+                        if (_idx === -1) _idx = _msgs.length - 1;
+                        var _sys = _msgs.filter(function(m) { return m.role === 'system' && !m.temporary && !m.timestamp; });
+                        var _ts = _msgs.find(function(m) { return m.timestamp; });
+                        var _others = _msgs.slice(0, _idx).filter(function(m) { return m.role !== 'system' || m.temporary || m.timestamp; });
+                        chats[chatId].messages = _sys.concat(_others).concat(_ts ? [_ts] : []);
+                        saveChatsDebounced();
+                        loadChat(chatId);
+                        if ($.userInput) {
+                            $.userInput.value = _userText || '';
+                            window.autoResize($.userInput);
+                        }
+                    };
+                    var _existingActions = _lastUserRow.querySelector('.msg-actions');
+                    if (_existingActions) {
+                        _existingActions.insertBefore(_editBtn, _existingActions.firstChild);
+                    }
+                }
+            }
             // ★ 子代理完成报告处理:触发队列中的下一个通知
             if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0) {
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 1000);
             }
+            // ★ 保存聊天到 localStorage (确保图片等数据持久化,工具路径和直接路径都需要)
+            saveChats();
             const defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
             if (!skipUserAdd && chats[chatId].title === defaultTitle) {
                 autoGenerateTitle(chatId);
@@ -14296,7 +15089,7 @@ window.useAlternativeVisionModel = function() {
             clearInterval(window._queuePollTimer);
             window._queuePollTimer = null;
         }
-        setTimeout(function() { window._drainQueue(chatId); }, 300);
+        setTimeout(function() { window._drainQueue(); }, 300);
         // ★ 停止流渲染 RAF 循环
         cleanupStreamState(chatId);
         delete abortControllerMap[chatId];
@@ -14680,13 +15473,8 @@ function saveChats() {
     // ★ 立即保存到服务器(不延迟,异步不阻塞)
     saveChatsToServer();
 
-    // ★ 本地压缩:用 requestIdleCallback 在空闲时执行,不阻塞 UI
-    var _saveSlim = function() { slimSaveChats(); };
-    if (window.requestIdleCallback) {
-        requestIdleCallback(_saveSlim, { timeout: 3000 });
-    } else {
-        setTimeout(_saveSlim, 500);
-    }
+    // ★ 立即保存到 localStorage (图片等关键数据不能等 idle callback)
+    slimSaveChats();
 }
 
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
@@ -14694,8 +15482,8 @@ function compressChatsForStorage(chatsObj) {
     // ★ 精简副本:保留图片等完整数据,仅在 localStorage 超出配额时降级
     var slim = {};
     var chatIds = Object.keys(chatsObj).sort(function(a, b) {
-        var ta = chatsObj[a].updated_at || '';
-        var tb = chatsObj[b].updated_at || '';
+        var ta = String(chatsObj[a].updated_at || '');
+        var tb = String(chatsObj[b].updated_at || '');
         return tb.localeCompare(ta); // 最新的排前面
     });
 
@@ -14717,6 +15505,15 @@ function compressChatsForStorage(chatsObj) {
                 if (msg._webFetchUrls && msg._webFetchUrls.length > 10) {
                     msg._webFetchUrls = msg._webFetchUrls.slice(0, 10);
                 }
+                // ★ 压缩 base64 图片数据: 保留已上传的 serverUrl,清除内联 base64
+                if (msg.generatedImage && msg.generatedImage.startsWith('data:')) {
+                    msg.generatedImage = '';
+                }
+                if (msg.generatedImages && msg.generatedImages.length > 0) {
+                    msg.generatedImages = msg.generatedImages.map(function(gi) {
+                        return (gi && gi.startsWith('data:')) ? '' : gi;
+                    }).filter(Boolean);
+                }
                 return msg;
             });
         }
@@ -14727,10 +15524,23 @@ function compressChatsForStorage(chatsObj) {
 function slimSaveChats() {
     try {
         const slim = compressChatsForStorage(chats);
+        // ★ 调试: 记录保存的图片数据
+        var _imgCount = 0;
+        for (var _sid in slim) {
+            var _smsg = slim[_sid].messages;
+            if (_smsg) {
+                for (var _smi = 0; _smi < _smsg.length; _smi++) {
+                    if (_smsg[_smi].generatedImages && _smsg[_smi].generatedImages.length > 0) {
+                        _imgCount += _smsg[_smi].generatedImages.length;
+                    }
+                }
+            }
+        }
+        console.log('[slimSaveChats] 写入localStorage, 图片数:', _imgCount, '大小:', JSON.stringify(slim).length, 'chars');
         localStorage.setItem('chats', JSON.stringify(slim));
         return true;
     } catch (e) {
-        // localStorage 配额不足,去掉图片后重试
+        console.error('[slimSaveChats] ❌ 写入失败:', e.message);
         try {
             const fallback = {};
             Object.keys(chats).slice(-15).forEach(function(id) {
@@ -14747,6 +15557,15 @@ function slimSaveChats() {
                                 }
                                 return f;
                             });
+                        }
+                        // ★ 清除内联 base64 生成的图片(过大,超出 localStorage 配额)
+                        if (msg.generatedImage && msg.generatedImage.startsWith('data:')) {
+                            msg.generatedImage = '';
+                        }
+                        if (msg.generatedImages && msg.generatedImages.length > 0) {
+                            msg.generatedImages = msg.generatedImages.map(function(gi) {
+                                return (gi && gi.startsWith('data:')) ? '' : gi;
+                            }).filter(Boolean);
                         }
                         return msg;
                     });
@@ -14869,7 +15688,7 @@ window.createNewChat = function () {
     updateHeaderTitle();
 };
 
-window.loadChat = function (id) {
+window.loadChat = async function (id) {
     if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
     currentChatId = id;
     localStorage.setItem('lastChatId', id);
@@ -14880,7 +15699,15 @@ window.loadChat = function (id) {
     container.innerHTML = '';
     applyParagraphPrefix(prefix);
 
-    // ★ 恢复刷新前未完成的流式消息(先清理旧pendingMsg,再恢复)
+    // ★ 可恢复流式续接 (开关打开时尝试)
+    if (localStorage.getItem('__enableResumeStream') === '1') {
+        try {
+            var _ok = await ResumeStream.resume(id);
+            if (_ok) { window._backendRecovered = true; return; }
+        } catch(e) {}
+    }
+
+    // ★ 恢复刷新前未完成的流式消息(旧方案兜底)
     try {
         var savedPartial = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
         if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
@@ -14899,18 +15726,18 @@ window.loadChat = function (id) {
             });
         }
     } catch(e) {}
-    // ★ 标记待恢复:仅当有用户消息且5分钟内才重发续接
-    if (savedPartial && savedPartial.chatId === id && savedPartial.userText) {
-        var _spAge2 = Date.now() - (savedPartial.time || 0);
-        if (_spAge2 < 300000) {
+    // ★ 标记待恢复:仅当流式确实在进行中(有内容且最近)才触发自动续生
+    if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
+        var _age = Date.now() - (savedPartial.time || 0);
+        var _hasContent = (savedPartial.content && savedPartial.content.length > 0) || (savedPartial.reasoning && savedPartial.reasoning.length > 0);
+        if (_hasContent && _age < 120000) {
             window._pendingRecovery = savedPartial;
+        } else {
+            console.log('[loadChat] 跳过过期或不完整的partial恢复, age=' + (_age/1000).toFixed(1) + 's');
         }
-        // ★ 只清理本地的 _savedPartial(_pendingRecovery 已保存)
-        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-    } else {
-        // 即便没续接数据也清理残留
-        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
     }
+    // ★ 清理 localStorage,避免下次重复恢复
+    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
 
     // ★ Agent 模式: 加载记忆/人格/身份,注入 system prompt
     if (id === AGENT_CHAT_ID) {
@@ -14982,7 +15809,7 @@ window.loadChat = function (id) {
                     // 插入工具调用html到文本之前
                     displayText = toolDisplayHtml + displayText;
                 }
-                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null);
+                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial);
                 // ★ 恢复时也渲染 web_fetch 链接列表
                 if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
                     _renderWebFetchUrls(_bubble, m._webFetchUrls);
@@ -15841,10 +16668,17 @@ function initializeApp() {
                 });
             })(chats);
             // 同时清理 messages 数组中 content 为空字符串的空消息
+            // ★ 保留有图片/推理/工具调用的消息 (如 GPT Image 模型 content 为 null)
             Object.keys(chats).forEach(id => {
                 if (chats[id].messages) {
                     chats[id].messages = chats[id].messages.filter(m => {
-                        if (m.role === 'assistant' && (!m.content || m.content.trim() === '')) return false;
+                        if (m.role === 'assistant' && (!m.content || m.content.trim() === '')) {
+                            if (m.generatedImages && m.generatedImages.length > 0) return true;
+                            if (m.generatedImage) return true;
+                            if (m.reasoning) return true;
+                            if (m.tool_calls && m.tool_calls.length > 0) return true;
+                            return false;
+                        }
                         return true;
                     });
                 }
@@ -15855,45 +16689,65 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 刷新后重发未完成消息(从 _pendingRecovery 获取)
+        // ★ 自动续生:检测到刷新前未完成的流式(仅当后端 SSE 未恢复时才触发)
         try {
-            var _spMsg = window._pendingRecovery;
-            if (_spMsg && _spMsg.chatId && _spMsg.userText) {
-                var _spAge = Date.now() - (_spMsg.time || 0);
-                if (_spAge < 300000) {
-                    if (chats[_spMsg.chatId]) {
-                        chats[_spMsg.chatId].messages = chats[_spMsg.chatId].messages.filter(function(m) {
-                            return !m._recovered && !m.partial;
-                        });
-                        slimSaveChats();
-                    }
-                    setTimeout(function() {
-                        if (chats[_spMsg.chatId] && currentChatId !== _spMsg.chatId) {
-                            loadChat(_spMsg.chatId);
-                        }
-                        showToast('🔄 正在续接...', 'info', 4000);
-                        try {
-                            pendingFiles = (_spMsg.userFiles || []).map(function(f) {
-                                return { name: f.name, content: null, isImage: false, type: f.type, size: f.size };
-                            });
-                        } catch(e) { pendingFiles = []; }
-                        window.sendMessage(true, _spMsg.userText, _spMsg.userFiles || []).catch(function(){});
-                    }, 1500);
+            (function _autoRecover() {
+                if (!window._pendingRecovery) return;
+                // ★ 后端 SSE 恢复过就不再从头重发
+                if (window._backendRecovered) { window._pendingRecovery = null; return; }
+                var _rec = window._pendingRecovery;
+                window._pendingRecovery = null;
+                // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<120秒)
+                var _age = Date.now() - (_rec.time || 0);
+                var _hasRealContent = (_rec.content && _rec.content.length > 0) || (_rec.reasoning && _rec.reasoning.length > 0);
+                if (!_hasRealContent || _age > 120000) {
+                    console.log('[AutoRecover] 跳过: 内容不足或超120秒, age=' + (_age/1000).toFixed(1) + 's');
+                    return;
                 }
-                localStorage.removeItem('_activeStreamMsgId');
-                localStorage.removeItem('_activeStreamChatId');
-                localStorage.removeItem('_activeStreamTs');
-            }
-        } catch(e) { console.warn('[Resume] 续接失败:', e.message); }
+                setTimeout(function() {
+                    if (!chats[_rec.chatId]) return;
+                    // 找到用户最后一条消息
+                    var _msgs = chats[_rec.chatId].messages;
+                    var _userText = '', _userFiles = [];
+                    var _prevPartialContent = '', _prevPartialReasoning = '';
+                    for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
+                        if (_msgs[_ri].role === 'user') {
+                            _userText = _msgs[_ri].text || '';
+                            _userFiles = _msgs[_ri].files || [];
+                            break;
+                        }
+                        if (_msgs[_ri]._recovered) {
+                            _prevPartialContent = _msgs[_ri].content || '';
+                            _prevPartialReasoning = _msgs[_ri].reasoning || '';
+                        }
+                    }
+                    if (!_userText && !_userFiles.length && !_prevPartialContent) return;
+                    // ★ 关键:在重新生成前,移除旧的 _recovered 消息(避免新旧混合)
+                    chats[_rec.chatId].messages = _msgs.filter(function(m) { return !m._recovered; });
+                    // ★ 将已流出的部分内容注入为系统上下文,让AI从停下的地方继续
+                    if (_prevPartialContent) {
+                        var _ctxMsg = '以下是之前已生成但未完成的内容,请在此基础上继续,不要重新开始:\n\n' + _prevPartialContent.substring(-1000);
+                        if (_prevPartialReasoning) {
+                            _ctxMsg = '之前的思考过程:\n' + _prevPartialReasoning.substring(-800) + '\n\n已生成但未完成的内容:\n' + _prevPartialContent.substring(-1000) + '\n\n请继续。不要重复前面已有的内容。';
+                        }
+                        window.__internalAgentContext = _ctxMsg;
+                    }
+                    showToast('🔄 正在继续生成...', 'info', 4000);
+                    sendMessage(true, _userText, _userFiles).catch(function(e) {
+                        console.warn('[AutoRecover] 续生失败:', e.message);
+                    });
+                }, 500);
+            })();
+        } catch(e) { console.warn('[AutoRecover] 出错:', e.message); }
 
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {
             if (window._loadQueue && window._loadQueue()) {
-                var _queueLen = window._getTotalQueueCount();
+                var _queueLen = window._messageQueue.length;
                 console.log('[Queue] 恢复 ' + _queueLen + ' 条队列消息');
                 // 如果 AI 当前空闲且有队列消息,自动开始处理
                 if (!isTypingMap[currentChatId] && _queueLen > 0) {
-                    setTimeout(function() { window._drainQueue(currentChatId); }, 1500);
+                    setTimeout(function() { window._drainQueue(); }, 1500);
                 }
                 // 更新队列UI
                 window._updateQueueUI();
@@ -17017,7 +17871,7 @@ window.checkAgentNotifications = function() {
     }
 
     // 先获取引擎心跳(cron通知等)
-    fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(300000) })
+    fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.error) return;
@@ -17040,7 +17894,7 @@ window.checkAgentNotifications = function() {
         }).catch(function() {});
 
     // ★ 同时获取子代理完成通知(新功能)
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(300000) })
+    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) return;
@@ -17122,3 +17976,54 @@ window.appendAgentSystemMessage = function(text, source) {
 
 
 // MARKER_CACHE_TEST_v2
+
+// ★ DEBUG: 控制台诊断函数 — 输入 __dumpImages() 查看图片持久化状态
+window.__dumpImages = function() {
+    console.log('=== 图片持久化诊断 ===');
+    console.log('currentChatId:', currentChatId);
+    if (currentChatId && chats[currentChatId]) {
+        var msgs = chats[currentChatId].messages;
+        console.log('当前聊天消息数:', msgs.length);
+        for (var i = 0; i < msgs.length; i++) {
+            var m = msgs[i];
+            if (m.generatedImages && m.generatedImages.length > 0) {
+                console.log('  消息[' + i + '] role=' + m.role + ' 图片数=' + m.generatedImages.length + ' partial=' + !!m.partial);
+                for (var j = 0; j < m.generatedImages.length; j++) {
+                    var u = m.generatedImages[j];
+                    console.log('    [' + j + '] ' + (u ? u.substring(0, 80) : 'null') + ' (startsWith data: ' + (u && u.startsWith('data:')) + ')');
+                }
+            }
+        }
+        var hasImages = msgs.some(function(m) { return m.generatedImages && m.generatedImages.length > 0; });
+        console.log('聊天中有图片:', hasImages);
+    } else {
+        console.log('无当前聊天');
+    }
+
+    // 检查 localStorage
+    try {
+        var stored = JSON.parse(localStorage.getItem('chats') || '{}');
+        console.log('localStorage chats 键数:', Object.keys(stored).length);
+        if (currentChatId && stored[currentChatId]) {
+            var smsgs = stored[currentChatId].messages || [];
+            for (var si = 0; si < smsgs.length; si++) {
+                var sm = smsgs[si];
+                if (sm.generatedImages && sm.generatedImages.length > 0) {
+                    console.log('  localStorage消息[' + si + '] 图片数=' + sm.generatedImages.length);
+                }
+            }
+        }
+    } catch(e) {
+        console.error('localStorage 读取失败:', e.message);
+    }
+    console.log('=== 诊断完成 ===');
+};
+
+// ★ DEBUG: 强制立即保存并输出状态
+window.__forceSave = function() {
+    console.log('强制保存前状态:');
+    window.__dumpImages();
+    slimSaveChats();
+    console.log('强制保存后状态:');
+    window.__dumpImages();
+};

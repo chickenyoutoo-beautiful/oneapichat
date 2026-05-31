@@ -173,6 +173,21 @@ const configs = [
         alias: ['openai-o'],
     }),
 
+    // GPT Image 模型 (OpenRouter) — 不支持工具调用，图片输出需要大量 token
+    cfg({
+        match: ['gpt-5.4-image', 'gpt-4o-image', 'gpt-image'],
+        supports: [S.VISION, S.STREAM],
+        bannedParams: ['tools', 'tool_choice', 'parallel_tool_calls', 'reasoning_effort',
+            'presence_penalty', 'frequency_penalty', 'logit_bias', 'response_format',
+            'logprobs', 'top_logprobs', 'seed', 'user', 'stop'],
+        bannedBodyKeys: ['tools', 'tool_choice'],
+        contextWindow: 256000,
+        maxOutputTokens: 256000,
+        safetyMargin: 8192,
+        defaultMaxTokens: 256000,
+        noToolsBuiltin: true,
+    }),
+
     // GPT-5 系列 — 支持 reasoning_effort: none | minimal | low | medium | high | xhigh
     // GPT-5.1 默认 reasoning_effort=none
     // GPT-5-Pro 仅支持 reasoning_effort=high

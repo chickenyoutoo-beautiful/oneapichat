@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import threading
+import uuid
 import subprocess
 import requests
 import re
@@ -480,83 +481,6 @@ def _apply_tts(params):
             return f"TTS 失败 (mmx): {err}"
     except Exception as e:
         return f"TTS 异常 (mmx): {str(e)}"
-
-
-def _get_video_duration(input_path):
-    """获取视频时长(秒), 失败返回 0"""
-    try:
-        r = subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",input_path],
-                          capture_output=True, text=True, timeout=15)
-        info = json.loads(r.stdout)
-        return float(info.get("format", {}).get("duration", 0))
-    except: return 0
-
-def _smart_timeout(input_path, base=300):
-    """根据视频时长智能调整 timeout: 每 60 秒视频加 60 秒,最少 300 秒"""
-    dur = _get_video_duration(input_path)
-    return max(base, int(base + dur * 1.0))
-
-def _ffmpeg_edit(input_path, output_path, vf="", af="", extra_args=None, action_label="编辑"):
-    """通用 ffmpeg 编辑：-vf 视频滤镜, -af 音频滤镜, extra_args 额外参数"""
-    timeout = _smart_timeout(input_path)
-    cmd = ["ffmpeg","-y","-i",input_path]
-    if vf: cmd += ["-vf", vf]
-    if af: cmd += ["-af", af]
-    if extra_args: cmd += extra_args
-    cmd += ["-c:v","libx264","-preset","ultrafast","-c:a","aac","-movflags","+faststart",output_path]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0:
-        err_detail = r.stderr[-500:] if r.stderr else "(no stderr)"
-        # 也看 stdout 最后几行
-        if r.stdout: err_detail += "\nstdout: " + r.stdout[-200:]
-        logger.error(f"[{action_label}] CMD: {' '.join(cmd[-8:])}\nERR: {err_detail}")
-        return f"{action_label}失败: {err_detail}"
-    return f"{action_label}完成: {output_path}"
-
-def _stt_transcribe(input_path, language="zh"):
-    """语音转文字: 提取音频后用 whisper 或 MiniMax STT API"""
-    # 提取音频
-    audio_path = input_path + ".wav"
-    r = subprocess.run(["ffmpeg","-y","-i",input_path,"-vn","-acodec","pcm_s16le","-ar","16000","-ac","1",audio_path],
-                      capture_output=True, text=True, timeout=60)
-    if r.returncode != 0 or not os.path.exists(audio_path):
-        return {"error": f"音频提取失败: {r.stderr[:100]}"}
-    
-    transcript = ""
-    # 1. 尝试 faster-whisper
-    try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
-        segments, info = model.transcribe(audio_path, language=language, beam_size=5)
-        for seg in segments:
-            transcript += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
-    except (ImportError, Exception):
-        # 2. 尝试 MiniMax STT API (如果配置了)
-        try:
-            tts_key = _get_decrypted_key("ttsApiKey") or _get_decrypted_key("visionApiKey")
-            if tts_key:
-                import base64 as b64
-                with open(audio_path,"rb") as f:
-                    audio_b64 = b64.b64encode(f.read()).decode()
-                resp = requests.post(
-                    "https://api.minimaxi.com/v1/speech_transcription",
-                    headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"},
-                    json={"model":"speech-01","audio":audio_b64,"language":language},
-                    timeout=120
-                )
-                if resp.ok:
-                    data = resp.json()
-                    transcript = data.get("text","") or data.get("transcript","")
-        except Exception:
-            transcript = "(STT服务不可用，请安装 faster-whisper: pip install faster-whisper)"
-    
-    try: os.remove(audio_path)
-    except: pass
-    
-    return {
-        "result": transcript.strip() or "(无语音内容)",
-        "duration": _get_video_duration(input_path)
-    }
 
 def _apply_voice_to_video(video_path, audio_path, output_path, params):
     """将音频混入视频(FFmpeg),保持原视频速度不变"""
@@ -3478,10 +3402,6 @@ _heartbeat_html = """
 import threading
 import queue
 
-# 全局活跃流管理 {msg_id: {queue, thread, cache:[], finished:bool, chat_id, user_id}}
-_active_streams = {}
-_active_streams_lock = threading.Lock()
-
 def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id: str):
     """在后台线程中将 OpenAI 流式响应转为 SSE，实时保存进度到 SQLite"""
     from openai import OpenAI
@@ -3574,7 +3494,7 @@ async def chat_stream(request: Request, user_id: str = Query("")):
     """
     后端流式聊天端点:
     - 接收消息，转发给 OpenAI，流式返回 SSE
-    - 活跃流注册到 _active_streams（支持续接）
+    - 实时将进度保存到 SQLite（刷新恢复）
     """
     try:
         body = await request.json()
@@ -3588,73 +3508,172 @@ async def chat_stream(request: Request, user_id: str = Query("")):
     if not request_data.get('api_key'):
         return {"error": "api_key required"}
 
-    # 如果已有同 msg_id 的活跃流,复用(续接)
-    resume = body.get('resume', False)
-    with _active_streams_lock:
-        existing = _active_streams.get(msg_id)
-        if resume and existing:
-            result_queue = existing['queue']
-            cache = existing['cache']
-        else:
-            result_queue = queue.Queue()
-            cache = []
-            t = threading.Thread(target=_run_stream, args=(request_data, chat_id, msg_id, user_id, result_queue), daemon=True)
-            _active_streams[msg_id] = {
-                'queue': result_queue,
-                'thread': t,
-                'cache': cache,
-                'chat_id': chat_id,
-                'user_id': user_id,
-                'started': time.time()
-            }
-            t.start()
+    # 启动后台线程执行流式请求（避免 FastAPI 线程阻塞）
+    result_queue = queue.Queue()
+    t = threading.Thread(target=_run_stream, args=(request_data, chat_id, msg_id, user_id, result_queue), daemon=True)
+    t.start()
 
     async def event_generator():
-        try:
-            # 先发送已缓存的内容(续接时跳过已收到的)
-            for c in list(cache):
-                yield c
-
-            while True:
-                try:
-                    status, data = result_queue.get(timeout=60)
-                    if status == 'error':
-                        yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
-                        break
-                    elif status == 'done':
-                        break
-                    elif status == 'chunk':
-                        cache.append(data)
-                        yield data
-                        await asyncio.sleep(0.001)
-                except queue.Empty:
-                    yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"
+        # 前端通过 EventSource 接收 SSE
+        while True:
+            try:
+                status, data = result_queue.get(timeout=60)
+                if status == 'error':
+                    yield f"event: error\ndata: {json.dumps({'error': data})}\n\n"
                     break
-        finally:
-            with _active_streams_lock:
-                _active_streams.pop(msg_id, None)
+                elif status == 'done':
+                    break
+                elif status == 'chunk':
+                    yield data
+                    await asyncio.sleep(0.001)
+            except queue.Empty:
+                yield f"event: timeout\ndata: {json.dumps({'error': 'stream timeout'})}\n\n"
+                break
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-@app.get("/engine/chat/status/{msg_id}")
-async def chat_status(msg_id: str, user_id: str = Query("")):
-    """检查流是否活跃（续接判断）"""
-    with _active_streams_lock:
-        stream = _active_streams.get(msg_id)
-        if stream:
-            return {
-                'active': True,
-                'chat_id': stream['chat_id'],
-                'cached': len(stream['cache']),
-                'started': stream['started'],
-                'alive': stream['thread'].is_alive()
-            }
-    # 再看 SQLite 进度
+@app.get("/engine/chat/progress/{msg_id}")
+async def chat_progress(msg_id: str, user_id: str = Query("")):
+    """查询流式进度（用于刷新恢复）"""
     store = get_chat_store(user_id)
-    progress = store.get_progress(msg_id)
-    if progress and progress.get('finished'):
-        return {'active': False, 'finished': True, 'full_text': progress['full_text']}
-    return {'active': False, 'finished': False}
+    return store.get_progress(msg_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 可恢复流式系统 — 流在后端线程独立运行，前端断线重连无感续接
+# ═══════════════════════════════════════════════════════════════
+
+_resumable = {}           # {stream_id: {queue, chunks, finished, created}}
+_resumable_lock = threading.Lock()
+_RESUMABLE_TTL = 600      # 10 分钟超时
+
+
+def _generate_resumable(request: dict, stream_id: str):
+    """后台线程: 调用 OpenAI 流式 API，逐 chunk 写入缓存和队列"""
+    from openai import OpenAI
+    q = _resumable[stream_id]['queue']
+    full = ''
+    reasoning = ''
+    tool_calls = []
+    usage = None
+
+    def _emit(ev_type, data):
+        sse = f"event: {ev_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        _resumable[stream_id]['chunks'].append(sse)
+        try: asyncio.run_coroutine_threadsafe(q.put(sse), asyncio.get_event_loop())
+        except: pass
+
+    try:
+        client = OpenAI(
+            api_key=request.get('api_key', ''),
+            base_url=request.get('base_url', '').strip().rstrip('/') or None
+        )
+        params = {
+            'model': request.get('model', 'deepseek-chat'),
+            'messages': request.get('messages', []),
+            'stream': True,
+            'temperature': request.get('temperature', 0.7),
+            'max_tokens': request.get('max_tokens', 4096),
+        }
+        if request.get('tools'):
+            params['tools'] = request['tools']
+
+        for chunk in client.chat.completions.create(**params):
+            delta = chunk.choices[0].delta
+            c = delta.content or ''
+            r = getattr(delta, 'reasoning_content', '') or ''
+            if c:
+                full += c
+                _emit('content', {'delta': c})
+            if r:
+                reasoning += r
+                _emit('reasoning', {'delta': r})
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    d = {'index': getattr(tc, 'index', len(tool_calls)),
+                         'id': tc.id or f'call_{len(tool_calls)}',
+                         'function': {'name': tc.function.name or '',
+                                      'arguments': tc.function.arguments or ''}}
+                    tool_calls.append(d)
+                    _emit('tool_call', d)
+            if hasattr(chunk, 'usage') and chunk.usage:
+                try: usage = chunk.usage.model_dump()
+                except: pass
+
+        done_data = {'full_text': full, 'reasoning_text': reasoning,
+                     'tool_calls': tool_calls, 'usage': usage}
+        _emit('done', done_data)
+        _resumable[stream_id]['finished'] = True
+        try: asyncio.run_coroutine_threadsafe(q.put(None), asyncio.get_event_loop())
+        except: pass
+
+    except Exception as e:
+        _emit('error', {'error': str(e)})
+        _resumable[stream_id]['finished'] = True
+        try: asyncio.run_coroutine_threadsafe(q.put(None), asyncio.get_event_loop())
+        except: pass
+
+
+@app.post("/engine/chat/create")
+async def chat_create(request: Request, user_id: str = Query("")):
+    """创建可恢复流 — 接收消息，返回 stream_id，后台线程调 OpenAI"""
+    try: body = await request.json()
+    except: return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    if not body.get('api_key'):
+        return JSONResponse({"error": "api_key required"}, status_code=400)
+
+    sid = f"stream_{uuid.uuid4().hex[:12]}"
+    q = asyncio.Queue()
+
+    with _resumable_lock:
+        _resumable[sid] = {'queue': q, 'chunks': [], 'finished': False, 'created': time.time()}
+        # 清理过期
+        now = time.time()
+        for k in list(_resumable.keys()):
+            v = _resumable[k]
+            if not v.get('finished') and now - v.get('created', 0) > _RESUMABLE_TTL:
+                try: v['queue'].put_nowait(None)
+                except: pass
+                del _resumable[k]
+
+    threading.Thread(target=_generate_resumable, args=(body, sid), daemon=True).start()
+    return {"stream_id": sid}
+
+
+@app.get("/engine/chat/stream/{stream_id}")
+async def chat_stream_get(stream_id: str):
+    """消费 SSE 流 — 先发所有缓存 chunk（断点续传核心），再等新数据"""
+    s = _resumable.get(stream_id)
+    if not s:
+        return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
+
+    async def gen():
+        yield f"event: start\ndata: {json.dumps({'stream_id': stream_id})}\n\n"
+        for c in list(s['chunks']):
+            yield c
+            await asyncio.sleep(0.001)
+        if s.get('finished'):
+            return
+        q = s['queue']
+        while True:
+            try:
+                c = await asyncio.wait_for(q.get(), timeout=30)
+                if c is None:
+                    break
+                yield c
+                await asyncio.sleep(0.001)
+            except asyncio.TimeoutError:
+                yield f"event: heartbeat\ndata: {json.dumps({'hb': True})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+@app.delete("/engine/chat/stream/{stream_id}")
+async def chat_stream_delete(stream_id: str):
+    """清理指定流"""
+    _resumable.pop(stream_id, None)
+    return {"cleaned": True}
 
 
 # ==================== Agent 记忆/人格/身份/心跳 系统 ====================
@@ -4009,79 +4028,73 @@ async def video_edit_endpoint(request: Request):
             return {"result": r.stdout}
         elif action == "trim":
             start = params.get("start", 0)
-            end = params.get("end", "")
-            extra = []
-            if end: extra += ["-t", str(float(end) - float(start))]
-            extra += ["-ss", str(start)]
-            return {"result": _ffmpeg_edit(input_path, output_path, extra_args=extra, action_label="裁剪")}
+            end = params.get("end", None)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if end: clip = clip.subclipped(start, end)
+            else: clip = clip.subclipped(start)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"裁剪完成: {output_path}"}
         elif action == "speed":
             factor = float(params.get("factor", 1.0))
-            atempo = "atempo=" + str(factor)
-            if factor > 2: atempo = "atempo=2.0,atempo=" + str(factor/2)
-            vf = f"setpts={1/factor}*PTS"
-            af = atempo
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=vf, af=af, action_label="调速")}
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.MultiplySpeed(factor)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"调速完成 (x{factor}): {output_path}"}
         elif action == "resize":
-            w = params.get("width", 0); h = params.get("height", 0)
-            if w and h: scale = f"scale={w}:{h}"
-            elif w: scale = f"scale={w}:-1"
-            elif h: scale = f"scale=-1:{h}"
-            else: scale = "scale=1280:-1"
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=scale, action_label="缩放")}
+            width = params.get("width", 0); height = params.get("height", 0)
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
+            if width and height: clip = clip.resized((width, height))
+            elif width: clip = clip.resized(width=width)
+            elif height: clip = clip.resized(height=height)
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"缩放完成: {output_path}"}
         elif action == "audio":
+            from moviepy import VideoFileClip
+            clip = VideoFileClip(input_path)
             audio_output = output_path + ".mp3" if not output_path.endswith(".mp3") else output_path
-            r = subprocess.run(["ffmpeg","-y","-i",input_path,"-vn","-acodec","libmp3lame","-q:a","2",audio_output],
-                             capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            if r.returncode != 0:
-                return {"result": f"音频提取失败: {r.stderr[-200:]}"}
+            if clip.audio: clip.audio.write_audiofile(audio_output)
+            clip.close()
             return {"result": f"音频提取完成: {audio_output}"}
         elif action == "concat":
             files = params.get("files", [])
             if not files: return JSONResponse({"error": "concat 需要 files 数组"}, status_code=400)
-            # 用 ffmpeg concat demuxer
-            import tempfile
-            flist = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-            for f in files:
-                # 转换相对路径
-                fp = f
-                if fp.startswith("/oneapichat/"): fp = PROJECT_ROOT + "/" + fp.replace("/oneapichat/", "", 1)
-                flist.write(f"file '{fp}'\n")
-            flist.close()
-            extra = ["-f","concat","-safe","0","-i",flist.name,"-c","copy"]
-            r = subprocess.run(["ffmpeg","-y"] + extra + ["-c:v","libx264","-c:a","aac",output_path],
-                             capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            try: os.unlink(flist.name)
-            except: pass
-            if r.returncode != 0:
-                return {"result": f"拼接失败: {r.stderr[-200:]}"}
+            from moviepy import VideoFileClip, concatenate_videoclips
+            clips = [VideoFileClip(f) for f in files]
+            final = concatenate_videoclips(clips, method="compose")
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            for c in clips: c.close()
+            final.close()
             return {"result": f"拼接完成: {output_path}"}
         elif action == "overlay":
             overlay_path = params.get("overlay_path", "")
             if not overlay_path or not os.path.exists(overlay_path):
-                # 转换相对路径
-                if overlay_path.startswith("/oneapichat/"):
-                    overlay_path = PROJECT_ROOT + "/" + overlay_path.replace("/oneapichat/", "", 1)
-            if not os.path.exists(overlay_path):
                 return JSONResponse({"error": "overlay_path 无效"}, status_code=400)
-            x = params.get("x", 10); y = params.get("y", 10)
-            vf = f"[1]scale=iw*0.3:-1[ov];[0][ov]overlay={x}:{y}"
-            r = subprocess.run([
-                "ffmpeg","-y","-i",input_path,"-i",overlay_path,
-                "-filter_complex",vf,"-c:v","libx264","-preset","ultrafast","-c:a","aac",output_path
-            ], capture_output=True, text=True, timeout=_smart_timeout(input_path))
-            if r.returncode != 0:
-                return {"result": f"画中画失败: {r.stderr[-200:]}"}
+            x, y = params.get("x", 10), params.get("y", 10)
+            scale = params.get("scale", 0.3)
+            from moviepy import VideoFileClip, CompositeVideoClip
+            clip = VideoFileClip(input_path)
+            ov = VideoFileClip(overlay_path).resized(scale).with_position((x, y))
+            final = CompositeVideoClip([clip, ov])
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close(); ov.close(); final.close()
             return {"result": f"画中画完成: {output_path}"}
         elif action == "text":
             result = _apply_subtitle(input_path, output_path, params)
             return {"result": result}
         elif action == "rotate":
             angle = float(params.get("angle", 90))
-            rotations = {"90":"transpose=1","180":"transpose=2,transpose=2","270":"transpose=2","-90":"transpose=2"}
-            vf = rotations.get(str(int(angle)), f"rotate={angle}*PI/180")
-            return {"result": _ffmpeg_edit(input_path, output_path, vf=vf, action_label="旋转")}
-        elif action == "stt":
-            return _stt_transcribe(input_path, params.get("language","zh"))
+            from moviepy import VideoFileClip, vfx
+            clip = VideoFileClip(input_path)
+            clip = clip.with_effects([vfx.Rotate(angle)])
+            clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+            clip.close()
+            return {"result": f"旋转完成 ({angle}°): {output_path}"}
         elif action in ("filter", "video_filter"):
             return {"result": _apply_ffmpeg_filter(input_path, output_path, params)}
         elif action in ("transition", "video_transition"):

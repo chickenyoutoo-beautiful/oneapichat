@@ -89,6 +89,26 @@ switch ($action) {
         echo $resp ?: json_encode(['status' => 'error', 'message' => 'unreachable']);
         break;
 
+    case 'chat_create':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405); echo json_encode(['error' => 'POST required']); exit;
+        }
+        if (!$userId) { http_response_code(401); echo json_encode(['error' => 'auth required']); exit; }
+        $body = file_get_contents('php://input');
+        $ch = curl_init($engine_url . '/engine/chat/create?user_id=' . urlencode($userId));
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        http_response_code($code ?: 200);
+        header('Content-Type: application/json; charset=utf-8');
+        echo $resp;
+        break;
+
     case 'heartbeat':
         $resp = @file_get_contents($engine_url . '/engine/heartbeat?' . $userParam);
         echo $resp ?: json_encode(['ok' => false, 'responses' => []]);
@@ -354,22 +374,6 @@ switch ($action) {
                 echo json_encode(['result' => $output]);
             }
         }
-        break;
-
-    case 'stream_resume':
-        $msg_id = $_GET['msg_id'] ?? '';
-        if (!$msg_id) { echo json_encode(['error' => 'missing msg_id']); exit; }
-        $url = $engine_url . '/engine/chat/status/' . urlencode($msg_id) . $userParam;
-        $resp = @file_get_contents($url, false, null, 0, 5);
-        echo $resp ?: json_encode(['active' => false, 'error' => 'unreachable']);
-        break;
-
-    case 'stream_progress':
-        $msg_id = $_GET['msg_id'] ?? '';
-        if (!$msg_id) { echo json_encode(['error' => 'missing msg_id']); exit; }
-        $url = $engine_url . '/engine/chat/progress/' . urlencode($msg_id) . $userParam;
-        $resp = @file_get_contents($url);
-        echo $resp ?: json_encode(['error' => 'unreachable']);
         break;
 
     default:
