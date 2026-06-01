@@ -17690,6 +17690,7 @@ async function engineApiHandler(action, args) {
                     _resultMsg += '\n' + _webUrl;
                 }
                 return { result: _resultMsg };
+            }
             return { error: d.error || '写入失败' };
         }
         if (action === 'agent_stop') {
