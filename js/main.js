@@ -8102,6 +8102,12 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         return fetch(targetUrl, options);
     }
 
+    // ★ chat/completions 等大请求不走双重代理（proxy.php 本来就跑在 xiaoxin，能直连）
+    if (targetUrl.indexOf('/chat/completions') !== -1 || targetUrl.indexOf('/v1/chat/completions') !== -1) {
+        console.log('[Proxy] chat请求直连,跳过代理:', targetUrl.substring(0, 60));
+        return fetch(targetUrl, options);
+    }
+
     console.log('[Proxy] →', targetUrl.substring(0, 80));
 
     var headers = {};
@@ -11381,24 +11387,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                 markdownBody.appendChild(contentEl);
                 _triggerPostRender(contentEl);
             }
-            // ★ 流式完成:添加操作按钮(复制+重新生成)
-            if (!currentBubble.querySelector('.msg-actions')) {
-                var _aDiv = document.createElement('div');
-                _aDiv.className = 'msg-actions';
-                // 复制按钮
-                var _copyB = document.createElement('div');
-                _copyB.className = 'msg-action-btn copy-msg-btn';
-                _copyB.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-                _copyB.onclick = function(e2) { e2.stopPropagation(); copyMessageContent(fullText); };
-                _aDiv.appendChild(_copyB);
-                // 重新生成按钮
-                var _rB = document.createElement('div');
-                _rB.className = 'msg-action-btn regenerate-btn';
-                _rB.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
-                _rB.onclick = function(e2) { e2.stopPropagation(); window.regenLastAssistant(fullText); };
-                _aDiv.appendChild(_rB);
-                currentBubble.appendChild(_aDiv);
-            }
+            // ★ 操作按钮由 appendMessage 统一管理,不重复创建
             // ★ 流式完成:滚到底部(图表可能已延迟渲染导致高度变化)
             setTimeout(function _scrollAfterRender() {
                 if (!userScrolled) $.chatBox.scrollTop = $.chatBox.scrollHeight;
@@ -17979,6 +17968,8 @@ window.checkAgentNotifications = function() {
         setTimeout(window.checkAgentNotifications, 3000);
         return;
     }
+
+    var _apiBase = window.location.origin + '/oneapichat/engine_api.php';
 
     // 先获取引擎心跳(cron通知等)
     fetch(_apiBase + '?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
