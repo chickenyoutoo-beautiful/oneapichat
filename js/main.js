@@ -8099,6 +8099,19 @@ window.toggleProxy = function() {
     if (details) details.style.display = enabled ? 'block' : 'none';
     window.saveConfig();
 };
+
+// ★ thinking 模式 — 仅在 MiniMax 模型时显示
+function _updateThinkingVisibility() {
+    var _tl = getEl('thinkingModeRow');
+    if (!_tl) return;
+    var _m = (getVal('modelSelect') || '').toLowerCase();
+    var _bu = (getVal('baseUrl') || '').toLowerCase();
+    _tl.style.display = (_m.includes('minimax') || _bu.includes('minimax')) ? '' : 'none';
+}
+window._saveThinkingMode = function() {
+    localStorage.setItem('thinkingMode', getVal('thinkingMode') || 'adaptive');
+    saveConfig(false);
+};
 window.isProxyEnabled = function() {
     return localStorage.getItem('proxyEnabled') === '1';
 };
@@ -12225,9 +12238,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         max_tokens: requestedTokens
     };
 
-    // ★ MiniMax M3: 添加 thinking 参数启用思考
+    // ★ MiniMax M3: 添加 thinking 参数
     if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
-        body.thinking = { type: "adaptive" };
+        var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
+        if (_tm !== 'disabled') {
+            body.thinking = { type: _tm === 'enabled' ? 'enabled' : 'adaptive' };
+        }
         // M3 推荐用 max_completion_tokens 代替 max_tokens
         body.max_completion_tokens = body.max_tokens;
         delete body.max_tokens;
@@ -16353,6 +16369,23 @@ function initializeConfig() {
     // Agent 模式初始化
     initAgentConfig();
     updateAgentUI();
+    // ★ thinking mode 初始化
+    var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
+    var _tmEl = getEl('thinkingMode');
+    if (_tmEl) _tmEl.value = _tm;
+    _updateThinkingVisibility();
+    // modelSelect 变化时更新 thinking 栏可见性
+    var _ms = getEl('modelSelect');
+    if (_ms && !_ms._thinkingBound) {
+        _ms._thinkingBound = true;
+        _ms.addEventListener('change', _updateThinkingVisibility);
+    }
+    // baseUrlProvider 变化时也检查
+    var _bp = getEl('baseUrlProvider');
+    if (_bp && !_bp._thinkingBound) {
+        _bp._thinkingBound = true;
+        _bp.addEventListener('change', _updateThinkingVisibility);
+    }
     // 配置面板打开时自动刷新引擎状态
     var configToggleBtn = document.querySelector('button[onclick*="toggleConfigPanel"]');
     if (configToggleBtn) {

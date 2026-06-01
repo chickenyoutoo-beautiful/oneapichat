@@ -620,6 +620,14 @@ window.VISION_API_KEY = '';
                 <span class="config-label">流式输出</span>
                 <input type="checkbox" id="streamToggle" class="config-toggle" checked >
             </div>
+            <div class="config-toggle-row" id="thinkingModeRow" style="display:none">
+                <span class="config-label">💭 思考模式</span>
+                <select id="thinkingMode" class="config-input config-select" style="width:auto;min-width:120px" onchange="window._saveThinkingMode()">
+                    <option value="adaptive">自适应 (推荐)</option>
+                    <option value="enabled">始终思考</option>
+                    <option value="disabled">关闭思考</option>
+                </select>
+            </div>
             </div>
         </details>
 
