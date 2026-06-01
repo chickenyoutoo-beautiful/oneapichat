@@ -75,9 +75,23 @@ if (!empty($curlHeaders)) {
     curl_setopt($ch, CURLOPT_HTTPHEADER, $curlHeaders);
 }
 
+// ★ 代理地址映射: 公网地址 → 内网直连
+// proxy.php 运行在 xiaoxin (192.168.195.213), 可以直接走内网
+$internalProxy = $proxyUrl;
+if ($proxyUrl) {
+    // proxy.naujtrats.xyz:8888 → 晓星 10808
+    if (preg_match('#^https?://proxy\.naujtrats\.xyz:8888#', $proxyUrl)) {
+        $internalProxy = 'http://192.168.195.213:10808';
+    }
+    // proxy.naujtrats.xyz:8889 → 天选 10808
+    elseif (preg_match('#^https?://proxy\.naujtrats\.xyz:8889#', $proxyUrl)) {
+        $internalProxy = 'http://192.168.195.22:10808';
+    }
+}
+
 // 代理设置
 if ($proxyUrl) {
-    curl_setopt($ch, CURLOPT_PROXY, $proxyUrl);
+    curl_setopt($ch, CURLOPT_PROXY, $internalProxy);
 
     // SOCKS5 代理类型
     if (strpos($proxyUrl, 'socks5') === 0) {
