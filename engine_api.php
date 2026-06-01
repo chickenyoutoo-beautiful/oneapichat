@@ -261,8 +261,16 @@ switch ($action) {
         $script = $_GET['script'] ?? '';
         $timeout = intval($_GET['timeout'] ?? 30);
         if (!$script) { echo json_encode(['error' => '缺少script']); exit; }
-        $url = $engine_url . '/engine/python?script=' . urlencode($script) . '&timeout=' . $timeout;
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        // ★ 大脚本:路径参数在 URL,content 通过 raw body 传
+        $url = $engine_url . '/engine/python?timeout=' . $timeout;
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $script);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout + 5);
+        echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
+        curl_close($ch);
         break;
 
     case 'file_read':
@@ -278,8 +286,16 @@ switch ($action) {
         $content = $_GET['content'] ?? '';
         $append = isset($_GET['append']) && $_GET['append'] === 'true';
         if (!$path || !$content) { echo json_encode(['error' => '缺少参数']); exit; }
-        $url = $engine_url . '/engine/file/write?path=' . urlencode($path) . '&content=' . urlencode($content) . '&append=' . ($append ? 'true' : 'false');
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        // ★ 大文件:参数放在 URL query,content 通过 CURLOPT_POSTFIELDS 的 raw body 传
+        $url = $engine_url . '/engine/file/write?path=' . urlencode($path) . '&append=' . ($append ? 'true' : 'false');
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $content);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
+        curl_close($ch);
         break;
 
     case 'sys_info':

@@ -2557,13 +2557,19 @@ def engine_exec(
     except Exception as e:
         return {"ok": False, "error": str(e), "exit_code": -1}
 
-@app.get("/engine/python")
-def engine_python(
-    script: str = Query(...),
-    timeout: int = Query(30),
-    user_id: str = Query("")
-):
+@app.api_route("/engine/python", methods=["GET","POST"])
+async def engine_python(request: Request):
     """执行 Python 脚本,返回输出"""
+    # 优先从 body 读脚本(支持大脚本),其次从 query
+    content_type = request.headers.get("content-type", "")
+    if "text/plain" in content_type or request.method == "POST":
+        script = (await request.body()).decode('utf-8', errors='replace')
+        timeout = int(request.query_params.get("timeout", 30))
+    else:
+        script = request.query_params.get("script", "")
+        timeout = int(request.query_params.get("timeout", 30))
+    if not script:
+        return JSONResponse({"ok": False, "error": "缺少script参数"}, status_code=400)
     import tempfile
     tf = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir=str(TEMP_DIR))
     try:
@@ -2616,15 +2622,16 @@ def engine_file_read(
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-@app.get("/engine/file/write")
-def engine_file_write(
-    path: str = Query(...),
-    content: str = Query(...),
-    append: bool = Query(False),
-    user_id: str = Query("")
-):
+@app.api_route("/engine/file/write", methods=["GET","POST"])
+async def engine_file_write(request: Request):
     """写入文件(默认覆盖,append=True 追加)"""
     try:
+        path = request.query_params.get("path", "")
+        append = request.query_params.get("append", "") in ("true", "1", True)
+        # content 从 raw body 读(支持大文件)
+        content = (await request.body()).decode('utf-8', errors='replace')
+        if not path or not content:
+            return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
         # 安全检查:只允许写入 /tmp 和 /var/www/html/oneapichat
         resolved = Path(path).resolve()
         allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
