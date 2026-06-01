@@ -10016,7 +10016,19 @@ function buildApiMessages(chatId) {
             }
         }
         const merged = sysMsgs.length > 0 ? sysMsgs.join('\n\n') : (getVal('systemPrompt') || DEFAULT_CONFIG.system);
-        apiMessagesUnfiltered.push({ role: 'system', content: merged });
+        // ★ 追加工作空间信息
+        var _wsInfo = '\n\n## 🗂 工作空间\n' +
+            '你必须使用 server_file_write 工具保存所有生成的项目文件到工作空间。\n' +
+            '- 完整项目: 写入到 /var/www/html/oneapichat/workspace/projects/<项目名>/\n' +
+            '- 脚本: /var/www/html/oneapichat/workspace/scripts/<文件名>\n' +
+            '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
+            '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
+            '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
+            '文件写入成功后,在回复中告诉用户在线访问链接,格式: https://www.naujtrats.xyz/oneapichat/workspace/projects/<项目名>/index.html\n' +
+            '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
+            '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
+            '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
+        apiMessagesUnfiltered.push({ role: 'system', content: merged + _wsInfo });
     } else {
         for (const msg of chats[chatId].messages) {
             if (msg.role === 'system' && !msg.temporary) {
@@ -10026,6 +10038,19 @@ function buildApiMessages(chatId) {
 
         if (apiMessagesUnfiltered.length === 0) {
             var defaultSystemContent = getVal('systemPrompt') || DEFAULT_CONFIG.system;
+            // ★ 追加工作空间信息
+            var _wsInfo = '\n\n## 🗂 工作空间\n' +
+                '你必须使用 server_file_write 工具保存所有生成的项目文件到工作空间。\n' +
+                '- 完整项目: 写入到 /var/www/html/oneapichat/workspace/projects/<项目名>/\n' +
+                '- 脚本: /var/www/html/oneapichat/workspace/scripts/<文件名>\n' +
+                '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
+                '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
+                '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
+                '文件写入成功后,在回复中告诉用户在线访问链接,格式: https://www.naujtrats.xyz/oneapichat/workspace/projects/<项目名>/index.html\n' +
+                '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
+                '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
+                '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
+            defaultSystemContent += _wsInfo;
             apiMessagesUnfiltered.push({ role: 'system', content: defaultSystemContent });
             if (!chats[chatId].messages.some(m => m.role === 'system' && !m.temporary)) {
                 chats[chatId].messages.unshift({ role: 'system', content: defaultSystemContent });
