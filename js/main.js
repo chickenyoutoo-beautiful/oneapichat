@@ -17674,7 +17674,22 @@ async function engineApiHandler(action, args) {
                 body: args.content || ''
             });
             var d = await r.json();
-            if (d.ok) return { result: '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)' };
+            if (d.ok) {
+                // ★ 自动生成可访问URL
+                var _fp = args.path;
+                var _webUrl = '';
+                if (_fp.startsWith('/var/www/html/oneapichat/')) {
+                    _webUrl = 'https://www.naujtrats.xyz/oneapichat/' + _fp.replace('/var/www/html/oneapichat/', '');
+                } else if (_fp.startsWith('/tmp/')) {
+                    _webUrl = '(服务器临时文件: ' + _fp + ', 如需访问请用 engine_push 推送)';
+                }
+                var _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
+                if (_webUrl && !_webUrl.startsWith('(')) {
+                    _resultMsg += '\n🔗 在线访问: ' + _webUrl;
+                } else if (_webUrl) {
+                    _resultMsg += '\n' + _webUrl;
+                }
+                return { result: _resultMsg };
             return { error: d.error || '写入失败' };
         }
         if (action === 'agent_stop') {
