@@ -290,19 +290,38 @@ details.reasoning-details summary::before {
 details.reasoning-details[open] summary::before { content: "▸"; transform: rotate(90deg); }
 .reasoning-content {
     margin-top: 4px;
-    padding: 8px 12px;
-    border-left: 3px solid #7c3aed;
+    padding: 4px 8px;
+    border-left: 2px solid #9a8cc0;
+    font-style: italic;
     white-space: pre-wrap;
     font-size: 0.85rem;
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.08) 0%, rgba(199, 210, 254, 0.12) 100%);
-    border-radius: 8px;
-    color: #3b2766;
-    display: block;
+    background: rgba(200, 215, 240, 0.2);
+    border-radius: 6px;
+    color: #2c3e6b;
+    max-height: 999999px;
+    opacity: 1;
+    overflow: visible;
+    transition: max-height 0.3s ease-out, opacity 0.2s ease-out, margin 0.2s;
 }
 .dark .reasoning-content {
     background: rgba(50, 60, 90, 0.3);
     border-left-color: #b39ddb;
     color: #cfd9f0;
+}
+
+/* 代理/非流式模式下的思考块增强样式 */
+.reasoning-content.proxy-mode {
+    padding: 8px 12px;
+    border-left: 3px solid #7c3aed;
+    font-style: normal;
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.06) 0%, rgba(199, 210, 254, 0.1) 100%);
+    border-radius: 8px;
+    color: #3b2766;
+}
+.dark .reasoning-content.proxy-mode {
+    border-left-color: #a78bfa;
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.12) 0%, rgba(199, 210, 254, 0.06) 100%);
+    color: #c4b5fd;
 }
 
 /* ===== 消息页脚 ===== */
