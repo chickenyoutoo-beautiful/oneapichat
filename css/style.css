@@ -2266,10 +2266,12 @@ html.dark #sunPath { display: block !important; }
 }
 
 /* ===== 助手气泡生成中 —— 呼吸淡光 ===== */
-.bubble.assistant.typing {
+.bubble.assistant.typing,
+.bubble.assistant.gen-active {
     animation: bubble-breathe 2.5s ease-in-out infinite;
 }
-.dark .bubble.assistant.typing {
+.dark .bubble.assistant.typing,
+.dark .bubble.assistant.gen-active {
     animation: bubble-breathe-dark 2.5s ease-in-out infinite;
 }
 @keyframes bubble-breathe {

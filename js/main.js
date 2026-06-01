@@ -10954,7 +10954,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                             var currentBubble = activeBubbleMap[chatId];
                             if (currentBubble) {
                                 if (!hasContent) {
-                                    currentBubble.classList.remove('typing');
+                                    // 不移除 typing，改加生成活跃标记让光晕持续
+                                    currentBubble.classList.add('gen-active');
                                     hasContent = true;
                                 }
                                 // 实时更新思考区
@@ -11082,7 +11083,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         const currentBubble = activeBubbleMap[chatId];
         if (currentBubble && document.body.contains(currentBubble)) {
             currentBubble.querySelector('.markdown-body').innerHTML = `<span style="color:#ef4444">⚠️ 部分响应解析失败,可能是 API 返回格式不兼容。</span>`;
-            currentBubble.classList.remove('typing');
+            currentBubble.classList.remove('typing', 'gen-active');
         }
     }
     if (toolCalls.length > 0) {
@@ -11419,7 +11420,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 
     if (currentChatId === chatId && currentBubble) {
         try {
-        currentBubble.classList.remove('typing');
+        currentBubble.classList.remove('typing', 'gen-active');
         const markdownBody = currentBubble.querySelector('.markdown-body');
         if (markdownBody) {
             markdownBody.innerHTML = '';
@@ -11500,7 +11501,7 @@ function handleError(e, chatId, pendingMsg, currentBubble) {
     }
     saveChats();
     if (currentChatId === chatId && currentBubble) {
-        currentBubble.classList.remove('typing');
+        currentBubble.classList.remove('typing', 'gen-active');
         // 配置面板编辑时不显示错误,避免频繁报错
         if (!configPanelInteracting) {
             var errorMsg = e.name === 'AbortError' ? '⚠️ 请求已停止或超时。' : `❌ 错误: ${e.message}`;
@@ -11546,7 +11547,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 
     // 清理当前错误消息
     if (currentBubble) {
-        currentBubble.classList.remove('typing');
+        currentBubble.classList.remove('typing', 'gen-active');
         currentBubble.querySelector('.markdown-body').innerHTML = '⚠️ 模型不支持图片格式,正在重新发送...';
     }
 
@@ -12944,7 +12945,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     // ★ 确保 pendingMsg 有基本内容,防止刷新后消息消失
                     if (!pendingMsg.content) pendingMsg.content = '(图片生成中发生内部错误,但图片已保存)';
                     if (currentBubble) {
-                        currentBubble.classList.remove('typing');
+                        currentBubble.classList.remove('typing', 'gen-active');
                         var _phHns = currentBubble.querySelector('#image-placeholder');
                         if (_phHns) _phHns.remove();
                         // 显示兜底文本
@@ -15267,7 +15268,7 @@ window.useAlternativeVisionModel = function() {
             showToast('⚠️ 模型不支持工具调用,已切换模式,请重新发送', 'warning', 3000);
             // 不清除 pendingMsg,让用户看到气泡
             if (currentBubble) {
-                currentBubble.classList.remove('typing');
+                currentBubble.classList.remove('typing', 'gen-active');
                 var _ocMb = currentBubble.querySelector('.markdown-body');
                 if (_ocMb) _ocMb.innerHTML = '⚠️ 该模型不支持工具调用,已自动降级为普通模式。请重新发送。';
             }
