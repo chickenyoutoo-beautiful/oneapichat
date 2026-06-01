@@ -8102,12 +8102,6 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         return fetch(targetUrl, options);
     }
 
-    // ★ chat/completions 等大请求不走双重代理（proxy.php 本来就跑在 xiaoxin，能直连）
-    if (targetUrl.indexOf('/chat/completions') !== -1 || targetUrl.indexOf('/v1/chat/completions') !== -1) {
-        console.log('[Proxy] chat请求直连,跳过代理:', targetUrl.substring(0, 60));
-        return fetch(targetUrl, options);
-    }
-
     console.log('[Proxy] →', targetUrl.substring(0, 80));
 
     var headers = {};
