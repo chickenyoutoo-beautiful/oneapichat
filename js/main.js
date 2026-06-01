@@ -17611,7 +17611,12 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '命令执行失败' };
         }
         if (action === 'python') {
-            var r = await fetch(_apiBase + '?action=python&script=' + encodeURIComponent(args.script) + '&timeout=' + (args.timeout || 30) + authSuffix);
+            // ★ 大脚本: timeout 放 URL, script 放 POST body
+            var r = await fetch(_apiBase + '?action=python&timeout=' + (args.timeout || 30) + authSuffix, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: args.script || ''
+            });
             var d = await r.json();
             if (d.ok) {
                 var out = '🐍 Python 脚本执行结果:\n退出码: ' + d.exit_code + '\n';
@@ -17632,7 +17637,12 @@ async function engineApiHandler(action, args) {
         }
         if (action === 'file_write') {
             var appendParam = args.append ? '&append=true' : '';
-            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + '&content=' + encodeURIComponent(args.content) + appendParam + authSuffix);
+            // ★ 大文件: path/append 放 URL, content 放 POST body
+            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + appendParam + authSuffix, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: args.content || ''
+            });
             var d = await r.json();
             if (d.ok) return { result: '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)' };
             return { error: d.error || '写入失败' };

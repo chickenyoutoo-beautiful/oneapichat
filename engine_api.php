@@ -258,8 +258,9 @@ switch ($action) {
         break;
 
     case 'python':
-        $script = $_GET['script'] ?? '';
         $timeout = intval($_GET['timeout'] ?? 30);
+        // ★ script 从 POST raw body 读(支持大脚本)
+        $script = file_get_contents('php://input');
         if (!$script) { echo json_encode(['error' => '缺少script']); exit; }
         // ★ 大脚本:路径参数在 URL,content 通过 raw body 传
         $url = $engine_url . '/engine/python?timeout=' . $timeout;
@@ -283,9 +284,10 @@ switch ($action) {
 
     case 'file_write':
         $path = $_GET['path'] ?? '';
-        $content = $_GET['content'] ?? '';
         $append = isset($_GET['append']) && $_GET['append'] === 'true';
-        if (!$path || !$content) { echo json_encode(['error' => '缺少参数']); exit; }
+        // ★ content 从 POST raw body 读(支持大文件)
+        $content = file_get_contents('php://input');
+        if (!$path || $content === false || $content === '') { echo json_encode(['error' => '缺少参数']); exit; }
         // ★ 大文件:参数放在 URL query,content 通过 CURLOPT_POSTFIELDS 的 raw body 传
         $url = $engine_url . '/engine/file/write?path=' . urlencode($path) . '&append=' . ($append ? 'true' : 'false');
         $ch = curl_init($url);
