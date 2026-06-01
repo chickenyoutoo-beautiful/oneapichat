@@ -53,3 +53,15 @@ uploads/*.webm
 uploads/*.mov
 uploads/*.mkv
 uploads/*.flv
+
+# 测试/调试/备份文件
+__pycache__/
+*.pyc
+test_*
+debug_*
+*_backup_*
+.fix_backup_*
+*TEMP_*
+config.ini.template
+src_routes_backup_optimize.py
+engine_sub_test*
