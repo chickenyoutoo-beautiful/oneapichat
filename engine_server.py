@@ -18,6 +18,43 @@ import sqlite3
 import tempfile
 import glob
 
+# ── 代理配置 ────────────────────────────────────────────
+def _load_proxy_config():
+    """从用户配置中加载代理设置,配置 requests 全局代理"""
+    try:
+        # 读取 localStorage 持久化的配置
+        import glob as _glob
+        config_files = _glob.glob(os.path.join(PROJECT_ROOT, 'chat_data/config_user_*.json'))
+        for cf in config_files:
+            try:
+                with open(cf, 'r') as f:
+                    cfg = json.load(f)
+                if cfg.get('proxyEnabled') == '1' and cfg.get('proxyUrl'):
+                    proxy_url = cfg['proxyUrl']
+                    os.environ['HTTP_PROXY'] = proxy_url
+                    os.environ['HTTPS_PROXY'] = proxy_url
+                    os.environ['ALL_PROXY'] = proxy_url
+                    print(f'[Engine] 代理已启用: {proxy_url}')
+                    return proxy_url
+            except:
+                pass
+    except Exception as e:
+        print(f'[Engine] 代理配置加载失败: {e}')
+    return None
+
+_PROXY_URL = _load_proxy_config()
+
+# ── 全局 Session (带代理) ──────────────────────────────
+_http_session = requests.Session()
+if _PROXY_URL:
+    _http_session.proxies = {'http': _PROXY_URL, 'https': _PROXY_URL}
+
+def _get_proxies():
+    """获取请求代理字典"""
+    if _PROXY_URL:
+        return {'http': _PROXY_URL, 'https': _PROXY_URL}
+    return None
+
 # Cross-platform: fcntl is Unix-only
 try:
     import fcntl
@@ -449,7 +486,7 @@ def _apply_tts(params):
         url = tts_url or "https://api.openai.com/v1/audio/speech"
         body = {"model": "tts-1", "voice": voice_id or "alloy", "input": text, "speed": speed}
         try:
-            resp = requests.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
+            resp = _http_session.post(url, headers={"Authorization":f"Bearer {tts_key}","Content-Type":"application/json"}, json=body, timeout=60)
             if resp.status_code == 200:
                 with open(output_path, "wb") as f: f.write(resp.content)
                 return f"语音合成完成 (OpenAI): {output_path} ({len(resp.content)} bytes)"
@@ -1839,7 +1876,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     if not search_api_key:
                         return None
                     try:
-                        r = requests.post(
+                        r = _http_session.post(
                             "https://api.tavily.com/search",
                             json={
                                 "api_key": search_api_key,
@@ -1914,7 +1951,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     if not search_api_key:
                         return f"搜索出错: 未找到 Brave API Key (请先在设置中配置搜索API Key)"
                     headers = {"Accept": "application/json", "X-Subscription-Token": search_api_key}
-                    r = requests.get(
+                    r = _http_session.get(
                         f"https://api.search.brave.com/res/v1/web/search?q={requests.utils.quote(query)}&count=8&safesearch=off",
                         headers=headers, timeout=15
                     )
@@ -1957,7 +1994,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             results = []
             for url in urls:
                 try:
-                    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                    r = _http_session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
                     # ★ 修复:过滤控制字符+null字节,防止JSON序列化崩溃
                     raw = r.text
                     # 移除控制字符(保留换行和制表符)
@@ -2245,7 +2282,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 }.get(tool_name, tool_name)
                 _params = {};
                 for _k, _v in args.items(): _params[_k] = str(_v);
-                _r = requests.get(_engine_url, params=_params, timeout=30);
+                _r = _http_session.get(_engine_url, params=_params, timeout=30);
                 _d = _r.json();
                 return json.dumps(_d, ensure_ascii=False)
             except Exception as _e:
@@ -2253,7 +2290,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         # 遇到未知工具时 not-sub-tool, 先尝试通过 engine/heartbeat 转发给主系统
         try:
             _engine_url = "http://127.0.0.1:8766/engine/agent/heartbeat?user_id=" + str(user_id) + "&tool_name=" + str(tool_name) + "&args=" + str(json.dumps(args))
-            _r = requests.get(_engine_url, timeout=10)
+            _r = _http_session.get(_engine_url, timeout=10)
             if _r.ok:
                 _d = _r.json()
                 if _d.get("ok") or _d.get("result"):

@@ -5022,6 +5022,10 @@ function loadSearchConfig() {
     setChecked('ragToggle', ragChecked);
     window.RAG_ENABLED = ragChecked;
     setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
+    setChecked('proxyToggle', localStorage.getItem('proxyEnabled') === '1');
+    setVal('proxyUrl', localStorage.getItem('proxyUrl') || '');
+    var _proxyDetails = document.getElementById('proxyConfigDetails');
+    if (_proxyDetails) _proxyDetails.style.display = localStorage.getItem('proxyEnabled') === '1' ? 'block' : 'none';
     setVal('aiSearchJudgeModel', localStorage.getItem('aiSearchJudgeModel') || 'deepseek-chat');
     setVal('aiSearchJudgePrompt', localStorage.getItem('aiSearchJudgePrompt') || DEFAULT_CONFIG.aiSearchJudgePrompt);
     setVal('searchProvider', localStorage.getItem('searchProvider') || 'duckduckgo');
@@ -5265,9 +5269,15 @@ function setAgentMode(mode) {
         var agentId = '_agent_main';
         if (!chats[agentId]) {
             createAgentChat().then(function() {
+                // ★ 接续: 从当前普通聊天复制最近对话到 Agent 聊天
+                _inheritChatContext(agentId);
                 loadChat(agentId);
             });
         } else {
+            // ★ 已有 agent 聊天但只有 system prompt → 补充普通聊天上下文
+            if (chats[agentId].messages && chats[agentId].messages.length <= 1) {
+                _inheritChatContext(agentId);
+            }
             loadChat(agentId);
         }
     } else if (mode === 'off') {
@@ -5462,6 +5472,43 @@ function createAgentChat() {
         };
         resolve();
     });
+}
+
+/** ★ 从当前普通聊天继承上下文到 Agent 聊天,实现任务接续 */
+function _inheritChatContext(agentId) {
+    try {
+        // 找到最近活跃的普通聊天
+        var normalChats = Object.keys(chats).filter(function(id) {
+            return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
+        }).sort(function(a, b) {
+            return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+        });
+        var sourceId = currentChatId && currentChatId !== '_agent_main' ? currentChatId : normalChats[0];
+        if (!sourceId || !chats[sourceId]) return;
+
+        var sourceMsgs = chats[sourceId].messages;
+        // 取最近 20 条非 system 消息
+        var recentMsgs = [];
+        for (var i = sourceMsgs.length - 1; i >= 0 && recentMsgs.length < 20; i--) {
+            var m = sourceMsgs[i];
+            if (m.role === 'system' || m.temporary || m._internal) continue;
+            recentMsgs.unshift(m);
+        }
+        if (recentMsgs.length === 0) return;
+
+        // 在 system prompt 后插入上下文摘要
+        var sysMsg = chats[agentId].messages[0];
+        var contextLines = ['[上下文 - 从普通聊天继承]'];
+        recentMsgs.forEach(function(m) {
+            var prefix = m.role === 'user' ? '用户' : 'AI';
+            var text = (m.text || m.content || '').substring(0, 300);
+            if (text) contextLines.push(prefix + ': ' + text);
+        });
+        sysMsg.content = (sysMsg.content || '') + '\n\n' + contextLines.join('\n');
+        console.log('[Agent] 已继承普通聊天上下文, 消息数:', recentMsgs.length);
+    } catch(e) {
+        console.warn('[Agent] 继承上下文失败:', e.message);
+    }
 }
 
 // ==================== 代理面板控制 ====================
@@ -5735,15 +5782,15 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     // 用廉价模型,但必须用 DeepSeek API(不能走 MiniMax)
     var key = localStorage.getItem('apiKey') || '';
     var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
-    if (baseUrl.includes('minimaxi.com') || baseUrl.includes('openrouter.ai')) {
-        // MiniMax/OpenRouter 不兼容 deepseek-chat 模型,跳过
+    if (baseUrl.includes('minimaxi.com') || baseUrl.includes('openrouter.ai') || baseUrl.includes('api.x.ai') || baseUrl.includes('anthropic.com') || baseUrl.includes('generativelanguage.googleapis.com')) {
+        // 非 DeepSeek API 不兼容 deepseek-chat 模型,跳过
         return;
     }
     var model = 'deepseek-chat';
     if (!key) return;
 
     try {
-        var resp = await fetch(baseUrl + '/chat/completions', {
+        var resp = await window.proxyFetch(baseUrl + '/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
             body: JSON.stringify({
@@ -6054,7 +6101,7 @@ function startAgentPanelRefresh() {
             // ★ 保持选中状态,只更新内容(不覆盖已渲染的聊天历史)
             var token = getAuthToken();
             if (token) {
-                fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+                fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
                     .then(function(r) { return r.json(); })
                     .then(function(agents) {
                         var a = agents[_selectedAgentName];
@@ -6149,7 +6196,7 @@ window._refreshAllAgentLists = async function() {
     var token = getAuthToken();
     if (!token) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
+        var r = await fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
         var agents = await r.json();
         // 验证返回的数据是有效对象
         if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
@@ -6217,7 +6264,7 @@ window.selectAgentChat = function(agentName) {
         var token = getAuthToken();
         if (!token) { msgArea.innerHTML = '<div class="text-xs text-gray-400">请先登录</div>'; return; }
         msgArea.innerHTML = '<div class="text-xs text-gray-400">获取中...</div>';
-        fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+        fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
             .then(function(r) { return r.json(); })
             .then(function(agents) {
                 var a = agents[agentName];
@@ -6268,7 +6315,7 @@ window.mainAgentReply = function() {
     }
     var token = getAuthToken();
     if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+    fetch(_apiBase + '?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) {
@@ -6872,7 +6919,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
         };
 
         var model = getVal('modelSelect') || DEFAULT_CONFIG.model;
-        var resp = await fetch((localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url) + '/chat/completions', {
+        var resp = await window.proxyFetch((localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url) + '/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -6936,7 +6983,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
+        var r = await fetch(_apiBase + '?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -6951,7 +6998,7 @@ window.deleteCron = async function(name) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
+        var r = await fetch(_apiBase + '?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -7118,7 +7165,7 @@ window._triggerMainAgentForTask = function(taskId) {
     setTimeout(function() {
         var token = getAuthToken();
         if (token) {
-            fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) }).catch(function() {});
+            fetch(_apiBase + '?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) }).catch(function() {});
         }
         // 清理任务: mainResponded后30秒删除
         setTimeout(function() {
@@ -7280,9 +7327,9 @@ window.deleteAgent = async function(name) {
     // 异步删除 (不阻塞 UI)
     var token = getAuthToken();
     if (!token) return;
-    fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+    fetch(_apiBase + '?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
         .then(function() {
-            return fetch('/oneapichat/engine_api.php?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
+            return fetch(_apiBase + '?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
         })
         .then(function() { window._refreshAllAgentLists(); })
         .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
@@ -7326,7 +7373,7 @@ window.refreshEngineStatus = async function() {
     text.textContent = '检查中...';
 
     try {
-        var resp = await fetch('/oneapichat/engine_api.php?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+        var resp = await fetch(_apiBase + '?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
         var data = await resp.json();
 
         if (data.ok || data.status === 'ok' || data.status === 'running') {
@@ -7345,7 +7392,7 @@ window.refreshEngineStatus = async function() {
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch('/oneapichat/engine_api.php?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+            var cronResp = await fetch(_apiBase + '?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
             var cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
@@ -7371,7 +7418,7 @@ window.refreshEngineStatus = async function() {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
         try {
-            var agentResp = await fetch('/oneapichat/engine_api.php?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+            var agentResp = await fetch(_apiBase + '?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
             var agentData = await agentResp.json();
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
@@ -7772,7 +7819,7 @@ window.generateSkillDefinition = async function() {
         '注意:\n- 参数名用小写英文\n- description 要清晰,让AI知道何时调用\n- required列表只放必填参数\n- implementation 是前端 JS 函数名,按 impl_xxx 格式';
 
     try {
-        var resp = await fetch(baseUrl + '/chat/completions', {
+        var resp = await window.proxyFetch(baseUrl + '/chat/completions', {
             method: 'POST',
             headers: {
                 'Authorization': 'Bearer ' + apiKey,
@@ -7955,6 +8002,8 @@ function saveConfig(showFeedback = false) {
     localStorage.setItem('tokens', getVal('maxTokens') || '8192');
     localStorage.setItem('stream', getChecked('streamToggle'));
     localStorage.setItem('requestTimeout', getVal('requestTimeout') || '60');
+    localStorage.setItem('proxyEnabled', getChecked('proxyToggle') ? '1' : '0');
+    localStorage.setItem('proxyUrl', getVal('proxyUrl') || '');
     localStorage.setItem('compress', getChecked('compressToggle'));
     localStorage.setItem('threshold', getVal('compressThreshold') || '10');
     // compressModel 自动选择,不再手动设置
@@ -8028,6 +8077,65 @@ function saveConfig(showFeedback = false) {
     }
 }
 
+// ★ 代理设置
+window.toggleProxy = function() {
+    var enabled = getChecked('proxyToggle');
+    localStorage.setItem('proxyEnabled', enabled ? '1' : '0');
+    localStorage.setItem('proxyUrl', getVal('proxyUrl') || '');
+    var details = document.getElementById('proxyConfigDetails');
+    if (details) details.style.display = enabled ? 'block' : 'none';
+    window.saveConfig();
+};
+window.isProxyEnabled = function() {
+    return localStorage.getItem('proxyEnabled') === '1';
+};
+window.getProxyUrl = function() {
+    return localStorage.getItem('proxyUrl') || '';
+};
+
+// ★ 代理 fetch — 通过 PHP 代理中继转发请求
+window.proxyFetch = async function(targetUrl, options = {}) {
+    var proxyUrl = window.getProxyUrl();
+    var enabled = window.isProxyEnabled();
+    if (!enabled || !proxyUrl) {
+        // 代理未启用或无代理URL,直接请求
+        return fetch(targetUrl, options);
+    }
+
+    console.log('[Proxy] →', targetUrl.substring(0, 80));
+
+    var headers = {};
+    if (options.headers) {
+        if (options.headers instanceof Headers) {
+            options.headers.forEach(function(v, k) { headers[k] = v; });
+        } else if (Array.isArray(options.headers)) {
+            options.headers.forEach(function(h) { headers[h[0]] = h[1]; });
+        } else {
+            headers = Object.assign({}, options.headers);
+        }
+    }
+
+    var body = null;
+    if (options.body) {
+        body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+    }
+
+    var relayBody = {
+        url: targetUrl,
+        method: options.method || (body ? 'POST' : 'GET'),
+        headers: headers,
+        body: body,
+        proxy: proxyUrl
+    };
+
+    return fetch(SERVER_API_BASE + '/proxy.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(relayBody),
+        signal: options.signal
+    });
+};
+
 window.updateDisplayParam = (type, val) => {
     if (type === 'lineHeight') {
         const span = getEl('lineHeightValue');
@@ -8090,7 +8198,7 @@ window.fetchModels = async function (silent) {
 
     try {
         var _headers = _isLocalModel ? {} : { Authorization: `Bearer ${key}` };
-        const res = await fetch(`${url}/models`, { headers: _headers });
+        const res = await window.proxyFetch(`${url}/models`, { headers: _headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = data.data || [];
@@ -12111,7 +12219,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     const body = {
         model,
         messages: apiMessages,
-        stream: getChecked('streamToggle'),
+        stream: window.isProxyEnabled() ? false : getChecked('streamToggle'),
         temperature: parseFloat(getVal('temperature')) || 0.7,
         max_tokens: requestedTokens
     };
@@ -12609,7 +12717,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
             // ★ 可恢复流式: 开关打开时走后端引擎
             // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
-            var useStream = _isImageModel ? false : getChecked('streamToggle');
+            var useStream = _isImageModel ? false : (window.isProxyEnabled() ? false : getChecked('streamToggle'));
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
             var _isContinuation = (toolCallCount > 0); // 工具调用次数>0说明是递归延续
             var _useRS = useStream && _rsEnabled && !_isContinuation;
@@ -12648,7 +12756,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }, 1000);
             }
 
-            const res = await fetch(_reqUrl, {
+            const _fetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+            const res = await _fetchFn(_reqUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
                 body: JSON.stringify(body),
@@ -12700,7 +12809,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         // 重新构造非流式请求体(清除stream标记)
                         var _nsBody = JSON.parse(JSON.stringify(body));
                         if (_nsBody.stream !== undefined) _nsBody.stream = false;
-                        const _nsRes = await fetch(_reqUrl, {
+                        const _nsFetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+                        const _nsRes = await _nsFetchFn(_reqUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
                             body: JSON.stringify(_nsBody),
@@ -13310,7 +13420,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _pushFile = args.file || '';
                         if (_pushFile) {
                             try {
-                                var _pRes = await fetch('/oneapichat/engine_api.php?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
+                                var _pRes = await fetch(_apiBase + '?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
                                 var _pData = await _pRes.json();
                                 if (_pData.ok && _pData.url) {
                                     // ★ 直接追加在 tool_result 中, 并注入到 pendingMsg.content
@@ -14065,7 +14175,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 abortSignal.addEventListener('abort', function() { _mmxCtrl.abort(); }, { once: true });
                             }
                             var _to = setTimeout(function() { _mmxCtrl.abort(); }, 300000); // 5分钟超时
-                            var _mmxResp = await fetch(_mmxUrl, { signal: _mmxCtrl.signal });
+                            var _mmxResp = await window.proxyFetch(_mmxUrl, { signal: _mmxCtrl.signal });
                             clearTimeout(_to);
                             // speech 和 music: 生成后自动返回音频 URL
                             if (_mmxCmd === 'speech' || _mmxCmd === 'music') {
@@ -14201,7 +14311,7 @@ window.generateImage = async (prompt, options = {}) => {
         if (options.style && typeof options.style === 'string') {
             body.style = options.style;
         }
-        const response = await fetch(apiUrl, {
+        const response = await window.proxyFetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -14361,7 +14471,7 @@ async function generateImageOpenRouter(prompt, options = {}) {
             stream: false
         };
 
-        const response = await fetch(chatUrl, {
+        const response = await window.proxyFetch(chatUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -14459,7 +14569,7 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
             body.mask_image_url = options.mask_image;
         }
 
-        const response = await fetch(chatUrl, {
+        const response = await window.proxyFetch(chatUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
             body: JSON.stringify(body),
@@ -14559,7 +14669,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
     }
 
     try {
-        const response = await fetch(apiUrl, {
+        const response = await window.proxyFetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -15487,11 +15597,9 @@ function compressChatsForStorage(chatsObj) {
         return tb.localeCompare(ta); // 最新的排前面
     });
 
-    // 保留最近 N 个聊天的完整数据（排除 Agent 聊天，防止泄漏到普通模式）
+    // 保留最近 N 个聊天的完整数据（包括 Agent 聊天，刷新后不丢失）
     const MAX_CHATS = 50;
     chatIds.forEach((id, idx) => {
-        // ★ 排除 Agent 独立聊天
-        if (id === AGENT_CHAT_ID || id === '_agent_main') return;
         const chat = chatsObj[id];
         // 保留所有聊天的完整消息,不做截断
         slim[id] = JSON.parse(JSON.stringify(chat));
@@ -17275,10 +17383,11 @@ async function engineApiHandler(action, args) {
     // 所有引擎 API 调用带上 auth_token 实现用户隔离
     var token = localStorage.getItem('authToken') || '';
     var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
+    var _apiBase = window.location.origin + '/oneapichat/engine_api.php';
 
     try {
         if (action === 'cron_list') {
-            var r = await fetch('/oneapichat/engine_api.php?action=cron_list' + authSuffix);
+            var r = await fetch(_apiBase + '?action=cron_list' + authSuffix);
             var d = await r.json();
             var names = Object.keys(d);
             if (names.length === 0) return { result: '暂无后台任务' };
@@ -17302,7 +17411,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '创建失败' };
         }
         if (action === 'cron_delete') {
-            var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&name=' + encodeURIComponent(args.name) + authSuffix);
+            var r = await fetch(_apiBase + '?action=cron_delete&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
             if (d.ok) return { result: '已删除任务: ' + args.name };
             return { error: d.error || '删除失败' };
@@ -17325,7 +17434,7 @@ async function engineApiHandler(action, args) {
                 var d = await r.json();
                 if (d.ok) {
                     // 创建后自动运行(不等待完成,避免阻塞并行工具调用)
-                    fetch('/oneapichat/engine_api.php?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix).catch(function(){});
+                    fetch(_apiBase + '?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix).catch(function(){});
                     return { result: '✅ 子代理 ' + args.name + ' 已创建并启动(角色:' + agentRole + ')' };
                 }
                 return { error: d.error || '创建失败' };
@@ -17334,7 +17443,7 @@ async function engineApiHandler(action, args) {
             }
         }
         if (action === 'agent_status') {
-            var r = await fetch('/oneapichat/engine_api.php?action=agent_status&name=' + encodeURIComponent(args.name) + authSuffix);
+            var r = await fetch(_apiBase + '?action=agent_status&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
             if (d.name) {
                 var msg = '🤖 子代理: ' + d.name + '\n状态: ' + d.status + '\n模型: ' + d.model;
@@ -17346,7 +17455,7 @@ async function engineApiHandler(action, args) {
             return { error: '未找到子代理' };
         }
         if (action === 'agent_list') {
-            var r = await fetch('/oneapichat/engine_api.php?action=agent_list' + authSuffix);
+            var r = await fetch(_apiBase + '?action=agent_list' + authSuffix);
             var d = await r.json();
             var names = Object.keys(d);
             if (names.length === 0) return { result: '暂无子代理' };
@@ -17363,17 +17472,17 @@ async function engineApiHandler(action, args) {
             var message = args.message;
             if (!name || !message) return { error: '请提供子代理名称和消息' };
             // 先查子代理是否存在
-            var sr = await fetch('/oneapichat/engine_api.php?action=agent_status&name=' + encodeURIComponent(name) + authSuffix);
+            var sr = await fetch(_apiBase + '?action=agent_status&name=' + encodeURIComponent(name) + authSuffix);
             var sd = await sr.json();
             if (!sd.name) return { error: '子代理 ' + name + ' 不存在' };
             // 运行子代理(直接触发一次)
-            await fetch('/oneapichat/engine_api.php?action=agent_run&name=' + encodeURIComponent(name) + '&message=' + encodeURIComponent(message) + '&from_ask=1' + authSuffix);
+            await fetch(_apiBase + '?action=agent_run&name=' + encodeURIComponent(name) + '&message=' + encodeURIComponent(message) + '&from_ask=1' + authSuffix);
             // 等待完成
             var waitStart = Date.now();
             var resultMsg = '';
             while (Date.now() - waitStart < 120000) {
                 await new Promise(r2 => setTimeout(r2, 2000));
-                sr = await fetch('/oneapichat/engine_api.php?action=agent_status&name=' + encodeURIComponent(name) + authSuffix);
+                sr = await fetch(_apiBase + '?action=agent_status&name=' + encodeURIComponent(name) + authSuffix);
                 sd = await sr.json();
                 if (sd.status === 'completed' || sd.status === 'error' || sd.status === 'failed') {
                     if (sd.result) resultMsg = sd.result.slice(0, 1000);
@@ -17388,19 +17497,19 @@ async function engineApiHandler(action, args) {
             }
         }
         if (action === 'agent_delete') {
-            var r = await fetch('/oneapichat/engine_api.php?action=agent_delete&name=' + encodeURIComponent(args.name) + authSuffix);
+            var r = await fetch(_apiBase + '?action=agent_delete&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
             if (d.ok) return { result: '✅ 子代理已删除: ' + args.name };
             return { error: d.error || '删除失败' };
         }
         if (action === 'cron_delete') {
-            var r = await fetch('/oneapichat/engine_api.php?action=cron_delete&name=' + encodeURIComponent(args.name) + authSuffix);
+            var r = await fetch(_apiBase + '?action=cron_delete&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
             if (d.ok) return { result: '✅ Cron任务已删除: ' + args.name };
             return { error: d.error || '删除失败' };
         }
         if (action === 'sys_info') {
-            var r = await fetch('/oneapichat/engine_api.php?action=sys_info' + authSuffix);
+            var r = await fetch(_apiBase + '?action=sys_info' + authSuffix);
             var d = await r.json();
             if (d.ok) {
                 var info = '🖥️ 系统信息:\n' +
@@ -17417,7 +17526,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '获取系统信息失败' };
         }
         if (action === 'exec') {
-            var r = await fetch('/oneapichat/engine_api.php?action=exec&cmd=' + encodeURIComponent(args.cmd) + '&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix);
+            var r = await fetch(_apiBase + '?action=exec&cmd=' + encodeURIComponent(args.cmd) + '&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix);
             var d = await r.json();
             if (d.ok) {
                 var out = '💻 命令: ' + args.cmd + '\n退出码: ' + d.exit_code + '\n';
@@ -17429,7 +17538,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '命令执行失败' };
         }
         if (action === 'python') {
-            var r = await fetch('/oneapichat/engine_api.php?action=python&script=' + encodeURIComponent(args.script) + '&timeout=' + (args.timeout || 30) + authSuffix);
+            var r = await fetch(_apiBase + '?action=python&script=' + encodeURIComponent(args.script) + '&timeout=' + (args.timeout || 30) + authSuffix);
             var d = await r.json();
             if (d.ok) {
                 var out = '🐍 Python 脚本执行结果:\n退出码: ' + d.exit_code + '\n';
@@ -17440,7 +17549,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || 'Python 脚本执行失败' };
         }
         if (action === 'file_read') {
-            var r = await fetch('/oneapichat/engine_api.php?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200) + authSuffix);
+            var r = await fetch(_apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200) + authSuffix);
             var d = await r.json();
             if (d.ok) {
                 var out = '📄 ' + args.path + ' (' + (d.size || 0) + ' bytes)\n' + d.content;
@@ -17450,33 +17559,33 @@ async function engineApiHandler(action, args) {
         }
         if (action === 'file_write') {
             var appendParam = args.append ? '&append=true' : '';
-            var r = await fetch('/oneapichat/engine_api.php?action=file_write&path=' + encodeURIComponent(args.path) + '&content=' + encodeURIComponent(args.content) + appendParam + authSuffix);
+            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + '&content=' + encodeURIComponent(args.content) + appendParam + authSuffix);
             var d = await r.json();
             if (d.ok) return { result: '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)' };
             return { error: d.error || '写入失败' };
         }
         if (action === 'agent_stop') {
-            var r = await fetch('/oneapichat/engine_api.php?action=agent_stop&name=' + encodeURIComponent(args.name) + authSuffix);
+            var r = await fetch(_apiBase + '?action=agent_stop&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
             if (d.ok) return { result: '✅ 已停止子代理: ' + args.name };
             return { error: d.error || '停止失败' };
         }
         if (action === 'push') {
-            var r = await fetch('/oneapichat/engine_api.php?action=push&msg=' + encodeURIComponent(args.msg) + authSuffix);
+            var r = await fetch(_apiBase + '?action=push&msg=' + encodeURIComponent(args.msg) + authSuffix);
             var d = await r.json();
             if (d.ok) { window.showAgentNotification('info', '📤 已推送通知'); return { result: '消息已推送,将在下次心跳时送达' }; }
             return { error: d.error || '推送失败' };
         }
         // ===== PS / DISK: 无需参数的工具,直接用明确 URL =====
         if (action === 'ps') {
-            var _r = await fetch('/oneapichat/engine_api.php?action=ps' + authSuffix);
+            var _r = await fetch(_apiBase + '?action=ps' + authSuffix);
             var _d = await _r.json();
             if (_d.ok) return { result: _d.stdout, total: _d.total };
             console.warn('[ps] failed:', JSON.stringify(_d).substring(0,200));
             return { error: _d.error || 'unreachable' };
         }
         if (action === 'disk') {
-            var _r = await fetch('/oneapichat/engine_api.php?action=disk' + authSuffix);
+            var _r = await fetch(_apiBase + '?action=disk' + authSuffix);
             var _d = await _r.json();
             if (_d.ok) return { result: _d.stdout };
             return { error: _d.error || 'unreachable' };
@@ -17486,7 +17595,7 @@ async function engineApiHandler(action, args) {
         if (browserActions.indexOf(action) >= 0) {
             // ★ PHP 期望的 action 名 (去掉 browser_ 前缀的变化)
             var _phpAction = action.replace('browser_', 'browser_');  // keep as-is
-            var _burl = '/oneapichat/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
+            var _burl = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // POST body 用于 navigate/click/type
             var _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
             if (_bmethod === 'POST') {
@@ -17515,7 +17624,7 @@ async function engineApiHandler(action, args) {
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
         var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
-            var _url = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat') + '/engine_api.php?action=' + encodeURIComponent(action) + authSuffix;
+            var _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
             var _skipKeys = ['action_cmd', 'auth_token'];
             Object.keys(args || {}).forEach(function(k) {
@@ -17551,7 +17660,8 @@ async function engineApiHandler(action, args) {
         }
         return { error: '未知操作: ' + action };
     } catch(e) {
-        return { error: '引擎API错误: ' + e.message };
+        console.error('[EngineAPI] ' + action + ' 失败:', e.message, '(请确认引擎服务运行正常)');
+        return { error: '引擎API错误(' + action + '): ' + e.message };
     }
 }
 
@@ -17871,7 +17981,7 @@ window.checkAgentNotifications = function() {
     }
 
     // 先获取引擎心跳(cron通知等)
-    fetch('/oneapichat/engine_api.php?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
+    fetch(_apiBase + '?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.error) return;
@@ -17894,7 +18004,7 @@ window.checkAgentNotifications = function() {
         }).catch(function() {});
 
     // ★ 同时获取子代理完成通知(新功能)
-    fetch('/oneapichat/engine_api.php?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
+    fetch(_apiBase + '?action=agent_notifications&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) return;

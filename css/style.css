@@ -1274,13 +1274,13 @@ select option { background: white; color: #1f2937; }
 .msg-actions {
     display: flex;
     gap: 4px;
-    margin-top: 2px;
+    margin-top: 1px;
     opacity: 0.5;
     transition: opacity 0.2s;
     justify-content: flex-end;
     padding: 0 0.6rem;
+    margin-bottom: -2px;
 }
-.message-content-wrapper:hover .msg-actions { opacity: 1; }
 .message-content-wrapper:hover .msg-actions { opacity: 1; }
 
 /* ===== 操作按钮样式 ===== */
