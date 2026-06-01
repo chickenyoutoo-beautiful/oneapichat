@@ -3779,21 +3779,18 @@ function buildUserContent(text, files) {
     const hasImages = files.some(f => f.isImage || f.type?.startsWith('image/'));
 
     if (hasImages && shouldUseVisionFormat()) {
+        console.log('[Vision] shouldUseVisionFormat=true, 图片数:', files.filter(f => f.isImage || f.type?.startsWith('image/')).length);
         // OpenAI 视觉模型格式:数组
         const content = [];
-        // 添加图片(优先使用服务器URL避免base64过大导致SSL错误)
-        // ★ 本地/自建模型: 检测 baseUrl 是否为本地地址,强制用 base64 data URL
-        // 因为 localhost/内网服务器可能无法访问公网 serverUrl
         var _baseUrl = (getVal?.('baseUrl') || localStorage.getItem('baseUrl') || '').toLowerCase();
         var _isLocalModel = _baseUrl.includes('localmodels') || _baseUrl.includes('localhost') || _baseUrl.includes('127.0.0.1') || _baseUrl.includes('192.168.');
         for (const f of files) {
             if (f.isImage || f.type?.startsWith('image/')) {
                 var _imgUrl = f.content;
-                // 非本地模型且有服务器URL时,优先使用服务器URL(大幅减小请求体大小)
                 if (!_isLocalModel && f.serverUrl) {
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 }
-                console.log('[Vision] 📷 ' + _imgUrl.substring(0, 50) + '...');
+                console.log('[Vision] 📷 name:', f.name, 'serverUrl:', f.serverUrl||'(none)', 'contentLen:', (f.content||'').length, 'finalUrl:', _imgUrl.substring(0, 80) + '...');
                 content.push({
                     type: 'image_url',
                     image_url: { url: _imgUrl }
