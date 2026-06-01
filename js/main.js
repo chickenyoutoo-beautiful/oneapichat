@@ -11375,10 +11375,11 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         if (markdownBody) {
             markdownBody.innerHTML = '';
             if (reasoningText) {
-                const reasoningEl = document.createElement('div');
-                reasoningEl.className = 'reasoning';
-                reasoningEl.textContent = reasoningText;
-                markdownBody.appendChild(reasoningEl);
+                var _det = document.createElement('details');
+                _det.className = 'reasoning-details';
+                _det.open = true;
+                _det.innerHTML = '<summary>💭 深度思考</summary><div class="reasoning-content">' + reasoningText.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
+                markdownBody.appendChild(_det);
             }
             if (fullText) {
                 const contentEl = document.createElement('div');
@@ -12210,6 +12211,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         stream: window.isProxyEnabled() ? false : getChecked('streamToggle'),
         temperature: parseFloat(getVal('temperature')) || 0.7,
         max_tokens: requestedTokens
+    };
+
+    // ★ MiniMax M3: 添加 thinking 参数启用思考
+    if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
+        body.thinking = { type: "adaptive" };
+        // M3 推荐用 max_completion_tokens 代替 max_tokens
+        body.max_completion_tokens = body.max_tokens;
+        delete body.max_tokens;
     };
 
     // 统一获取模型选择并转小写
