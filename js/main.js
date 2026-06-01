@@ -12510,6 +12510,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         try { _cfgBuiltinNoTool = _getModelCfg().isNoToolsBuiltin(currentModel); } catch(e) {}
         var _isInNoToolList = _matchedLocal || _cfgBuiltinNoTool;
         if (!_isInNoToolList) {
+            // ★ MiniMax M3: 限制工具数量避免 400
+            if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
+                if (tools.length > 50) {
+                    console.log('[M3] 工具数 ' + tools.length + ' > 50, 截断');
+                    tools = tools.slice(0, 50);
+                }
+            }
             body.tools = tools;
             // Agent 模式: 始终设置 tool_choice = "auto"
             if (agentModeActive || !isMiniMaxModel) body.tool_choice = "auto";
