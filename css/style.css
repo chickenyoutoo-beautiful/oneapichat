@@ -290,18 +290,14 @@ details.reasoning-details summary::before {
 details.reasoning-details[open] summary::before { content: "▸"; transform: rotate(90deg); }
 .reasoning-content {
     margin-top: 4px;
-    padding: 4px 8px;
-    border-left: 2px solid #9a8cc0;
-    font-style: italic;
+    padding: 8px 12px;
+    border-left: 3px solid #7c3aed;
     white-space: pre-wrap;
     font-size: 0.85rem;
-    background: rgba(200, 215, 240, 0.2);
-    border-radius: 6px;
-    color: #2c3e6b;
-    max-height: 999999px;
-    opacity: 1;
-    overflow: visible;
-    transition: max-height 0.3s ease-out, opacity 0.2s ease-out, margin 0.2s;
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.08) 0%, rgba(199, 210, 254, 0.12) 100%);
+    border-radius: 8px;
+    color: #3b2766;
+    display: block;
 }
 .dark .reasoning-content {
     background: rgba(50, 60, 90, 0.3);
