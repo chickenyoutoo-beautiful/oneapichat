@@ -9,6 +9,7 @@
     };
 })();
 // ==================== 全局常量 ====================
+var _apiBase = window.location.origin + '/oneapichat/engine_api.php';
 
 // ==================== 已知不支持工具调用的模型(硬编码,不依赖 models.js) ====================
 (function() {
@@ -17383,7 +17384,6 @@ async function engineApiHandler(action, args) {
     // 所有引擎 API 调用带上 auth_token 实现用户隔离
     var token = localStorage.getItem('authToken') || '';
     var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-    var _apiBase = window.location.origin + '/oneapichat/engine_api.php';
 
     try {
         if (action === 'cron_list') {
@@ -17979,8 +17979,6 @@ window.checkAgentNotifications = function() {
         setTimeout(window.checkAgentNotifications, 3000);
         return;
     }
-
-    var _apiBase = window.location.origin + '/oneapichat/engine_api.php';
 
     // 先获取引擎心跳(cron通知等)
     fetch(_apiBase + '?action=heartbeat&auth_token=' + token + '&t=' + Date.now(), { signal: AbortSignal.timeout(900000) })
