@@ -3730,6 +3730,7 @@ function shouldUseVisionFormat() {
         '-vl',           // 视觉语言模型后缀
         'vision',        // 明确包含 vision
         'minimax-vl',    // MiniMax 视觉模型
+        'minimax-m3',    // MiniMax M3 原生多模态
         'qwen-vl',       // Qwen 视觉模型
         'gemini-1.5',    // Gemini 1.5 支持多模态
         'claude-3'       // Claude 3 系列
@@ -3794,6 +3795,17 @@ function buildUserContent(text, files) {
                 content.push({
                     type: 'image_url',
                     image_url: { url: _imgUrl }
+                });
+            } else if (f.isVideo || f.type?.startsWith('video/')) {
+                // M3 原生视频理解
+                var _vidUrl = f.serverUrl || f.content || '';
+                if (_vidUrl && !_vidUrl.startsWith('http')) {
+                    _vidUrl = window.location.origin + _vidUrl;
+                }
+                console.log('[Vision] 🎬 ' + _vidUrl.substring(0, 50) + '...');
+                content.push({
+                    type: 'video_url',
+                    video_url: { url: _vidUrl }
                 });
             } else {
                 // 非图片文件: 注入服务器路径元信息
