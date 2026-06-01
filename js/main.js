@@ -9495,9 +9495,13 @@ function updateBubbleSearchStatus(bubble, status, isError = false) {
     if (!statusDiv) {
         statusDiv = document.createElement('div');
         statusDiv.className = 'search-status';
-        const markdownBody = bubble.querySelector('.markdown-body');
-        if (markdownBody) {
-            bubble.insertBefore(statusDiv, markdownBody);
+        // 放在 reasoning details 下方、markdown-body 上方
+        var _rsn = bubble.querySelector('details.reasoning-details');
+        var _md = bubble.querySelector('.markdown-body');
+        if (_rsn && _md) {
+            _rsn.after(statusDiv);
+        } else if (_md) {
+            bubble.insertBefore(statusDiv, _md);
         } else {
             bubble.appendChild(statusDiv);
         }
@@ -13288,7 +13292,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         if (_curTaskId && typeof window.addAgentToTask === 'function') {
                             window.addAgentToTask(_curTaskId, _aName, args.role || 'general');
                         }
-                        toolResult = await engineApiHandler('agent_create', args);
+                        // ★ 传递网络代理配置
+                        var _aArgs = Object.assign({}, args);
+                        if (window.isProxyEnabled && window.isProxyEnabled() && window.getProxyUrl && window.getProxyUrl()) {
+                            _aArgs.proxy_url = window.getProxyUrl();
+                            _aArgs.proxy_enabled = '1';
+                        }
+                        toolResult = await engineApiHandler('agent_create', _aArgs);
                     }
                      else if (func.name === 'engine_agent_status') {
                         toolResult = await engineApiHandler('agent_status', args);
@@ -13659,11 +13669,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var tPrompt = taskArgs.prompt || '';
                         var fullPrompt = tPrompt || '你的任务是: ' + tTask + '。\n\n【重要】任务完成后必须调用 engine_push 工具向用户推送结果摘要(中文,不超过200字)。不要只返回文本,必须使用 engine_push!';
                         if (fullPrompt) {
+                            // ★ 传递网络代理配置到子代理
+                            var _proxyConfig = {};
+                            if (window.isProxyEnabled && window.isProxyEnabled() && window.getProxyUrl && window.getProxyUrl()) {
+                                _proxyConfig = {
+                                    proxy_url: window.getProxyUrl(),
+                                    proxy_enabled: '1'
+                                };
+                            }
                             if (typeof window.engineApiHandler === 'function') {
                                 var _cr = await window.engineApiHandler('agent_create', {
                                     name: tName,
                                     prompt: fullPrompt,
-                                    role: tRole
+                                    role: tRole,
+                                    proxy_url: _proxyConfig.proxy_url || '',
+                                    proxy_enabled: _proxyConfig.proxy_enabled || ''
                                 });
                                 await window.engineApiHandler('agent_run', {
                                     name: tName

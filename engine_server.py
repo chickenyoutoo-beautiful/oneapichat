@@ -1751,7 +1751,9 @@ def agent_create(
     model: str = Query(""),
     api_key: str = Query(""),
     base_url: str = Query(""),
-    user_id: str = Query("")
+    user_id: str = Query(""),
+    proxy_url: str = Query(""),
+    proxy_enabled: str = Query("")
 ):
     store = get_ns("agents", user_id)
     agents = store.get()
@@ -1769,7 +1771,9 @@ def agent_create(
         "prompt": prompt + time_tag,
         "role": role,
         "status": "idle",
-        "created": datetime.now().isoformat()
+        "created": datetime.now().isoformat(),
+        "proxy_url": proxy_url or "",
+        "proxy_enabled": proxy_enabled or ""
     }
     agents[name] = agent_data
     store.set(agents)
@@ -1802,6 +1806,20 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
 
     # ★ 根据角色选择工具集(最小权限原则)
     agent_role = agent.get("role", "general")
+
+    # ★ 应用子代理的代理配置
+    proxy_url = agent.get("proxy_url", "")
+    proxy_enabled = agent.get("proxy_enabled", "")
+    if proxy_enabled == '1' and proxy_url:
+        os.environ['HTTP_PROXY'] = proxy_url
+        os.environ['HTTPS_PROXY'] = proxy_url
+        os.environ['ALL_PROXY'] = proxy_url
+        print(f'[Agent {name}] 代理已启用: {proxy_url}')
+    else:
+        # 回退到全局代理配置
+        for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']:
+            os.environ.pop(k, None)
+
     role_config = AGENT_ROLES.get(agent_role, AGENT_ROLES["general"])
     TOOLS = _filter_tools_by_role(agent_role)
 
