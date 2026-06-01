@@ -2677,18 +2677,20 @@ async function restoreUserData() {
     // ★ 延迟启动 Agent 通知轮询, 避免和主数据加载竞争 abort
     setTimeout(function() { window.startAgentNotificationPolling(); }, 2000);
 
-    // ★ Agent 模式恢复:如果刷新前 agentMode 是激活的,自动恢复 UI 状态
-    //    (setAgentMode 会处理工具启用/侧边栏/聊天切换)
+    // ★ Agent 模式恢复:如果刷新前 agentMode 是激活的,自动恢复
     var _agentModeSaved = localStorage.getItem('agentMode');
     if (_agentModeSaved && _agentModeSaved !== 'off') {
-        setTimeout(function() {
-            var _currentMode = getAgentMode();
-            if (_currentMode === _agentModeSaved || _currentMode === 'off') {
-                // 当前处于 agent 模式:确保 UI 状态正确
-                updateAgentUI();
-                if (window._agentBtn) window._agentBtn.classList.add('active');
-            }
-        }, 100);
+        var _currentMode = getAgentMode();
+        if (_currentMode !== _agentModeSaved) {
+            // 直接写 localStorage 和恢复，绕过 setAgentMode 的同模式退出逻辑
+            localStorage.setItem('agentMode', _agentModeSaved);
+            // 启用工具
+            var _agentKeys = ['SERVER_EXEC_TOOL','SERVER_PYTHON_TOOL','SERVER_FILE_READ_TOOL','SERVER_FILE_WRITE_TOOL','SERVER_FILE_OP_TOOL','SERVER_FILE_SEARCH_TOOL','SERVER_DOCKER_TOOL','SERVER_DB_QUERY_TOOL','SERVER_SYS_INFO_TOOL','SERVER_PS_TOOL','SERVER_DISK_TOOL','SERVER_NETWORK_TOOL','ENGINE_CRON_LIST_TOOL','ENGINE_CRON_CREATE_TOOL','ENGINE_CRON_DELETE_TOOL','DELEGATE_TASK_TOOL','ENGINE_AGENT_STATUS_TOOL','ENGINE_AGENT_LIST_TOOL','ENGINE_AGENT_DELETE_TOOL','ENGINE_PUSH_TOOL','BROWSER_NAVIGATE_TOOL','BROWSER_SCREENSHOT_TOOL','BROWSER_CLICK_TOOL','BROWSER_TYPE_TOOL','BROWSER_GET_CONTENT_TOOL','BROWSER_GET_SNAPSHOT_TOOL'];
+            _agentKeys.forEach(function(k) { window.setToolEnabled(k, true); });
+            updateAgentUI();
+            if (typeof renderToolPanel === 'function') renderToolPanel();
+            console.log('[Agent] 刷新后恢复模式:', _agentModeSaved);
+        }
     }
 }
 
