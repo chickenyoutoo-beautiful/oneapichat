@@ -12238,6 +12238,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         max_tokens: requestedTokens
     };
 
+    // 统一获取模型选择并转小写
+    const currentModel = getVal('modelSelect') || '';
+    const modelLower = currentModel.toLowerCase();
+
     // ★ MiniMax M3: 添加 thinking 参数
     if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
         var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
@@ -12247,11 +12251,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // M3 推荐用 max_completion_tokens 代替 max_tokens
         body.max_completion_tokens = body.max_tokens;
         delete body.max_tokens;
-    };
-
-    // 统一获取模型选择并转小写
-    const currentModel = getVal('modelSelect') || '';
-    const modelLower = currentModel.toLowerCase();
+    }
 
     // MiniMax M2: 启用 reasoning_split 以分离思考内容
     const isMiniMaxModel = modelLower.includes('minimax');
