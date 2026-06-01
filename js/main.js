@@ -1760,7 +1760,7 @@ const ASK_AGENT_TOOL = {
     type: "function",
     function: {
         name: "ask_agent",
-        description: "向用户请求启用Agent模式。当需要执行文件操作、运行命令、管理定时任务或使用子代理时调用此工具。用户确认后才可执行这些操作。",
+        description: "单次请求启用高级工具权限。调用后本对话可临时使用文件操作、命令执行、子代理等工具，无需切换模式。完成本轮任务后权限自动回收。",
         parameters: {
             type: "object",
             properties: {
@@ -5342,6 +5342,8 @@ function cycleAgentMode() {
 
 /** 判断 Agent 工具是否激活 (agent 或 yolo 模式) */
 function isAgentToolsActive() {
+    // ★ 单次 ask_agent 授权优先
+    if (window._tempAgentGranted && window._tempAgentChatId === currentChatId) return true;
     var mode = getAgentMode();
     return mode === 'agent' || mode === 'yolo';
 }
@@ -13436,19 +13438,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         } else { toolResult = await engineApiHandler('file_op', args); }
                     }
                      else if (func.name === 'ask_agent') {
+                        var reason = args.reason || '执行高级操作';
                         if (isYoloMode()) {
                             toolResult = { result: '✅ 当前已是 YOLO 自主模式,无需再次请求。' };
+                        } else if (isAgentToolsActive()) {
+                            toolResult = { result: '✅ Agent 模式已启用,工具可用。' };
                         } else {
-                            var reason = args.reason || '执行高级操作';
-                            if (confirm('🧠 AI 请求启用 Agent 模式\n\n原因: ' + reason + '\n\n是否允许?')) {
-                                abortExistingRequest(chatId);
-                                if (searchAbortControllerMap[chatId]) { searchAbortControllerMap[chatId].abort(); delete searchAbortControllerMap[chatId]; }
-                                delete isTypingMap[chatId];
-                                setAgentMode('agent');
-                                toolResult = { result: '✅ Agent 模式已启用,现在可以执行文件操作和命令了。' };
-                            } else {
-                                toolResult = { result: '❌ 用户拒绝了 Agent 模式请求,继续普通模式。' };
-                            }
+                            // ★ 单次授权: 临时允许本轮对话使用 Agent 工具,不切换模式
+                            window._tempAgentGranted = true;
+                            window._tempAgentChatId = chatId;
+                            toolResult = { result: '✅ 已获得单次授权,本轮对话可使用文件操作、命令执行、子代理等工具。完成后权限自动回收。' };
+                            console.log('[AskAgent] 单次授权已授予, chatId=' + chatId);
                         }
                     }
                      else if (func.name === 'autonomous_mode') {
