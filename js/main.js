@@ -18154,20 +18154,25 @@ window.checkAgentNotifications = function() {
 };
 
 window.showAgentNotification = function(type, message) {
-    // 右上角通知已禁用(冗余且太频繁)
+    // ★ 有重要推送时在聊天界面显示
+    if (message && currentChatId && chats[currentChatId]) {
+        appendMessage('system', '🔔 ' + message);
+    }
 };
 
 window.appendAgentSystemMessage = function(text, source) {
-    if (!text || !currentChatId) return;
-    // ★ 只注入主代理上下文,不显示在聊天界面
-    // 保存到主代理聊天数据中供 system prompt 读取
+    if (!text) return;
+    // ★ 推送消息直接显示在当前聊天
+    if (currentChatId && chats[currentChatId]) {
+        appendMessage('system', '📬 **' + (source || '通知') + ':** ' + text);
+    }
+    // ★ 同时保存到主代理聊天数据中供 system prompt 读取
     var chatId = currentChatId;
-    if (chats[chatId]) {
+    if (chatId && chats[chatId]) {
         if (!chats[chatId]._agentMessages) chats[chatId]._agentMessages = [];
         chats[chatId]._agentMessages.push({ text: text, time: Date.now(), source: source });
         if (chats[chatId]._agentMessages.length > 20) chats[chatId]._agentMessages = chats[chatId]._agentMessages.slice(-20);
     }
-    // ★ 不再调用 appendMessage 显示在聊天界面
 };
 
 // 已移至 restoreUserData 完成后延迟启动

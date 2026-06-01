@@ -1,0 +1,3348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AISniper OS</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+/* ============================================
+   AISniper OS - macOS Tahoe Inspired
+   Modern Browser-Based Operating System
+   ============================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  user-select: none;
+  cursor: default;
+  letter-spacing: -0.01em;
+}
+
+/* ============================================
+   THEME SYSTEM
+   ============================================ */
+
+/* Light Theme (Sequoia Light) */
+:root, .theme-light {
+  --accent: #0a84ff;
+  --accent-light: #5eb3ff;
+  --desktop-bg: linear-gradient(135deg, #5b8ee8 0%, #8b6dd8 35%, #c75db5 70%, #ff8a65 100%);
+  --menubar-bg: rgba(255, 255, 255, 0.55);
+  --menubar-text: rgba(0, 0, 0, 0.88);
+  --menubar-text-secondary: rgba(0, 0, 0, 0.55);
+  --dock-bg: rgba(255, 255, 255, 0.35);
+  --dock-border: rgba(255, 255, 255, 0.45);
+  --window-bg: rgba(246, 246, 248, 0.78);
+  --window-header: rgba(0, 0, 0, 0.04);
+  --window-text: #1d1d1f;
+  --window-text-secondary: #6e6e73;
+  --window-border: rgba(0, 0, 0, 0.08);
+  --control-bg: rgba(255, 255, 255, 0.6);
+  --control-border: rgba(255, 255, 255, 0.8);
+  --sidebar-bg: rgba(0, 0, 0, 0.03);
+  --sidebar-active: #0a84ff;
+  --button-bg: rgba(0, 0, 0, 0.06);
+  --button-hover: rgba(0, 0, 0, 0.1);
+  --shadow-window: 0 22px 60px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  --shadow-dock: 0 12px 40px rgba(0, 0, 0, 0.18);
+  --text-secondary: #86868b;
+  --input-bg: rgba(255, 255, 255, 0.85);
+  --input-border: rgba(0, 0, 0, 0.12);
+  --terminal-bg: rgba(28, 28, 30, 0.92);
+  --terminal-text: #f5f5f7;
+  --terminal-prompt: #5eb3ff;
+  --glass-blur: 40px;
+  --wallpaper-overlay: rgba(255, 255, 255, 0.05);
+  --desktop-icon-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Dark Theme (Sequoia Dark) */
+.theme-dark {
+  --accent: #0a84ff;
+  --accent-light: #5eb3ff;
+  --desktop-bg: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 35%, #2d1b4e 70%, #4a1e5c 100%);
+  --menubar-bg: rgba(20, 20, 25, 0.55);
+  --menubar-text: rgba(255, 255, 255, 0.92);
+  --menubar-text-secondary: rgba(255, 255, 255, 0.55);
+  --dock-bg: rgba(40, 40, 45, 0.5);
+  --dock-border: rgba(255, 255, 255, 0.1);
+  --window-bg: rgba(36, 36, 40, 0.78);
+  --window-header: rgba(255, 255, 255, 0.05);
+  --window-text: #f5f5f7;
+  --window-text-secondary: #98989d;
+  --window-border: rgba(255, 255, 255, 0.1);
+  --control-bg: rgba(255, 255, 255, 0.08);
+  --control-border: rgba(255, 255, 255, 0.1);
+  --sidebar-bg: rgba(255, 255, 255, 0.04);
+  --sidebar-active: #0a84ff;
+  --button-bg: rgba(255, 255, 255, 0.08);
+  --button-hover: rgba(255, 255, 255, 0.15);
+  --shadow-window: 0 22px 60px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  --shadow-dock: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --text-secondary: #98989d;
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --input-border: rgba(255, 255, 255, 0.12);
+  --terminal-bg: rgba(10, 10, 12, 0.95);
+  --terminal-text: #f5f5f7;
+  --terminal-prompt: #5eb3ff;
+  --glass-blur: 50px;
+  --wallpaper-overlay: rgba(0, 0, 0, 0.2);
+  --desktop-icon-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Aurora Theme */
+.theme-aurora {
+  --accent: #00d4aa;
+  --accent-light: #5eead4;
+  --desktop-bg: linear-gradient(135deg, #0f2027 0%, #203a43 25%, #2c5364 50%, #00b09b 100%);
+  --menubar-bg: rgba(15, 32, 39, 0.55);
+  --menubar-text: #ffffff;
+  --menubar-text-secondary: rgba(255, 255, 255, 0.6);
+  --dock-bg: rgba(15, 32, 39, 0.55);
+  --dock-border: rgba(0, 212, 170, 0.3);
+  --window-bg: rgba(20, 40, 50, 0.78);
+  --window-header: rgba(255, 255, 255, 0.06);
+  --window-text: #ffffff;
+  --window-text-secondary: #b0d4d1;
+  --window-border: rgba(0, 212, 170, 0.2);
+  --control-bg: rgba(255, 255, 255, 0.08);
+  --control-border: rgba(0, 212, 170, 0.3);
+  --sidebar-bg: rgba(0, 0, 0, 0.2);
+  --sidebar-active: #00d4aa;
+  --button-bg: rgba(255, 255, 255, 0.08);
+  --button-hover: rgba(0, 212, 170, 0.2);
+  --shadow-window: 0 22px 60px rgba(0, 0, 0, 0.5);
+  --shadow-dock: 0 12px 40px rgba(0, 176, 155, 0.3);
+  --text-secondary: #8eb8b3;
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --input-border: rgba(0, 212, 170, 0.3);
+  --terminal-bg: rgba(5, 20, 25, 0.95);
+  --terminal-text: #5eead4;
+  --terminal-prompt: #00d4aa;
+  --glass-blur: 45px;
+  --wallpaper-overlay: rgba(0, 0, 0, 0.15);
+  --desktop-icon-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Sunset Theme */
+.theme-sunset {
+  --accent: #ff6b35;
+  --accent-light: #ffa07a;
+  --desktop-bg: linear-gradient(135deg, #ff6b35 0%, #f7931e 25%, #ff4081 60%, #6a1b9a 100%);
+  --menubar-bg: rgba(60, 20, 40, 0.55);
+  --menubar-text: #ffffff;
+  --menubar-text-secondary: rgba(255, 255, 255, 0.65);
+  --dock-bg: rgba(40, 15, 30, 0.5);
+  --dock-border: rgba(255, 107, 53, 0.3);
+  --window-bg: rgba(50, 25, 35, 0.8);
+  --window-header: rgba(255, 255, 255, 0.06);
+  --window-text: #ffffff;
+  --window-text-secondary: #d4a5b0;
+  --window-border: rgba(255, 107, 53, 0.2);
+  --control-bg: rgba(255, 255, 255, 0.08);
+  --control-border: rgba(255, 107, 53, 0.3);
+  --sidebar-bg: rgba(0, 0, 0, 0.2);
+  --sidebar-active: #ff6b35;
+  --button-bg: rgba(255, 255, 255, 0.08);
+  --button-hover: rgba(255, 107, 53, 0.2);
+  --shadow-window: 0 22px 60px rgba(0, 0, 0, 0.5);
+  --shadow-dock: 0 12px 40px rgba(255, 107, 53, 0.3);
+  --text-secondary: #c9a5b0;
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --input-border: rgba(255, 107, 53, 0.3);
+  --terminal-bg: rgba(30, 10, 20, 0.95);
+  --terminal-text: #ffa07a;
+  --terminal-prompt: #ff6b35;
+  --glass-blur: 45px;
+  --wallpaper-overlay: rgba(0, 0, 0, 0.15);
+  --desktop-icon-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Cyberpunk Theme */
+.theme-cyberpunk {
+  --accent: #f0f600;
+  --accent-light: #ffeb3b;
+  --desktop-bg: linear-gradient(135deg, #ff006e 0%, #8338ec 50%, #3a86ff 100%);
+  --menubar-bg: rgba(20, 0, 40, 0.6);
+  --menubar-text: #f0f600;
+  --menubar-text-secondary: rgba(240, 246, 0, 0.6);
+  --dock-bg: rgba(20, 0, 40, 0.6);
+  --dock-border: rgba(240, 246, 0, 0.4);
+  --window-bg: rgba(15, 0, 30, 0.85);
+  --window-header: rgba(240, 246, 0, 0.08);
+  --window-text: #f0f600;
+  --window-text-secondary: #c0c600;
+  --window-border: rgba(240, 246, 0, 0.3);
+  --control-bg: rgba(240, 246, 0, 0.1);
+  --control-border: rgba(240, 246, 0, 0.4);
+  --sidebar-bg: rgba(0, 0, 0, 0.3);
+  --sidebar-active: #f0f600;
+  --button-bg: rgba(240, 246, 0, 0.1);
+  --button-hover: rgba(240, 246, 0, 0.2);
+  --shadow-window: 0 22px 60px rgba(131, 56, 236, 0.5), 0 0 20px rgba(240, 246, 0, 0.2);
+  --shadow-dock: 0 12px 40px rgba(240, 246, 0, 0.3);
+  --text-secondary: #c0c600;
+  --input-bg: rgba(0, 0, 0, 0.4);
+  --input-border: rgba(240, 246, 0, 0.4);
+  --terminal-bg: rgba(0, 0, 0, 0.95);
+  --terminal-text: #f0f600;
+  --terminal-prompt: #ff006e;
+  --glass-blur: 50px;
+  --wallpaper-overlay: rgba(0, 0, 0, 0.2);
+  --desktop-icon-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+}
+
+/* ============================================
+   DESKTOP
+   ============================================ */
+#desktop {
+  position: fixed;
+  inset: 0;
+  background: var(--desktop-bg);
+  background-size: 200% 200%;
+  animation: wallpaperShift 30s ease-in-out infinite;
+  transition: background 1s ease;
+  overflow: hidden;
+}
+
+#desktop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,0.15) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(255,255,255,0.1) 0%, transparent 40%);
+  pointer-events: none;
+}
+
+#desktop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--wallpaper-overlay);
+  pointer-events: none;
+}
+
+@keyframes wallpaperShift {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}
+
+/* ============================================
+   MENU BAR (Top Bar)
+   ============================================ */
+#menubar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: var(--menubar-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  color: var(--menubar-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 9999;
+  border-bottom: 1px solid var(--window-border);
+}
+
+.menubar-left, .menubar-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.menubar-item {
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.menubar-item:hover {
+  background: var(--button-hover);
+}
+
+.menubar-item.active {
+  background: var(--button-bg);
+}
+
+.menubar-logo {
+  font-size: 16px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.menubar-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.menubar-icon {
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.menubar-icon:hover {
+  background: var(--button-hover);
+}
+
+/* Apple menu dropdown */
+.apple-menu {
+  position: absolute;
+  top: 32px;
+  left: 8px;
+  background: var(--menubar-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 220px;
+  box-shadow: var(--shadow-window);
+  display: none;
+  z-index: 10000;
+}
+
+.apple-menu.show { display: block; }
+
+.apple-menu-item {
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--menubar-text);
+}
+
+.apple-menu-item:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.apple-menu-divider {
+  height: 1px;
+  background: var(--window-border);
+  margin: 4px 8px;
+}
+
+/* App menu dropdown */
+.app-menu {
+  position: absolute;
+  top: 32px;
+  left: 90px;
+  background: var(--menubar-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 240px;
+  box-shadow: var(--shadow-window);
+  display: none;
+  z-index: 10000;
+}
+
+.app-menu.show { display: block; }
+
+/* ============================================
+   CONTROL CENTER
+   ============================================ */
+#control-center {
+  position: fixed;
+  top: 36px;
+  right: 8px;
+  width: 320px;
+  background: var(--menubar-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: var(--shadow-window);
+  z-index: 9998;
+  display: none;
+  color: var(--menubar-text);
+}
+
+#control-center.show { display: block; }
+
+.cc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cc-widget {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cc-widget:hover {
+  background: var(--button-hover);
+}
+
+.cc-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-widget-icon {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+}
+
+.cc-widget-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cc-widget-status {
+  font-size: 11px;
+  color: var(--menubar-text-secondary);
+}
+
+.cc-toggle {
+  width: 36px;
+  height: 20px;
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cc-toggle.on {
+  background: #34c759;
+  border-color: #34c759;
+}
+
+.cc-toggle::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.cc-toggle.on::after { transform: translateX(16px); }
+
+.cc-slider-group {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.cc-slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: var(--menubar-text);
+}
+
+.cc-slider {
+  width: 100%;
+  height: 6px;
+  background: var(--control-border);
+  border-radius: 3px;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.cc-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.cc-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.cc-system-info {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 12px;
+}
+
+.cc-info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  color: var(--menubar-text);
+}
+
+.cc-info-label { color: var(--menubar-text-secondary); }
+
+.cc-info-value { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.health-bar {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.health-bar-cell {
+  flex: 1;
+  height: 6px;
+  background: var(--control-border);
+  border-radius: 1px;
+}
+
+.health-bar-cell.filled { background: #34c759; }
+.health-bar-cell.filled.medium { background: #ff9f0a; }
+.health-bar-cell.filled.high { background: #ff3b30; }
+
+/* ============================================
+   DOCK
+   ============================================ */
+#dock-wrapper {
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9997;
+}
+
+#dock {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--dock-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--dock-border);
+  border-radius: 22px;
+  box-shadow: var(--shadow-dock);
+  min-height: 70px;
+}
+
+.dock-item {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.2s, height 0.2s, margin 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  transform-origin: bottom center;
+  background: linear-gradient(135deg, #f5f5f7, #d1d1d6);
+  color: #1d1d1f;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  flex-shrink: 0;
+}
+
+.dock-item:hover {
+  transform: scale(1.4) translateY(-12px);
+  margin: 0 12px;
+}
+
+.dock-item.running::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  background: var(--menubar-text);
+  border-radius: 50%;
+}
+
+.dock-item .dock-tooltip {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--menubar-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: var(--menubar-text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  border: 1px solid var(--window-border);
+}
+
+.dock-item:hover .dock-tooltip { opacity: 1; }
+
+/* Dock item icon styles */
+.dock-item.finder { background: linear-gradient(135deg, #5eb3ff, #0a84ff); color: white; }
+.dock-item.calculator { background: linear-gradient(135deg, #2c2c2e, #1c1c1e); color: white; }
+.dock-item.settings { background: linear-gradient(135deg, #8e8e93, #48484a); color: white; }
+.dock-item.terminal { background: linear-gradient(135deg, #1c1c1e, #000000); color: #5eb3ff; border: 1px solid rgba(255,255,255,0.1); }
+.dock-item.game { background: linear-gradient(135deg, #ff006e, #8338ec); color: white; }
+
+/* ============================================
+   WINDOWS
+   ============================================ */
+.window {
+  position: absolute;
+  background: var(--window-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-window);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  min-height: 240px;
+  color: var(--window-text);
+  animation: windowOpen 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+
+@keyframes windowOpen {
+  0% { opacity: 0; transform: scale(0.85) translateY(20px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.window.minimized {
+  animation: windowMinimize 0.4s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes windowMinimize {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.1) translateY(80vh); }
+}
+
+.window.maximized {
+  border-radius: 0;
+  border: none;
+}
+
+.window-header {
+  height: 38px;
+  background: var(--window-header);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--window-border);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.window-header:active { cursor: grabbing; }
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.window-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  position: relative;
+  transition: filter 0.15s;
+}
+
+.window-btn:hover { filter: brightness(0.85); }
+
+.window-btn.close { background: #ff5f57; }
+.window-btn.minimize { background: #febc2e; }
+.window-btn.maximize { background: #28c840; }
+
+.window-title {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--window-text);
+  margin: 0 12px;
+}
+
+.window-content {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.window-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.window-content::-webkit-scrollbar-track { background: transparent; }
+
+.window-content::-webkit-scrollbar-thumb {
+  background: var(--button-bg);
+  border-radius: 4px;
+}
+
+.window-content::-webkit-scrollbar-thumb:hover { background: var(--button-hover); }
+
+/* ============================================
+   CALCULATOR
+   ============================================ */
+.calculator {
+  display: grid;
+  grid-template-rows: 1fr repeat(5, 1fr);
+  height: 100%;
+  padding: 16px;
+  gap: 8px;
+}
+
+.calc-display {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  padding: 16px 20px;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 80px;
+  border: 1px solid var(--window-border);
+}
+
+.calc-expression {
+  font-size: 14px;
+  color: var(--window-text-secondary);
+  min-height: 20px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calc-result {
+  font-size: 44px;
+  font-weight: 300;
+  color: var(--window-text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.02em;
+}
+
+.calc-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.calc-btn {
+  border: none;
+  border-radius: 50%;
+  font-size: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s;
+  font-family: inherit;
+  color: var(--window-text);
+  background: var(--button-bg);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calc-btn:hover { background: var(--button-hover); }
+.calc-btn:active { transform: scale(0.95); }
+
+.calc-btn.op { background: var(--accent); color: white; }
+.calc-btn.op:hover { background: var(--accent-light); }
+
+.calc-btn.fn { background: rgba(0, 0, 0, 0.4); color: var(--window-text); }
+.calc-btn.fn:hover { background: rgba(0, 0, 0, 0.5); }
+
+.calc-btn.wide {
+  grid-column: span 2;
+  border-radius: 36px;
+  aspect-ratio: auto;
+  justify-content: flex-start;
+  padding-left: 28px;
+}
+
+/* ============================================
+   SETTINGS
+   ============================================ */
+.settings-layout {
+  display: flex;
+  height: 100%;
+}
+
+.settings-sidebar {
+  width: 220px;
+  background: var(--sidebar-bg);
+  padding: 12px 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--window-border);
+  flex-shrink: 0;
+}
+
+.settings-sidebar-title {
+  font-size: 18px;
+  font-weight: 700;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  color: var(--window-text);
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--window-text);
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+
+.settings-nav-item:hover { background: var(--button-bg); }
+.settings-nav-item.active { background: var(--sidebar-active); color: white; }
+.settings-nav-item .nav-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: white;
+  background: var(--accent);
+}
+
+.settings-nav-item.active .nav-icon { background: rgba(255,255,255,0.25); }
+
+.settings-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+}
+
+.settings-section-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--window-text);
+}
+
+.settings-section-desc {
+  font-size: 13px;
+  color: var(--window-text-secondary);
+  margin-bottom: 20px;
+}
+
+.settings-group {
+  background: var(--control-bg);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--window-border);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--window-border);
+  gap: 10px;
+}
+
+.settings-row:last-child { border-bottom: none; }
+
+.settings-row-label {
+  font-size: 13px;
+  color: var(--window-text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-row-control { display: flex; align-items: center; gap: 10px; }
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.theme-card {
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 8px;
+  cursor: pointer;
+  background: var(--control-bg);
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.theme-card:hover { background: var(--button-hover); }
+
+.theme-card.active {
+  border-color: var(--accent);
+  background: var(--button-hover);
+}
+
+.theme-preview {
+  width: 100%;
+  height: 60px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.theme-name { font-size: 12px; color: var(--window-text); }
+
+.theme-light-preview { background: linear-gradient(135deg, #5b8ee8, #c75db5); }
+.theme-dark-preview { background: linear-gradient(135deg, #0a0e27, #4a1e5c); }
+.theme-aurora-preview { background: linear-gradient(135deg, #0f2027, #00b09b); }
+.theme-sunset-preview { background: linear-gradient(135deg, #ff6b35, #6a1b9a); }
+.theme-cyberpunk-preview { background: linear-gradient(135deg, #ff006e, #3a86ff); }
+
+.toggle-switch {
+  width: 38px;
+  height: 22px;
+  background: var(--button-bg);
+  border: 1px solid var(--window-border);
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-switch.on { background: #34c759; border-color: #34c759; }
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.toggle-switch.on::after { transform: translateX(16px); }
+
+.settings-select {
+  padding: 5px 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--window-text);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+}
+
+/* ============================================
+   TERMINAL
+   ============================================ */
+.terminal {
+  height: 100%;
+  background: var(--terminal-bg);
+  color: var(--terminal-text);
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  padding: 12px 16px;
+  overflow-y: auto;
+  line-height: 1.5;
+  cursor: text;
+}
+
+.terminal-line { white-space: pre-wrap; word-wrap: break-word; }
+
+.terminal-prompt-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-prompt-user { color: #5eb3ff; }
+.terminal-prompt-sep { color: var(--window-text); }
+.terminal-prompt-path { color: #5eead4; }
+.terminal-prompt-sigil { color: #5eb3ff; }
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--terminal-text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 0;
+  caret-color: var(--terminal-prompt);
+}
+
+.terminal-input::selection { background: rgba(94, 179, 255, 0.3); }
+
+.terminal-output { color: var(--terminal-text); }
+.terminal-output.error { color: #ff6b6b; }
+.terminal-output.success { color: #5eead4; }
+.terminal-output.warning { color: #febc2e; }
+.terminal-output.info { color: #5eb3ff; }
+.terminal-output.accent { color: var(--accent); }
+
+/* ============================================
+   FINDER
+   ============================================ */
+.finder-layout {
+  display: flex;
+  height: 100%;
+}
+
+.finder-sidebar {
+  width: 200px;
+  background: var(--sidebar-bg);
+  padding: 14px 8px;
+  border-right: 1px solid var(--window-border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.finder-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--window-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 12px 4px;
+}
+
+.finder-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--window-text);
+  transition: background 0.15s;
+}
+
+.finder-sidebar-item:hover { background: var(--button-bg); }
+.finder-sidebar-item.active { background: var(--sidebar-active); color: white; }
+
+.finder-sidebar-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  color: var(--accent);
+}
+
+.finder-sidebar-item.active .finder-sidebar-icon { color: white; }
+
+.finder-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.finder-toolbar {
+  height: 38px;
+  border-bottom: 1px solid var(--window-border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  background: var(--window-header);
+  flex-shrink: 0;
+}
+
+.finder-nav-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--button-bg);
+  border: none;
+  cursor: pointer;
+  color: var(--window-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.finder-nav-btn:hover { background: var(--button-hover); }
+.finder-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.finder-search {
+  flex: 1;
+  height: 26px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--window-text);
+  outline: none;
+  font-family: inherit;
+}
+
+.finder-breadcrumb {
+  font-size: 12px;
+  color: var(--window-text-secondary);
+  margin-left: 8px;
+}
+
+.finder-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+.finder-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  text-align: center;
+}
+
+.finder-item:hover { background: var(--button-bg); }
+.finder-item.selected { background: rgba(10, 132, 255, 0.2); }
+
+.finder-item-icon {
+  font-size: 42px;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.finder-item-name {
+  font-size: 12px;
+  color: var(--window-text);
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+/* ============================================
+   GAME
+   ============================================ */
+.game-window-content {
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.game-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+#game-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.game-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(10px);
+  color: white;
+  text-align: center;
+  padding: 20px;
+  z-index: 10;
+}
+
+.game-overlay.hidden { display: none; }
+
+.game-title {
+  font-size: 36px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #ff006e, #3a86ff, #5eead4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 12px;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 30px rgba(94, 234, 212, 0.5);
+}
+
+.game-subtitle {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-bottom: 24px;
+}
+
+.game-btn {
+  background: linear-gradient(135deg, #ff006e, #8338ec);
+  border: none;
+  color: white;
+  padding: 12px 32px;
+  border-radius: 25px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 6px;
+  box-shadow: 0 4px 20px rgba(255, 0, 110, 0.4);
+}
+
+.game-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(255, 0, 110, 0.6);
+}
+
+.game-btn:active { transform: translateY(0); }
+
+.game-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  color: white;
+  font-family: 'SF Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 5;
+  pointer-events: none;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+.game-hud-item {
+  background: rgba(0, 0, 0, 0.5);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.game-hud-item span { color: #5eead4; }
+
+.game-controls-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  font-family: 'SF Mono', monospace;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 6px 14px;
+  border-radius: 12px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.game-pause-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  font-weight: 600;
+  z-index: 8;
+}
+
+.game-pause-overlay.hidden { display: none; }
+
+/* ============================================
+   SPOTLIGHT SEARCH
+   ============================================ */
+#spotlight {
+  position: fixed;
+  top: 25%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.95);
+  width: 640px;
+  max-width: 90vw;
+  background: var(--menubar-bg);
+  backdrop-filter: blur(50px) saturate(180%);
+  -webkit-backdrop-filter: blur(50px) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-window);
+  z-index: 10001;
+  display: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+#spotlight.show {
+  display: block;
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+.spotlight-input {
+  width: 100%;
+  height: 64px;
+  background: transparent;
+  border: none;
+  padding: 0 20px;
+  font-size: 22px;
+  color: var(--menubar-text);
+  outline: none;
+  font-family: inherit;
+  font-weight: 300;
+}
+
+.spotlight-input::placeholder { color: var(--menubar-text-secondary); }
+
+.spotlight-results {
+  border-top: 1px solid var(--window-border);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.spotlight-result {
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  color: var(--menubar-text);
+  font-size: 14px;
+}
+
+.spotlight-result:hover, .spotlight-result.selected {
+  background: var(--accent);
+  color: white;
+}
+
+.spotlight-result-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: var(--button-bg);
+}
+
+/* ============================================
+   NOTIFICATION
+   ============================================ */
+#notifications {
+  position: fixed;
+  top: 36px;
+  right: 8px;
+  width: 340px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.notification {
+  background: var(--menubar-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid var(--window-border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  color: var(--menubar-text);
+  box-shadow: var(--shadow-window);
+  display: flex;
+  gap: 12px;
+  pointer-events: auto;
+  animation: slideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-size: 13px;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.notification.fadeout {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+@keyframes slideOut {
+  to { transform: translateX(120%); opacity: 0; }
+}
+
+.notification-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.notification-body { flex: 1; }
+.notification-title { font-weight: 600; margin-bottom: 2px; }
+.notification-msg { font-size: 12px; color: var(--menubar-text-secondary); }
+
+/* ============================================
+   BOOT SCREEN
+   ============================================ */
+#boot-screen {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  transition: opacity 0.6s ease-out;
+}
+
+#boot-screen.fade-out { opacity: 0; pointer-events: none; }
+
+.boot-logo {
+  font-size: 60px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0a84ff, #5eb3ff, #00d4aa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.03em;
+  animation: bootPulse 2s ease-in-out infinite;
+}
+
+@keyframes bootPulse {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+
+.boot-progress {
+  width: 200px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  margin-top: 30px;
+  overflow: hidden;
+}
+
+.boot-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #0a84ff, #5eb3ff);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.boot-text {
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 20px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+
+/* ============================================
+   UTILITY
+   ============================================ */
+@media (max-width: 768px) {
+  #control-center { width: 90vw; right: 5vw; }
+  #spotlight { width: 90vw; }
+  .window { min-width: 280px; }
+}
+</style>
+</head>
+
+<body class="theme-dark">
+
+<!-- BOOT SCREEN -->
+<div id="boot-screen">
+  <div class="boot-logo">AISniper</div>
+  <div class="boot-progress">
+    <div class="boot-progress-bar" id="boot-bar"></div>
+  </div>
+  <div class="boot-text" id="boot-text">Starting AISniper OS...</div>
+</div>
+
+<!-- DESKTOP -->
+<div id="desktop">
+
+  <!-- Menu Bar -->
+  <div id="menubar">
+    <div class="menubar-left">
+      <div class="menubar-item menubar-logo" id="apple-menu-trigger">⚡ AISniper</div>
+      <div class="menubar-item" id="app-menu-trigger">Finder</div>
+      <div class="menubar-item menubar-menu-item" data-name="File">File</div>
+      <div class="menubar-item menubar-menu-item" data-name="Edit">Edit</div>
+      <div class="menubar-item menubar-menu-item" data-name="View">View</div>
+      <div class="menubar-item menubar-menu-item" data-name="Window">Window</div>
+      <div class="menubar-item menubar-menu-item" data-name="Help">Help</div>
+    </div>
+    <div class="menubar-right">
+      <div class="menubar-icon" id="battery-icon" title="Battery">🔋</div>
+      <div class="menubar-icon" id="wifi-icon" title="Wi-Fi">📶</div>
+      <div class="menubar-icon" id="control-center-trigger" title="Control Center">⚙️</div>
+      <div class="menubar-icon" id="spotlight-trigger" title="Search (Cmd+Space)">🔍</div>
+      <div class="menubar-item menubar-clock" id="menubar-clock">Mon Jun 01 21:45</div>
+    </div>
+  </div>
+
+  <!-- Apple Menu -->
+  <div class="apple-menu" id="apple-menu">
+    <div class="apple-menu-item" onclick="OS.showAbout()">ℹ️ About This Mac</div>
+    <div class="apple-menu-divider"></div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.openApp('settings')">⚙️ System Settings...</div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.openApp('settings')">🖥️ Displays</div>
+    <div class="apple-menu-item" onclick="OS.closeMenus()">🔊 Sound</div>
+    <div class="apple-menu-divider"></div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.sleep()">😴 Sleep</div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.restart()">🔄 Restart...</div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.shutdown()">⏻ Shut Down...</div>
+    <div class="apple-menu-divider"></div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.lockScreen()">🔒 Lock Screen</div>
+  </div>
+
+  <!-- App Menu -->
+  <div class="app-menu" id="app-menu">
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.closeAllWindows()">Close All Windows</div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.minimizeAllWindows()">Minimize All</div>
+    <div class="apple-menu-divider"></div>
+    <div class="apple-menu-item" onclick="OS.closeMenus(); OS.zoomWindow()">Zoom</div>
+  </div>
+
+  <!-- Control Center -->
+  <div id="control-center">
+    <div class="cc-grid">
+      <div class="cc-widget">
+        <div class="cc-widget-row">
+          <div class="cc-widget-icon">📶</div>
+          <div style="flex:1;">
+            <div class="cc-widget-label">Wi-Fi</div>
+            <div class="cc-widget-status" id="wifi-status">AISniper-5G</div>
+          </div>
+          <div class="cc-toggle on" id="wifi-toggle" onclick="OS.toggleWifi()"></div>
+        </div>
+      </div>
+      <div class="cc-widget">
+        <div class="cc-widget-row">
+          <div class="cc-widget-icon">🔵</div>
+          <div style="flex:1;">
+            <div class="cc-widget-label">Bluetooth</div>
+            <div class="cc-widget-status">On</div>
+          </div>
+          <div class="cc-toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+      <div class="cc-widget">
+        <div class="cc-widget-row">
+          <div class="cc-widget-icon">📡</div>
+          <div style="flex:1;">
+            <div class="cc-widget-label">AirDrop</div>
+            <div class="cc-widget-status">Contacts</div>
+          </div>
+          <div class="cc-toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+      <div class="cc-widget">
+        <div class="cc-widget-row">
+          <div class="cc-widget-icon">🎯</div>
+          <div style="flex:1;">
+            <div class="cc-widget-label">Focus</div>
+            <div class="cc-widget-status">Do Not Disturb</div>
+          </div>
+          <div class="cc-toggle" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cc-slider-group">
+      <div class="cc-slider-label">
+        <span>☀️ Brightness</span>
+        <span id="brightness-val">75%</span>
+      </div>
+      <input type="range" min="0" max="100" value="75" class="cc-slider" id="brightness-slider" oninput="OS.setBrightness(this.value)">
+    </div>
+
+    <div class="cc-slider-group">
+      <div class="cc-slider-label">
+        <span>🔊 Volume</span>
+        <span id="volume-val">50%</span>
+      </div>
+      <input type="range" min="0" max="100" value="50" class="cc-slider" id="volume-slider" oninput="OS.setVolume(this.value)">
+    </div>
+
+    <div class="cc-system-info">
+      <div style="font-weight:600;margin-bottom:8px;font-size:13px;">🩺 System Health</div>
+      <div class="cc-info-row">
+        <span class="cc-info-label">CPU</span>
+        <span class="cc-info-value" id="cpu-usage">--</span>
+      </div>
+      <div class="cc-info-row">
+        <span class="cc-info-label">Memory</span>
+        <span class="cc-info-value" id="mem-usage">--</span>
+      </div>
+      <div class="cc-info-row">
+        <span class="cc-info-label">Disk</span>
+        <span class="cc-info-value" id="disk-usage">--</span>
+      </div>
+      <div class="health-bar" id="health-bar"></div>
+      <div class="cc-info-row" style="margin-top:8px;">
+        <span class="cc-info-label">Network</span>
+        <span class="cc-info-value" id="net-usage">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spotlight -->
+  <div id="spotlight">
+    <input type="text" class="spotlight-input" id="spotlight-input" placeholder="🔍 Spotlight Search">
+    <div class="spotlight-results" id="spotlight-results"></div>
+  </div>
+
+  <!-- Notifications Container -->
+  <div id="notifications"></div>
+
+  <!-- Windows Container -->
+  <div id="windows"></div>
+
+  <!-- Dock -->
+  <div id="dock-wrapper">
+    <div id="dock">
+      <div class="dock-item finder" onclick="OS.openApp('finder')">
+        <span style="font-size:32px;">📁</span>
+        <div class="dock-tooltip">Finder</div>
+      </div>
+      <div class="dock-item calculator" onclick="OS.openApp('calculator')">
+        <span style="font-size:30px;">🧮</span>
+        <div class="dock-tooltip">Calculator</div>
+      </div>
+      <div class="dock-item settings" onclick="OS.openApp('settings')">
+        <span style="font-size:28px;">⚙️</span>
+        <div class="dock-tooltip">System Settings</div>
+      </div>
+      <div class="dock-item terminal" onclick="OS.openApp('terminal')">
+        <span style="font-size:30px;">⌨️</span>
+        <div class="dock-tooltip">Terminal</div>
+      </div>
+      <div class="dock-item game" onclick="OS.openApp('game')">
+        <span style="font-size:30px;">🚀</span>
+        <div class="dock-tooltip">Space Shooter</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- THREE.JS for 3D Game -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+/* ============================================
+   AISniper OS - Core System
+   ============================================ */
+
+const OS = {
+  windows: {},
+  activeWindow: null,
+  windowZIndex: 100,
+  currentTheme: 'dark',
+  terminalHistory: [],
+  terminalHistoryIndex: -1,
+  wifiOn: true,
+  gameInstance: null,
+  bootDone: false,
+
+  init() {
+    console.log('🚀 AISniper OS Booting...');
+    this.setupMenuBar();
+    this.setupGlobalEvents();
+    this.startClock();
+    this.startSystemStats();
+    this.simulateBoot();
+    this.loadTheme(this.currentTheme);
+  },
+
+  simulateBoot() {
+    const bootText = document.getElementById('boot-text');
+    const bootBar = document.getElementById('boot-bar');
+    const messages = [
+      'Initializing kernel...',
+      'Loading system services...',
+      'Starting window manager...',
+      'Mounting file systems...',
+      'Loading themes...',
+      'Starting network services...',
+      'Welcome to AISniper OS'
+    ];
+    let progress = 0;
+    let msgIndex = 0;
+
+    const interval = setInterval(() => {
+      progress += Math.random() * 12 + 4;
+      if (progress > 100) progress = 100;
+      bootBar.style.width = progress + '%';
+
+      if (msgIndex < messages.length - 1 && progress > (msgIndex + 1) * (100 / messages.length)) {
+        bootText.textContent = messages[msgIndex];
+        msgIndex++;
+      }
+
+      if (progress >= 100) {
+        clearInterval(interval);
+        setTimeout(() => {
+          document.getElementById('boot-screen').classList.add('fade-out');
+          setTimeout(() => {
+            document.getElementById('boot-screen').style.display = 'none';
+            this.bootDone = true;
+            this.notify('🚀 AISniper OS', 'Welcome back! System ready.', '⚡');
+            this.openApp('finder');
+            setTimeout(() => this.openApp('terminal'), 800);
+          }, 600);
+        }, 400);
+      }
+    }, 200);
+  },
+
+  setupMenuBar() {
+    const appleTrigger = document.getElementById('apple-menu-trigger');
+    const appleMenu = document.getElementById('apple-menu');
+    const appTrigger = document.getElementById('app-menu-trigger');
+    const appMenu = document.getElementById('app-menu');
+    const ccTrigger = document.getElementById('control-center-trigger');
+    const cc = document.getElementById('control-center');
+    const spotTrigger = document.getElementById('spotlight-trigger');
+    const spot = document.getElementById('spotlight');
+    const spotInput = document.getElementById('spotlight-input');
+
+    appleTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      appleMenu.classList.toggle('show');
+      appMenu.classList.remove('show');
+      cc.classList.remove('show');
+    });
+
+    appTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      appMenu.classList.toggle('show');
+      appleMenu.classList.remove('show');
+      cc.classList.remove('show');
+    });
+
+    ccTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cc.classList.toggle('show');
+      appleMenu.classList.remove('show');
+      appMenu.classList.remove('show');
+    });
+
+    spotTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      spot.classList.toggle('show');
+      if (spot.classList.contains('show')) {
+        setTimeout(() => spotInput.focus(), 50);
+        this.updateSpotlight('');
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.apple-menu') && !e.target.closest('#apple-menu-trigger')) appleMenu.classList.remove('show');
+      if (!e.target.closest('.app-menu') && !e.target.closest('#app-menu-trigger')) appMenu.classList.remove('show');
+      if (!e.target.closest('#control-center') && !e.target.closest('#control-center-trigger')) cc.classList.remove('show');
+      if (!e.target.closest('#spotlight') && !e.target.closest('#spotlight-trigger')) spot.classList.remove('show');
+    });
+
+    spotInput.addEventListener('input', (e) => this.updateSpotlight(e.target.value));
+    spotInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        spot.classList.remove('show');
+        spotInput.value = '';
+      } else if (e.key === 'Enter') {
+        const sel = document.querySelector('.spotlight-result.selected');
+        if (sel) sel.click();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const results = document.querySelectorAll('.spotlight-result');
+        const cur = document.querySelector('.spotlight-result.selected');
+        let idx = Array.from(results).indexOf(cur);
+        results.forEach(r => r.classList.remove('selected'));
+        idx = (idx + 1) % results.length;
+        if (results[idx]) results[idx].classList.add('selected');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const results = document.querySelectorAll('.spotlight-result');
+        const cur = document.querySelector('.spotlight-result.selected');
+        let idx = Array.from(results).indexOf(cur);
+        results.forEach(r => r.classList.remove('selected'));
+        idx = (idx - 1 + results.length) % results.length;
+        if (results[idx]) results[idx].classList.add('selected');
+      }
+    });
+
+    // File/Edit/View menu items
+    document.querySelectorAll('.menubar-menu-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeMenus();
+        const name = item.dataset.name;
+        this.notify(name + ' Menu', `${name} menu clicked. (Demo)`);
+      });
+    });
+  },
+
+  closeMenus() {
+    document.querySelectorAll('.apple-menu, .app-menu, #control-center, #spotlight').forEach(m => m.classList.remove('show'));
+  },
+
+  setupGlobalEvents() {
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Space') {
+        e.preventDefault();
+        const spot = document.getElementById('spotlight');
+        spot.classList.toggle('show');
+        if (spot.classList.contains('show')) {
+          setTimeout(() => document.getElementById('spotlight-input').focus(), 50);
+          this.updateSpotlight('');
+        }
+      }
+      if (e.key === 'Escape') {
+        this.closeMenus();
+      }
+    });
+  },
+
+  startClock() {
+    const update = () => {
+      const now = new Date();
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = days[now.getDay()];
+      const month = months[now.getMonth()];
+      const date = now.getDate();
+      const hh = now.getHours().toString().padStart(2, '0');
+      const mm = now.getMinutes().toString().padStart(2, '0');
+      document.getElementById('menubar-clock').textContent = `${day} ${month} ${date} ${hh}:${mm}`;
+    };
+    update();
+    setInterval(update, 1000);
+  },
+
+  startSystemStats() {
+    const update = () => {
+      const cpu = (20 + Math.random() * 30).toFixed(0);
+      const mem = (40 + Math.random() * 20).toFixed(0);
+      const disk = (35 + Math.random() * 5).toFixed(0);
+      const net = (Math.random() * 5).toFixed(1);
+      const cpuEl = document.getElementById('cpu-usage');
+      const memEl = document.getElementById('mem-usage');
+      const diskEl = document.getElementById('disk-usage');
+      const netEl = document.getElementById('net-usage');
+      if (cpuEl) cpuEl.textContent = cpu + '%';
+      if (memEl) memEl.textContent = mem + '%';
+      if (diskEl) diskEl.textContent = disk + '%';
+      if (netEl) netEl.textContent = net + ' MB/s';
+
+      const hb = document.getElementById('health-bar');
+      if (hb) {
+        const load = (parseInt(cpu) + parseInt(mem)) / 2;
+        const cls = load > 70 ? 'high' : (load > 40 ? 'medium' : '');
+        hb.innerHTML = '';
+        for (let i = 0; i < 20; i++) {
+          const cell = document.createElement('div');
+          cell.className = 'health-bar-cell';
+          if (i < (load / 5)) {
+            cell.classList.add('filled');
+            if (cls) cell.classList.add(cls);
+          }
+          hb.appendChild(cell);
+        }
+      }
+    };
+    update();
+    setInterval(update, 2000);
+  },
+
+  loadTheme(theme) {
+    document.body.className = 'theme-' + theme;
+    this.currentTheme = theme;
+  },
+
+  toggleWifi() {
+    this.wifiOn = !this.wifiOn;
+    const toggle = document.getElementById('wifi-toggle');
+    const status = document.getElementById('wifi-status');
+    const icon = document.getElementById('wifi-icon');
+    if (toggle) toggle.classList.toggle('on', this.wifiOn);
+    if (this.wifiOn) {
+      if (status) status.textContent = 'AISniper-5G';
+      if (icon) icon.textContent = '📶';
+    } else {
+      if (status) status.textContent = 'Off';
+      if (icon) icon.textContent = '📵';
+    }
+    this.notify('Wi-Fi', this.wifiOn ? 'Connected to AISniper-5G' : 'Wi-Fi turned off');
+  },
+
+  setBrightness(val) {
+    const v = document.getElementById('brightness-val');
+    if (v) v.textContent = val + '%';
+    const filter = 0.4 + (val / 100) * 0.6;
+    const d = document.getElementById('desktop');
+    if (d) d.style.filter = `brightness(${filter})`;
+  },
+
+  setVolume(val) {
+    const v = document.getElementById('volume-val');
+    if (v) v.textContent = val + '%';
+  },
+
+  // ========== APP LAUNCHER ==========
+  openApp(appName) {
+    if (this.windows[appName] && this.windows[appName].element) {
+      this.focusWindow(appName);
+      return;
+    }
+
+    const apps = {
+      finder: { title: 'Finder', width: 780, height: 520, content: this.renderFinder() },
+      calculator: { title: 'Calculator', width: 320, height: 460, content: this.renderCalculator() },
+      settings: { title: 'System Settings', width: 820, height: 560, content: this.renderSettings() },
+      terminal: { title: 'Terminal — zsh', width: 720, height: 460, content: this.renderTerminal() },
+      game: { title: 'Space Shooter 3D', width: 900, height: 600, content: this.renderGame() }
+    };
+
+    const app = apps[appName];
+    if (!app) return;
+
+    const win = document.createElement('div');
+    win.className = 'window';
+    win.style.width = app.width + 'px';
+    win.style.height = app.height + 'px';
+    win.style.left = Math.max(20, (window.innerWidth / 2 - app.width / 2 + (Math.random() * 40 - 20))) + 'px';
+    win.style.top = Math.max(40, (window.innerHeight / 2 - app.height / 2 + (Math.random() * 40 - 20))) + 'px';
+    win.style.zIndex = ++this.windowZIndex;
+
+    win.innerHTML = `
+      <div class="window-header">
+        <div class="window-controls">
+          <button class="window-btn close" onclick="OS.closeWindow('${appName}')"></button>
+          <button class="window-btn minimize" onclick="OS.minimizeWindow('${appName}')"></button>
+          <button class="window-btn maximize" onclick="OS.maximizeWindow('${appName}')"></button>
+        </div>
+        <div class="window-title">${app.title}</div>
+        <div style="width:52px;"></div>
+      </div>
+      <div class="window-content">${app.content}</div>
+    `;
+
+    document.getElementById('windows').appendChild(win);
+    this.windows[appName] = {
+      element: win,
+      isMinimized: false,
+      isMaximized: false,
+      prevState: null
+    };
+
+    this.makeDraggable(win, appName);
+    this.focusWindow(appName);
+
+    // Mark dock item as running
+    const dockMap = { finder: 0, calculator: 1, settings: 2, terminal: 3, game: 4 };
+    const dockItems = document.querySelectorAll('.dock-item');
+    if (dockMap[appName] !== undefined && dockItems[dockMap[appName]]) {
+      dockItems[dockMap[appName]].classList.add('running');
+    }
+
+    if (appName === 'terminal') this.initTerminal();
+    if (appName === 'calculator') this.initCalculator();
+    if (appName === 'settings') this.initSettings();
+    if (appName === 'game') this.initGame();
+    if (appName === 'finder') this.initFinder();
+  },
+
+  makeDraggable(win, appName) {
+    const header = win.querySelector('.window-header');
+    let isDragging = false;
+    let startX, startY, startLeft, startTop;
+
+    header.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.window-btn')) return;
+      if (this.windows[appName].isMaximized) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = win.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      this.focusWindow(appName);
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      win.style.left = (startLeft + dx) + 'px';
+      win.style.top = Math.max(28, startTop + dy) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => { isDragging = false; });
+
+    win.addEventListener('mousedown', () => this.focusWindow(appName));
+  },
+
+  focusWindow(appName) {
+    const win = this.windows[appName];
+    if (!win) return;
+    win.element.style.zIndex = ++this.windowZIndex;
+    if (win.isMinimized) {
+      win.element.classList.remove('minimized');
+      win.isMinimized = false;
+    }
+    this.activeWindow = appName;
+    const trigger = document.getElementById('app-menu-trigger');
+    if (trigger) trigger.textContent = this.getAppMenuName(appName);
+  },
+
+  getAppMenuName(appName) {
+    const map = { finder: 'Finder', calculator: 'Calculator', settings: 'System Settings', terminal: 'Terminal', game: 'Space Shooter' };
+    return map[appName] || 'Finder';
+  },
+
+  closeWindow(appName) {
+    if (appName === 'game' && this.gameInstance) {
+      this.gameInstance.destroy();
+      this.gameInstance = null;
+    }
+    const win = this.windows[appName];
+    if (win && win.element) {
+      win.element.style.animation = 'windowMinimize 0.3s ease-in forwards';
+      setTimeout(() => {
+        if (win.element && win.element.parentNode) {
+          win.element.parentNode.removeChild(win.element);
+        }
+        delete this.windows[appName];
+        // Unmark dock
+        const dockMap = { finder: 0, calculator: 1, settings: 2, terminal: 3, game: 4 };
+        const dockItems = document.querySelectorAll('.dock-item');
+        if (dockMap[appName] !== undefined && dockItems[dockMap[appName]]) {
+          dockItems[dockMap[appName]].classList.remove('running');
+        }
+      }, 280);
+    }
+  },
+
+  minimizeWindow(appName) {
+    const win = this.windows[appName];
+    if (!win) return;
+    win.element.classList.add('minimized');
+    win.isMinimized = true;
+  },
+
+  maximizeWindow(appName) {
+    const win = this.windows[appName];
+    if (!win) return;
+    if (!win.isMaximized) {
+      win.prevState = {
+        left: win.element.style.left, top: win.element.style.top,
+        width: win.element.style.width, height: win.element.style.height
+      };
+      win.element.classList.add('maximized');
+      win.element.style.left = '0';
+      win.element.style.top = '28px';
+      win.element.style.width = '100%';
+      win.element.style.height = 'calc(100vh - 28px - 90px)';
+      win.isMaximized = true;
+    } else {
+      win.element.classList.remove('maximized');
+      if (win.prevState) {
+        win.element.style.left = win.prevState.left;
+        win.element.style.top = win.prevState.top;
+        win.element.style.width = win.prevState.width;
+        win.element.style.height = win.prevState.height;
+      }
+      win.isMaximized = false;
+    }
+  },
+
+  closeAllWindows() {
+    Object.keys(this.windows).forEach(k => this.closeWindow(k));
+  },
+
+  minimizeAllWindows() {
+    Object.keys(this.windows).forEach(k => {
+      if (this.windows[k] && !this.windows[k].isMinimized) this.minimizeWindow(k);
+    });
+  },
+
+  zoomWindow() {
+    if (this.activeWindow) this.maximizeWindow(this.activeWindow);
+  },
+
+  // ========== FINDER ==========
+  renderFinder() {
+    return `
+      <div class="finder-layout">
+        <div class="finder-sidebar">
+          <div class="finder-sidebar-title">Favorites</div>
+          <div class="finder-sidebar-item active" data-path="Home" onclick="OS.finderNav(this, 'Home')">
+            <span class="finder-sidebar-icon">🏠</span> Home
+          </div>
+          <div class="finder-sidebar-item" data-path="Desktop" onclick="OS.finderNav(this, 'Desktop')">
+            <span class="finder-sidebar-icon">🖥️</span> Desktop
+          </div>
+          <div class="finder-sidebar-item" data-path="Documents" onclick="OS.finderNav(this, 'Documents')">
+            <span class="finder-sidebar-icon">📄</span> Documents
+          </div>
+          <div class="finder-sidebar-item" data-path="Downloads" onclick="OS.finderNav(this, 'Downloads')">
+            <span class="finder-sidebar-icon">⬇️</span> Downloads
+          </div>
+          <div class="finder-sidebar-item" data-path="Pictures" onclick="OS.finderNav(this, 'Pictures')">
+            <span class="finder-sidebar-icon">🖼️</span> Pictures
+          </div>
+          <div class="finder-sidebar-item" data-path="Music" onclick="OS.finderNav(this, 'Music')">
+            <span class="finder-sidebar-icon">🎵</span> Music
+          </div>
+          <div class="finder-sidebar-item" data-path="Movies" onclick="OS.finderNav(this, 'Movies')">
+            <span class="finder-sidebar-icon">🎬</span> Movies
+          </div>
+          <div class="finder-sidebar-item" data-path="Applications" onclick="OS.finderNav(this, 'Applications')">
+            <span class="finder-sidebar-icon">📦</span> Applications
+          </div>
+          <div class="finder-sidebar-title" style="margin-top:14px;">Locations</div>
+          <div class="finder-sidebar-item">
+            <span class="finder-sidebar-icon">💾</span> Macintosh HD
+          </div>
+          <div class="finder-sidebar-item">
+            <span class="finder-sidebar-icon">☁️</span> iCloud Drive
+          </div>
+          <div class="finder-sidebar-item">
+            <span class="finder-sidebar-icon">🌐</span> Network
+          </div>
+        </div>
+        <div class="finder-main">
+          <div class="finder-toolbar">
+            <button class="finder-nav-btn" id="finder-back">←</button>
+            <button class="finder-nav-btn" disabled>→</button>
+            <div class="finder-breadcrumb" id="finder-breadcrumb">Home</div>
+            <input type="text" class="finder-search" placeholder="Search">
+          </div>
+          <div class="finder-content" id="finder-content"></div>
+        </div>
+      </div>
+    `;
+  },
+
+  initFinder() {
+    this.finderPath = 'Home';
+    this.renderFinderContent();
+  },
+
+  finderNav(el, path) {
+    document.querySelectorAll('.finder-sidebar-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    this.finderPath = path;
+    document.getElementById('finder-breadcrumb').textContent = path;
+    this.renderFinderContent();
+  },
+
+  renderFinderContent() {
+    const data = {
+      Home: [
+        { name: 'Desktop', icon: '🖥️' }, { name: 'Documents', icon: '📁' },
+        { name: 'Downloads', icon: '📁' }, { name: 'Pictures', icon: '🖼️' },
+        { name: 'Music', icon: '🎵' }, { name: 'Movies', icon: '🎬' },
+        { name: 'Applications', icon: '📦' }, { name: 'README.txt', icon: '📄' }
+      ],
+      Desktop: [
+        { name: 'Project Alpha', icon: '📁' }, { name: 'Notes.txt', icon: '📄' },
+        { name: 'todo.md', icon: '📝' }, { name: 'screenshot.png', icon: '🖼️' }
+      ],
+      Documents: [
+        { name: 'Resume.pdf', icon: '📕' }, { name: 'Work', icon: '📁' },
+        { name: 'Personal', icon: '📁' }, { name: 'presentation.key', icon: '📊' },
+        { name: 'budget.xlsx', icon: '📈' }
+      ],
+      Downloads: [
+        { name: 'aisniper-os.zip', icon: '🗜️' }, { name: 'photo-2026.jpg', icon: '🖼️' },
+        { name: 'installer.dmg', icon: '💿' }, { name: 'report.pdf', icon: '📕' }
+      ],
+      Pictures: [
+        { name: 'vacation-2026', icon: '📁' }, { name: 'wallpapers', icon: '📁' },
+        { name: 'IMG_0001.jpg', icon: '🖼️' }, { name: 'IMG_0002.jpg', icon: '🖼️' }
+      ],
+      Music: [
+        { name: 'lofi-chill.mp3', icon: '🎵' }, { name: 'playlist.m3u', icon: '📜' }
+      ],
+      Movies: [
+        { name: 'demo.mp4', icon: '🎬' }, { name: 'tutorial.mov', icon: '🎬' }
+      ],
+      Applications: [
+        { name: 'Calculator.app', icon: '🧮' }, { name: 'Terminal.app', icon: '⌨️' },
+        { name: 'Settings.app', icon: '⚙️' }, { name: 'Finder.app', icon: '📁' },
+        { name: 'Space Shooter.app', icon: '🚀' }
+      ]
+    };
+    const items = data[this.finderPath] || [];
+    const content = document.getElementById('finder-content');
+    if (!content) return;
+    content.innerHTML = items.map(it => `
+      <div class="finder-item">
+        <div class="finder-item-icon">${it.icon}</div>
+        <div class="finder-item-name">${it.name}</div>
+      </div>
+    `).join('');
+  },
+
+  // ========== CALCULATOR ==========
+  renderCalculator() {
+    return `
+      <div class="calculator">
+        <div class="calc-display">
+          <div class="calc-expression" id="calc-expr"></div>
+          <div class="calc-result" id="calc-result">0</div>
+        </div>
+        <div class="calc-buttons">
+          <button class="calc-btn fn" data-val="AC">AC</button>
+          <button class="calc-btn fn" data-val="+/-">±</button>
+          <button class="calc-btn fn" data-val="%">%</button>
+          <button class="calc-btn op" data-val="/">÷</button>
+          <button class="calc-btn" data-val="7">7</button>
+          <button class="calc-btn" data-val="8">8</button>
+          <button class="calc-btn" data-val="9">9</button>
+          <button class="calc-btn op" data-val="*">×</button>
+          <button class="calc-btn" data-val="4">4</button>
+          <button class="calc-btn" data-val="5">5</button>
+          <button class="calc-btn" data-val="6">6</button>
+          <button class="calc-btn op" data-val="-">−</button>
+          <button class="calc-btn" data-val="1">1</button>
+          <button class="calc-btn" data-val="2">2</button>
+          <button class="calc-btn" data-val="3">3</button>
+          <button class="calc-btn op" data-val="+">+</button>
+          <button class="calc-btn wide" data-val="0">0</button>
+          <button class="calc-btn" data-val=".">.</button>
+          <button class="calc-btn op" data-val="=">=</button>
+        </div>
+      </div>
+    `;
+  },
+
+  initCalculator() {
+    this.calcState = { current: '0', previous: '', operator: null, justEvaluated: false };
+    document.querySelectorAll('.calc-btn').forEach(btn => {
+      btn.addEventListener('click', () => this.calcInput(btn.dataset.val));
+    });
+    const keyHandler = (e) => {
+      if (!this.windows.calculator) {
+        document.removeEventListener('keydown', keyHandler);
+        return;
+      }
+      // Don't interfere with terminal input
+      if (e.target.tagName === 'INPUT' && e.target.closest('.terminal')) return;
+      const key = e.key;
+      if (/[0-9]/.test(key)) this.calcInput(key);
+      else if (key === '+' || key === '-' || key === '*' || key === '/') this.calcInput(key);
+      else if (key === 'Enter' || key === '=') { e.preventDefault(); this.calcInput('='); }
+      else if (key === '.') this.calcInput('.');
+      else if (key === 'Backspace') this.calcInput('AC');
+    };
+    document.addEventListener('keydown', keyHandler);
+  },
+
+  calcInput(val) {
+    const s = this.calcState;
+    const resultEl = document.getElementById('calc-result');
+    const exprEl = document.getElementById('calc-expr');
+    if (!resultEl) return;
+
+    if (val === 'AC') {
+      s.current = '0'; s.previous = ''; s.operator = null; s.justEvaluated = false;
+    } else if (val === '+/-') {
+      s.current = (parseFloat(s.current) * -1).toString();
+    } else if (val === '%') {
+      s.current = (parseFloat(s.current) / 100).toString();
+    } else if (['+', '-', '*', '/'].includes(val)) {
+      if (s.operator && !s.justEvaluated) {
+        s.current = this.calcCompute(s.previous, s.current, s.operator).toString();
+      }
+      s.previous = s.current;
+      s.operator = val;
+      s.justEvaluated = true;
+    } else if (val === '=') {
+      if (s.operator) {
+        const r = this.calcCompute(s.previous, s.current, s.operator);
+        exprEl.textContent = `${s.previous} ${this.calcOpSymbol(s.operator)} ${s.current} =`;
+        s.current = r.toString();
+        s.previous = '';
+        s.operator = null;
+        s.justEvaluated = true;
+      }
+    } else {
+      if (s.justEvaluated || s.current === '0') {
+        if (val === '.') s.current = '0.';
+        else s.current = val;
+        s.justEvaluated = false;
+      } else {
+        if (val === '.' && s.current.includes('.')) return;
+        s.current += val;
+      }
+    }
+
+    if (s.operator && val !== '=') {
+      exprEl.textContent = `${s.previous} ${this.calcOpSymbol(s.operator)}`;
+    } else if (val !== '=' && !s.justEvaluated) {
+      exprEl.textContent = '';
+    }
+
+    let display = s.current;
+    if (display.length > 12) display = parseFloat(display).toExponential(6);
+    resultEl.textContent = display;
+  },
+
+  calcCompute(a, b, op) {
+    a = parseFloat(a); b = parseFloat(b);
+    if (op === '+') return a + b;
+    if (op === '-') return a - b;
+    if (op === '*') return a * b;
+    if (op === '/') return b === 0 ? 'Error' : a / b;
+    return b;
+  },
+
+  calcOpSymbol(op) {
+    return { '+': '+', '-': '−', '*': '×', '/': '÷' }[op] || op;
+  },
+
+  // ========== SETTINGS ==========
+  renderSettings() {
+    return `
+      <div class="settings-layout">
+        <div class="settings-sidebar">
+          <div class="settings-sidebar-title">System Settings</div>
+          <div class="settings-nav-item active" data-page="appearance" onclick="OS.settingsNav(this, 'appearance')">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#5b8ee8,#c75db5);">🎨</div>
+            Appearance
+          </div>
+          <div class="settings-nav-item" data-page="display" onclick="OS.settingsNav(this, 'display')">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#0a84ff,#5eb3ff);">🖥️</div>
+            Display
+          </div>
+          <div class="settings-nav-item" data-page="sound" onclick="OS.settingsNav(this, 'sound')">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#ff6b6b,#ff006e);">🔊</div>
+            Sound
+          </div>
+          <div class="settings-nav-item" data-page="network" onclick="OS.settingsNav(this, 'network')">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#34c759,#00d4aa);">📶</div>
+            Network
+          </div>
+          <div class="settings-nav-item" data-page="about" onclick="OS.settingsNav(this, 'about')">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#8e8e93,#48484a);">ℹ️</div>
+            About
+          </div>
+        </div>
+        <div class="settings-content" id="settings-content"></div>
+      </div>
+    `;
+  },
+
+  initSettings() {
+    this.settingsPage = 'appearance';
+    this.renderSettingsPage();
+  },
+
+  settingsNav(el, page) {
+    document.querySelectorAll('.settings-nav-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    this.settingsPage = page;
+    this.renderSettingsPage();
+  },
+
+  renderSettingsPage() {
+    const c = document.getElementById('settings-content');
+    if (!c) return;
+    const pages = {
+      appearance: `
+        <div class="settings-section-title">Appearance</div>
+        <div class="settings-section-desc">Customize the look of your AISniper OS.</div>
+        <div class="settings-group">
+          <div class="settings-row" style="flex-direction:column;align-items:stretch;">
+            <div class="settings-row-label" style="margin-bottom:10px;">Theme</div>
+            <div class="theme-grid">
+              <div class="theme-card ${this.currentTheme === 'light' ? 'active' : ''}" onclick="OS.setTheme('light')">
+                <div class="theme-preview theme-light-preview"></div>
+                <div class="theme-name">Light</div>
+              </div>
+              <div class="theme-card ${this.currentTheme === 'dark' ? 'active' : ''}" onclick="OS.setTheme('dark')">
+                <div class="theme-preview theme-dark-preview"></div>
+                <div class="theme-name">Dark</div>
+              </div>
+              <div class="theme-card ${this.currentTheme === 'aurora' ? 'active' : ''}" onclick="OS.setTheme('aurora')">
+                <div class="theme-preview theme-aurora-preview"></div>
+                <div class="theme-name">Aurora</div>
+              </div>
+              <div class="theme-card ${this.currentTheme === 'sunset' ? 'active' : ''}" onclick="OS.setTheme('sunset')">
+                <div class="theme-preview theme-sunset-preview"></div>
+                <div class="theme-name">Sunset</div>
+              </div>
+              <div class="theme-card ${this.currentTheme === 'cyberpunk' ? 'active' : ''}" onclick="OS.setTheme('cyberpunk')">
+                <div class="theme-preview theme-cyberpunk-preview"></div>
+                <div class="theme-name">Cyberpunk</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <div class="settings-row-label">🌙 Dark Mode</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch ${this.currentTheme === 'dark' ? 'on' : ''}" onclick="OS.toggleDarkMode(this)"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">✨ Accent Color</div>
+            <div class="settings-row-control">
+              <select class="settings-select" onchange="OS.setAccent(this.value)">
+                <option value="0a84ff">Blue</option>
+                <option value="00d4aa">Teal</option>
+                <option value="ff6b35">Orange</option>
+                <option value="ff006e">Pink</option>
+                <option value="f0f600">Yellow</option>
+                <option value="8338ec">Purple</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🔄 Animated Wallpaper</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🔍 Reduce Transparency</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+        </div>
+      `,
+      display: `
+        <div class="settings-section-title">Display</div>
+        <div class="settings-section-desc">Adjust brightness, resolution and refresh rate.</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <div class="settings-row-label">☀️ Brightness</div>
+            <div class="settings-row-control">
+              <input type="range" min="0" max="100" value="75" style="width:160px;" oninput="OS.setBrightness(this.value); document.getElementById('b-val').textContent = this.value + '%'">
+              <span id="b-val">75%</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🌙 Night Shift</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">📐 Resolution</div>
+            <div class="settings-row-control">
+              <select class="settings-select">
+                <option>Default</option>
+                <option>1920 × 1080</option>
+                <option>2560 × 1440</option>
+                <option>3840 × 2160</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🔄 Refresh Rate</div>
+            <div class="settings-row-control">
+              <select class="settings-select">
+                <option>60 Hz</option>
+                <option>120 Hz</option>
+                <option>144 Hz</option>
+                <option>ProMotion</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      `,
+      sound: `
+        <div class="settings-section-title">Sound</div>
+        <div class="settings-section-desc">Configure audio output and input.</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <div class="settings-row-label">🔊 Output Volume</div>
+            <div class="settings-row-control">
+              <input type="range" min="0" max="100" value="50" style="width:160px;" oninput="OS.setVolume(this.value); document.getElementById('v-val').textContent = this.value + '%'">
+              <span id="v-val">50%</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🔕 Mute</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🎵 Play sound on startup</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+        </div>
+      `,
+      network: `
+        <div class="settings-section-title">Network</div>
+        <div class="settings-section-desc">Wi-Fi, Bluetooth and other connections.</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <div class="settings-row-label">📶 Wi-Fi</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch ${this.wifiOn ? 'on' : ''}" onclick="OS.toggleWifi(); this.classList.toggle('on')"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🌐 Network Name</div>
+            <div class="settings-row-control">AISniper-5G</div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">🔵 Bluetooth</div>
+            <div class="settings-row-control">
+              <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">📡 AirDrop</div>
+            <div class="settings-row-control">
+              <select class="settings-select">
+                <option>Contacts Only</option>
+                <option>Everyone</option>
+                <option>No One</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      `,
+      about: `
+        <div class="settings-section-title">About</div>
+        <div class="settings-section-desc">Information about your AISniper OS.</div>
+        <div class="settings-group">
+          <div style="padding:24px;display:flex;gap:20px;align-items:center;">
+            <div style="font-size:64px;background:linear-gradient(135deg,#0a84ff,#5eb3ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700;">⚡</div>
+            <div>
+              <div style="font-size:20px;font-weight:700;">AISniper OS</div>
+              <div style="color:var(--window-text-secondary);font-size:13px;">Version 1.0 "Sequoia"</div>
+            </div>
+          </div>
+          <div class="settings-row"><div class="settings-row-label">💻 Chip</div><div class="settings-row-control">Apple M-Series (Virtual)</div></div>
+          <div class="settings-row"><div class="settings-row-label">🧠 Memory</div><div class="settings-row-control">16 GB</div></div>
+          <div class="settings-row"><div class="settings-row-label">💾 Storage</div><div class="settings-row-control">512 GB SSD</div></div>
+          <div class="settings-row"><div class="settings-row-label">🆔 Serial Number</div><div class="settings-row-control">AISN-2026-0001</div></div>
+          <div class="settings-row"><div class="settings-row-label">🌐 Hostname</div><div class="settings-row-control">AISniper.local</div></div>
+        </div>
+      `
+    };
+    c.innerHTML = pages[this.settingsPage] || pages.appearance;
+  },
+
+  setTheme(theme) {
+    this.loadTheme(theme);
+    this.renderSettingsPage();
+    this.notify('Theme Changed', `Applied: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`);
+  },
+
+  toggleDarkMode(el) {
+    el.classList.toggle('on');
+    this.setTheme(el.classList.contains('on') ? 'dark' : 'light');
+  },
+
+  setAccent(color) {
+    document.documentElement.style.setProperty('--accent', '#' + color);
+    document.documentElement.style.setProperty('--accent-light', '#' + color + '99');
+    this.notify('Accent Color', 'Updated accent color');
+  },
+
+  // ========== TERMINAL ==========
+  renderTerminal() {
+    return `
+      <div class="terminal" id="terminal">
+        <div class="terminal-line terminal-output success">AISniper OS 1.0 (build 2026.06.01)</div>
+        <div class="terminal-line terminal-output">Copyright © 2026 AISniper Corporation. All rights reserved.</div>
+        <div class="terminal-line terminal-output">Type 'help' to see available commands.</div>
+        <div class="terminal-line">&nbsp;</div>
+        <div id="terminal-output"></div>
+        <div class="terminal-prompt-line">
+          <span class="terminal-prompt-user">aisniper</span><span class="terminal-prompt-sep">@</span><span class="terminal-prompt-path">AISniperOS</span> <span class="terminal-prompt-sep">~</span> <span class="terminal-prompt-sigil">$</span>
+          <input type="text" class="terminal-input" id="terminal-input" autofocus>
+        </div>
+      </div>
+    `;
+  },
+
+  initTerminal() {
+    const input = document.getElementById('terminal-input');
+    if (!input) return;
+    setTimeout(() => input.focus(), 100);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const cmd = input.value.trim();
+        this.terminalHistory.push(cmd);
+        this.terminalHistoryIndex = this.terminalHistory.length;
+        this.execTerminalCommand(cmd);
+        input.value = '';
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (this.terminalHistoryIndex > 0) {
+          this.terminalHistoryIndex--;
+          input.value = this.terminalHistory[this.terminalHistoryIndex] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (this.terminalHistoryIndex < this.terminalHistory.length - 1) {
+          this.terminalHistoryIndex++;
+          input.value = this.terminalHistory[this.terminalHistoryIndex] || '';
+        } else {
+          this.terminalHistoryIndex = this.terminalHistory.length;
+          input.value = '';
+        }
+      } else if (e.key === 'l' && e.ctrlKey) {
+        e.preventDefault();
+        document.getElementById('terminal-output').innerHTML = '';
+      }
+    });
+
+    document.querySelector('.terminal')?.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+        input.focus();
+      }
+    });
+  },
+
+  terminalPrint(text, cls = '') {
+    const out = document.getElementById('terminal-output');
+    if (!out) return;
+    const line = document.createElement('div');
+    line.className = 'terminal-line terminal-output ' + cls;
+    line.innerHTML = text;
+    out.appendChild(line);
+    const term = document.getElementById('terminal');
+    if (term) term.scrollTop = term.scrollHeight;
+  },
+
+  terminalPrintPrompt(cmd) {
+    const out = document.getElementById('terminal-output');
+    if (!out) return;
+    const line = document.createElement('div');
+    line.className = 'terminal-line terminal-prompt-line';
+    line.innerHTML = `<span class="terminal-prompt-user">aisniper</span><span class="terminal-prompt-sep">@</span><span class="terminal-prompt-path">AISniperOS</span> <span class="terminal-prompt-sep">~</span> <span class="terminal-prompt-sigil">$</span> <span>${this.escapeHtml(cmd)}</span>`;
+    out.appendChild(line);
+  },
+
+  escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  },
+
+  execTerminalCommand(raw) {
+    if (raw) this.terminalPrintPrompt(raw);
+    const parts = raw.split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1);
+
+    const commands = {
+      help: () => {
+        this.terminalPrint('<span class="terminal-output info">Available commands:</span>');
+        const cmds = [
+          ['help', 'Show this help message'], ['about', 'About AISniper OS'],
+          ['date', 'Show current date and time'], ['whoami', 'Show current user'],
+          ['ls', 'List files in current directory'], ['pwd', 'Print working directory'],
+          ['echo [text]', 'Echo the given text'], ['clear', 'Clear the terminal'],
+          ['theme [name]', 'Change theme (light/dark/aurora/sunset/cyberpunk)'],
+          ['neofetch', 'Show system info'], ['open [app]', 'Open an app'],
+          ['exit', 'Close terminal'], ['sudo [cmd]', 'Run as superuser'],
+          ['matrix', 'Enter the matrix'], ['hello', 'Say hello'],
+          ['fortune', 'Get a random fortune'], ['uptime', 'Show system uptime'],
+          ['ping [host]', 'Ping a host'], ['uname', 'System info'],
+          ['history', 'Show command history']
+        ];
+        cmds.forEach(([c, d]) => this.terminalPrint(`  <span class="terminal-output success">${c.padEnd(20)}</span> ${d}`));
+      },
+      about: () => this.terminalPrint('AISniper OS 1.0 — Modern browser-based operating system inspired by macOS.'),
+      date: () => this.terminalPrint(new Date().toString()),
+      whoami: () => this.terminalPrint('aisniper'),
+      pwd: () => this.terminalPrint('/Users/aisniper'),
+      ls: () => this.terminalPrint('<span class="terminal-output info">Desktop  Documents  Downloads  Pictures  Music  Movies  Applications</span>'),
+      echo: (args) => this.terminalPrint(args.join(' ')),
+      clear: () => { const o = document.getElementById('terminal-output'); if (o) o.innerHTML = ''; },
+      theme: (args) => {
+        const t = args[0];
+        if (!t) { this.terminalPrint('Current theme: ' + this.currentTheme, 'info'); return; }
+        if (['light', 'dark', 'aurora', 'sunset', 'cyberpunk'].includes(t)) this.setTheme(t);
+        else this.terminalPrint('Unknown theme: ' + t, 'error');
+      },
+      neofetch: () => {
+        const art = ['         ___        ', '        /   \\       ', '       | ⚡ |      ', '        \\___/       ', '    ___/     \\___   ', '   /             \\  '];
+        const info = [
+          '<span class="terminal-output success">aisniper@AISniperOS</span>',
+          '------------------',
+          '<span class="terminal-output info">OS:</span> AISniper OS 1.0',
+          '<span class="terminal-output info">Host:</span> AISniper.local',
+          '<span class="terminal-output info">Kernel:</span> AOS 26.0.0',
+          '<span class="terminal-output info">Theme:</span> ' + this.currentTheme
+        ];
+        art.forEach((line, i) => this.terminalPrint(line + '  ' + (info[i] || '')));
+      },
+      open: (args) => {
+        const app = args[0];
+        if (!app) return this.terminalPrint('Usage: open <app>', 'error');
+        const validApps = ['finder', 'calculator', 'settings', 'terminal', 'game'];
+        if (validApps.includes(app)) { this.openApp(app); this.terminalPrint('Opened ' + app, 'success'); }
+        else this.terminalPrint('Unknown app: ' + app + '. Available: ' + validApps.join(', '), 'error');
+      },
+      exit: () => this.closeWindow('terminal'),
+      sudo: (args) => {
+        if (!args.length) return this.terminalPrint('Usage: sudo <command>');
+        this.terminalPrint('<span class="terminal-output warning">[sudo] password for aisniper:</span>', '');
+        this.terminalPrint('Sorry, try again.', 'error');
+        this.terminalPrint('😏 Just kidding! In AISniper OS, you are always root.', 'success');
+      },
+      matrix: () => {
+        let i = 0;
+        const chars = '0123456789ABCDEFアイウエオカキクケコサシスセソ';
+        const interval = setInterval(() => {
+          let line = '';
+          for (let j = 0; j < 60; j++) line += chars[Math.floor(Math.random() * chars.length)];
+          this.terminalPrint('<span class="terminal-output success">' + line + '</span>');
+          if (++i > 10) clearInterval(interval);
+        }, 80);
+      },
+      hello: () => this.terminalPrint('Hello, world! 👋 Welcome to AISniper OS.'),
+      fortune: () => {
+        const f = [
+          'The best way to predict the future is to invent it. — Alan Kay',
+          'Simplicity is the ultimate sophistication. — Leonardo da Vinci',
+          'Code is poetry. — WordPress',
+          'Make it work, make it right, make it fast. — Kent Beck',
+          'Stay hungry, stay foolish. — Steve Jobs'
+        ];
+        this.terminalPrint('🥠 ' + f[Math.floor(Math.random() * f.length)], 'accent');
+      },
+      uptime: () => {
+        const sec = Math.floor((Date.now() - window.osBootTime) / 1000);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        this.terminalPrint(`up ${m} minutes, ${s} seconds`);
+      },
+      ping: (args) => {
+        const host = args[0] || 'localhost';
+        this.terminalPrint(`PING ${host}: 56 data bytes`);
+        let i = 0;
+        const interval = setInterval(() => {
+          const t = (Math.random() * 50).toFixed(1);
+          this.terminalPrint(`64 bytes from ${host}: icmp_seq=${i} time=${t}ms`);
+          if (++i >= 4) {
+            clearInterval(interval);
+            this.terminalPrint(`--- ${host} ping statistics ---`);
+            this.terminalPrint('4 packets transmitted, 4 received, 0% packet loss', 'success');
+          }
+        }, 400);
+      },
+      uname: () => this.terminalPrint('AISniper OS 1.0.0 aarch64'),
+      history: () => { this.terminalHistory.forEach((c, i) => this.terminalPrint(`  ${i + 1}  ${c}`)); }
+    };
+
+    if (!cmd) return;
+    if (commands[cmd]) {
+      try { commands[cmd](args); } catch (e) { this.terminalPrint('Error: ' + e.message, 'error'); }
+    } else {
+      this.terminalPrint(`zsh: command not found: ${cmd}`, 'error');
+      this.terminalPrint('Type "help" for available commands.', 'warning');
+    }
+  },
+
+  // ========== GAME ==========
+  renderGame() {
+    return `
+      <div class="game-window-content">
+        <div class="game-canvas-wrap">
+          <canvas id="game-canvas"></canvas>
+          <div class="game-overlay" id="game-overlay">
+            <div class="game-title">SPACE SHOOTER</div>
+            <div class="game-subtitle">Destroy the enemy fleet. Save the galaxy.</div>
+            <button class="game-btn" onclick="OS.startGame()">▶ START MISSION</button>
+            <div style="margin-top:20px;font-size:11px;opacity:0.6;font-family:monospace;">
+              ↑↓←→ or WASD to move &nbsp;•&nbsp; SPACE to shoot &nbsp;•&nbsp; P to pause
+            </div>
+          </div>
+          <div class="game-pause-overlay hidden" id="game-pause">
+            <div>
+              <div style="font-size:48px;margin-bottom:12px;">⏸</div>
+              <div>PAUSED</div>
+              <div style="font-size:12px;margin-top:8px;opacity:0.7;">Press P to resume</div>
+            </div>
+          </div>
+          <div class="game-hud" id="game-hud" style="display:none;">
+            <div class="game-hud-item">SCORE: <span id="game-score">0</span></div>
+            <div class="game-hud-item">WAVE: <span id="game-wave">1</span></div>
+            <div class="game-hud-item">LIVES: <span id="game-lives">♥♥♥</span></div>
+          </div>
+          <div class="game-controls-hint" id="game-hint" style="display:none;">
+            ↑↓←→/WASD MOVE • SPACE SHOOT • P PAUSE
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  initGame() {
+    this.gameInstance = new SpaceShooter3D('game-canvas', this);
+  },
+
+  startGame() {
+    if (this.gameInstance) {
+      this.gameInstance.start();
+      document.getElementById('game-overlay').classList.add('hidden');
+      document.getElementById('game-hud').style.display = 'flex';
+      document.getElementById('game-hint').style.display = 'block';
+    }
+  },
+
+  // ========== SPOTLIGHT ==========
+  updateSpotlight(query) {
+    const apps = [
+      { name: 'Finder', icon: '📁', action: 'finder' },
+      { name: 'Calculator', icon: '🧮', action: 'calculator' },
+      { name: 'System Settings', icon: '⚙️', action: 'settings' },
+      { name: 'Terminal', icon: '⌨️', action: 'terminal' },
+      { name: 'Space Shooter', icon: '🚀', action: 'game' }
+    ];
+    const filtered = query ? apps.filter(a => a.name.toLowerCase().includes(query.toLowerCase())) : apps;
+    const results = document.getElementById('spotlight-results');
+    if (!results) return;
+    if (filtered.length === 0) {
+      results.innerHTML = '<div class="spotlight-result" style="opacity:0.6;cursor:default;">No results</div>';
+      return;
+    }
+    results.innerHTML = filtered.map((a, i) => `
+      <div class="spotlight-result ${i === 0 ? 'selected' : ''}" onclick="OS.openApp('${a.action}'); document.getElementById('spotlight').classList.remove('show'); document.getElementById('spotlight-input').value='';">
+        <div class="spotlight-result-icon">${a.icon}</div>
+        <div>${a.name}</div>
+      </div>
+    `).join('');
+  },
+
+  // ========== NOTIFICATIONS ==========
+  notify(title, msg, icon = '🔔') {
+    if (!this.bootDone) return;
+    const n = document.createElement('div');
+    n.className = 'notification';
+    n.innerHTML = `
+      <div class="notification-icon">${icon}</div>
+      <div class="notification-body">
+        <div class="notification-title">${title}</div>
+        <div class="notification-msg">${msg}</div>
+      </div>
+    `;
+    document.getElementById('notifications').appendChild(n);
+    setTimeout(() => {
+      n.classList.add('fadeout');
+      setTimeout(() => n.remove(), 300);
+    }, 4000);
+  },
+
+  showAbout() { this.closeMenus(); this.notify('AISniper OS', 'Version 1.0 "Sequoia" — Modern Browser OS', '⚡'); },
+  sleep() { this.closeMenus(); this.notify('Sleep', 'System is going to sleep...', '😴'); },
+  restart() { this.closeMenus(); this.notify('Restart', 'Restarting AISniper OS...', '🔄'); setTimeout(() => location.reload(), 1000); },
+  shutdown() { this.closeMenus(); this.notify('Shutdown', 'Shutting down...', '⏻'); setTimeout(() => location.reload(), 1500); },
+  lockScreen() { this.closeMenus(); this.notify('Lock', 'Screen locked.', '🔒'); }
+};
+
+window.osBootTime = Date.now();
+
+/* ============================================
+   SPACE SHOOTER 3D
+   Built with Three.js
+   ============================================ */
+class SpaceShooter3D {
+  constructor(canvasId, os) {
+    this.canvas = document.getElementById(canvasId);
+    this.os = os;
+    this.running = false;
+    this.paused = false;
+    this.score = 0;
+    this.wave = 1;
+    this.lives = 3;
+    this.lastTime = 0;
+    this.spawnTimer = 0;
+    this.waveTimer = 0;
+    this.invuln = 0;
+    this.engineFlameTime = 0;
+    this.shootCooldown = 0;
+
+    this.keys = {};
+    this.setupInput();
+
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x000010, 0.012);
+
+    this.camera = new THREE.PerspectiveCamera(70, this.canvas.clientWidth / this.canvas.clientHeight, 0.1, 1000);
+    this.camera.position.set(0, 0, 12);
+    this.camera.lookAt(0, 0, -5);
+
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
+    this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setClearColor(0x000005);
+
+    this.setupLights();
+    this.createStarfield();
+    this.createPlayer();
+    this.bullets = [];
+    this.enemies = [];
+    this.particles = [];
+    this.powerups = [];
+
+    this.resize();
+  }
+
+  setupInput() {
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.key.toLowerCase()] = true;
+      if (e.key === ' ' && this.running && !this.paused) { e.preventDefault(); this.shoot(); }
+      if (e.key.toLowerCase() === 'p' && this.running) this.togglePause();
+    });
+    window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
+    this.canvas.addEventListener('mousedown', () => { if (this.running && !this.paused) this.shoot(); });
+  }
+
+  setupLights() {
+    this.scene.add(new THREE.AmbientLight(0x404060, 0.8));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(5, 5, 10);
+    this.scene.add(dir);
+    const point = new THREE.PointLight(0x0a84ff, 1.5, 30);
+    point.position.set(0, 0, 10);
+    this.scene.add(point);
+  }
+
+  createStarfield() {
+    const stars = [];
+    for (let i = 0; i < 1500; i++) {
+      stars.push({ x: (Math.random() - 0.5) * 200, y: (Math.random() - 0.5) * 200, z: (Math.random() - 0.5) * 200 });
+    }
+    const starGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(stars.length * 3);
+    stars.forEach((s, i) => {
+      positions[i * 3] = s.x;
+      positions[i * 3 + 1] = s.y;
+      positions[i * 3 + 2] = s.z;
+    });
+    starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.5, sizeAttenuation: true }));
+    this.scene.add(this.starField);
+
+    for (let i = 0; i < 5; i++) {
+      const cloud = this.createNebula();
+      cloud.position.set((Math.random() - 0.5) * 100, (Math.random() - 0.5) * 60, -50 - Math.random() * 50);
+      this.scene.add(cloud);
+    }
+  }
+
+  createNebula() {
+    const colors = [0x5b8ee8, 0xc75db5, 0xff6b35, 0x00d4aa, 0x8338ec];
+    return new THREE.Mesh(
+      new THREE.SphereGeometry(Math.random() * 8 + 4, 8, 8),
+      new THREE.MeshBasicMaterial({ color: colors[Math.floor(Math.random() * colors.length)], transparent: true, opacity: 0.08, side: THREE.DoubleSide })
+    );
+  }
+
+  createPlayer() {
+    this.player = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.ConeGeometry(0.6, 2.5, 8),
+      new THREE.MeshPhongMaterial({ color: 0x4a90e2, emissive: 0x0a3050, shininess: 80 })
+    );
+    body.rotation.x = -Math.PI / 2;
+    this.player.add(body);
+    const wings = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 0.1, 0.6),
+      new THREE.MeshPhongMaterial({ color: 0x2c5f9e, emissive: 0x0a1f3a })
+    );
+    wings.position.z = 0.4;
+    this.player.add(wings);
+    const cockpit = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 8, 8),
+      new THREE.MeshPhongMaterial({ color: 0x5eb3ff, emissive: 0x1080ff, transparent: true, opacity: 0.7 })
+    );
+    cockpit.position.set(0, 0.3, 0.2);
+    cockpit.scale.set(1, 0.7, 1.5);
+    this.player.add(cockpit);
+    this.flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.3, 1.2, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff9500 })
+    );
+    this.flame.rotation.x = Math.PI / 2;
+    this.flame.position.z = 1.5;
+    this.player.add(this.flame);
+    const glow = new THREE.PointLight(0xff6b35, 2, 5);
+    glow.position.z = 1.5;
+    this.player.add(glow);
+    this.player.position.set(0, 0, 8);
+    this.scene.add(this.player);
+  }
+
+  createBullet(x, y, z) {
+    const bullet = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 0.8, 6),
+      new THREE.MeshBasicMaterial({ color: 0x5eead4 })
+    );
+    bullet.rotation.x = Math.PI / 2;
+    bullet.position.set(x, y, z);
+    bullet.add(new THREE.PointLight(0x5eead4, 1, 3));
+    bullet.userData = { life: 120 };
+    this.scene.add(bullet);
+    this.bullets.push(bullet);
+  }
+
+  createEnemy(x, y, z, type = 0) {
+    const enemy = new THREE.Group();
+    const configs = [
+      { size: 0.8, color: 0xff006e, speed: 0.08, hp: 1, points: 10 },
+      { size: 1.2, color: 0xff6b35, speed: 0.06, hp: 3, points: 30 },
+      { size: 1.6, color: 0x8338ec, speed: 0.04, hp: 5, points: 50 }
+    ];
+    const cfg = configs[type];
+    const body = new THREE.Mesh(
+      new THREE.OctahedronGeometry(cfg.size, 0),
+      new THREE.MeshPhongMaterial({ color: cfg.color, emissive: cfg.color, emissiveIntensity: 0.3 })
+    );
+    enemy.add(body);
+    if (type >= 1) {
+      const wings = new THREE.Mesh(
+        new THREE.BoxGeometry(cfg.size * 2.5, 0.1, cfg.size * 0.8),
+        new THREE.MeshPhongMaterial({ color: cfg.color })
+      );
+      enemy.add(wings);
+    }
+    const core = new THREE.Mesh(new THREE.SphereGeometry(cfg.size * 0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    core.position.z = -cfg.size * 0.3;
+    enemy.add(core);
+    enemy.position.set(x, y, z);
+    enemy.userData = {
+      vx: (Math.random() - 0.5) * 0.02, vy: (Math.random() - 0.5) * 0.02, vz: cfg.speed,
+      hp: cfg.hp, maxHp: cfg.hp, points: cfg.points
+    };
+    this.scene.add(enemy);
+    this.enemies.push(enemy);
+  }
+
+  createExplosion(x, y, z, color = 0xff9500) {
+    for (let i = 0; i < 12; i++) {
+      const p = new THREE.Mesh(
+        new THREE.SphereGeometry(Math.random() * 0.15 + 0.05, 4, 4),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
+      );
+      p.position.set(x, y, z);
+      p.userData = {
+        vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3, vz: (Math.random() - 0.5) * 0.3,
+        life: 60, maxLife: 60
+      };
+      this.scene.add(p);
+      this.particles.push(p);
+    }
+  }
+
+  createPowerup(x, y, z) {
+    const p = new THREE.Mesh(
+      new THREE.TorusGeometry(0.4, 0.15, 6, 12),
+      new THREE.MeshPhongMaterial({ color: 0x34c759, emissive: 0x34c759, emissiveIntensity: 0.5 })
+    );
+    p.position.set(x, y, z);
+    p.userData = { vz: 0.04 };
+    this.scene.add(p);
+    this.powerups.push(p);
+  }
+
+  shoot() {
+    if (this.shootCooldown > 0) return;
+    this.shootCooldown = 10;
+    this.createBullet(this.player.position.x, this.player.position.y, this.player.position.z - 1);
+    if (Math.random() > 0.4) {
+      this.createBullet(this.player.position.x - 0.5, this.player.position.y, this.player.position.z - 1);
+      this.createBullet(this.player.position.x + 0.5, this.player.position.y, this.player.position.z - 1);
+    }
+  }
+
+  start() {
+    this.running = true;
+    this.paused = false;
+    this.score = 0;
+    this.wave = 1;
+    this.lives = 3;
+    this.invuln = 120;
+    this.enemies.forEach(e => this.scene.remove(e)); this.enemies = [];
+    this.bullets.forEach(b => this.scene.remove(b)); this.bullets = [];
+    this.particles.forEach(p => this.scene.remove(p)); this.particles = [];
+    this.powerups.forEach(p => this.scene.remove(p)); this.powerups = [];
+    this.player.position.set(0, 0, 8);
+    this.updateHUD();
+    this.lastTime = performance.now();
+    this.loop();
+  }
+
+  togglePause() {
+    this.paused = !this.paused;
+    const p = document.getElementById('game-pause');
+    if (p) p.classList.toggle('hidden', !this.paused);
+    if (!this.paused) { this.lastTime = performance.now(); this.loop(); }
+  }
+
+  updateHUD() {
+    const s = document.getElementById('game-score');
+    const w = document.getElementById('game-wave');
+    const l = document.getElementById('game-lives');
+    if (s) s.textContent = this.score;
+    if (w) w.textContent = this.wave;
+    if (l) l.textContent = '♥'.repeat(Math.max(0, this.lives)) || 'GAME OVER';
+  }
+
+  gameOver() {
+    this.running = false;
+    const overlay = document.getElementById('game-overlay');
+    overlay.classList.remove('hidden');
+    overlay.innerHTML = `
+      <div class="game-title" style="background:linear-gradient(135deg,#ff006e,#ff3b30);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">GAME OVER</div>
+      <div class="game-subtitle">Final Score: <strong>${this.score}</strong> • Wave <strong>${this.wave}</strong></div>
+      <button class="game-btn" onclick="OS.startGame()">🔄 PLAY AGAIN</button>
+      <div style="margin-top:20px;font-size:11px;opacity:0.6;font-family:monospace;">Better luck next time, pilot!</div>
+    `;
+    document.getElementById('game-hud').style.display = 'none';
+    document.getElementById('game-hint').style.display = 'none';
+  }
+
+  loop(time) {
+    if (!this.running || this.paused) return;
+    requestAnimationFrame((t) => this.loop(t));
+
+    const dt = Math.min((time - this.lastTime) / 16, 2);
+    this.lastTime = time;
+
+    if (this.shootCooldown > 0) this.shootCooldown -= dt;
+    if (this.invuln > 0) this.invuln -= dt;
+    this.engineFlameTime += dt;
+
+    const speed = 0.18;
+    if (this.keys['arrowleft'] || this.keys['a']) this.player.position.x -= speed * dt;
+    if (this.keys['arrowright'] || this.keys['d']) this.player.position.x += speed * dt;
+    if (this.keys['arrowup'] || this.keys['w']) this.player.position.y += speed * dt;
+    if (this.keys['arrowdown'] || this.keys['s']) this.player.position.y -= speed * dt;
+
+    this.player.position.x = Math.max(-6, Math.min(6, this.player.position.x));
+    this.player.position.y = Math.max(-3.5, Math.min(3.5, this.player.position.y));
+    this.player.rotation.z = -(this.player.position.x * 0.08);
+    this.player.rotation.x = (this.player.position.y * 0.05);
+    this.flame.scale.z = 0.8 + Math.sin(this.engineFlameTime * 0.5) * 0.4;
+    this.player.visible = Math.floor(this.invuln / 6) % 2 === 0 || this.invuln <= 0;
+
+    this.spawnTimer += dt;
+    if (this.spawnTimer > Math.max(20, 50 - this.wave * 3)) {
+      this.spawnTimer = 0;
+      const type = Math.random() < 0.1 + this.wave * 0.05 ? Math.min(2, Math.floor(this.wave / 2)) : 0;
+      this.createEnemy((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 5, -30 - Math.random() * 10, type);
+    }
+
+    this.waveTimer += dt;
+    if (this.waveTimer > 1500) {
+      this.waveTimer = 0; this.wave++; this.updateHUD();
+      this.os.notify('Wave ' + this.wave, 'New wave incoming!', '🌊');
+    }
+
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.position.z -= 0.4 * dt;
+      b.userData.life -= dt;
+      if (b.position.z < -40 || b.userData.life <= 0) {
+        this.scene.remove(b); this.bullets.splice(i, 1);
+      }
+    }
+
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      const u = e.userData;
+      e.position.z += u.vz * dt * 3;
+      e.position.x += u.vx * dt;
+      e.position.y += u.vy * dt;
+      e.rotation.y += 0.02 * dt;
+      e.rotation.z += 0.01 * dt;
+      if (e.position.x > 7 || e.position.x < -7) u.vx *= -1;
+      if (e.position.y > 4 || e.position.y < -4) u.vy *= -1;
+      if (e.position.z > 14) { this.scene.remove(e); this.enemies.splice(i, 1); continue; }
+
+      for (let j = this.bullets.length - 1; j >= 0; j--) {
+        const b = this.bullets[j];
+        const dx = b.position.x - e.position.x, dy = b.position.y - e.position.y, dz = b.position.z - e.position.z;
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1) {
+          this.scene.remove(b); this.bullets.splice(j, 1);
+          u.hp--;
+          if (u.hp <= 0) {
+            this.createExplosion(e.position.x, e.position.y, e.position.z, e.children[0].material.color.getHex());
+            this.score += u.points; this.updateHUD();
+            if (Math.random() < 0.1) this.createPowerup(e.position.x, e.position.y, e.position.z);
+            this.scene.remove(e); this.enemies.splice(i, 1);
+          }
+          break;
+        }
+      }
+
+      if (this.invuln <= 0) {
+        const dx = this.player.position.x - e.position.x, dy = this.player.position.y - e.position.y, dz = this.player.position.z - e.position.z;
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1.2) {
+          this.createExplosion(this.player.position.x, this.player.position.y, this.player.position.z, 0x4a90e2);
+          this.lives--; this.invuln = 120; this.updateHUD();
+          this.scene.remove(e); this.enemies.splice(i, 1);
+          if (this.lives <= 0) {
+            this.createExplosion(this.player.position.x, this.player.position.y, this.player.position.z, 0xff3b30);
+            this.gameOver(); return;
+          }
+        }
+      }
+    }
+
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.position.x += p.userData.vx * dt;
+      p.position.y += p.userData.vy * dt;
+      p.position.z += p.userData.vz * dt;
+      p.userData.life -= dt;
+      p.material.opacity = p.userData.life / p.userData.maxLife;
+      p.scale.multiplyScalar(0.98);
+      if (p.userData.life <= 0) { this.scene.remove(p); this.particles.splice(i, 1); }
+    }
+
+    for (let i = this.powerups.length - 1; i >= 0; i--) {
+      const p = this.powerups[i];
+      p.position.z += p.userData.vz * dt;
+      p.rotation.y += 0.05 * dt; p.rotation.x += 0.03 * dt;
+      const dx = this.player.position.x - p.position.x, dy = this.player.position.y - p.position.y, dz = this.player.position.z - p.position.z;
+      if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1) {
+        this.lives = Math.min(5, this.lives + 1); this.updateHUD();
+        this.os.notify('Power-up!', 'Extra life collected!', '💚');
+        this.scene.remove(p); this.powerups.splice(i, 1); continue;
+      }
+      if (p.position.z > 14) { this.scene.remove(p); this.powerups.splice(i, 1); }
+    }
+
+    if (this.starField) this.starField.rotation.z += 0.0003 * dt;
+    if (this.invuln > 100) {
+      this.camera.position.x = (Math.random() - 0.5) * 0.2;
+      this.camera.position.y = (Math.random() - 0.5) * 0.2;
+    } else { this.camera.position.x = 0; this.camera.position.y = 0; }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  resize() {
+    if (!this.canvas) return;
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false);
+  }
+
+  destroy() {
+    this.running = false;
+    if (this.renderer) this.renderer.dispose();
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => OS.init());
+window.addEventListener('resize', () => { if (OS.gameInstance) OS.gameInstance.resize(); });
+</script>
+</body>
+</html>
