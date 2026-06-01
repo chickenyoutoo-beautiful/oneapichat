@@ -31,6 +31,11 @@ def _load_proxy_config():
                     cfg = json.load(f)
                 if cfg.get('proxyEnabled') == '1' and cfg.get('proxyUrl'):
                     proxy_url = cfg['proxyUrl']
+                    # ★ 公网地址映射为内网直连
+                    if 'proxy.naujtrats.xyz:8888' in proxy_url:
+                        proxy_url = 'http://192.168.195.213:10808'
+                    elif 'proxy.naujtrats.xyz:8889' in proxy_url:
+                        proxy_url = 'http://192.168.195.22:10808'
                     os.environ['HTTP_PROXY'] = proxy_url
                     os.environ['HTTPS_PROXY'] = proxy_url
                     os.environ['ALL_PROXY'] = proxy_url
@@ -1811,12 +1816,22 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     proxy_url = agent.get("proxy_url", "")
     proxy_enabled = agent.get("proxy_enabled", "")
     if proxy_enabled == '1' and proxy_url:
+        # 公网地址映射为内网
+        if 'proxy.naujtrats.xyz:8888' in proxy_url:
+            proxy_url = 'http://192.168.195.213:10808'
+        elif 'proxy.naujtrats.xyz:8889' in proxy_url:
+            proxy_url = 'http://192.168.195.22:10808'
         os.environ['HTTP_PROXY'] = proxy_url
         os.environ['HTTPS_PROXY'] = proxy_url
         os.environ['ALL_PROXY'] = proxy_url
-        print(f'[Agent {name}] 代理已启用: {proxy_url}')
-    else:
+        print(f'[Agent {name}] 代理已启用(子代理配置): {proxy_url}')
+    elif _PROXY_URL:
         # 回退到全局代理配置
+        os.environ['HTTP_PROXY'] = _PROXY_URL
+        os.environ['HTTPS_PROXY'] = _PROXY_URL
+        os.environ['ALL_PROXY'] = _PROXY_URL
+        print(f'[Agent {name}] 代理已启用(全局配置): {_PROXY_URL}')
+    else:
         for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']:
             os.environ.pop(k, None)
 
