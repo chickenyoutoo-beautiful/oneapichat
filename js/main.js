@@ -17611,10 +17611,9 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '命令执行失败' };
         }
         if (action === 'python') {
-            // ★ 大脚本: timeout 放 URL, script 放 POST body
-            var r = await fetch(_apiBase + '?action=python&timeout=' + (args.timeout || 30) + authSuffix, {
+            var r = await fetch(_apiBase + '?action=python&timeout=' + (args.timeout || 30) + authSuffix + '&t=' + Date.now(), {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain' },
+                headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
                 body: args.script || ''
             });
             var d = await r.json();
@@ -17637,10 +17636,9 @@ async function engineApiHandler(action, args) {
         }
         if (action === 'file_write') {
             var appendParam = args.append ? '&append=true' : '';
-            // ★ 大文件: path/append 放 URL, content 放 POST body
-            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + appendParam + authSuffix, {
+            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + appendParam + authSuffix + '&t=' + Date.now(), {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain' },
+                headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
                 body: args.content || ''
             });
             var d = await r.json();
