@@ -10024,7 +10024,7 @@ function buildApiMessages(chatId) {
             '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
             '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
             '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
-            '文件写入成功后,在回复中告诉用户在线访问链接,格式: https://www.naujtrats.xyz/oneapichat/workspace/projects/<项目名>/index.html\n' +
+            '文件写入成功后,server_file_write 工具会自动返回在线访问链接,你直接使用该链接即可,不要自己拼接URL。\n' +
             '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
             '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
             '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
@@ -10046,7 +10046,7 @@ function buildApiMessages(chatId) {
                 '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
                 '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
                 '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
-                '文件写入成功后,在回复中告诉用户在线访问链接,格式: https://www.naujtrats.xyz/oneapichat/workspace/projects/<项目名>/index.html\n' +
+                '文件写入成功后,server_file_write 工具会自动返回在线访问链接,你在回复中直接使用该链接即可,不要自己拼接URL。\n' +
                 '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
                 '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
                 '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
@@ -17675,11 +17675,11 @@ async function engineApiHandler(action, args) {
             });
             var d = await r.json();
             if (d.ok) {
-                // ★ 自动生成可访问URL
+                // ★ 自动生成可访问URL（根据当前访问域名动态生成）
                 var _fp = args.path;
                 var _webUrl = '';
-                if (_fp.startsWith('/var/www/html/oneapichat/')) {
-                    _webUrl = 'https://www.naujtrats.xyz/oneapichat/' + _fp.replace('/var/www/html/oneapichat/', '');
+                if (_fp.indexOf('/oneapichat/') !== -1) {
+                    _webUrl = window.location.origin + '/' + _fp.substring(_fp.indexOf('oneapichat/'));
                 } else if (_fp.startsWith('/tmp/')) {
                     _webUrl = '(服务器临时文件: ' + _fp + ', 如需访问请用 engine_push 推送)';
                 }
