@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAUJTRATS · 星河影院</title>
+    <link rel="icon" href="data:;base64,=">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+    :root {
+        --bg-gradient: linear-gradient(135deg, #0b1120 0%, #1a1f35 30%, #2d2a5a 70%, #1e1a40 100%);
+        --card-bg: rgba(255, 255, 255, 0.03);
+        --accent-color: #38bdf8;
+        --text-main: #f1f5f9;
+        --text-dim: #94a3b8;
+        --c1: #818cf8; --c2: #c084fc; --c3: #22d3ee; --c4: #f472b6; --c5: #6366f1;
+    }
+    body.light-mode {
+        --bg-gradient: linear-gradient(135deg, #e6f0ff 0%, #a8c6ff 20%, #7aa6ff 40%, #5d8cff 60%, #ffb3b3 80%, #ff9999 100%);
+        --card-bg: rgba(255, 255, 255, 0.82);
+        --text-main: #1e293b;
+        --text-dim: #475569;
+        --accent-color: #2563eb;
+        --c1: #818cf8; --c2: #c084fc; --c3: #06b6d4; --c4: #f472b6; --c5: #6366f1;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: var(--bg-gradient);
+        background-attachment: fixed;
+        background-size: 200% 200%;
+        animation: gradientMove 15s ease infinite;
+        color: var(--text-main);
+        margin: 0;
+        padding: 100px 20px 60px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        overflow-x: hidden;
+        transition: background-color 0.3s, color 0.3s;
+    }
+    .beian-link {
+        color: #94a3b8;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 500;
+        transition: color 0.2s;
+    }
+    .beian-link:visited { color: #94a3b8; }
+    .beian-link:hover { color: white; }
+    body.light-mode .beian-link { color: #475569; }
+    body.light-mode .beian-link:visited { color: #475569; }
+    body.light-mode .beian-link:hover { color: #0f172a; }
+    @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    .click-wave {
+        position: fixed;
+        pointer-events: none;
+        border: 2px solid var(--accent-color);
+        border-radius: 50%;
+        width: 10px;
+        height: 10px;
+        transform: translate(-50%, -50%);
+        animation: wave-out 0.6s ease-out forwards;
+        z-index: 999999;
+    }
+    @keyframes wave-out { to { width: 120px; height: 120px; opacity: 0; border-width: 1px; } }
+    .navbar {
+        position: fixed; top: 0; left: 0; right: 0;
+        height: 65px;
+        background: rgba(2, 6, 23, 0.5);
+        backdrop-filter: blur(30px) saturate(180%);
+        -webkit-backdrop-filter: blur(30px) saturate(180%);
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 40px;
+        z-index: 100000;
+    }
+    body.light-mode .navbar {
+        background: rgba(255, 255, 255, 0.6);
+        border-bottom: 1px solid rgba(0,0,0,0.08);
+    }
+    .nav-logo {
+        font-weight: bold;
+        font-size: 1.6rem;
+        letter-spacing: 2px;
+        background: linear-gradient(90deg, var(--c1), var(--c2), var(--c3));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .nav-actions { display: flex; gap: 15px; align-items: center; }
+    .nav-btn, .theme-toggle {
+        text-decoration: none;
+        font-size: 0.85rem;
+        color: var(--text-main);
+        padding: 8px 18px;
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .nav-btn:hover, .theme-toggle:hover {
+        background: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        transform: translateY(-1px);
+    }
+    body.light-mode .nav-btn, body.light-mode .theme-toggle {
+        background: rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        color: var(--text-main);
+    }
+    .theme-toggle svg { width: 16px; height: 16px; fill: currentColor; vertical-align: middle; }
+    .container { width: 100%; max-width: 1200px; }
+    .section-title {
+        display: flex; align-items: center; gap: 10px; font-size: 1rem;
+        color: var(--accent-color); margin: 50px 0 25px; font-weight: bold;
+    }
+    .section-title::before { content: ""; width: 4px; height: 18px; background: var(--accent-color); border-radius: 4px; box-shadow: 0 0 10px var(--accent-color); }
+    .grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+    .nav-card, .video-item {
+        background: var(--card-bg);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+        backdrop-filter: blur(20px) saturate(140%);
+        position: relative;
+        z-index: 1;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+    body.light-mode .nav-card, body.light-mode .video-item {
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+    }
+    body.light-mode .video-item { background: rgba(0,0,0,0.04) !important; }
+    body.light-mode .video-item::after {
+        background: linear-gradient(transparent, rgba(0,0,0,0.25));
+    }
+    body.light-mode .video-item:hover::after {
+        background: linear-gradient(transparent, rgba(0,0,0,0.4));
+    }
+    /* 下拉菜单亮色适配 */
+    body.light-mode #userDropdown {
+        background: rgba(255,255,255,0.95) !important;
+        border-color: rgba(0,0,0,0.1) !important;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1) !important;
+        color: #1e293b !important;
+    }
+    body.light-mode #userDropdown .nav-btn { color: #1e293b !important; }
+    body.light-mode #userDropdown .nav-btn:hover { background: rgba(0,0,0,0.05) !important; }
+    body.light-mode .video-item > div[style*="aspect-ratio"] {
+        background: rgba(0, 0, 0, 0.03) !important;
+    }
+    .nav-card { padding: 20px; cursor: pointer; text-decoration: none; color: inherit; display: flex; flex-direction: column; }
+    .card-light {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        overflow: hidden; border-radius: 18px; pointer-events: none; z-index: 2;
+    }
+    .card-light::before {
+        content: '';
+        position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        transition: left 0.6s ease; border-radius: 18px;
+    }
+    .nav-card:hover .card-light::before, .nav-card.active .card-light::before { left: 100%; }
+    .nav-card::after {
+        content: ""; position: absolute; left: 0; top: 25%; bottom: 25%;
+        width: 3px; background: var(--theme); border-radius: 0 5px 5px 0;
+        box-shadow: 0 0 15px var(--theme); transition: all 0.4s ease; z-index: 3;
+    }
+    .nav-card:hover, .nav-card.active, .video-item:hover {
+        z-index: 99999; transform: translateY(-8px); border-color: transparent;
+        box-shadow: 0 20px 45px -10px var(--theme, var(--accent-color));
+    }
+    .nav-card:hover::after { top: 10%; bottom: 10%; width: 4px; box-shadow: 0 0 20px var(--theme); }
+    .grid-layout .nav-card:nth-child(5n+1) { --theme: var(--c1); }
+    .grid-layout .nav-card:nth-child(5n+2) { --theme: var(--c2); }
+    .grid-layout .nav-card:nth-child(5n+3) { --theme: var(--c3); }
+    .grid-layout .nav-card:nth-child(5n+4) { --theme: var(--c4); }
+    .grid-layout .nav-card:nth-child(5n+5) { --theme: var(--c5); }
+    .card-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; position: relative; z-index: 4; }
+    .card-icon { font-size: 1.6rem; width: 36px; text-align: center; color: var(--theme); flex-shrink: 0; }
+    .card-content { flex: 1; }
+    .card-title { font-size: 1rem; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px; line-height: 1.3; }
+    .card-desc { font-size: 0.75rem; color: var(--text-dim); line-height: 1.4; opacity: 0.9; }
+    .preview-pane {
+        position: absolute; top: 100%; left: 0; right: 0; padding-top: 15px;
+        z-index: 99999; opacity: 0; visibility: hidden;
+        transform: translateY(10px); transition: all 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        pointer-events: none;
+    }
+    .preview-content {
+        background: rgba(15, 23, 42, 0.92); border: 1px solid var(--theme);
+        border-radius: 14px; padding: 15px; display: flex; flex-direction: column; gap: 12px;
+        backdrop-filter: blur(25px); box-shadow: 0 25px 60px rgba(0,0,0,0.8);
+    }
+    body.light-mode .preview-content { background: rgba(255, 255, 255, 0.9); border: 1px solid var(--theme); color: var(--text-main); }
+    .nav-card:hover .preview-pane, .nav-card.active .preview-pane { opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto; }
+    .sub-link {
+        font-size: 0.9rem; padding: 12px; color: var(--text-main); text-decoration: none;
+        text-align: center; border-radius: 10px; background: rgba(255,255,255,0.05);
+        transition: 0.3s ease; border: 1px solid rgba(255,255,255,0.05);
+    }
+    .sub-link:hover { background: var(--theme); color: #000; box-shadow: 0 0 15px var(--theme); transform: scale(1.05); }
+    body.light-mode .sub-link { background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.05); color: var(--text-main); }
+    .video-showcase { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; position: relative; }
+    .video-item { --theme: var(--accent-color); overflow: hidden; border-radius: 14px; position: relative; background: #0a0f1a; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    .video-item video { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; cursor: pointer; }
+    .video-item video[poster] { background: #0a0f1a; }
+    .video-item::after {
+        content: '';
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 50%;
+        background: linear-gradient(transparent, rgba(0,0,0,0.6));
+        pointer-events: none;
+        z-index: 5;
+        transition: opacity 0.3s ease;
+    }
+    .video-item:hover::after {
+        background: linear-gradient(transparent, rgba(0,0,0,0.75));
+    }
+    .video-desc {
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        padding: 30px 14px 14px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: white;
+        text-align: left;
+        z-index: 6;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+    }
+    .video-play-overlay {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; z-index: 10;
+        opacity: 0; transition: opacity 0.3s ease;
+    }
+    .video-item:hover .video-play-overlay { opacity: 1; }
+    .video-play-overlay svg {
+        width: 48px; height: 48px;
+        color: white;
+        filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6));
+        transform: scale(0.95);
+        transition: transform 0.2s ease;
+    }
+    .video-item:hover .video-play-overlay svg { transform: scale(1); }
+    .video-expand-btn {
+        position: absolute; bottom: 10px; right: 10px;
+        width: 32px; height: 32px;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-size: 16px; cursor: pointer; z-index: 20;
+        transition: all 0.25s ease;
+        opacity: 0;
+    }
+    .video-item:hover .video-expand-btn { opacity: 0.85; }
+    .video-expand-btn:hover { background: var(--accent-color); color: #020617; transform: scale(1.15) rotate(90deg); border-color: var(--accent-color); box-shadow: 0 0 20px var(--accent-color); opacity: 1 !important; }
+    .lock-badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 10;
+        color: rgba(255,255,255,0.45);
+        background: rgba(0,0,0,0.35);
+        border-radius: 50%;
+        width: 26px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255,255,255,0.1);
+        transition: all 0.3s ease;
+    }
+    .nav-card:hover .lock-badge {
+        color: var(--theme, var(--accent-color));
+        background: rgba(0,0,0,0.5);
+        border-color: var(--theme, var(--accent-color));
+        box-shadow: 0 0 12px var(--theme, var(--accent-color));
+    }
+    body.light-mode .lock-badge {
+        color: rgba(0,0,0,0.4);
+        background: rgba(255,255,255,0.6);
+        border: 1px solid rgba(0,0,0,0.1);
+    }
+    body.light-mode .nav-card:hover .lock-badge {
+        color: var(--theme, var(--accent-color));
+        background: rgba(255,255,255,0.8);
+    }
+    .video-modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(2, 6, 23, 0.85);
+        backdrop-filter: blur(16px) saturate(180%);
+        -webkit-backdrop-filter: blur(16px) saturate(180%);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 1000000; visibility: hidden; opacity: 0;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+    }
+    .video-modal.show { visibility: visible; opacity: 1; }
+    .modal-content {
+        width: min(66vw, 1200px);
+        background: #0b0f1a; border-radius: 28px; overflow: hidden;
+        box-shadow: 0 40px 80px rgba(0, 0, 0, 0.8), 0 0 0 2px rgba(56, 189, 248, 0.2);
+        transform: scale(0.92); transition: transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+    .video-modal.show .modal-content { transform: scale(1); }
+    .modal-content video { width: 100%; height: auto; display: block; background: #000; border-radius: 28px 28px 0 0; }
+    .modal-close {
+        position: absolute; top: 20px; right: 30px;
+        color: white; font-size: 32px; font-weight: 300; cursor: pointer;
+        width: 48px; height: 48px;
+        background: rgba(0,0,0,0.4); border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2);
+        transition: 0.2s; z-index: 1000001;
+    }
+    .modal-close:hover { background: var(--accent-color); color: #000; transform: rotate(90deg); border-color: var(--accent-color); }
+    .main-title {
+        text-align: center; font-size: 2.6rem; letter-spacing: 2px;
+        background: linear-gradient(135deg, #38bdf8, #f472b6);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        margin-bottom: 0.5rem; position: relative; z-index: 2;
+    }
+    body.light-mode .main-title { background: linear-gradient(135deg, #6366f1, #ec4899); -webkit-background-clip: text; background-clip: text; font-weight: 700; }
+    @media (max-width: 1024px) { .video-showcase { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 640px) { .video-showcase { grid-template-columns: 1fr; } .modal-content { width: 90vw; } }
+    
+    /* ★ 移动端导航优化 */
+    @media (max-width: 768px) {
+        body { padding: 80px 12px 40px; }
+        .navbar { height: 55px; padding: 0 16px; }
+        .nav-logo { font-size: 1.2rem; letter-spacing: 1px; }
+        .nav-actions { gap: 8px; }
+        .nav-btn, .theme-toggle { font-size: 0.75rem; padding: 6px 12px; border-radius: 24px; }
+        .nav-btn .btn-text-full { display: none; }
+        .nav-btn .btn-text-short { display: inline; }
+        .main-title { font-size: 1.5rem !important; }
+        .grid-layout { grid-template-columns: 1fr; }
+        .container { padding: 0 4px; }
+    }
+    @media (min-width: 769px) {
+        .nav-btn .btn-text-short { display: none; }
+        .nav-btn .btn-text-full { display: inline; }
+    }
+    </style>
+</head>
+<body onclick="createClickEffect(event)">
+
+<nav class="navbar">
+    <div class="nav-logo">NAUJTRATS</div>
+    <div class="nav-actions">
+        <span id="authNavContainer"><span class="nav-btn" style="opacity:0.5;cursor:default;"><span class="btn-text-full">功能维护中</span><span class="btn-text-short">维护中</span></span></span>
+        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+            </svg>
+        </button>
+    </div>
+</nav>
+
+<div class="container">
+    <header style="margin-bottom: 50px;">
+        <h1 class="main-title">Welcome to My Website</h1>
+        <p style="text-align: center; color: var(--text-main); font-size: 0.9rem; letter-spacing: 1.5px;">动漫库 · 实验室 · 个人收藏</p>
+    </header>
+
+    <div class="section-title">番剧索引 / Anime</div>
+    <div class="grid-layout">
+        <a href="超时空辉夜姬！.html" target="_blank" class="nav-card">
+            <div class="card-light"></div>
+            <div class="card-header">
+                <i class="fas fa-rocket card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">超时空辉夜姬！</div>
+                    <div class="card-desc">科幻恋爱经典，跨越时空</div>
+                </div>
+            </div>
+        </a>
+        <a href="Clannad.html" target="_blank" class="nav-card">
+            <div class="card-light"></div>
+            <div class="card-header">
+                <i class="fas fa-heart card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">Clannad</div>
+                    <div class="card-desc">催泪神作，小镇家族</div>
+                </div>
+            </div>
+        </a>
+        <div class="nav-card" onclick="toggleCard(this)">
+            <div class="card-light"></div>
+            <div class="card-header">
+                <i class="fas fa-lungs card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">工作细胞系列</div>
+                    <div class="card-desc">细胞拟人，体内冒险</div>
+                </div>
+            </div>
+            <div class="preview-pane">
+                <div class="preview-content">
+                    <a href="工作细胞1.html" class="sub-link" onclick="event.stopPropagation()">第一季 (S1)</a>
+                    <a href="工作细胞2.html" class="sub-link" onclick="event.stopPropagation()">第二季 (S2)</a>
+                    <a href="工作细胞：细胞大作战.html" class="sub-link" onclick="event.stopPropagation()">细胞大作战</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-title">游戏 / Games</div>
+    <div class="grid-layout">
+        <a href="Cs1.6_0401.exe" download class="nav-card">
+            <div class="card-light"></div>
+            <div class="card-header">
+                <i class="fas fa-gamepad card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">CS 1.6</div>
+                    <div class="card-desc">经典射击游戏</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+
+    <div class="section-title">实验室 / Lab</div>
+    <div class="grid-layout">
+        <a href="https://libsys.zime.edu.cn/space/reader/lendList" target="_blank" class="nav-card" onclick="return confirmExternalLink('https://libsys.zime.edu.cn/space/reader/lendList')">
+            <div class="card-light"></div>
+            <div class="card-header">
+                <i class="fas fa-book-reader card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">图书馆借阅</div>
+                    <div class="card-desc">浙机电借阅查询</div>
+                </div>
+            </div>
+        </a>
+        <div onclick="requireAuth(event, '/oneapichat/')" class="nav-card" style="cursor:pointer;position:relative;">
+            <div class="card-light"></div>
+            <div class="lock-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            </div>
+            <div class="card-header">
+                <i class="fas fa-comment-dots card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">智能对话</div>
+                    <div class="card-desc">个人助理，多模型</div>
+                </div>
+            </div>
+        </div>
+        <div onclick="openCloudreve(event)" class="nav-card" style="cursor:pointer;position:relative;">
+            <div class="card-light"></div>
+            <div class="lock-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            </div>
+            <div class="card-header">
+                <i class="fas fa-cloud card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">云盘</div>
+                    <div class="card-desc">Cloudreve 私有网盘</div>
+                </div>
+            </div>
+        </div>
+        <div onclick="requireRoot(event, 'https://openclaw.naujtrats.xyz/#token=dd388f7fe0e11d302e1f4c0bf33b786d32c7aab3cc61981f')" class="nav-card" style="cursor:pointer;position:relative;">
+            <div class="card-light"></div>
+            <div class="lock-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            </div>
+            <div class="card-header">
+                <i class="fas fa-paw card-icon"></i>
+                <div class="card-content">
+                    <div class="card-title">OpenClaw</div>
+                    <div class="card-desc" id="openclawDesc">个人助手网关</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-title">精选视频 / Featured Video</div>
+    <div class="video-showcase">
+        <div class="video-item">
+            <video class="hls-player" data-src="video/hls/【60帧1080P】只因你太美（鸡你太美）原版/index.m3u8" poster="video/jini_cover.jpg" onclick="expandVideo(this, event)"></video>
+            <div class="video-play-overlay" onclick="expandVideo(this, event)">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="11" fill="rgba(0,0,0,0.5)"/><polygon points="10,8 16,12 10,16" fill="white"/></svg>
+            </div>
+            <div class="video-expand-btn" onclick="expandVideo(this, event)">⛶</div>
+            <div class="video-desc">只因你太美</div>
+        </div>
+        <div class="video-item">
+            <video class="hls-player" data-src="video/hls/超时空辉夜姬！/超时空辉夜姬！-4K/index.m3u8" poster="video/huiye_cover.jpg" onclick="expandVideo(this, event)"></video>
+            <div class="video-play-overlay" onclick="expandVideo(this, event)">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="11" fill="rgba(0,0,0,0.5)"/><polygon points="10,8 16,12 10,16" fill="white"/></svg>
+            </div>
+            <div class="video-expand-btn" onclick="expandVideo(this, event)">⛶</div>
+            <div class="video-desc">超时空辉夜姬</div>
+        </div>
+        <div class="video-item" style="background:rgba(0,0,0,0.3);"><div style="aspect-ratio:16/9;"></div><div class="video-desc" style="color:var(--dim);opacity:0.5;">待定</div></div>
+        <div class="video-item" style="background:rgba(0,0,0,0.3);"><div style="aspect-ratio:16/9;"></div><div class="video-desc" style="color:var(--dim);opacity:0.5;">待定</div></div>
+    </div>
+</div>
+
+<!-- 视频模态框 -->
+<div class="video-modal" id="videoModal" onclick="closeModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <video id="modalVideo" controls autoplay></video>
+    </div>
+    <div class="modal-close" onclick="closeModal(event)">✕</div>
+</div>
+
+<script>
+function createClickEffect(e) {
+    const wave = document.createElement('div');
+    wave.className = 'click-wave';
+    wave.style.left = e.clientX + 'px';
+    wave.style.top = e.clientY + 'px';
+    document.body.appendChild(wave);
+    setTimeout(() => wave.remove(), 600);
+}
+
+function toggleCard(el) {
+    const isActive = el.classList.contains('active');
+    document.querySelectorAll('.nav-card').forEach(c => c.classList.remove('active'));
+    if (!isActive) el.classList.add('active');
+}
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.nav-card')) {
+        document.querySelectorAll('.nav-card').forEach(c => c.classList.remove('active'));
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    // ★ 初始化验证 auth 状态（确保 role 已保存）
+    var _t = localStorage.getItem('authToken');
+    if (_t) {
+        fetch('/oneapichat/auth.php?action=verify&token=' + encodeURIComponent(_t))
+            .then(function(r){ return r.json(); })
+            .then(function(d) {
+                if (d.valid) {
+                    if (d.role) localStorage.setItem('authRole', d.role);
+                    // ★ 验证完成后检查是否有登录后待跳转 URL
+                    var _postUrl = sessionStorage.getItem('_postLoginUrl');
+                    if (_postUrl) {
+                        sessionStorage.removeItem('_postLoginUrl');
+                        if (_postUrl === 'cloudreve') {
+                            var _ct = sessionStorage.getItem('_postLoginCloudToken');
+                            sessionStorage.removeItem('_postLoginCloudToken');
+                            if (_ct) {
+                                window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(_ct), '_blank');
+                            } else {
+                                window.open('https://cloudreve.naujtrats.xyz', '_blank');
+                            }
+                        } else if (_postUrl === 'openclaw') {
+                            window.open('https://openclaw.naujtrats.xyz/#token=dd388f7fe0e11d302e1f4c0bf33b786d32c7aab3cc61981f', '_blank');
+                        } else {
+                            window.open(_postUrl, '_blank');
+                        }
+                    }
+                } else {
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('authUsername');
+                    localStorage.removeItem('authUserId');
+                    localStorage.removeItem('authRole');
+                }
+            }).catch(function(){});
+    }
+    var videos = document.querySelectorAll('.hls-player');
+    videos.forEach(function(video) {
+        var src = video.getAttribute('data-src');
+        if (Hls.isSupported()) {
+            var hls = new Hls({ enableWorker: true });
+            hls.loadSource(src);
+            hls.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = src;
+        }
+    });
+    const savedTheme = localStorage.getItem('theme');
+    const savedDark = localStorage.getItem('dark');
+    if (savedTheme === 'light' || savedDark === 'false') {
+        document.body.classList.add('light-mode');
+        setThemeButtonMoon();
+    }
+});
+
+function setThemeButtonMoon() {
+    var btn = document.getElementById('themeToggle');
+    if (btn) {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/></svg>';
+    }
+}
+
+function setThemeButtonSun() {
+    var btn = document.getElementById('themeToggle');
+    if (btn) {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/></svg>';
+    }
+}
+
+function toggleTheme() {
+    var body = document.body;
+    body.classList.toggle('light-mode');
+    if (body.classList.contains('light-mode')) {
+        setThemeButtonMoon();
+        localStorage.setItem('theme', 'light');
+        // 同步到聊天项目
+        localStorage.setItem('dark', 'false');
+    } else {
+        setThemeButtonSun();
+        localStorage.setItem('theme', 'dark');
+        // 同步到聊天项目
+        localStorage.setItem('dark', 'true');
+    }
+}
+
+var modal = document.getElementById('videoModal');
+var modalVideo = document.getElementById('modalVideo');
+var currentHls = null;
+
+function destroyModalHls() {
+    if (currentHls) { currentHls.destroy(); currentHls = null; }
+    modalVideo.removeAttribute('src');
+    modalVideo.load();
+}
+
+function closeModal(e) {
+    if (e) e.stopPropagation();
+    modal.classList.remove('show');
+    destroyModalHls();
+}
+
+function expandVideo(btn, event) {
+    event.stopPropagation();
+    var videoItem = btn.closest('.video-item');
+    if (!videoItem) return;
+    var originalVideoElem = videoItem.querySelector('video');
+    if (!originalVideoElem) return;
+    var src = originalVideoElem.getAttribute('data-src');
+    var currentTime = originalVideoElem.currentTime || 0;
+    if (!originalVideoElem.paused) { originalVideoElem.pause(); }
+    modal.classList.add('show');
+    destroyModalHls();
+    if (Hls.isSupported()) {
+        currentHls = new Hls({ enableWorker: true });
+        currentHls.loadSource(src);
+        currentHls.attachMedia(modalVideo);
+        modalVideo.addEventListener('loadedmetadata', function onMeta() {
+            modalVideo.currentTime = currentTime;
+            modalVideo.play().catch(function(e) { console.log('自动播放失败:', e); });
+            modalVideo.removeEventListener('loadedmetadata', onMeta);
+        });
+    } else if (modalVideo.canPlayType('application/vnd.apple.mpegurl')) {
+        modalVideo.src = src;
+        modalVideo.addEventListener('loadedmetadata', function onMeta() {
+            modalVideo.currentTime = currentTime;
+            modalVideo.play().catch(function(e) { console.log('自动播放失败:', e); });
+            modalVideo.removeEventListener('loadedmetadata', onMeta);
+        });
+    } else {
+        modalVideo.src = src;
+        modalVideo.currentTime = currentTime;
+        modalVideo.play().catch(function(e) { console.log('自动播放失败:', e); });
+    }
+}
+
+modal.addEventListener('click', function(e) { if (e.target === modal) { closeModal(e); } });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && modal.classList.contains('show')) { closeModal(e); } });
+function confirmExternalLink(url) { return confirm('即将离开本站，是否继续？\n\n即将跳转到：' + url); }
+
+// ★ 通用登录锁定：私人功能，需登录才能访问
+function requireAuth(e, url) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!localStorage.getItem('authToken')) {
+        showLoginModal('请先登录', url);
+        return;
+    }
+    window.open(url, '_blank');
+}
+
+function requireRoot(e, url) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (localStorage.getItem('authRole') !== 'root') {
+        showLoginModal('仅限管理员访问', url);
+        return;
+    }
+    if (!localStorage.getItem('authToken')) {
+        showLoginModal('私人功能，不对外开放', url);
+        return;
+    }
+    window.open(url, '_blank');
+}
+
+// ★ 云盘：已登录即可访问（自动同步 Cloudreve 账号）
+function openCloudreve(e) {
+    e.stopPropagation();
+    if (!localStorage.getItem('authToken')) {
+        showLoginModal('请先登录以访问云盘', 'cloudreve');
+        return;
+    }
+    // 有 login_token 直接跳转
+    var loginToken = localStorage.getItem('_cloudLoginToken');
+    if (loginToken) {
+        localStorage.removeItem('_cloudLoginToken');
+        window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(loginToken), '_blank');
+        return;
+    }
+    // 无 token → 用主页凭据主动同步注册 Cloudreve 账号
+    var username = localStorage.getItem('authUsername') || '';
+    var email = localStorage.getItem('authUserEmail') || (username + '@naujtrats.xyz');
+    var password = sessionStorage.getItem('_authPassword') || '';
+    // 密码在 localStorage 中没有存储，需要在登录时保存
+    // 如果密码为空，回退到直接打开 Cloudreve
+    if (!password) {
+        // 尝试从 sessionStorage 或 cookie 获取（安全考虑不存明文密码到 localStorage）
+        // 回退：通过 cloudreve_login.php 无 token 直接打开
+        window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        return;
+    }
+    // 主动同步
+    syncCloudreve(username, password, email).then(function(d) {
+        var token2 = localStorage.getItem('_cloudLoginToken');
+        if (token2) {
+            localStorage.removeItem('_cloudLoginToken');
+            window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2), '_blank');
+        } else {
+            window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        }
+    }).catch(function() {
+        window.open('https://cloudreve.naujtrats.xyz', '_blank');
+    });
+}
+
+// ★ OpenClaw 标签：登录才可点击
+function openOpenClaw(e) {
+    e.stopPropagation();
+    if (localStorage.getItem('authRole') !== 'root') {
+        showLoginModal('仅限管理员访问', 'openclaw');
+        return;
+    }
+    window.open('https://openclaw.naujtrats.xyz/#token=dd388f7fe0e11d302e1f4c0bf33b786d32c7aab3cc61981f', '_blank');
+}
+
+</script>
+
+
+<!-- 登录模态框 -->
+<div id="loginModal" style="display:none;position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;">
+  <div style="background:#1a1f35;border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:36px 40px;width:100%;max-width:420px;position:relative;box-shadow:0 25px 60px rgba(0,0,0,0.5);">
+    <button onclick="closeLoginModal()" style="position:absolute;top:16px;right:20px;background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">×</button>
+    <h2 style="text-align:center;color:#f1f5f9;font-size:22px;margin-bottom:6px;">NAUJTRATS</h2>
+    <p id="modalSub" style="text-align:center;color:#94a3b8;font-size:13px;margin-bottom:28px;">统一账号 · 全站通行</p>
+
+    <div id="loginModalNotice" style="display:none;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;text-align:center;"></div>
+
+    <input type="text" id="modalUsername" placeholder="用户名" autocomplete="username" style="width:100%;padding:12px 16px;border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:#f1f5f9;font-size:14px;margin-bottom:12px;outline:none;box-sizing:border-box;">
+    <input type="email" id="modalEmail" placeholder="邮箱（注册必填）" autocomplete="email" style="display:none;width:100%;padding:12px 16px;border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:#f1f5f9;font-size:14px;margin-bottom:12px;outline:none;box-sizing:border-box;">
+    <input type="password" id="modalPassword" placeholder="密码" autocomplete="off" style="width:100%;padding:12px 16px;border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:#f1f5f9;font-size:14px;margin-bottom:12px;outline:none;box-sizing:border-box;">
+    <input type="password" id="modalPassword2" placeholder="确认密码（注册时填写）" autocomplete="off" style="display:none;width:100%;padding:12px 16px;border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:#f1f5f9;font-size:14px;margin-bottom:12px;outline:none;box-sizing:border-box;">
+    <div id="modalVerifyRow" style="display:none;margin-bottom:12px;">
+      <div style="display:flex;gap:10px;">
+        <button id="modalSendCode" onclick="sendRegCode()" style="padding:12px 14px;border:1px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:var(--accent);font-size:13px;cursor:pointer;white-space:nowrap;">发送验证码</button>
+        <input type="text" id="modalVerifyCode" placeholder="6位验证码" maxlength="6" style="flex:1;padding:12px;border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;background:rgba(255,255,255,0.05);color:#f1f5f9;font-size:14px;outline:none;">
+      </div>
+    </div>
+
+    <div id="modalMsg" style="display:none;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;"></div>
+
+    <button id="modalSubmitBtn" onclick="handleModalAuth()" style="width:100%;padding:13px;border:none;border-radius:12px;background:#38bdf8;color:#0b1120;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.2s;">登 录</button>
+    <p style="text-align:center;color:#6b7280;font-size:11px;margin-top:14px;">
+      <a href="javascript:void(0)" id="modalToggleLink" onclick="toggleModalMode()" style="color:#38bdf8;text-decoration:none;">没有账号？去注册</a>
+      <span style="color:#6b7280;">&nbsp;|&nbsp;</span>
+      <a href="javascript:void(0)" onclick="showResetPwd()" style="color:#6b7280;text-decoration:none;font-size:11px;">忘记密码？</a>
+    </p>
+  </div>
+</div>
+
+<script>
+let modalAuthType = 'login';
+let modalPendingUrl = null;
+let modalRegEmailVerified = false;
+
+function resetModalMode() {
+    modalAuthType = 'login';
+    document.getElementById('modalSubmitBtn').textContent = '登 录';
+    document.getElementById('modalEmail').style.display = 'none';
+    document.getElementById('modalPassword2').style.display = 'none';
+    document.getElementById('modalVerifyRow').style.display = 'none';
+    document.getElementById('modalToggleLink').textContent = '没有账号？去注册';
+    modalRegEmailVerified = false;
+}
+function toggleModalMode() {
+    if (modalAuthType === 'login') {
+        modalAuthType = 'register';
+        document.getElementById('modalSubmitBtn').textContent = '注 册';
+        document.getElementById('modalEmail').style.display = 'block';
+        document.getElementById('modalPassword2').style.display = 'block';
+        document.getElementById('modalVerifyRow').style.display = 'block';
+        document.getElementById('modalToggleLink').textContent = '已有账号？去登录';
+        document.getElementById('modalMsg').style.display = 'none';
+    } else {
+        resetModalMode();
+        document.getElementById('modalMsg').style.display = 'none';
+    }
+}
+function syncCloudreve(username, password, email) {
+    return fetch('/oneapichat/cloudreve_sync.php', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password,email}) })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if (d.login_token) localStorage.setItem('_cloudLoginToken', d.login_token);
+            return d;
+        })
+        .catch(function(){});
+}
+
+function showLoginModal(hint, pendingUrl) {
+    modalPendingUrl = pendingUrl || null;
+    document.getElementById('loginModal').style.display = 'flex';
+    const notice = document.getElementById('loginModalNotice');
+    if (hint) {
+        notice.textContent = hint;
+        notice.style.display = 'block';
+    } else {
+        notice.style.display = 'none';
+    }
+    document.getElementById('modalSub').textContent = hint ? '请先登录' : '统一账号 · 全站通行';
+}
+function closeLoginModal() {
+    document.getElementById('loginModal').style.display = 'none';
+    resetModalMode();
+}
+function showModalMsg(msg, isError) {
+    const el = document.getElementById('modalMsg');
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.style.background = isError ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)';
+    el.style.color = isError ? '#f87171' : '#4ade80';
+    el.style.border = '1px solid ' + (isError ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)');
+}
+async function handleModalAuth() {
+    const btn = document.getElementById('modalSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = modalAuthType === 'register' ? '注册中...' : '登录中...';
+    document.getElementById('modalMsg').style.display = 'none';
+    try {
+        const username = document.getElementById('modalUsername').value.trim();
+        const password = document.getElementById('modalPassword').value;
+        const password2 = document.getElementById('modalPassword2').value;
+        const email = document.getElementById('modalEmail').value.trim();
+        const vcode = document.getElementById('modalVerifyCode').value.trim();
+        if (!username || !password) { showModalMsg('请填写用户名和密码', true); btn.disabled=false; btn.textContent=modalAuthType==='register'?'注 册':'登 录'; return; }
+        if (modalAuthType === 'register') {
+            if (password !== password2) { showModalMsg('两次密码不一致', true); btn.disabled=false; btn.textContent='注 册'; return; }
+            if (password.length < 6) { showModalMsg('密码至少6位', true); btn.disabled=false; btn.textContent='注 册'; return; }
+            if (!email) { showModalMsg('请填写邮箱', true); btn.disabled=false; btn.textContent='注 册'; return; }
+            if (!vcode) { showModalMsg('请输入邮箱验证码', true); btn.disabled=false; btn.textContent='注 册'; return; }
+        }
+
+        const action = modalAuthType === 'register' ? 'register' : 'login';
+        const body = modalAuthType === 'register'
+            ? JSON.stringify({ username, password, email, code: vcode })
+            : JSON.stringify({ username, password });
+
+        const resp = await fetch('/oneapichat/auth.php?action=' + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body
+        });
+        const data = await resp.json();
+        if (data.success && data.token) {
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('authUsername', data.username);
+            localStorage.setItem('authUserId', data.user_id);
+            // ★ 保存 role 到 localStorage
+            localStorage.setItem('authRole', data.role || 'user');
+            // 保存邮箱和密码到 sessionStorage（用于后续同步 Cloudreve）
+            if (email) localStorage.setItem('authUserEmail', email);
+            sessionStorage.setItem('_authPassword', password);
+            // 同步到 Cloudreve 网盘（拿回 login_token）— 必须 await
+            try {
+                await syncCloudreve(username, password, email);
+            } catch(_e) {
+                // cloudreve 同步失败不影响登录成功
+            }
+
+            showModalMsg(modalAuthType === 'register' ? '注册成功！' : '登录成功！', false);
+            setTimeout(() => {
+                closeLoginModal();
+                var pending = modalPendingUrl;
+                modalPendingUrl = null;
+                // ★ 把待跳转 URL 存到 sessionStorage，刷新后再跳
+                if (pending) {
+                    sessionStorage.setItem('_postLoginUrl', pending);
+                    if (pending === 'cloudreve') {
+                        var _lt = localStorage.getItem('_cloudLoginToken');
+                        if (_lt) {
+                            sessionStorage.setItem('_postLoginCloudToken', _lt);
+                        }
+                    }
+                }
+                // ★ 刷新当前页面
+                location.reload();
+            }, 800);
+        } else {
+            showModalMsg(data.error || '登录失败，请检查用户名和密码', true);
+        }
+    } catch(e) {
+        showModalMsg('网络错误', true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = modalAuthType === 'register' ? '注 册' : '登 录';
+    }
+}
+// Enter 提交
+document.getElementById('modalPassword').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') handleModalAuth();
+});
+
+function sendRegCode() {
+    var email = document.getElementById('modalEmail').value.trim();
+    var btn = document.getElementById('modalSendCode');
+    if (!email) { showModalMsg('请先填写邮箱', true); return; }
+    if (sendRegCooldown > 0) return;
+    btn.disabled = true;
+    sendRegCooldown = 60;
+    btn.textContent = sendRegCooldown + 's';
+    var timer = setInterval(function(){
+        sendRegCooldown--;
+        btn.textContent = sendRegCooldown + 's';
+        if (sendRegCooldown <= 0) {
+            clearInterval(timer);
+            btn.textContent = '重新发送';
+            btn.disabled = false;
+        }
+    }, 1000);
+    fetch('/oneapichat/auth.php?action=send_reg_code', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.success) { showModalMsg('验证码已发送到 ' + email, false); }
+        else { showModalMsg(d.error || '发送失败', true); clearInterval(timer); sendRegCooldown=0; btn.textContent='发送验证码'; btn.disabled=false; }
+    }).catch(function(e){
+        showModalMsg('网络错误: ' + e.message, true);
+        clearInterval(timer); sendRegCooldown=0; btn.textContent='发送验证码'; btn.disabled=false;
+    });
+}
+var sendRegCooldown = 0;
+
+// ESC 关闭
+function showResetPwd() {
+    closeLoginModal();
+    var email = prompt('请输入注册时绑定的邮箱，我们将发送重置链接：');
+    if (!email) return;
+    showModalMsg('发送中...', false);
+    fetch('/oneapichat/auth.php?action=send_reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.success) alert(d.message || '已发送');
+        else alert(d.error || '发送失败');
+    }).catch(function(){ alert('网络错误'); });
+}
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeLoginModal();
+});
+
+// ---- 登录后动态更新导航栏 + 用户下拉菜单 ----
+(function() {
+    console.log('NAV_IIFE_START');
+    const token = localStorage.getItem('authToken');
+    console.log('NAV_IIFE token=' + token);
+    if (!token) { sessionStorage.removeItem('_postLoginUrl'); return; }
+    const container = document.getElementById('authNavContainer');
+    console.log('NAV_IIFE container=' + (!!container));
+    if (!container) return;
+
+    // ★ 异步获取 role 后重新构建导航栏
+    function buildNav(role) {
+        const username = localStorage.getItem('authUsername') || '';
+        if (!username) return;
+        const initial = username.charAt(0).toUpperCase();
+        const isRoot = (role || localStorage.getItem('authRole') || 'user') === 'root';
+    const grad = isRoot
+        ? 'linear-gradient(135deg,#38bdf8,#818cf8)'
+        : 'linear-gradient(135deg,#667eea,#764ba2)';
+
+    // SVG 图标
+    const icons = {
+        user: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+        settings: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+        logout: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+        chevron: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
+    };
+
+    var extraBtns = '';
+
+    var html = '<span style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="position:relative;display:inline-block;">' +
+            '<span id="userMenuBtn" onclick="toggleUserMenu(event)" class="nav-btn" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 14px 5px 8px;">' +
+                '<span style="width:26px;height:26px;border-radius:50%;background:' + grad + ';display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;flex-shrink:0;">' + initial + '</span>' +
+                '<span style="font-size:0.8rem;color:var(--text-dim);">' + username + '</span>' +
+                '<span style="margin-left:2px;color:var(--text-dim);">' + icons.chevron + '</span>' +
+            '</span>' +
+            '<span id="userDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:var(--menu-bg);border:1px solid var(--menu-border);border-radius:14px;padding:6px;min-width:150px;box-shadow:0 20px 50px rgba(0,0,0,0.5);backdrop-filter:blur(20px);z-index:99999;">' +
+                '<a href="/oneapichat/profile.html" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;text-decoration:none;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.user + '个人中心</a>' +
+                (isRoot ? '<a href="/manager" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;text-decoration:none;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.settings + '管理后台</a>' : '') +
+                '<span onclick="doLogout()" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.logout + '退出登录</span>' +
+            '</span>' +
+        '</span>' +
+    '</span>';
+
+    container.innerHTML = html;
+    }
+
+    // ★ 尝试用 localStorage 的角色直接构建
+    var cachedRole = localStorage.getItem('authRole');
+    console.log('NAV_BUILD: cachedRole=' + cachedRole + ', token=' + !!token);
+    if (cachedRole) {
+        buildNav(cachedRole);
+    } else {
+        // ★ 没有缓存，异步获取
+        console.log('NAV_BUILD: fetching role...');
+        fetch('/oneapichat/auth.php?action=verify&token=' + encodeURIComponent(token))
+            .then(function(r){ return r.json(); })
+            .then(function(d) {
+                console.log('NAV_BUILD: verify done, valid=' + d.valid + ', role=' + d.role);
+                if (d.valid && d.role) {
+                    localStorage.setItem('authRole', d.role);
+                    buildNav(d.role);
+                } else {
+                    buildNav('user');
+                }
+            }).catch(function(){
+                buildNav('user');
+            });
+    }
+})();
+
+// 点击其他地方关闭下拉
+window.toggleUserMenu = function(e) {
+    e.stopPropagation();
+    var dd = document.getElementById('userDropdown');
+    dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+};
+document.addEventListener('click', function(e) {
+    var dd = document.getElementById('userDropdown');
+    var btn = document.getElementById('userMenuBtn');
+    if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) {
+        dd.style.display = 'none';
+    }
+});
+window.doLogout = function() {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('authUsername');
+    localStorage.removeItem('authUserId');
+    localStorage.removeItem('authRole');
+    localStorage.removeItem('_cloudLoginToken');
+    location.reload();
+};
+</script>
+
+<!-- ICP备案 -->
+<footer style="width:100%;text-align:center;padding:30px 20px 20px;margin-top:60px;border-top:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(10px);">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" class="beian-link">
+            浙ICP备2026033601号
+        </a>
+        <a href="https://beian.mps.gov.cn/#/query/webSearch?code=33048102260024" target="_blank" rel="noopener noreferrer" class="beian-link" style="display:inline-flex;align-items:center;gap:6px;">
+            <img src="/beian_police.png" alt="警" style="vertical-align:middle;height:16px;width:16px;opacity:0.9;">
+            浙公网安备33048102260024号
+        </a>
+    </div>
+</footer>
+
+</body>
+</html>

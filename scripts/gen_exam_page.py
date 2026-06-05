@@ -41,7 +41,7 @@ html = html.replace('<head>', f'<head>{cookie_script}')
 # Also replace all script src to use absolute URLs
 html = html.replace('src="//', 'src="https://')
 
-out = '/var/www/html/oneapichat/manual_exam.html'
+out = '/var/www/html/oneapichat/public/manual_exam.html'
 with open(out, 'w', encoding='utf-8') as f:
     f.write(html)
 
