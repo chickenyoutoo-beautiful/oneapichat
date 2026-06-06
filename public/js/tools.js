@@ -880,7 +880,7 @@ function buildToolMeta(name, opts) {
     // 渲染工具结果 (可覆写)
     renderResultMessage: opts.renderResultMessage || function(output) {
       var text = typeof output === 'string' ? output : (output && output.result ? output.result : JSON.stringify(output));
-      const truncated = text.length > 500 ? text.substring(0, 500) + '...' : text;
+      var truncated = text.length > 500 ? text.substring(0, 500) + '...' : text;
       return '<div class="tool-result"><div class="tool-result-header">✅ 结果</div><pre class="tool-result-body">' + escapeHtml(truncated) + '</pre></div>';
     },
     // 获取简要摘要
@@ -907,30 +907,30 @@ const toolRegistry = (function() {
   }
 
   function getApprovalLevel(name) {
-    const meta = _registry[name];
+    var meta = _registry[name];
     if (!meta) return ApprovalLevel.REQUIRED; // 未知工具默认需要审批
     return meta.approval;
   }
 
   function isReadOnly(name) {
-    const meta = _registry[name];
+    var meta = _registry[name];
     if (!meta) return false;
     return meta.isReadOnly;
   }
 
   function isAgentOnly(name) {
-    const meta = _registry[name];
+    var meta = _registry[name];
     if (!meta) return false;
     return meta.isAgentOnly;
   }
 
   function getSearchHint(name) {
-    const meta = _registry[name];
+    var meta = _registry[name];
     return meta ? (meta.searchHint || '') : '';
   }
 
   function getCapabilities(name) {
-    const meta = _registry[name];
+    var meta = _registry[name];
     return meta ? (meta.capabilities || []) : [];
   }
 
@@ -939,9 +939,9 @@ const toolRegistry = (function() {
   }
 
   function getStats() {
-    const names = Object.keys(_registry);
-    const readOnly = names.filter(function(n) { return _registry[n].isReadOnly; }).length;
-    const write = names.filter(function(n) { return !_registry[n].isReadOnly; }).length;
+    var names = Object.keys(_registry);
+    var readOnly = names.filter(function(n) { return _registry[n].isReadOnly; }).length;
+    var write = names.filter(function(n) { return !_registry[n].isReadOnly; }).length;
     var auto = names.filter(function(n) { return _registry[n].approval === 'auto'; }).length;
     var required = names.filter(function(n) { return _registry[n].approval === 'required'; }).length;
     return { total: names.length, readOnly: readOnly, write: write, autoApproval: auto, requiresApproval: required };
@@ -951,10 +951,10 @@ const toolRegistry = (function() {
    * 生成 AI 可读的工具选择提示
    */
   function getToolSelectionPrompt() {
-    const names = Object.keys(_registry);
-    const lines = names.map(function(n) {
-      const m = _registry[n];
-      const caps = m.capabilities.join(', ');
+    var names = Object.keys(_registry);
+    var lines = names.map(function(n) {
+      var m = _registry[n];
+      var caps = m.capabilities.join(', ');
       var appLevel = m.approval === 'auto' ? '✅ 自动' : (m.approval === 'suggest' ? '💡 建议' : '🔐 需审批');
       return '- ' + n + ' [' + caps + '] ' + appLevel + (m.isReadOnly ? ' 📖只读' : ' ✏️写') + (m.searchHint ? ' → ' + m.searchHint : '');
     });
@@ -1365,7 +1365,7 @@ window.getToolDefaultEnabled = function(toolKey) {
 window.isToolEnabled = function(toolKey) {
     // ★ YOLO 模式: 所有工具强制可用(用户已授权完全自主, 无视localStorage和危险列表)
     if (typeof getAgentMode === 'function' && getAgentMode() === 'yolo') return true;
-    const stored = localStorage.getItem('tool_enabled_' + toolKey);
+    var stored = localStorage.getItem('tool_enabled_' + toolKey);
     if (stored !== null) return stored === 'true';
     return window.getToolDefaultEnabled(toolKey);
 };

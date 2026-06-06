@@ -11,8 +11,8 @@ window.analyzeImage = async function(imageInput, focus) {
         imageInput = '';
     }
     // 获取配置
-    const storedVisionUrl = localStorage.getItem('visionApiUrl');
-    const visionApiUrl = storedVisionUrl || DEFAULT_CONFIG.visionApiUrl || '/mcp';
+    var storedVisionUrl = localStorage.getItem('visionApiUrl');
+    var visionApiUrl = storedVisionUrl || DEFAULT_CONFIG.visionApiUrl || '/mcp';
     // ★ 限流保护: 如果 60 秒内遇到过 Token Plan 限流,直接抛错不请求
     if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 60000) {
         throw new Error('⚠️ MiniMax API 限流保护中,请 60 秒后再试');
@@ -105,8 +105,8 @@ window.analyzeImage = async function(imageInput, focus) {
     }
     // 直连模式: 直接使用 visionApiUrl,不做路径修改
     // 创建 AbortController 用于超时控制
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(() => {
         controller.abort('请求超时(120秒)');
     }, 120000);
 
@@ -131,7 +131,7 @@ window.analyzeImage = async function(imageInput, focus) {
             }
         }
 
-        const response = await fetch(mcpEndpoint, {
+        var response = await fetch(mcpEndpoint, {
             method: 'POST',
             headers: _fetchHeaders,
             body: _fetchBody,
@@ -140,7 +140,7 @@ window.analyzeImage = async function(imageInput, focus) {
 
         clearTimeout(timeoutId);
         if (!response.ok) {
-            const errorText = await response.text();
+            var errorText = await response.text();
             console.error('[analyzeImage] HTTP 错误:', response.status, errorText);
 
             if (isDirectApi) {
@@ -164,7 +164,7 @@ window.analyzeImage = async function(imageInput, focus) {
             }
         }
 
-        const data = await response.json();
+        var data = await response.json();
 
         if (data.error) {
             throw new Error((isDirectApi ? 'API' : 'MCP') + ' 返回错误: ' + (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
@@ -197,7 +197,7 @@ window.analyzeImage = async function(imageInput, focus) {
             throw new Error('图片分析请求超时,请稍后重试');
         }
 
-        const errMsg = (error && typeof error.message === 'string') ? error.message : '';
+        var errMsg = (error && typeof error.message === 'string') ? error.message : '';
         if (errMsg && (errMsg.includes('Failed to fetch') || errMsg.includes('network'))) {
             throw new Error('网络连接失败。请检查:\n1. 网络是否正常\n2. MCP 服务是否运行\n3. visionApiUrl 配置: ' + visionApiUrl);
         }
@@ -347,7 +347,7 @@ function compressImage(dataUrl, maxDim, quality) {
 
 // ==================== 图像生成函数 ====================
 window.generateImage = async (prompt, options = {}) => {
-    const imageProvider = localStorage.getItem('imageProvider') || 'minimax';
+    var imageProvider = localStorage.getItem('imageProvider') || 'minimax';
 
     if (imageProvider === 'openrouter') {
         return generateImageOpenRouter(prompt, options);
@@ -355,13 +355,13 @@ window.generateImage = async (prompt, options = {}) => {
 
     // ===== MiniMax (原有实现) =====
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
-    const MAX_PROMPT_LEN = 1400;
+    var MAX_PROMPT_LEN = 1400;
     if (prompt.length > MAX_PROMPT_LEN) prompt = prompt.slice(0, MAX_PROMPT_LEN);
     let baseUrl = (localStorage.getItem('imageBaseUrl') || DEFAULT_CONFIG.imageBaseUrl || '').replace(/\/$/, '');
     if (baseUrl && !baseUrl.endsWith('/v1')) {
         baseUrl = baseUrl + '/v1';
     }
-    const rawKey = localStorage.getItem('imageApiKey') || '';
+    var rawKey = localStorage.getItem('imageApiKey') || '';
     let apiKey = '';
     try { apiKey = await decrypt(rawKey) || ''; } catch(e) { console.error('[generateImage] decrypt error:', e.message); }
 
@@ -374,10 +374,10 @@ window.generateImage = async (prompt, options = {}) => {
         throw new Error('未配置图像生成API密钥,请在设置中填写');
     }
 
-    const imageModel = localStorage.getItem('imageModel') || 'image-01';
-    const apiUrl = baseUrl + '/image_generation';
+    var imageModel = localStorage.getItem('imageModel') || 'image-01';
+    var apiUrl = baseUrl + '/image_generation';
     try {
-        const body = {
+        var body = {
             model: options.model || imageModel,
             prompt: prompt,
             aspect_ratio: options.aspect_ratio || '1:1',
@@ -390,7 +390,7 @@ window.generateImage = async (prompt, options = {}) => {
         if (options.style && typeof options.style === 'string') {
             body.style = options.style;
         }
-        const response = await window.proxyFetch(apiUrl, {
+        var response = await window.proxyFetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -403,8 +403,8 @@ window.generateImage = async (prompt, options = {}) => {
             throw new Error('图像生成 API 请求失败: ' + response.status);
         }
 
-        const data = await response.json();
-        const images = [];
+        var data = await response.json();
+        var images = [];
         if (data.data && Array.isArray(data.data)) {
             data.data.forEach(function(d) {
                 if (d.image_base64) images.push('data:image/png;base64,' + d.image_base64);
@@ -513,7 +513,7 @@ async function generateImageOpenRouter(prompt, options = {}) {
     if (baseUrl && !baseUrl.endsWith('/v1')) {
         baseUrl = baseUrl + '/v1';
     }
-    const rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
+    var rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
     let apiKey = '';
     try { apiKey = await decrypt(rawKey) || ''; } catch(e) { console.error('[generateImageOpenRouter] decrypt error:', e.message); }
 
@@ -521,25 +521,25 @@ async function generateImageOpenRouter(prompt, options = {}) {
         throw new Error('未配置 OpenRouter API Key,请在设置-图像生成中填写');
     }
 
-    const configuredModel = localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    var configuredModel = localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
     // ★ 当提供商为 OpenRouter 时,忽略 AI 传来的 MiniMax 模型名(如 image-01),强制使用配置的模型
     var actualModel = options.model || configuredModel;
     if (actualModel.indexOf('image-01') !== -1 || actualModel.indexOf('minimax') !== -1) {
         actualModel = configuredModel;
     }
-    const chatUrl = baseUrl + '/chat/completions';
-    const n = options.n || 1;
-    const aspectRatio = options.aspect_ratio || '1:1';
-    const imageSize = options.image_size || '1K';
+    var chatUrl = baseUrl + '/chat/completions';
+    var n = options.n || 1;
+    var aspectRatio = options.aspect_ratio || '1:1';
+    var imageSize = options.image_size || '1K';
 
     // 构建 image_config
-    const imageConfig = {
+    var imageConfig = {
         aspect_ratio: aspectRatio,
         image_size: imageSize
     };
 
     try {
-        const body = {
+        var body = {
             model: actualModel,
             messages: [
                 { role: 'user', content: prompt }
@@ -550,7 +550,7 @@ async function generateImageOpenRouter(prompt, options = {}) {
             stream: false
         };
 
-        const response = await window.proxyFetch(chatUrl, {
+        var response = await window.proxyFetch(chatUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -561,11 +561,11 @@ async function generateImageOpenRouter(prompt, options = {}) {
         });
 
         if (!response.ok) {
-            const errText = await response.text().catch(function() { return response.statusText; });
+            var errText = await response.text().catch(function() { return response.statusText; });
             throw new Error('OpenRouter 请求失败 (' + response.status + '): ' + errText.substring(0, 200));
         }
 
-        const data = await response.json();
+        var data = await response.json();
 
         // 检查错误
         if (data.error) {
@@ -573,7 +573,7 @@ async function generateImageOpenRouter(prompt, options = {}) {
         }
 
         // ★ 使用通用提取器支持多种 API 返回格式
-        const images = _extractImagesFromResponse(data);
+        var images = _extractImagesFromResponse(data);
 
         if (images.length > 0) {
             // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
@@ -596,16 +596,16 @@ async function generateImageOpenRouter(prompt, options = {}) {
 async function _gptImageI2I(prompt, primaryImage, options = {}) {
     let baseUrl = (localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api').replace(/\/$/, '');
     if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
-    const rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
+    var rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
     let apiKey = '';
     try { apiKey = await decrypt(rawKey) || ''; } catch(e) {}
     if (!apiKey) throw new Error('未配置 OpenRouter API Key');
 
-    const model = options.model || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
-    const chatUrl = baseUrl + '/chat/completions';
-    const n = options.n || 1;
-    const aspectRatio = options.aspect_ratio || '1:1';
-    const imageSize = options.image_size || '1K';
+    var model = options.model || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    var chatUrl = baseUrl + '/chat/completions';
+    var n = options.n || 1;
+    var aspectRatio = options.aspect_ratio || '1:1';
+    var imageSize = options.image_size || '1K';
 
     // 构建带参考图的消息
     var content = [];
@@ -634,7 +634,7 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
     content.push({ type: 'text', text: fullPrompt });
 
     try {
-        const body = {
+        var body = {
             model: model,
             messages: [{ role: 'user', content: content }],
             modalities: ['image', 'text'],
@@ -648,7 +648,7 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
             body.mask_image_url = options.mask_image;
         }
 
-        const response = await window.proxyFetch(chatUrl, {
+        var response = await window.proxyFetch(chatUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
             body: JSON.stringify(body),
@@ -656,17 +656,17 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
         });
 
         if (!response.ok) {
-            const errText = await response.text().catch(function(){return response.statusText;});
+            var errText = await response.text().catch(function(){return response.statusText;});
             throw new Error('GPT Image i2i 请求失败 (' + response.status + '): ' + errText.substring(0, 200));
         }
 
-        const data = await response.json();
+        var data = await response.json();
         if (data.error) {
             throw new Error('GPT Image 错误: ' + (data.error.message || JSON.stringify(data.error)));
         }
 
         // ★ 使用通用提取器支持多种 API 返回格式
-        const images = _extractImagesFromResponse(data);
+        var images = _extractImagesFromResponse(data);
 
         if (images.length === 0) throw new Error('GPT Image i2i 未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
         // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
@@ -699,13 +699,13 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         return window.generateImage(prompt, options);
     }
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
-    const MAX_PROMPT_LEN = 1400;
+    var MAX_PROMPT_LEN = 1400;
     if (prompt.length > MAX_PROMPT_LEN) prompt = prompt.slice(0, MAX_PROMPT_LEN);
     let baseUrl = (localStorage.getItem('imageBaseUrl') || DEFAULT_CONFIG.imageBaseUrl || '').replace(/\/$/, '');
     if (baseUrl && !baseUrl.endsWith('/v1')) {
         baseUrl = baseUrl + '/v1';
     }
-    const apiKey = await decrypt(localStorage.getItem('imageApiKey') || '') || '';
+    var apiKey = await decrypt(localStorage.getItem('imageApiKey') || '') || '';
 
     if (!baseUrl) {
         throw new Error('未配置图像生成API地址,请在设置中填写');
@@ -714,10 +714,10 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         throw new Error('未配置图像生成API密钥,请在设置中填写');
     }
 
-    const imageModel = localStorage.getItem('imageModel') || 'image-01';
-    const apiUrl = baseUrl + '/image_generation';
+    var imageModel = localStorage.getItem('imageModel') || 'image-01';
+    var apiUrl = baseUrl + '/image_generation';
 
-    const requestBody = {
+    var requestBody = {
         model: options.model || imageModel,
         prompt: prompt,
         aspect_ratio: options.aspect_ratio || '1:1',
@@ -748,7 +748,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
     }
 
     try {
-        const response = await window.proxyFetch(apiUrl, {
+        var response = await window.proxyFetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -761,12 +761,12 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
             throw new Error('图像生成 API 请求失败: ' + response.status);
         }
 
-        const data = await response.json();
+        var data = await response.json();
 
         // 检查 API 错误
         if (data.base_resp && data.base_resp.status_code !== 0) {
-            const errMsg = data.base_resp.status_msg || 'API 错误';
-            const errCode = data.base_resp.status_code;
+            var errMsg = data.base_resp.status_msg || 'API 错误';
+            var errCode = data.base_resp.status_code;
             // 如果是模型不支持错误
             if (errMsg.includes('not support model') || errMsg.includes('image-01-live')) {
                 throw new Error('抱歉,您的账号不支持 image-01-live 模型,请联系管理员升级');
@@ -785,12 +785,12 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         // MiniMax 图生图返回: data: { image_base64: ["..."] }
         let imageResult = null;
         if (data.data && data.data.image_base64 && Array.isArray(data.data.image_base64) && data.data.image_base64.length > 0) {
-            const images = data.data.image_base64.map(function(b64) { return 'data:image/png;base64,' + b64; });
+            var images = data.data.image_base64.map(function(b64) { return 'data:image/png;base64,' + b64; });
             imageResult = images.length === 1 ? images[0] : images;
         } else if (data.data && data.data.image_url) {
             imageResult = data.data.image_url;
         } else if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-            const images = data.data.map(function(d) {
+            var images = data.data.map(function(d) {
                 if (d.image_base64) return 'data:image/png;base64,' + d.image_base64;
                 if (d.image_url) return d.image_url;
                 return null;
@@ -801,15 +801,15 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         // ★ i2i失败(failed_count>0): 自动降级为文生图重试
         if (!imageResult && data.metadata && parseInt(data.metadata.failed_count) > 0 && requestBody.subject_reference) {
             delete requestBody.subject_reference;
-            const retryResp = await fetch(apiUrl, {
+            var retryResp = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
                 body: JSON.stringify(requestBody)
             });
             if (retryResp.ok) {
-                const retryData = await retryResp.json();
+                var retryData = await retryResp.json();
                 if (retryData.data && retryData.data.image_base64 && Array.isArray(retryData.data.image_base64) && retryData.data.image_base64.length > 0) {
-                    const images = retryData.data.image_base64.map(function(b64) { return 'data:image/png;base64,' + b64; });
+                    var images = retryData.data.image_base64.map(function(b64) { return 'data:image/png;base64,' + b64; });
                     imageResult = images.length === 1 ? images[0] : images;
                 }
             }
@@ -817,7 +817,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
 
         if (imageResult) {
             // 尝试上传图片到服务器
-            const serverUrl = await uploadImageToServer(imageResult);
+            var serverUrl = await uploadImageToServer(imageResult);
             if (serverUrl) {
                 return serverUrl; // 返回服务器 URL 而不是 base64
             }

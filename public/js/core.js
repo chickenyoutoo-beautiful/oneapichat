@@ -4,7 +4,7 @@
 // ==== extracted from main.js L1-L10 ====
 // 抑制 KaTeX 字体指标警告(中文字符如123不影响渲染)
 (function(){
-    const _origWarn = console.warn;
+    var _origWarn = console.warn;
     console.warn = function() {
         if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].indexOf('No character metrics') >= 0) return;
         return _origWarn.apply(console, arguments);
@@ -20,8 +20,8 @@ var _apiBase = window.location.origin + '/oneapichat/api/engine_api.php';
 // ==================== 已知不支持工具调用的模型(硬编码,不依赖 models.js) ====================
 (function() {
     try {
-        const _existing = JSON.parse(localStorage.getItem('noToolModels') || '[]');
-        const _add = ['deepseek-r1', 'deepseek-reasoner', 'qwq', 'qwq-'];
+        var _existing = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+        var _add = ['deepseek-r1', 'deepseek-reasoner', 'qwq', 'qwq-'];
         let _changed = false;
         for (var _i = 0; _i < _add.length; _i++) {
             if (_existing.indexOf(_add[_i]) === -1) {
@@ -50,24 +50,24 @@ function _protectMath(text) {
 
     // 块公式: $$...$$ 和 \[...\]
     text = text.replace(/\$\$([\s\S]*?)\$\$/g, function(match, formula) {
-        const id = 'MATHBx' + (_mathCounter++);
+        var id = 'MATHBx' + (_mathCounter++);
         _mathStore[id] = { type: 'block', formula: formula.trim() };
         return id;
     });
     text = text.replace(/\\\[([\s\S]*?)\\\]/g, function(match, formula) {
-        const id = 'MATHBx' + (_mathCounter++);
+        var id = 'MATHBx' + (_mathCounter++);
         _mathStore[id] = { type: 'block', formula: formula.trim() };
         return id;
     });
 
     // 行内公式: $...$ 和 \(...\)
     text = text.replace(/(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)/g, function(match, formula) {
-        const id = 'MATHIx' + (_mathCounter++);
+        var id = 'MATHIx' + (_mathCounter++);
         _mathStore[id] = { type: 'inline', formula: formula.trim() };
         return id;
     });
     text = text.replace(/\\\(([^)]+?)\\\)/g, function(match, formula) {
-        const id = 'MATHIx' + (_mathCounter++);
+        var id = 'MATHIx' + (_mathCounter++);
         _mathStore[id] = { type: 'inline', formula: formula.trim() };
         return id;
     });
@@ -107,13 +107,13 @@ function _restoreMath(html) {
 function _renderMarkdownWithMath(text) {
     if (!text) return '';
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
-    const protected = _protectMath(text);
-    const html = marked.parse(protected);
+    var protected = _protectMath(text);
+    var html = marked.parse(protected);
     // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify）
     let tempHtml = _restoreMath(html);
     tempHtml = tempHtml.replace(/(?<!["'=])(https?:\/\/[^\s<>"']+)(?!["'])/gi, function(url) {
         // 清理尾部标点
-        const cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
+        var cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
         return '<a href="' + cleanUrl + '" target="_blank" rel="noopener">' + cleanUrl + '</a>';
     });
     // ★ 所有已经存在的链接打开新标签页
@@ -124,7 +124,7 @@ function _renderMarkdownWithMath(text) {
 // ==== extracted from main.js L444-L460 ====
 // ★ 跨域登录状态同步(naujtrats.xyz / www 共享登录)
 function getCookie(name) {
-    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? decodeURIComponent(match[2]) : '';
 }
 function setCookie(name, value, days) {
@@ -161,14 +161,14 @@ var __encryptionKeyLoaded = false;
 // 从服务端加载加密密钥(与 config.ini 同步，缓存到 sessionStorage)
 async function _loadEncryptionKeyFromServer() {
     if (__encryptionKeyLoaded) return;
-    const _cached = sessionStorage.getItem('__encKey');
+    var _cached = sessionStorage.getItem('__encKey');
     if (_cached) { ENCRYPTION_KEY = _cached; __aesKey = null; __encryptionKeyLoaded = true; return; }
-    const _token = getAuthToken();
+    var _token = getAuthToken();
     if (!_token) { __encryptionKeyLoaded = true; return; }  // 未登录 → 使用默认密钥
     try {
-        const _resp = await fetch(_apiBase + '?action=get_encryption_key&auth=' + encodeURIComponent(_token));
+        var _resp = await fetch(_apiBase + '?action=get_encryption_key&auth=' + encodeURIComponent(_token));
         if (_resp.ok) {
-            const _data = await _resp.json();
+            var _data = await _resp.json();
             if (_data.encryption_key && _data.encryption_key !== ENCRYPTION_KEY) {
                 ENCRYPTION_KEY = _data.encryption_key;
                 __aesKey = null;  // ★ 清除 PBKDF2 缓存(新密钥需要重新派生)
@@ -203,9 +203,9 @@ let _currentProvider = '';
 // ==== extracted from main.js L2483-L2495 ====
 var getEl = id => document.getElementById(id);
 var getVal = id => {
-    const el = getEl(id);
+    var el = getEl(id);
     if (!el) return undefined;
-    const val = el.value;
+    var val = el.value;
     // 输入框为空时用 DEFAULT_CONFIG 的默认值(仅非敏感配置)
     if (!val && id === 'baseUrl' && DEFAULT_CONFIG && DEFAULT_CONFIG.url) return DEFAULT_CONFIG.url;
     if (!val && id === 'modelSelect' && DEFAULT_CONFIG && DEFAULT_CONFIG.model) return DEFAULT_CONFIG.model;
@@ -220,8 +220,8 @@ var setChecked = (id, val) => { const el = getEl(id); if (el) el.checked = val; 
 var __aesKey = null;
 async function _getAesKey() {
     if (__aesKey) return __aesKey;
-    const _enc = new TextEncoder();
-    const _km = await crypto.subtle.importKey('raw', _enc.encode(ENCRYPTION_KEY), 'PBKDF2', false, ['deriveKey']);
+    var _enc = new TextEncoder();
+    var _km = await crypto.subtle.importKey('raw', _enc.encode(ENCRYPTION_KEY), 'PBKDF2', false, ['deriveKey']);
     __aesKey = await crypto.subtle.deriveKey(
         { name: 'PBKDF2', salt: _enc.encode('oneapichat-aes-v2'), iterations: 100000, hash: 'SHA-256' },
         _km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
@@ -233,12 +233,12 @@ async function _getAesKey() {
 async function encrypt(text) {
     if (!text) return text;
     try {
-        const _aesKey = await _getAesKey();
-        const _iv = crypto.getRandomValues(new Uint8Array(12));
-        const _enc = new TextEncoder();
-        const _ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: _iv }, _aesKey, _enc.encode(text));
+        var _aesKey = await _getAesKey();
+        var _iv = crypto.getRandomValues(new Uint8Array(12));
+        var _enc = new TextEncoder();
+        var _ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: _iv }, _aesKey, _enc.encode(text));
         // _ct 末尾 16 字节是 GCM auth tag (Web Crypto 自动追加)
-        const _combined = new Uint8Array(_iv.length + _ct.byteLength);
+        var _combined = new Uint8Array(_iv.length + _ct.byteLength);
         _combined.set(_iv);
         _combined.set(new Uint8Array(_ct), _iv.length);
         return 'v2:' + btoa(Array.from(_combined, function(b) { return String.fromCharCode(b); }).join(''));
@@ -253,14 +253,14 @@ async function decrypt(encoded) {
     // v2: AES-256-GCM (新格式)
     if (encoded.indexOf('v2:') === 0) {
         try {
-            const _aesKey2 = await _getAesKey();
-            const _raw = encoded.slice(3);
-            const _binStr = atob(_raw);
-            const _bytes = new Uint8Array(_binStr.length);
+            var _aesKey2 = await _getAesKey();
+            var _raw = encoded.slice(3);
+            var _binStr = atob(_raw);
+            var _bytes = new Uint8Array(_binStr.length);
             for (var _i = 0; _i < _binStr.length; _i++) _bytes[_i] = _binStr.charCodeAt(_i);
-            const _iv2 = _bytes.slice(0, 12);
-            const _ct2 = _bytes.slice(12);
-            const _decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: _iv2 }, _aesKey2, _ct2);
+            var _iv2 = _bytes.slice(0, 12);
+            var _ct2 = _bytes.slice(12);
+            var _decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: _iv2 }, _aesKey2, _ct2);
             return new TextDecoder().decode(_decrypted);
         } catch(_e2) {
             console.error('[AES-GCM] decrypt error:', _e2.message);
@@ -269,11 +269,11 @@ async function decrypt(encoded) {
     }
     // 旧版 XOR 解密 (向后兼容 — 下次保存时自动升级到 v2)
     try {
-        const _bin2 = atob(encoded);
-        const _bytes2 = new Uint8Array(_bin2.length);
+        var _bin2 = atob(encoded);
+        var _bytes2 = new Uint8Array(_bin2.length);
         for (var _j = 0; _j < _bin2.length; _j++) _bytes2[_j] = _bin2.charCodeAt(_j);
-        const _xorKey = new TextEncoder().encode(ENCRYPTION_KEY);
-        const _res2 = new Uint8Array(_bytes2.length);
+        var _xorKey = new TextEncoder().encode(ENCRYPTION_KEY);
+        var _res2 = new Uint8Array(_bytes2.length);
         for (var _k = 0; _k < _bytes2.length; _k++) _res2[_k] = _bytes2[_k] ^ _xorKey[_k % _xorKey.length];
         return new TextDecoder().decode(_res2);
     } catch(_e3) {
@@ -287,9 +287,9 @@ function compressNewlines(text, max = 1) {
 
 function estimateTokens(text) {
     if (!text) return 0;
-    const ch = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-    const other = text.length - ch;
-    const words = text.split(/\s+/).filter(Boolean).length;
+    var ch = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    var other = text.length - ch;
+    var words = text.split(/\s+/).filter(Boolean).length;
     return Math.ceil(ch * 2 + other * 0.25 + words * 1.3);
 }
 
@@ -314,7 +314,7 @@ var throttle = (fn, limit) => {
 };
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
+    var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
@@ -333,7 +333,7 @@ function lazyLoadScript(src, onload) {
         return;
     }
     // 检查 DOM 中是否已有该脚本
-    const existing = document.querySelector('script[data-src="' + src + '"], script[src="' + src + '"]');
+    var existing = document.querySelector('script[data-src="' + src + '"], script[src="' + src + '"]');
     if (existing) {
         __loadedScripts[src] = true;
         if (onload) onload();
@@ -361,7 +361,7 @@ function lazyLoadScript(src, onload) {
 
 /** 空闲时批量加载脚本(rIC 降级到 setTimeout) */
 function _loadScriptsOnIdle(scripts) {
-    const loader = function() {
+    var loader = function() {
         for (var i = 0; i < scripts.length; i++) {
             lazyLoadScript(scripts[i]);
         }

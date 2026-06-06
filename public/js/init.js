@@ -24,7 +24,7 @@ function cacheDOMElements() {
 }
 
 function injectStyles() {
-    const style = document.createElement('style');
+    var style = document.createElement('style');
     style.textContent = `
         .bubble.assistant.typing .markdown-body { min-height:1.5em; position:relative; }
         .bubble.assistant.typing .markdown-body::after { content:'...'; display:inline-block; animation:typing-dots 1.2s steps(4,end) infinite; width:1.5em; text-align:left; font-size:1.2em; line-height:1; opacity:0.7; }
@@ -104,7 +104,7 @@ function createResetButton() {
 function resetConfig() {
     if (!confirm('确定恢复所有设置为默认值吗?此操作将刷新页面。')) return;
     // 配置相关的 localStorage 键列表(与 saveConfig 中存储的键保持一致)
-    const configKeys = [
+    var configKeys = [
         'apiKey', 'baseUrl', 'systemPrompt', 'model', 'temp', 'tokens',
         'stream', 'requestTimeout',
         'compress', 'threshold', 'customParams', 'customEnabled',
@@ -130,7 +130,7 @@ function exportChats() {
         alert('没有聊天记录可导出');
         return;
     }
-    const exportData = {
+    var exportData = {
         version: '1.0',
         exportedAt: new Date().toISOString(),
         chats: chats
@@ -155,16 +155,16 @@ function exportCurrentChat() {
     }
     var chat = chats[currentChatId];
     var title = chat.title || '当前对话';
-    const lines = []
+    var lines = []
     lines.push('标题: ' + title);
     lines.push('导出时间: ' + new Date().toLocaleString('zh-CN'));
     lines.push('='.repeat(50));
     lines.push('');
 
-    const msgs = chat.messages || [];
+    var msgs = chat.messages || [];
     msgs.forEach(function(m) {
         if (m.role === 'system') return;
-        const roleName = m.role === 'user' ? '👤 你' : '🤖 AI';
+        var roleName = m.role === 'user' ? '👤 你' : '🤖 AI';
         var text = m.content || '';
         lines.push(roleName + ':');
         lines.push(text);
@@ -198,13 +198,13 @@ function exportCurrentChat() {
 
 // ★ 导入聊天记录
 function importChats() {
-    const input = document.createElement('input');
+    var input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
     input.onchange = function(e) {
-        const file = e.target.files[0];
+        var file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
+        var reader = new FileReader();
         reader.onload = function(ev) {
             try {
                 var data = JSON.parse(ev.target.result);
@@ -250,41 +250,41 @@ function createDataManagementSection() {
 }
 // ==================== 初始化配置 ====================
 async function initializeConfig() {
-    const savedProvider = localStorage.getItem('baseUrlProvider') || 'deepseek';
+    var savedProvider = localStorage.getItem('baseUrlProvider') || 'deepseek';
     setVal('baseUrlProvider', savedProvider);
-    const _provCfg = API_PROVIDERS[savedProvider] || API_PROVIDERS.custom;
-    const _rawK = localStorage.getItem(_provCfg.keyLS);
+    var _provCfg = API_PROVIDERS[savedProvider] || API_PROVIDERS.custom;
+    var _rawK = localStorage.getItem(_provCfg.keyLS);
     var _pk = '';
     if (_rawK) { _pk = await decrypt(_rawK) || ''; if (_pk === 'not-needed') _pk = ''; }
     // 兼容旧数据: DeepSeek 之前存 apiKey
     if (!_pk && _provCfg.keyLS === 'apiKeyDeepseek') { var _old = localStorage.getItem('apiKey'); if (_old) { _pk = await decrypt(_old) || ''; if (_pk === 'not-needed') _pk = ''; } }
     setVal('apiKey', _pk);
-    const _lab = getEl('apiKeyLabel'); if (_lab) _lab.textContent = 'API Key (' + _provCfg.label + ')';
+    var _lab = getEl('apiKeyLabel'); if (_lab) _lab.textContent = 'API Key (' + _provCfg.label + ')';
     if (savedProvider === 'custom') setVal('baseUrl', localStorage.getItem('baseUrlCustom') || '');
     else if (_provCfg.baseUrl) setVal('baseUrl', _provCfg.baseUrl);
     else setVal('baseUrl', localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url);
-    const _pm = localStorage.getItem('model_' + savedProvider) || localStorage.getItem('model') || DEFAULT_CONFIG.model;
+    var _pm = localStorage.getItem('model_' + savedProvider) || localStorage.getItem('model') || DEFAULT_CONFIG.model;
     setVal('modelSelect', _pm);
     setVal('visionModel', localStorage.getItem('visionModel') || DEFAULT_CONFIG.visionModel || '');
     setVal('visionApiUrl', localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '');
-    const storedVisionKey = await decrypt(localStorage.getItem('visionApiKey') || '');
-    const cleanVisionKey = (storedVisionKey && storedVisionKey !== 'not-needed') ? storedVisionKey : '';
+    var storedVisionKey = await decrypt(localStorage.getItem('visionApiKey') || '');
+    var cleanVisionKey = (storedVisionKey && storedVisionKey !== 'not-needed') ? storedVisionKey : '';
     setVal('visionApiKey', cleanVisionKey || '');
     // 视觉理解提供商
-    const _visionProvider = localStorage.getItem('visionProvider') || 'minimax';
+    var _visionProvider = localStorage.getItem('visionProvider') || 'minimax';
     if (getEl('visionProvider')) getEl('visionProvider').value = _visionProvider;
     window._lastVisionProvider = _visionProvider;
     // 加载 OpenAI Vision 的配置
-    const storedOAKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
+    var storedOAKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
     setVal('visionApiKeyOpenAI', (storedOAKey && storedOAKey !== 'not-needed') ? storedOAKey : '');
     setVal('visionApiUrlOpenAI', localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
-    const storedImageKey = await decrypt(localStorage.getItem('imageApiKey') || '');
-    const cleanImageKey = (storedImageKey && storedImageKey !== 'not-needed') ? storedImageKey : '';
+    var storedImageKey = await decrypt(localStorage.getItem('imageApiKey') || '');
+    var cleanImageKey = (storedImageKey && storedImageKey !== 'not-needed') ? storedImageKey : '';
     setVal('imageApiKey', cleanImageKey || '');
     setVal('imageModel', localStorage.getItem('imageModel') || DEFAULT_CONFIG.imageModel || '');
     setVal('imageBaseUrl', localStorage.getItem('imageBaseUrl') || DEFAULT_CONFIG.imageBaseUrl || '');
-    const storedOrKey_Final = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '');
-    const cleanOrKey_Final = (storedOrKey_Final && storedOrKey_Final !== 'not-needed') ? storedOrKey_Final : '';
+    var storedOrKey_Final = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '');
+    var cleanOrKey_Final = (storedOrKey_Final && storedOrKey_Final !== 'not-needed') ? storedOrKey_Final : '';
     setVal('imageApiKeyOpenrouter', cleanOrKey_Final || '');
     setVal('imageBaseUrlOpenrouter', localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api');
     setVal('imageProvider', localStorage.getItem('imageProvider') || DEFAULT_CONFIG.imageProvider || 'minimax');
@@ -298,16 +298,16 @@ async function initializeConfig() {
     setVal('customParams', localStorage.getItem('customParams') || DEFAULT_CONFIG.customParams);
     setChecked('customParamsToggle', localStorage.getItem('customEnabled') === 'true');
 
-    const temp = localStorage.getItem('temp') || '0.7';
+    var temp = localStorage.getItem('temp') || '0.7';
     setVal('temperature', temp);
-    const tempSpan = getEl('tempValue');
+    var tempSpan = getEl('tempValue');
     if (tempSpan) tempSpan.innerText = temp;
 
     // ★ 完全按用户配置,不匹配模型，但上限跟随模型能力
-    const _curModel2 = getVal('modelSelect') || '';
-    const _modelMax2 = window._getModelMaxTokens ? window._getModelMaxTokens(_curModel2) : 200000;
-    const _slider2 = getEl('maxTokens');
-    const _input2 = getEl('maxTokensInput');
+    var _curModel2 = getVal('modelSelect') || '';
+    var _modelMax2 = window._getModelMaxTokens ? window._getModelMaxTokens(_curModel2) : 200000;
+    var _slider2 = getEl('maxTokens');
+    var _input2 = getEl('maxTokensInput');
     if (_slider2) _slider2.max = _modelMax2;
     if (_input2) _input2.max = _modelMax2;
     // 如果保存的 token 值超过模型上限，自动修正
@@ -323,22 +323,22 @@ async function initializeConfig() {
     setChecked('compressToggle', localStorage.getItem('compress') === 'true');
     setVal('compressThreshold', localStorage.getItem('threshold') || '10');
     // ★ compressModel 改为只读显示自动选择的模型
-    const compressSel = getEl('compressModel');
+    var compressSel = getEl('compressModel');
     if (compressSel) {
         compressSel.value = 'auto';
         compressSel.disabled = true;
         compressSel.title = '自动选择: 当前模型 context ≥ 128K 用自身, 否则用 deepseek-chat';
     }
 
-    const lh = parseFloat(localStorage.getItem('lineHeight') || DEFAULT_CONFIG.lineHeight);
+    var lh = parseFloat(localStorage.getItem('lineHeight') || DEFAULT_CONFIG.lineHeight);
     setVal('lineHeight', lh);
-    const lhSpan = getEl('lineHeightValue');
+    var lhSpan = getEl('lineHeightValue');
     if (lhSpan) lhSpan.innerText = lh.toFixed(2);
     document.documentElement.style.setProperty('--chat-line-height', lh);
 
-    const pm = parseFloat(localStorage.getItem('paragraphMargin') || DEFAULT_CONFIG.paragraphMargin);
+    var pm = parseFloat(localStorage.getItem('paragraphMargin') || DEFAULT_CONFIG.paragraphMargin);
     setVal('paragraphMargin', pm);
-    const pmSpan = getEl('paragraphMarginValue');
+    var pmSpan = getEl('paragraphMarginValue');
     if (pmSpan) pmSpan.innerText = pm.toFixed(2);
     document.documentElement.style.setProperty('--chat-paragraph-margin', pm + 'rem');
     setChecked('markdownGFM', localStorage.getItem('markdownGFM') !== 'false');
@@ -350,7 +350,7 @@ async function initializeConfig() {
 
     if (localStorage.getItem('dark') === 'true') toggleDarkMode(true);
     else {
-        const theme = getEl('hljsTheme');
+        var theme = getEl('hljsTheme');
         if (theme) theme.href = 'lib/atom-one-light.min.css';
     }
 
@@ -361,28 +361,28 @@ async function initializeConfig() {
     await initAgentConfig();
     updateAgentUI();
     // ★ thinking mode 初始化
-    const _tm = localStorage.getItem('thinkingMode') || 'adaptive';
-    const _tmEl = getEl('thinkingMode');
+    var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
+    var _tmEl = getEl('thinkingMode');
     if (_tmEl) _tmEl.value = _tm;
     _updateThinkingVisibility();
     // modelSelect 变化时更新 thinking 栏可见性
-    const _ms = getEl('modelSelect');
+    var _ms = getEl('modelSelect');
     if (_ms && !_ms._thinkingBound) {
         _ms._thinkingBound = true;
         _ms.addEventListener('change', _updateThinkingVisibility);
     }
     // baseUrlProvider 变化时也检查
-    const _bp = getEl('baseUrlProvider');
+    var _bp = getEl('baseUrlProvider');
     if (_bp && !_bp._thinkingBound) {
         _bp._thinkingBound = true;
         _bp.addEventListener('change', _updateThinkingVisibility);
     }
     // 配置面板打开时自动刷新引擎状态
-    const configToggleBtn = document.querySelector('button[onclick*="toggleConfigPanel"]');
+    var configToggleBtn = document.querySelector('button[onclick*="toggleConfigPanel"]');
     if (configToggleBtn) {
         configToggleBtn.addEventListener('click', function() {
             setTimeout(function() {
-                const cp = $.configPanel;
+                var cp = $.configPanel;
                 if (cp && !cp.classList.contains('hidden-panel')) {
                     window.refreshEngineStatus();
                 }
@@ -391,7 +391,7 @@ async function initializeConfig() {
     }
     if (window.initChaoxingMonitor) {
         initChaoxingMonitor();
-        const toggle = document.getElementById('chaoxingMonitorToggle');
+        var toggle = document.getElementById('chaoxingMonitorToggle');
         if (toggle) toggle.checked = localStorage.getItem('chaoxingAutoReport') === 'true';
     }
 
@@ -404,9 +404,9 @@ async function initializeConfig() {
             $.chatTitle.textContent = '新对话';
             document.getElementById('chatBox')?.prepend($.chatTitle);
         } else {
-            const header = document.querySelector('header');
-            const left = header?.querySelector('.flex.items-center.gap-4');
-            const right = header?.querySelector('.flex.items-center.gap-3');
+            var header = document.querySelector('header');
+            var left = header?.querySelector('.flex.items-center.gap-4');
+            var right = header?.querySelector('.flex.items-center.gap-3');
             if (left && right) {
                 var title = document.createElement('div');
                 title.id = 'chatTitle';
@@ -420,7 +420,7 @@ async function initializeConfig() {
 
     // 移动端配置输入框聚焦时自动展开面板
     if (isMobile()) {
-        const configInputs = $.configPanel?.querySelectorAll('input, textarea, select');
+        var configInputs = $.configPanel?.querySelectorAll('input, textarea, select');
         configInputs?.forEach(el => {
             el.addEventListener('focus', () => {
                 keyboardActive = true;
@@ -444,8 +444,8 @@ async function initializeConfig() {
 }
 
 async function initAgentConfig() {
-    const mode = getAgentMode();
-    const isActive = mode === 'agent' || mode === 'yolo';
+    var mode = getAgentMode();
+    var isActive = mode === 'agent' || mode === 'yolo';
     setChecked('agentModeToggle', isActive);
     setChecked('agentAutoDecision', localStorage.getItem('agentAutoDecision') !== 'false');
     setChecked('agentProactive', localStorage.getItem('agentProactive') === 'true');
@@ -456,15 +456,15 @@ async function initAgentConfig() {
     var _ttsKey = ''; try { _ttsKey = await decrypt(localStorage.getItem('ttsApiKey')||''); } catch(e) {} setVal('ttsApiKey', _ttsKey || '');
     // TTS 音色: 如果存储的值不在下拉选项中, 追加 custom option
     (function(){
-        const voiceSel = getEl('ttsVoiceId');
+        var voiceSel = getEl('ttsVoiceId');
         if (voiceSel) {
-            const savedVoice = localStorage.getItem('ttsVoiceId') || 'male-qn-qingse';
+            var savedVoice = localStorage.getItem('ttsVoiceId') || 'male-qn-qingse';
             var found = false;
             for (var i = 0; i < voiceSel.options.length; i++) {
                 if (voiceSel.options[i].value === savedVoice) { found = true; break; }
             }
             if (!found && savedVoice) {
-                const opt = document.createElement('option');
+                var opt = document.createElement('option');
                 opt.value = savedVoice;
                 opt.textContent = savedVoice + ' (已保存)';
                 voiceSel.insertBefore(opt, voiceSel.lastElementChild);
@@ -479,9 +479,9 @@ async function initAgentConfig() {
     if (isActive) {
         setChecked('searchToolCallToggle', true);
         localStorage.setItem('searchToolCall', 'true');
-        const tcToggle = getEl('searchToolCallToggle');
+        var tcToggle = getEl('searchToolCallToggle');
         if (tcToggle) {
-            const row = tcToggle.closest('.config-toggle-row');
+            var row = tcToggle.closest('.config-toggle-row');
             if (row) { row.style.opacity = '0.5'; row.style.pointerEvents = 'none'; row.title = 'Agent 模式下自动启用工具调用'; }
         }
     }
@@ -497,7 +497,7 @@ function setupEventListeners() {
             if (isAutoScrolling) return;  // 自动滚动时不更新 userScrolled
             if (streamingScrollLock) return;  // 流式期间锁定滚动跟随
             var { scrollTop, scrollHeight, clientHeight } = $.chatBox;
-            const atBottom = scrollHeight - scrollTop - clientHeight < 120;
+            var atBottom = scrollHeight - scrollTop - clientHeight < 120;
             if ($.scrollToBottomBtn) {
                 if (!atBottom) {
                     $.scrollToBottomBtn.classList.add('visible');
@@ -510,8 +510,8 @@ function setupEventListeners() {
         }, 50));
     }
 
-    const wrapper = document.querySelector('.input-wrapper');
-    const drop = getEl('dropOverlayInput');
+    var wrapper = document.querySelector('.input-wrapper');
+    var drop = getEl('dropOverlayInput');
     if (wrapper && drop) {
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => {
             document.body.addEventListener(ev, e => e.preventDefault());
@@ -530,7 +530,7 @@ function setupEventListeners() {
                 await processSelectedFiles(e.dataTransfer.files);
             } else {
                 // 拖拽进来的纯文本:插入到光标位置
-                const _dropText = e.dataTransfer.getData('text/plain');
+                var _dropText = e.dataTransfer.getData('text/plain');
                 if (_dropText && $.userInput) {
                     insertTextAtCursor($.userInput, _dropText);
                 }
@@ -549,15 +549,15 @@ function setupEventListeners() {
 
     if ($.userInput) {
         $.userInput.addEventListener('keydown', e => {
-            const _p = getEl('slashPopup');
-            const _vis = _p && window._slashVisible;
+            var _p = getEl('slashPopup');
+            var _vis = _p && window._slashVisible;
             if (e.key === 'ArrowDown' && _vis) { e.preventDefault(); navigateSlashPopup(1); return; }
             if (e.key === 'ArrowUp' && _vis) { e.preventDefault(); navigateSlashPopup(-1); return; }
             if (e.key === 'Escape' && _vis) { e.preventDefault(); hideSlashPopup(); return; }
             if (e.key === 'Enter' && !e.shiftKey) {
                 if (_vis) {
                     e.preventDefault();
-                    const _sel = _p.querySelector('.slash-item-highlight');
+                    var _sel = _p.querySelector('.slash-item-highlight');
                     if (_sel) { selectSlashCommand(_sel.dataset.cmd, _sel.dataset.args); }
                     return;
                 }
@@ -576,7 +576,7 @@ function setupEventListeners() {
 
     // ★ 配置自动保存:配置面板内任意输入框/选择框/开关变更时自动保存到 localStorage + 服务器
     // ★ 主模型API Key/地址: 仅change(失焦)时触发,避免打字过程中反复报错
-    const _panel = $.configPanel || getEl('configPanel');
+    var _panel = $.configPanel || getEl('configPanel');
     if (_panel) {
         _panel.querySelectorAll('input, select, textarea').forEach(function(el) {
             // ★ baseUrlProvider 有独立的 onProviderChange handler,不在此触发 saveConfig
@@ -591,7 +591,7 @@ function setupEventListeners() {
     }
 
     // ★ 图像提供商切换:更新字段提示
-    const _imgProvider = getEl('imageProvider');
+    var _imgProvider = getEl('imageProvider');
     if (_imgProvider) {
         _imgProvider.addEventListener('change', function() {
             window._isUserChangingProvider = true;
@@ -599,7 +599,7 @@ function setupEventListeners() {
         });
     }
     // ★ 绑定 provider change
-    const _urlSel = getEl('baseUrlProvider');
+    var _urlSel = getEl('baseUrlProvider');
     if (_urlSel && !_urlSel._providerBound) {
         _urlSel._providerBound = true;
         _urlSel.addEventListener('change', window.onProviderChange);
@@ -611,7 +611,7 @@ function loadInitialData() {
     setTimeout(fetchModels, 500);
 
     // ★ 如果聊天列表为空但已登录,延迟重试(可能 restoreUserData 还没完成)
-    const _uid = localStorage.getItem('authUserId') || '';
+    var _uid = localStorage.getItem('authUserId') || '';
     if (_uid && Object.keys(chats).filter(function(id) {
         if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
         return !chats[id].userId || chats[id].userId === _uid;
@@ -619,7 +619,7 @@ function loadInitialData() {
         // 延迟 2s 再次尝试从服务器加载
         setTimeout(async function() {
             try {
-                const _schats = await loadChatsFromServer();
+                var _schats = await loadChatsFromServer();
                 if (_schats && typeof _schats === 'object' && Object.keys(_schats).length > 0) {
                     var _added = 0;
                     for (var _scid in _schats) {
@@ -656,7 +656,7 @@ function loadInitialData() {
             });
         }
     } else {
-        const last = localStorage.getItem('lastChatId');
+        var last = localStorage.getItem('lastChatId');
         if (last && chats[last]) {
             loadChat(last);
         } else {
@@ -702,7 +702,7 @@ function loadInitialData() {
 }
 
 async function loadAllResources() {
-    const resources = [
+    var resources = [
         { type: 'script', src: 'lib/marked.min.js' },
         { type: 'script', src: 'lib/highlight.min.js' },
         { type: 'script', src: 'lib/mammoth.browser.min.js' },
@@ -732,7 +732,7 @@ async function loadAllResources() {
 
 function loadScript(src) {
     return new Promise((resolve, reject) => {
-        const s = document.createElement('script');
+        var s = document.createElement('script');
         s.src = src;
         s.onload = resolve;
         s.onerror = reject;
@@ -742,7 +742,7 @@ function loadScript(src) {
 
 function loadStyle(href, id) {
     return new Promise((resolve, reject) => {
-        const l = document.createElement('link');
+        var l = document.createElement('link');
         l.rel = 'stylesheet';
         l.href = href;
         if (id) l.id = id;
@@ -762,7 +762,7 @@ function initializeApp() {
         injectStyles();
         // ★ 恢复 ask_agent 临时授权状态(刷新不丢失指示灯)
         if (sessionStorage.getItem('_tempAgentGranted') === '1') {
-            const _savedChatId = sessionStorage.getItem('_tempAgentChatId') || null;
+            var _savedChatId = sessionStorage.getItem('_tempAgentChatId') || null;
             window._tempAgentGranted = true;
             window._tempAgentChatId = _savedChatId;
             // ★ 延迟恢复 banner: 等 loadChat 设置 currentChatId 后再判断
@@ -783,7 +783,7 @@ function initializeApp() {
             // 异步验证token有效性
             (async function() {
                 try {
-                    const resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
+                    var resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
                     var data = await resp.json();
                     if (!data.valid) {
                         localStorage.removeItem('authToken');
@@ -823,7 +823,7 @@ function initializeApp() {
         } catch(e) {}
 
         // ★ 旧版 /mcp 迁移为直连 MiniMax Vision API
-        const _oldVision = localStorage.getItem('visionApiUrl');
+        var _oldVision = localStorage.getItem('visionApiUrl');
         if (_oldVision && (_oldVision.indexOf('/mcp') >= 0 || _oldVision === '')) {
             localStorage.setItem('visionApiUrl', 'https://api.minimaxi.com/v1/coding_plan/vlm');
             localStorage.setItem('visionModel', 'MiniMax-M2');
@@ -877,11 +877,11 @@ function initializeApp() {
                 if (!window._pendingRecovery) return;
                 // ★ 后端 SSE 恢复过就不再从头重发
                 if (window._backendRecovered) { window._pendingRecovery = null; return; }
-                const _rec = window._pendingRecovery;
+                var _rec = window._pendingRecovery;
                 window._pendingRecovery = null;
                 // ★ 仅当流式确实被打断时才续生(有实际内容且距离保存时间<120秒)
-                const _age = Date.now() - (_rec.time || 0);
-                const _hasRealContent = (_rec.content && _rec.content.length > 0) || (_rec.reasoning && _rec.reasoning.length > 0);
+                var _age = Date.now() - (_rec.time || 0);
+                var _hasRealContent = (_rec.content && _rec.content.length > 0) || (_rec.reasoning && _rec.reasoning.length > 0);
                 if (!_hasRealContent || _age > 120000) {
                     console.log('[AutoRecover] 跳过: 内容不足或超120秒, age=' + (_age/1000).toFixed(1) + 's');
                     return;
@@ -889,7 +889,7 @@ function initializeApp() {
                 setTimeout(function() {
                     if (!chats[_rec.chatId]) return;
                     // 找到用户最后一条消息
-                    const _msgs = chats[_rec.chatId].messages;
+                    var _msgs = chats[_rec.chatId].messages;
                     var _userText = '', _userFiles = [];
                     var _prevPartialContent = '', _prevPartialReasoning = '';
                     for (var _ri = _msgs.length - 1; _ri >= 0; _ri--) {
@@ -925,7 +925,7 @@ function initializeApp() {
         // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
         try {
             if (window._loadQueue && window._loadQueue()) {
-                const _queueLen = window._messageQueue.length;
+                var _queueLen = window._messageQueue.length;
                 console.log('[Queue] 恢复 ' + _queueLen + ' 条队列消息');
                 if (_queueLen > 0) {
                     // 有队列消息: 恢复并等待处理
@@ -961,7 +961,7 @@ function initializeApp() {
 
     // ★ 登录/注册成功提示
         try {
-            const loginMsg = localStorage.getItem('_loginSuccess');
+            var loginMsg = localStorage.getItem('_loginSuccess');
             if (loginMsg) {
                 localStorage.removeItem('_loginSuccess');
                 setTimeout(function() {
@@ -973,7 +973,7 @@ function initializeApp() {
         window.addEventListener('beforeunload', function() {
             // ★ 保存输入框文本,刷新后恢复
             try {
-                const _inputEl = getEl('chatInput');
+                var _inputEl = getEl('chatInput');
                 if (_inputEl && _inputEl.value.trim()) {
                     localStorage.setItem('_savedInputText', _inputEl.value.trim());
                 }
@@ -1023,14 +1023,14 @@ function initializeApp() {
             // ★ 保存配置到服务器(使用 sendBeacon,保证代理状态等不丢失)
             if (token) {
                 try {
-                    const _unloadCfg = {}
-                    const _skipKeys = ['chats','lastChatId','deviceId','ongoingChats','authToken','authUsername','authUserId','dark','modelContextLength','modelMaxOutputTokens','autoDetectedTextModels','_test','_savedInputText','_savedPartial']
+                    var _unloadCfg = {}
+                    var _skipKeys = ['chats','lastChatId','deviceId','ongoingChats','authToken','authUsername','authUserId','dark','modelContextLength','modelMaxOutputTokens','autoDetectedTextModels','_test','_savedInputText','_savedPartial']
                     for (var _ui = 0; _ui < localStorage.length; _ui++) {
                         var _uk = localStorage.key(_ui);
                         if (!_uk || _skipKeys.indexOf(_uk) !== -1) continue;
                         _unloadCfg[_uk] = localStorage.getItem(_uk);
                     }
-                    const _beaconUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
+                    var _beaconUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
                     navigator.sendBeacon(_beaconUrl, JSON.stringify(_unloadCfg));
                 } catch(_ue) {}
             }

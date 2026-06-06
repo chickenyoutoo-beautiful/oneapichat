@@ -2,18 +2,18 @@
 // executeToolCallForRetry — 100+ 工具分支的统一执行入口
 
                 window.executeToolCallForRetry = async function(tc, abortSignal, ctx) {
-    const body = ctx.body, pendingMsg = ctx.pendingMsg, chatId = ctx.chatId,
+    var body = ctx.body, pendingMsg = ctx.pendingMsg, chatId = ctx.chatId,
         currentChatId = ctx.currentChatId, activeBubbleMap = ctx.activeBubbleMap,
         chats = ctx.chats;
-                    const func = tc.function;
+                    var func = tc.function;
                     let args;
                     try {
                         if (typeof func.arguments === 'string') {
                             // 尝试修复截断的JSON
                             var raw = func.arguments;
-                            const qc = (raw.match(/"/g) || []).length;
+                            var qc = (raw.match(/"/g) || []).length;
                             if (qc % 2 !== 0) raw += '"';
-                            const ob = (raw.match(/\{/g) || []).length;
+                            var ob = (raw.match(/\{/g) || []).length;
                             var cb = (raw.match(/\}/g) || []).length;
                             while (cb < ob) { raw += '}'; cb++; }
                             // ★ 修复: 清理 JSON 字符串中的非法控制字符和未转义换行
@@ -24,11 +24,11 @@
                         }
                     } catch (parseErr) {
                         // ★ 尝试更激进的修复: 直接按名称提取参数
-                        const argStr2 = typeof func.arguments === 'string' ? func.arguments : '';
+                        var argStr2 = typeof func.arguments === 'string' ? func.arguments : '';
                         if (func.name === 'engine_agent_create') {
-                            const nameMatch = argStr2.match(/"name"\s*:\s*"([^"]+)"/);
-                            const promptMatch = argStr2.match(/"prompt"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
-                            const modelMatch = argStr2.match(/"model"\s*:\s*"([^"]+)"/);
+                            var nameMatch = argStr2.match(/"name"\s*:\s*"([^"]+)"/);
+                            var promptMatch = argStr2.match(/"prompt"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
+                            var modelMatch = argStr2.match(/"model"\s*:\s*"([^"]+)"/);
                             args = {
                                 name: nameMatch ? nameMatch[1] : 'agent_' + Date.now(),
                                 prompt: promptMatch ? promptMatch[1].replace(/\\n/g, '\n') : '搜索并整理相关信息',
@@ -36,21 +36,21 @@
                             };
                         } else if (func.name === 'plan_update') {
                             // ★ plan_update 参数修复: 从破损 JSON 中提取关键字段
-                            const _aMatch = argStr2.match(/"action"\s*:\s*"([^"]+)"/);
-                            const _tidMatch = argStr2.match(/"task_id"\s*:\s*"([^"]+)"/);
-                            const _stMatch = argStr2.match(/"status"\s*:\s*"([^"]+)"/);
-                            const _noteMatch = argStr2.match(/"note"\s*:\s*"([^"]*)"/);
+                            var _aMatch = argStr2.match(/"action"\s*:\s*"([^"]+)"/);
+                            var _tidMatch = argStr2.match(/"task_id"\s*:\s*"([^"]+)"/);
+                            var _stMatch = argStr2.match(/"status"\s*:\s*"([^"]+)"/);
+                            var _noteMatch = argStr2.match(/"note"\s*:\s*"([^"]*)"/);
                             // tasks 数组: 尝试提取 tasks 片段
-                            const _tasksMatch = argStr2.match(/"tasks"\s*:\s*(\[[\s\S]*?\](?=\s*[,\}]))/);
+                            var _tasksMatch = argStr2.match(/"tasks"\s*:\s*(\[[\s\S]*?\](?=\s*[,\}]))/);
                             var _tasks = [];
                             if (_tasksMatch) {
                                 try { _tasks = JSON.parse(_tasksMatch[1]); } catch(e) {
                                     // 从 tasks 片段中逐个提取 id/title
-                                    const _taskItems = _tasksMatch[1].match(/\{[^}]+\}/g);
+                                    var _taskItems = _tasksMatch[1].match(/\{[^}]+\}/g);
                                     if (_taskItems) {
                                         _tasks = _taskItems.map(function(ti, idx) {
-                                            const _idM = ti.match(/"id"\s*:\s*"([^"]+)"/);
-                                            const _tiM = ti.match(/"title"\s*:\s*"([^"]+)"/);
+                                            var _idM = ti.match(/"id"\s*:\s*"([^"]+)"/);
+                                            var _tiM = ti.match(/"title"\s*:\s*"([^"]+)"/);
                                             return { id: (_idM ? _idM[1] : 'task_' + (idx+1)), title: (_tiM ? _tiM[1] : '步骤' + (idx+1)), status: 'pending' };
                                         });
                                     }
@@ -74,7 +74,7 @@
                         let query = args.query;
                         if (query) {
                             if (currentChatId === chatId) {
-                                const currentBubble = activeBubbleMap[chatId];
+                                var currentBubble = activeBubbleMap[chatId];
                                 if (currentBubble) {
                                     let status = currentBubble.querySelector('.search-status');
                                     if (!status) {
@@ -87,8 +87,8 @@
                             }
                             try {
                                 // 不传递外部signal,让performWebSearch使用自己的超时控制器
-                                const searchResult = await performWebSearch(query, null, 'web');
-                                const optimized = formatRawResults(searchResult);
+                                var searchResult = await performWebSearch(query, null, 'web');
+                                var optimized = formatRawResults(searchResult);
                                 toolResult = { result: optimized || '搜索完成' };
                             } catch (e) {
                                 toolResult = { error: e.message };
@@ -109,7 +109,7 @@
                         }
                         if (urls.length > 0) {
                             if (currentChatId === chatId) {
-                                const currentBubble = activeBubbleMap[chatId];
+                                var currentBubble = activeBubbleMap[chatId];
                                 if (currentBubble) {
                                     let status = currentBubble.querySelector('.search-status');
                                     if (!status) {
@@ -121,25 +121,25 @@
                                 }
                             }
                             try {
-                                const fetched = await performWebFetch(urls);
+                                var fetched = await performWebFetch(urls);
                                 if (fetched.error) {
                                     toolResult = { error: fetched.error };
                                 } else {
                                     // 格式化为可读的文本
-                                    const parts = fetched.results.map((r, i) => {
-                                        const label = urls.length > 1 ? `【网页${i + 1}】` : '';
+                                    var parts = fetched.results.map((r, i) => {
+                                        var label = urls.length > 1 ? `【网页${i + 1}】` : '';
                                         if (r.error) {
                                             return `${label}${r.url}\n⚠️ 抓取失败: ${r.error}`;
                                         }
                                         // 截断过长内容
-                                        const content = r.content && r.content.length > 8000
+                                        var content = r.content && r.content.length > 8000
                                             ? r.content.slice(0, 8000) + '...(内容过长已截断)'
                                             : (r.content || '(无内容)');
                                         return `${label}${r.url}\n${content}`;
                                     });
                                     toolResult = { result: parts.join('\n\n---\n\n'), _webFetchUrls: urls };
                                     if (currentChatId === chatId) {
-                                        const currentBubble = activeBubbleMap[chatId];
+                                        var currentBubble = activeBubbleMap[chatId];
                                         let status = currentBubble?.querySelector('.search-status');
                                         if (status) status.textContent = `✅ 抓取完成 (${urls.length}个网页)`;
                                     }
@@ -152,7 +152,7 @@
                         }
                     }
                     else if (func.name === 'rag_search') {
-                        const question = args.question || args.query || '';
+                        var question = args.question || args.query || '';
                         if (question) {
                             if (currentChatId === chatId) {
                                 var _b = activeBubbleMap[chatId];
@@ -163,17 +163,17 @@
                                 }
                             }
                             try {
-                                const _uid = localStorage.getItem('authUserId') || '';
-                                const _coll = localStorage.getItem('ragCurrentCollection') || 'default';
-                                const _ns = _uid ? _uid + '_' + _coll : _coll;
-                                const _token = getAuthToken();
-                                const _resp = await fetch('/oneapichat/api/rag_proxy.php?action=search&collection=' + encodeURIComponent(_ns) + '&auth_token=' + encodeURIComponent(_token), {
+                                var _uid = localStorage.getItem('authUserId') || '';
+                                var _coll = localStorage.getItem('ragCurrentCollection') || 'default';
+                                var _ns = _uid ? _uid + '_' + _coll : _coll;
+                                var _token = getAuthToken();
+                                var _resp = await fetch('/oneapichat/api/rag_proxy.php?action=search&collection=' + encodeURIComponent(_ns) + '&auth_token=' + encodeURIComponent(_token), {
                                     method: 'POST', headers: {'Content-Type': 'application/json'},
                                     body: JSON.stringify({question: question})
                                 });
-                                const _data = await _resp.json();
+                                var _data = await _resp.json();
                                 if (_data && _data.hits && _data.hits.length > 0) {
-                                    const _parts = _data.hits.map(function(h, i) {
+                                    var _parts = _data.hits.map(function(h, i) {
                                         return '[\u7247\u6bb5' + (i+1) + ' \u6765\u6e90:' + h.source + '] ' + h.full_content;
                                     });
                                     toolResult = { result: _parts.join('\n\n') };
@@ -188,7 +188,7 @@
                         }
                     }
                      else if (func.name === 'chaoxing_login') {
-                        const u = args.username, p = args.password;
+                        var u = args.username, p = args.password;
                         if (u && p) {
                             toolResult = await chaoxingToolHandler('login', null, u, p);
                         } else {
@@ -199,7 +199,7 @@
                         toolResult = await chaoxingToolHandler('courses');
                     }
                      else if (func.name === 'chaoxing_auto') {
-                        const ids = args.course_ids;
+                        var ids = args.course_ids;
                         if (ids) toolResult = await chaoxingToolHandler('start', ids);
                         else toolResult = { error: '请指定课程ID' };
                     }
@@ -247,14 +247,14 @@
                     }
                      else if (func.name === 'engine_agent_create') {
                         _hasCreatedSubAgent = true;
-                        const _aName = (args && args.name) ? args.name : ('agent_' + Date.now());
+                        var _aName = (args && args.name) ? args.name : ('agent_' + Date.now());
                         // ★ 关联到当前任务
                         var _curTaskId = window._lastMsgTaskId || window._currentTaskId;
                         if (_curTaskId && typeof window.addAgentToTask === 'function') {
                             window.addAgentToTask(_curTaskId, _aName, args.role || 'general');
                         }
                         // ★ 传递网络代理配置
-                        const _aArgs = Object.assign({}, args);
+                        var _aArgs = Object.assign({}, args);
                         if (window.isProxyEnabled && window.isProxyEnabled() && window.getProxyUrl && window.getProxyUrl()) {
                             _aArgs.proxy_url = window.getProxyUrl();
                             _aArgs.proxy_enabled = '1';
@@ -306,7 +306,7 @@
                         } else if (!args.old_string || !args.new_string) {
                             toolResult = { error: '缺少 old_string 或 new_string 参数' };
                         } else if (isApprovalMode()) {
-                            const _editApproved = await requestToolApproval(func.name, args);
+                            var _editApproved = await requestToolApproval(func.name, args);
                             if (!_editApproved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_edit', args); }
                         } else { toolResult = await engineApiHandler('file_edit', args); }
                     }
@@ -344,7 +344,7 @@
                         } else { toolResult = await engineApiHandler('file_op', args); }
                     }
                      else if (func.name === 'ask_agent') {
-                        const reason = args.reason || '执行高级操作';
+                        var reason = args.reason || '执行高级操作';
                         if (isYoloMode()) {
                             toolResult = { result: '✅ 当前已是 YOLO 自主模式,无需再次请求。' };
                         } else if (getAgentMode() === 'agent' || getAgentMode() === 'yolo') {
@@ -353,7 +353,7 @@
                             toolResult = { result: '✅ 本轮已获得临时授权,请直接使用工具。' };
                         } else {
                             // ★ 单次授权: 弹窗确认 → 动效 → 临时开放 Agent 工具
-                            const _granted = confirm('⚠️ 模型请求临时使用高级工具权限\n\n理由: ' + (args.reason || '执行高级操作') + '\n\n允许后，AI 可在本轮对话中调用文件操作、命令执行、子代理等工具。\n完成后权限自动回收。\n\n是否允许？');
+                            var _granted = confirm('⚠️ 模型请求临时使用高级工具权限\n\n理由: ' + (args.reason || '执行高级操作') + '\n\n允许后，AI 可在本轮对话中调用文件操作、命令执行、子代理等工具。\n完成后权限自动回收。\n\n是否允许？');
                             if (!_granted) {
                                 toolResult = { result: '❌ 用户拒绝了临时授权请求。' };
                             } else {
@@ -380,7 +380,7 @@
                         } else if (isYoloMode()) {
                             toolResult = { result: '✅ 当前已是 YOLO 自主模式。' };
                         } else {
-                            const enabled = args.enabled !== false;
+                            var enabled = args.enabled !== false;
                             if (enabled) {
                                 if (confirm('⚠️ 确定启用 YOLO 自主模式？\n\n所有工具操作将自动批准，不再逐一确认。\n此操作需由你亲自点击"确定"。')) {
                                     setAgentMode('yolo');
@@ -395,9 +395,9 @@
                         }
                     }
                      else if (func.name === 'plan_update') {
-                        const planAction = args.action || '';
+                        var planAction = args.action || '';
                         if (planAction === 'create') {
-                            const planTasks = (args.tasks || []).map(function(t, idx) {
+                            var planTasks = (args.tasks || []).map(function(t, idx) {
                                 return {
                                     id: t.id || 'step_' + (idx + 1),
                                     title: t.title || 'Untitled',
@@ -422,7 +422,7 @@
                             var newStatus = args.status;
                             // ★ 如果参数缺失，尝试从原始参数字符串中提取
                             if ((!tid || !newStatus) && typeof tc !== 'undefined' && tc.function) {
-                                const _raw = typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments || {});
+                                var _raw = typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments || {});
                                 if (!tid) { var _tm = _raw.match(/"task_id"\s*:\s*"([^"]+)"/); if (_tm) tid = _tm[1]; }
                                 if (!newStatus) { var _sm = _raw.match(/"status"\s*:\s*"([^"]+)"/); if (_sm) newStatus = _sm[1]; }
                             }
@@ -495,11 +495,11 @@
                     }
                      else if (func.name === 'engine_push') {
                         let _pushMsg = args.msg || '';
-                        const _pushFile = args.file || '';
+                        var _pushFile = args.file || '';
                         if (_pushFile) {
                             try {
-                                const _pRes = await fetch(_apiBase + '?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
-                                const _pData = await _pRes.json();
+                                var _pRes = await fetch(_apiBase + '?action=push_file&path=' + encodeURIComponent(_pushFile) + '&auth_token=' + (localStorage.getItem('authToken')||''));
+                                var _pData = await _pRes.json();
                                 if (_pData.ok && _pData.url) {
                                     // ★ 直接追加在 tool_result 中, 并注入到 pendingMsg.content
                                     _pushMsg += '\n📥 ' + _pData.url;
@@ -568,9 +568,9 @@
                      else if (func.name === 'src_dashboard') {
                         var r = await _srcApi('/dashboard?config_name=src');
                         if (r.ok && r.resources) {
-                            const res = r.resources;
+                            var res = r.resources;
                             var lines = [];
-                            const fmts = { trailblaze_power: '⚡体力', reserved_power: '💾后备体力', fuel: '⛽燃料', stellar_jade: '💎星琼', credit: '💰信用点', immersifier: '📿沉浸器', battle_pass_level: '📊大月卡', daily_activity: '📋活跃度', simulated_universe: '🌌模拟宇宙分', echo_of_war: '⚔️历战余响', relic: '📦遗器碎片' };
+                            var fmts = { trailblaze_power: '⚡体力', reserved_power: '💾后备体力', fuel: '⛽燃料', stellar_jade: '💎星琼', credit: '💰信用点', immersifier: '📿沉浸器', battle_pass_level: '📊大月卡', daily_activity: '📋活跃度', simulated_universe: '🌌模拟宇宙分', echo_of_war: '⚔️历战余响', relic: '📦遗器碎片' };
                             Object.keys(fmts).forEach(function(k) {
                                 if (res[k]) lines.push(fmts[k] + ': ' + (res[k].value||0) + '/' + (res[k].total||'∞') + (res[k].time ? ' (' + res[k].time + ')' : ''));
                             });
@@ -578,7 +578,7 @@
                         } else { toolResult = { error: r.error || '获取失败' }; }
                     }
                      else if (func.name === 'src_start') {
-                        const task = args.task || 'Alas';
+                        var task = args.task || 'Alas';
                         var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: task }) });
                         toolResult = r.ok ? { result: '✅ ' + task + ' 已启动' } : { error: r.error || '启动失败(可能已在运行,需先停止)' };
                     }
@@ -597,8 +597,8 @@
                     }
                      else if (func.name === 'src_toggle_task') {
                         // 通过配置路径修改任务启用状态
-                        const taskName = args.name;
-                        const taskPathMap = { Dungeon: 'Dungeon.Scheduler.Enable', Weekly: 'Weekly.Scheduler.Enable', Rogue: 'Rogue.Scheduler.Enable', Ornament: 'Ornament.Scheduler.Enable', Daemon: 'Daemon.Scheduler.Enable', DailyQuest: 'DailyQuest.Scheduler.Enable', BattlePass: 'BattlePass.Scheduler.Enable', Assignment: 'Assignment.Scheduler.Enable', Freebies: 'Freebies.Scheduler.Enable', PlannerScan: 'PlannerScan.Scheduler.Enable' };
+                        var taskName = args.name;
+                        var taskPathMap = { Dungeon: 'Dungeon.Scheduler.Enable', Weekly: 'Weekly.Scheduler.Enable', Rogue: 'Rogue.Scheduler.Enable', Ornament: 'Ornament.Scheduler.Enable', Daemon: 'Daemon.Scheduler.Enable', DailyQuest: 'DailyQuest.Scheduler.Enable', BattlePass: 'BattlePass.Scheduler.Enable', Assignment: 'Assignment.Scheduler.Enable', Freebies: 'Freebies.Scheduler.Enable', PlannerScan: 'PlannerScan.Scheduler.Enable' };
                         var path = taskPathMap[taskName];
                         if (!path) { toolResult = { error: '未知任务: ' + taskName + ', 可选: ' + Object.keys(taskPathMap).join(', ') }; }
                         else {
@@ -622,9 +622,9 @@
                      else if (func.name === 'src_get_logs') {
                         var lines = Math.min(args.lines || 50, 200);
                         var r = await _srcApi('/logs?config_name=src&limit=' + lines);
-                        const logLines = r.lines || r.logs || [];
+                        var logLines = r.lines || r.logs || [];
                         // 过滤掉 rich.table.Table 对象
-                        const filtered = logLines.filter(function(l) { return typeof l === 'string' && l.indexOf('<rich.table.Table') === -1; });
+                        var filtered = logLines.filter(function(l) { return typeof l === 'string' && l.indexOf('<rich.table.Table') === -1; });
                         toolResult = r.ok ? { result: filtered.join('\n') || '(日志为空)' } : { error: r.error || '获取失败' };
                     }
                      else if (func.name === 'src_check_upgrade') {
@@ -647,8 +647,8 @@
                         toolResult = await engineApiHandler('exec', { cmd: cmd, timeout: 15 });
                     }
                      else if (func.name === 'win_processes') {
-                        const filter = (args.filter || '').replace(/[^a-zA-Z0-9._-]/g, '');
-                        const psCmd = filter
+                        var filter = (args.filter || '').replace(/[^a-zA-Z0-9._-]/g, '');
+                        var psCmd = filter
                             ? WIN_POWERSHELL + ' -Command "Get-Process ' + filter + ' -ErrorAction SilentlyContinue | Format-Table Name,Id,CPU,WorkingSet -AutoSize | Out-String -Width 200"'
                             : WIN_POWERSHELL + ' -Command "Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 | Format-Table Name,Id,CPU,WorkingSet -AutoSize | Out-String -Width 200"';
                         toolResult = await engineApiHandler('exec', { cmd: psCmd, timeout: 10 });
@@ -669,11 +669,11 @@
                     }
                      else if (func.name === 'win_start') {
                         var path = (args.path || '').replace(/'/g, '');
-                        const app = (args.app || '').replace(/['"\\]/g, '');
+                        var app = (args.app || '').replace(/['"\\]/g, '');
                         var startCmd;
                         if (app) {
                             // ★ 中文应用名用 base64 编码防止编码问题
-                            const _encodedApp = btoa(unescape(encodeURIComponent(app)));
+                            var _encodedApp = btoa(unescape(encodeURIComponent(app)));
                             startCmd = WIN_POWERSHELL + ' -Command "' + String.fromCharCode(36) + 'n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\'' + _encodedApp + '\')); Start-Process \"shell:AppsFolder\\' + String.fromCharCode(36) + 'n\"; Write-Output started"';
                         } else if (path) {
                             startCmd = WIN_POWERSHELL + ' -Command "Start-Process \"' + path + '\"; Write-Output started"';
@@ -683,12 +683,12 @@
                         if (startCmd) toolResult = await engineApiHandler('exec', { cmd: startCmd, timeout: 10 });
                     }
                      else if (func.name === 'win_restart') {
-                        const name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
-                        const path2 = (args.path || '').replace(/'/g, '');
-                        const app2 = (args.app || '').replace(/['"\\]/g, '');
+                        var name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
+                        var path2 = (args.path || '').replace(/'/g, '');
+                        var app2 = (args.app || '').replace(/['"\\]/g, '');
                         let restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2';
                         if (app2) {
-                            const _encodedApp2 = btoa(unescape(encodeURIComponent(app2)));
+                            var _encodedApp2 = btoa(unescape(encodeURIComponent(app2)));
                             restartCmd += '; ' + String.fromCharCode(36) + 'n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\'' + _encodedApp2 + '\')); Start-Process \"shell:AppsFolder\\' + String.fromCharCode(36) + 'n\"';
                         }
                         else if (path2) restartCmd += '; Start-Process \"' + path2 + '\"';
@@ -700,7 +700,7 @@
                         var wslPath = (args.path || '/mnt/c/').replace(/\\/g, '/');
                         // ★ 自动转换 Windows 路径 → WSL 路径
                         if (!wslPath.startsWith('/mnt/')) {
-                            const _driveMatch = wslPath.match(/^([A-Z]):/i);
+                            var _driveMatch = wslPath.match(/^([A-Z]):/i);
                             if (_driveMatch) {
                                 wslPath = '/mnt/' + _driveMatch[1].toLowerCase() + wslPath.substring(2);
                             } else if (wslPath.startsWith('/') && !wslPath.startsWith('/mnt/')) {
@@ -720,11 +720,11 @@
                      else if (func.name === 'win_screenshot') {
                         var fmt = (args.format || 'png').replace(/[^a-z]/g, '');
                         if (fmt !== 'png' && fmt !== 'jpg') fmt = 'png';
-                        const _ts = Date.now();
+                        var _ts = Date.now();
                         // ★ 使用 Windows 临时目录（PowerShell 原生路径，避免 WSL 转义问题）
-                        const _outPath = 'C:\\\\Windows\\\\Temp\\\\screenshot_' + _ts + '.' + fmt;
-                        const _imgFmt = fmt === 'png' ? 'Png' : 'Jpeg';
-                        const ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b=New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save(\\\\\"' + _outPath + '\\\\\",[System.Drawing.Imaging.ImageFormat]::' + _imgFmt + '); $b.Dispose(); $g.Dispose(); Write-Output done"';
+                        var _outPath = 'C:\\\\Windows\\\\Temp\\\\screenshot_' + _ts + '.' + fmt;
+                        var _imgFmt = fmt === 'png' ? 'Png' : 'Jpeg';
+                        var ssCmd = WIN_POWERSHELL + ' -Command "Add-Type -AssemblyName System.Windows.Forms; $b=New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save(\\\\\"' + _outPath + '\\\\\",[System.Drawing.Imaging.ImageFormat]::' + _imgFmt + '); $b.Dispose(); $g.Dispose(); Write-Output done"';
                         var r = await engineApiHandler('exec', { cmd: ssCmd, timeout: 15 });
                         // 返回可访问的 URL
                         toolResult = { result: '✅ 截图已保存: ' + _outPath + '\n可通过 server_file_read 读取或直接在浏览器打开: /file?path=' + encodeURIComponent(_outPath) };
@@ -741,18 +741,18 @@
                             // 上传 base64 到服务器获取短 URL
                             if (_shotUrl.startsWith('data:')) {
                                 try {
-                                    const _uploaded = await uploadImageToServer(_shotUrl);
+                                    var _uploaded = await uploadImageToServer(_shotUrl);
                                     if (_uploaded) _shotUrl = _uploaded;
                                 } catch(e) { console.warn('[browser_screenshot] 上传失败，使用原始 data URL'); }
                             }
                             // ★ 内联到当前回复气泡尾部（不创建独立气泡）
-                            const _imgTag = '![截图](' + _shotUrl + ')';
+                            var _imgTag = '![截图](' + _shotUrl + ')';
                             // 追加到 pendingMsg.content 以持久化
                             if (pendingMsg && pendingMsg.chatId === chatId) {
                                 pendingMsg.content = (pendingMsg.content || '') + '\n\n📸 浏览器截图\n\n' + _imgTag;
                             }
                             // 追加到 DOM（当前气泡尾部）
-                            const _img = document.createElement('img');
+                            var _img = document.createElement('img');
                             _img.src = _shotUrl;
                             _img.style.cssText = 'max-width:100%;border-radius:8px;margin-top:8px;cursor:pointer;';
                             _img.onclick = function() { window.open(this.src, '_blank'); };
@@ -774,8 +774,8 @@
                     }
                      else if (func.name === 'delegate_task') {
                         _hasCreatedSubAgent = true;
-                        const taskArgs = args || {};
-                        const tName = taskArgs.name || 'agent_' + Date.now();
+                        var taskArgs = args || {};
+                        var tName = taskArgs.name || 'agent_' + Date.now();
                         var tTask = taskArgs.task || '';
                         var tRole = taskArgs.role || 'general';
                         var tPrompt = taskArgs.prompt || '';
@@ -789,7 +789,7 @@
                         var tRole = taskArgs.role || 'general';
                         var tPrompt = taskArgs.prompt || '';
                         var fullPrompt = tPrompt || '';
-                        const _taskDetail = tTask || '';
+                        var _taskDetail = tTask || '';
                         if (!fullPrompt && _taskDetail) {
                             // 纯 task 模式: 基于 task 生成详细 prompt
                             fullPrompt = '## 你的任务\n' + _taskDetail + '\n\n' +
@@ -849,11 +849,11 @@
                             toolResult = { error: '请提供任务描述' };
                         }
                     } else if (func.name === 'delegate_workflow') {
-                        const _wfSteps = args.steps;
-                        const _wfName = args.name || ('wf_' + Date.now());
+                        var _wfSteps = args.steps;
+                        var _wfName = args.name || ('wf_' + Date.now());
                         if (_wfSteps && _wfSteps.length > 0) {
                             if (currentChatId === chatId) {
-                                const _cb2 = activeBubbleMap[chatId];
+                                var _cb2 = activeBubbleMap[chatId];
                                 if (_cb2) {
                                     var _st2 = _cb2.querySelector('.search-status');
                                     if (!_st2) { _st2 = document.createElement('div'); _st2.className = 'search-status'; _cb2.querySelector('.markdown-body')?.appendChild(_st2); }
@@ -861,12 +861,12 @@
                                 }
                             }
                             try {
-                                const _wfCreated = [];
-                                const _wfErrors = [];
+                                var _wfCreated = [];
+                                var _wfErrors = [];
                                 for (var _si = 0; _si < _wfSteps.length; _si++) {
                                     var _step = _wfSteps[_si];
-                                    const _sName = _wfName + '_s' + (_si + 1);
-                                    const _sPrompt = _step.prompt;
+                                    var _sName = _wfName + '_s' + (_si + 1);
+                                    var _sPrompt = _step.prompt;
                                     // ★ 依赖步骤: 只能用上一步结果(异步通知到达后才有)
                                     // 后续步骤的 prompt 应自包含, 不要依赖 {step_N} 变量
                                     var _cr = await engineApiHandler('agent_create', {
@@ -884,7 +884,7 @@
                                     _wfCreated.push(_sName);
                                     console.log('[delegate_workflow] 步骤' + (_si+1) + '/' + _wfSteps.length + ' 已启动: ' + _sName);
                                 }
-                                const _wfCount = _wfCreated.length;
+                                var _wfCount = _wfCreated.length;
                                 toolResult = { result: '✅ 工作流「' + _wfName + '」已启动 (' + _wfCount + '/' + _wfSteps.length + '步)\n' +
                                     _wfSteps.map(function(s,i){return (i+1)+'. ['+s.role+'] '+s.prompt.substring(0,60);}).join('\n') +
                                     (_wfErrors.length > 0 ? '\n\n⚠️ 错误: ' + _wfErrors.join('; ') : '') +
@@ -903,7 +903,7 @@
     let prompt = args.prompt;
     if (prompt) {
         if (currentChatId === chatId) {
-            const currentBubble = activeBubbleMap[chatId];
+            var currentBubble = activeBubbleMap[chatId];
             if (currentBubble) {
                 let status = currentBubble.querySelector('.search-status');
                 if (!status) {
@@ -914,9 +914,9 @@
                 status.textContent = '🎨 正在生成图片...';
 
                 // ★ 添加图片占位符: 先清除旧占位符,避免重复
-                const _oldPh = currentBubble.querySelector('#image-placeholder');
+                var _oldPh = currentBubble.querySelector('#image-placeholder');
                 if (_oldPh) _oldPh.remove();
-                const placeholder = document.createElement('div');
+                var placeholder = document.createElement('div');
                 placeholder.id = 'image-placeholder';
                 placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
                 placeholder.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">🎨</div><div style="font-size:14px;">图片生成中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(prompt.substring(0, 30)) + '...</div>';
@@ -927,11 +927,11 @@
         try {
             // ★ 安全规则: n>1(多张)时自动丢弃 seed,防止所有图一模一样
             var _safeSeed = args.seed;
-            const _safeN = args.n || 1;
+            var _safeN = args.n || 1;
             if (_safeN > 1 && _safeSeed !== undefined) {
                 _safeSeed = undefined;
             }
-            const imageResult = await window.generateImage(prompt, {
+            var imageResult = await window.generateImage(prompt, {
                 model: args.model,
                 style: args.style,
                 aspect_ratio: args.aspect_ratio,
@@ -945,7 +945,7 @@
             if (imageResult) {
                 // ★ 累积所有图片(支持多次调用)
                 if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
-                const _imgUrlsFinal = typeof imageResult === 'string' ? [imageResult] : imageResult;
+                var _imgUrlsFinal = typeof imageResult === 'string' ? [imageResult] : imageResult;
                 for (var _giF = 0; _giF < _imgUrlsFinal.length; _giF++) {
                     var _imgF = _imgUrlsFinal[_giF];
                     pendingMsg.generatedImages.push(_imgF);
@@ -987,9 +987,9 @@
             toolResult = { error: e.message };
             // 替换占位符为错误提示
             if (currentChatId === chatId) {
-                const currentBubble = activeBubbleMap[chatId];
+                var currentBubble = activeBubbleMap[chatId];
                 if (currentBubble) {
-                    const ph = currentBubble.querySelector('#image-placeholder');
+                    var ph = currentBubble.querySelector('#image-placeholder');
                     if (ph) {
                         ph.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">❌</div><div style="font-size:14px;font-weight:bold;">图片生成失败</div><div style="font-size:12px;color:#666;margin-top:8px;">' + escapeHtml(e.message) + '</div>';
                         ph.style.background = '#fee2e2';
@@ -1004,13 +1004,13 @@
         toolResult = { error: 'Missing prompt parameter' };
     }
                     } else if (func.name === 'generate_image_i2i') {
-                        const userPrompt = args.prompt;
+                        var userPrompt = args.prompt;
                         let primaryImage = args.image;
 
                         // ★ 找出当前聊天中用户上传的图片(支持多张参考图)
                         var _allImages = [];
                         // 优先从 chat 级变量获取(当前聊天专属)
-                        const _chatImages = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
+                        var _chatImages = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
                         if (_chatImages && _chatImages.length > 0) {
                             _allImages = _chatImages.filter(function(f) {
                                 return f.isImage || (f.type && f.type.startsWith('image/'));
@@ -1056,7 +1056,7 @@
                             primaryImage = _allImages[0].serverUrl || _allImages[0].content || '';
 
                             if (currentChatId === chatId) {
-                                const currentBubble = activeBubbleMap[chatId];
+                                var currentBubble = activeBubbleMap[chatId];
                                 if (currentBubble) {
                                     let status = currentBubble.querySelector('.search-status');
                                     if (!status) {
@@ -1070,21 +1070,21 @@
 
                             try {
                                 // ★ 逐张分析所有参考图,构建完整描述
-                                const _allDescs = [];
+                                var _allDescs = [];
                                 for (var _ai = 0; _ai < _allImages.length; _ai++) {
                                     // 直连 API 优先 base64 content (HTTP URL 会导致 MiniMax 报 invalid image URL)
-                                    const _imgSrc = (_isDirectVision ? (_allImages[_ai].content || _allImages[_ai].serverUrl) : (_allImages[_ai].serverUrl || _allImages[_ai].content)) || '';
+                                    var _imgSrc = (_isDirectVision ? (_allImages[_ai].content || _allImages[_ai].serverUrl) : (_allImages[_ai].serverUrl || _allImages[_ai].content)) || '';
                                     if (!_imgSrc) continue;
                                     if (currentChatId === chatId) {
-                                        const _cbI2i = activeBubbleMap[chatId];
+                                        var _cbI2i = activeBubbleMap[chatId];
                                         if (_cbI2i) {
-                                            const _stI2i = _cbI2i.querySelector('.search-status');
+                                            var _stI2i = _cbI2i.querySelector('.search-status');
                                             if (_stI2i) _stI2i.textContent = '🔍 正在分析第' + (_ai + 1) + '/' + _allImages.length + '张参考图...';
                                         }
                                     }
                                     try {
-                                        const _descPromise = window.analyzeImage(_imgSrc, 'Describe this image in detail: style, subject, colors, composition, mood. Under 150 words.');
-                                        const _descResult = await _descPromise;
+                                        var _descPromise = window.analyzeImage(_imgSrc, 'Describe this image in detail: style, subject, colors, composition, mood. Under 150 words.');
+                                        var _descResult = await _descPromise;
                                         if (_descResult && typeof _descResult === 'string') {
                                             _allDescs.push('参考图' + (_ai + 1) + ': ' + _descResult.slice(0, 300));
                                         }
@@ -1095,15 +1095,15 @@
                                 }
 
                                 // 构建完整 prompt: 用户原始需求 + 所有图片描述
-                                const _allDescsText = _allDescs.join('\n');
+                                var _allDescsText = _allDescs.join('\n');
                                 var fullPrompt = userPrompt + '\n\n【参考图分析】\n' + _allDescsText.slice(0, 2000);
 
                                 if (currentChatId === chatId) {
-                                    const currentBubble = activeBubbleMap[chatId];
+                                    var currentBubble = activeBubbleMap[chatId];
                                     if (currentBubble) {
                                         let status = currentBubble.querySelector('.search-status');
                                         if (status) status.textContent = '🎨 正在图生图(' + _allImages.length + '张参考图)...';
-                                        const placeholder = document.createElement('div');
+                                        var placeholder = document.createElement('div');
                                         placeholder.id = 'image-placeholder';
                                         placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
                                         placeholder.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">🎨</div><div style="font-size:14px;">图生图中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(userPrompt.substring(0, 30)) + '...</div>';
@@ -1113,10 +1113,10 @@
 
                                 // ★ 调用图生图 API — 传递所有参考图 (GPT Image 原生支持多图)
                                 // 收集所有参考图的 URL
-                                const _allRefUrls = _allImages.map(function(img) {
+                                var _allRefUrls = _allImages.map(function(img) {
                                     return img.serverUrl || img.content || '';
                                 }).filter(function(u) { return u; });
-                                const i2iResult = await window.generateImageI2I(fullPrompt, primaryImage, {
+                                var i2iResult = await window.generateImageI2I(fullPrompt, primaryImage, {
                                     model: args.model || localStorage.getItem('imageModel') || 'image-01',
                                     aspect_ratio: args.aspect_ratio,
                                     seed: args.seed,
@@ -1126,7 +1126,7 @@
                                 });
                                 if (i2iResult) {
                                     if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
-                                    const _imgUrlsI2i = typeof i2iResult === 'string' ? [i2iResult] : i2iResult;
+                                    var _imgUrlsI2i = typeof i2iResult === 'string' ? [i2iResult] : i2iResult;
                                     for (var _giI2i = 0; _giI2i < _imgUrlsI2i.length; _giI2i++) {
                                         var _imgI2i = _imgUrlsI2i[_giI2i];
                                         pendingMsg.generatedImages.push(_imgI2i);
@@ -1167,9 +1167,9 @@
                                 console.error('[generate_image_i2i error]', e.message);
                                 toolResult = { error: e.message };
                                 if (currentChatId === chatId) {
-                                    const currentBubble = activeBubbleMap[chatId];
+                                    var currentBubble = activeBubbleMap[chatId];
                                     if (currentBubble) {
-                                        const ph = currentBubble.querySelector('#image-placeholder');
+                                        var ph = currentBubble.querySelector('#image-placeholder');
                                         if (ph) {
                                             ph.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">❌</div><div style="font-size:14px;font-weight:bold;">图生图失败</div><div style="font-size:12px;color:#666;margin-top:8px;">' + escapeHtml(e.message) + '</div>';
                                             ph.style.background = '#fee2e2';
@@ -1183,11 +1183,11 @@
                         }
                     } else if (func.name === 'analyze_image') {
                         // 图片理解工具 - 调用 MiniMax 图片理解 API
-                        const focus = args.focus || '请详细描述这张图片的内容,包括其中的物体、场景、文字等所有可见信息。';
-                        const imgIdx = (typeof args.image_index === 'number' && args.image_index >= 0) ? args.image_index : 0;
+                        var focus = args.focus || '请详细描述这张图片的内容,包括其中的物体、场景、文字等所有可见信息。';
+                        var imgIdx = (typeof args.image_index === 'number' && args.image_index >= 0) ? args.image_index : 0;
 
                         // 获取当前消息中的所有图片(优先从全局变量获取)
-                        const _imgsForChat = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
+                        var _imgsForChat = window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId];
                         let currentFiles = _imgsForChat || [];
                         if (!currentFiles.length) {
                             currentFiles = pendingFiles.length > 0 ? pendingFiles : (chats[chatId]?.messages?.slice(-1)[0]?.files || []);
@@ -1214,14 +1214,14 @@
                         }
 
                         // 按索引选择图片
-                        const imageFiles = currentFiles.filter(f => f.isImage || f.type?.startsWith('image/'));
-                        const imageFile = (imageFiles.length > imgIdx) ? imageFiles[imgIdx] : imageFiles[0];
+                        var imageFiles = currentFiles.filter(f => f.isImage || f.type?.startsWith('image/'));
+                        var imageFile = (imageFiles.length > imgIdx) ? imageFiles[imgIdx] : imageFiles[0];
 
                         if (!imageFile) {
                             toolResult = { error: '未找到可分析的图片,请确保用户已上传图片。' };
                         } else {
                             if (currentChatId === chatId) {
-                                const currentBubble = activeBubbleMap[chatId];
+                                var currentBubble = activeBubbleMap[chatId];
                                 if (currentBubble) {
                                     let status = currentBubble.querySelector('.search-status');
                                     if (!status) {
@@ -1235,17 +1235,17 @@
                             try {
                                 // ★ 更新状态提示(显示第几张)
                                 if (currentChatId === chatId) {
-                                    const _cbImg = activeBubbleMap[chatId];
+                                    var _cbImg = activeBubbleMap[chatId];
                                     if (_cbImg) {
-                                        const _stImg = _cbImg.querySelector('.search-status');
+                                        var _stImg = _cbImg.querySelector('.search-status');
                                         if (_stImg) _stImg.textContent = '🖼️ 正在分析第' + (imgIdx + 1) + '/' + imageFiles.length + '张图片...';
                                     }
                                 }
                                 // ★ 根据 API 类型选择最佳图片源:
                                 // 直连 API (MiniMax) 需要 data: URL,否则会报 invalid image URL
                                 // MCP 代理可以用 HTTP URL
-                                const _visUrl = localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '/mcp';
-                                const _isDirectVision = _visUrl.toLowerCase().indexOf('/mcp') === -1;
+                                var _visUrl = localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '/mcp';
+                                var _isDirectVision = _visUrl.toLowerCase().indexOf('/mcp') === -1;
                                 var analyzeInput;
                                 if (_isDirectVision) {
                                     // 直连模式: 优先 base64 content, HTTP URL 会导致 MiniMax 报错
@@ -1262,13 +1262,13 @@
                                         analyzeInput = fullUrl;
                                     }
                                 }
-                                const analyzeResult = await window.analyzeImage(analyzeInput, focus);
+                                var analyzeResult = await window.analyzeImage(analyzeInput, focus);
                                 toolResult = { result: analyzeResult };
                                 // ★ 缓存工具调用的分析结果,后续追问无需重新分析
                                 try {
                                     if (chatId && chats[chatId]) {
                                         if (!chats[chatId].imageAnalyses) chats[chatId].imageAnalyses = [];
-                                        const _cacheStr = '【' + (imageFile.name || '图片' + imgIdx) + '】\n' + analyzeResult;
+                                        var _cacheStr = '【' + (imageFile.name || '图片' + imgIdx) + '】\n' + analyzeResult;
                                         if (chats[chatId].imageAnalyses.indexOf(_cacheStr) === -1) {
                                             chats[chatId].imageAnalyses.push(_cacheStr);
                                         }
@@ -1280,24 +1280,24 @@
                                 } catch(e2) {}
                             } catch (e) {
                                 console.error('[analyze_image error]', e);
-                                const errorMsg = e?.message || e?.toString() || String(e) || '图片分析失败';
+                                var errorMsg = e?.message || e?.toString() || String(e) || '图片分析失败';
                                 toolResult = { error: errorMsg };
                             }
                         }
                     } else if (func.name === 'video_understanding') {
                         var query = args.query || '描述视频内容';
-                        const vidIdx = args.video_index || 0;
+                        var vidIdx = args.video_index || 0;
                         var vids = [];
                         if (chats[chatId]) {
                             var msgs = chats[chatId].messages;
                             for (var vi = msgs.length-1; vi >= 0; vi--) {
                                 if (msgs[vi].files) {
-                                    const vf2 = msgs[vi].files.filter(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
+                                    var vf2 = msgs[vi].files.filter(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
                                     vids = vids.concat(vf2);
                                 }
                             }
                         }
-                        const vf = vids[vidIdx];
+                        var vf = vids[vidIdx];
                         if (!vf) { toolResult = { error: '未找到视频' }; }
                         else {
                             var input = vf.serverUrl || vf.content;
@@ -1305,8 +1305,8 @@
                                 input = window.location.origin + input;
                             }
                             // ★ 检查缓存: 30分钟内已分析过的视频直接复用
-                            const _cacheKey = vf.serverUrl || input;
-                            const _cached = chats[chatId]?.videoAnalyses?.[_cacheKey];
+                            var _cacheKey = vf.serverUrl || input;
+                            var _cached = chats[chatId]?.videoAnalyses?.[_cacheKey];
                             if (_cached && _cached.time && (Date.now() - _cached.time < 1800000) && _cached.frames && _cached.frames.length > 0) {
                                 var _cr = '🎬 **视频分析结果(缓存)**\n\n**元信息:**\n';
                                 _cr += '- 时长: ' + Math.floor(_cached.duration/60) + '分' + Math.round(_cached.duration%60) + '秒\n';
@@ -1321,21 +1321,21 @@
                         }
                     } else if (func.name.startsWith('mmx_')) {
                         // MiniMax CLI 工具：mmx_chat/mmx_image/mmx_video/mmx_speech/mmx_voices/mmx_music/mmx_vision/mmx_quota
-                        const _mmxCmd = func.name.replace('mmx_', '');
+                        var _mmxCmd = func.name.replace('mmx_', '');
                         
                         // ★ 定义 appendAudioToChat（如尚未定义）— 内联到当前回复气泡尾部
                         if (typeof window.appendAudioToChat !== 'function') {
                             window.appendAudioToChat = function(url, label) {
-                                const cid2 = currentChatId;
+                                var cid2 = currentChatId;
                                 if (!cid2 || !chats[cid2]) return;
-                                const audioTag = '<audio controls style="width:100%;max-width:400px;margin:8px 0;"><source src="' + url + '" type="audio/mpeg"></audio><br><a href="' + url + '" target="_blank" download>⬇️ 下载</a>';
-                                const msgContent = '\n\n---\n### ' + label + '\n' + audioTag;
+                                var audioTag = '<audio controls style="width:100%;max-width:400px;margin:8px 0;"><source src="' + url + '" type="audio/mpeg"></audio><br><a href="' + url + '" target="_blank" download>⬇️ 下载</a>';
+                                var msgContent = '\n\n---\n### ' + label + '\n' + audioTag;
                                 // ★ 追加到当前活跃气泡的 markdown-body（而非独立气泡）
-                                const _bub = activeBubbleMap[cid2];
+                                var _bub = activeBubbleMap[cid2];
                                 if (_bub) {
                                     var _md = _bub.querySelector('.markdown-body');
                                     if (_md) {
-                                        const _wrapper = document.createElement('div');
+                                        var _wrapper = document.createElement('div');
                                         _wrapper.innerHTML = msgContent;
                                         _md.appendChild(_wrapper);
                                         // 滚动到底部
@@ -1348,7 +1348,7 @@
                                 }
                             };
                         }
-                        const _k2 = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
+                        var _k2 = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
                         var _mmxKey2 = _k2; try { _mmxKey2 = await decrypt(_k2) || _k2; } catch(e) {}
                         let _mmxUrl = SERVER_API_BASE + '/engine_api.php?action=mmx&resource=' + _mmxCmd + '&cmd=' + _mmxCmd + '&api_key=' + encodeURIComponent(_mmxKey2);
                         if (args.message) _mmxUrl += '&message=' + encodeURIComponent(args.message);
@@ -1363,19 +1363,19 @@
                         if (args.instrumental === true) _mmxUrl += '&instrumental=true';
                         if (args.max_tokens) _mmxUrl += '&max_tokens=' + parseInt(args.max_tokens);
                         try {
-                            const _mmxCtrl = new AbortController();
+                            var _mmxCtrl = new AbortController();
                             if (abortSignal) {
                                 abortSignal.addEventListener('abort', function() { _mmxCtrl.abort(); }, { once: true });
                             }
                             var _to = setTimeout(function() { _mmxCtrl.abort(); }, 300000); // 5分钟超时
-                            const _mmxResp = await window.proxyFetch(_mmxUrl, { signal: _mmxCtrl.signal });
+                            var _mmxResp = await window.proxyFetch(_mmxUrl, { signal: _mmxCtrl.signal });
                             clearTimeout(_to);
                             // speech 和 music: 生成后自动返回音频 URL
                             if (_mmxCmd === 'speech' || _mmxCmd === 'music') {
-                                const _mmxText = await _mmxResp.text();
+                                var _mmxText = await _mmxResp.text();
                                 try {
-                                    const _mmxJson = JSON.parse(_mmxText);
-                                    const _audioUrl = _mmxJson?.result?.url || '';
+                                    var _mmxJson = JSON.parse(_mmxText);
+                                    var _audioUrl = _mmxJson?.result?.url || '';
                                     if (_audioUrl) {
                                         toolResult = { result: '✅ ' + (_mmxCmd === 'speech' ? '语音' : '音乐') + '已生成: ' + _audioUrl };
                                         // ★ 附加文件到当前对话,让用户直接看到播放器
@@ -1390,7 +1390,7 @@
                                 }
                             } else if (_mmxCmd === 'chat') {
                                 // ★ mmx_chat: 从 MiniMax 响应中提取 thinking 和文本
-                                const _mmxData = await _mmxResp.json();
+                                var _mmxData = await _mmxResp.json();
                                 var _mmxRes = _mmxData.result || _mmxData;
                                 // result 可能是 parsed JSON 或原始 JSON 字符串
                                 if (typeof _mmxRes === 'string') {
@@ -1411,9 +1411,9 @@
                                 }
                             } else {
                                 // ★ voices/quota/image/video/vision — 直接返回 API 原始响应
-                                const _mmxText2 = await _mmxResp.text();
+                                var _mmxText2 = await _mmxResp.text();
                                 try {
-                                    const _mmxJson2 = JSON.parse(_mmxText2);
+                                    var _mmxJson2 = JSON.parse(_mmxText2);
                                     toolResult = { result: _mmxJson2.result || _mmxJson2.data || JSON.stringify(_mmxJson2, null, 2) };
                                 } catch(e2) {
                                     toolResult = { result: _mmxText2 };
@@ -1427,9 +1427,9 @@
                         // ★ STT action: 特殊处理
                         if (args.action === 'stt') {
                             try {
-                                const _sttBody = { action: 'stt', params: { language: args.params?.language || 'zh' }, input_path: args.input_path };
-                                const _sttResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_sttBody) });
-                                const _sttData = await _sttResp.json();
+                                var _sttBody = { action: 'stt', params: { language: args.params?.language || 'zh' }, input_path: args.input_path };
+                                var _sttResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_sttBody) });
+                                var _sttData = await _sttResp.json();
                                 if (_sttData.error) { toolResult = { error: _sttData.error }; }
                                 else if (_sttData.result) { toolResult = { result: '🎤 **语音识别结果:**\n' + _sttData.result }; }
                                 else { toolResult = { error: 'STT返回为空' }; }
@@ -1439,10 +1439,10 @@
                         var _srcEnginePath = args.input_path || '';
                         // ★ 智能补全: 如果没传 input_path,从当前聊天的上传文件里找
                         if (!_srcEnginePath && chats[chatId]) {
-                            const _msgs2 = chats[chatId].messages;
+                            var _msgs2 = chats[chatId].messages;
                             for (var _vi2 = _msgs2.length-1; _vi2 >= 0; _vi2--) {
                                 if (_msgs2[_vi2].files) {
-                                    const _vf2 = _msgs2[_vi2].files.find(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
+                                    var _vf2 = _msgs2[_vi2].files.find(function(f){ return f.isVideo || (f.type && f.type.startsWith('video/')); });
                                     if (_vf2) { _srcEnginePath = _vf2.serverUrl || _vf2.content || ''; break; }
                                 }
                             }
@@ -1453,7 +1453,7 @@
                                 if (args.params.files[_fi].startsWith('http')) args.params.files[_fi] = args.params.files[_fi].replace(window.location.origin, '');
                             }
                         }
-                        const _veditBody = { action: args.action || 'info', params: args.params || {}, input_path: _srcEnginePath };
+                        var _veditBody = { action: args.action || 'info', params: args.params || {}, input_path: _srcEnginePath };
                         if (args.output_path) _veditBody.output_path = args.output_path;
                         if (args.action === 'tts') {
                             _veditBody.params.api_key = await decrypt(localStorage.getItem('ttsApiKey')||'')||await decrypt(localStorage.getItem('visionApiKey')||'')||'';
@@ -1466,15 +1466,15 @@
                             _veditBody.params.group_id = args.params?.group_id || '';
                         }
                         try {
-                            const _ctlr = new AbortController();
+                            var _ctlr = new AbortController();
                             var _to = setTimeout(function() { _ctlr.abort(); }, 600000); // 10分钟超时
                             // ★ 如果用户停止,同时 abort 这个 fetch
                             if (abortSignal) {
                                 abortSignal.addEventListener('abort', function() { _ctlr.abort(); }, { once: true });
                             }
-                            const _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody), signal: _ctlr.signal });
+                            var _veditResp = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_veditBody), signal: _ctlr.signal });
                             clearTimeout(_to);
-                            const _veditData = await _veditResp.json();
+                            var _veditData = await _veditResp.json();
                             if (_veditData.error) { toolResult = { error: _veditData.error }; }
                             else { toolResult = { result: _veditData.result || '操作完成' }; }
                         } catch (_veditErr) {

@@ -5,9 +5,9 @@
 (function() {
     'use strict';
 
-    const API = '/src';
-    const POLL_INTERVAL = 3000;
-    const LOGS_INTERVAL = 2000;
+    var API = '/src';
+    var POLL_INTERVAL = 3000;
+    var LOGS_INTERVAL = 2000;
 
     let _configName = 'src';
     let _pollTimer = null;

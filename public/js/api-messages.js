@@ -29,8 +29,8 @@ function getImageKeywords() {
 
 async function determineSearchType(text, history, signal, forcedType) {
     if (forcedType) return forcedType;
-    const hasImageIntent = getImageKeywords().some(kw => text.toLowerCase().includes(kw));
-    const baseType = getVal('searchType') || 'auto';
+    var hasImageIntent = getImageKeywords().some(kw => text.toLowerCase().includes(kw));
+    var baseType = getVal('searchType') || 'auto';
     if (baseType === 'auto') {
         if (hasImageIntent || getChecked('aiSearchTypeToggle')) {
             return hasImageIntent ? 'images' : await aiChooseSearchType(text, history, signal);
@@ -47,7 +47,7 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
     let searchResults = null;
     let searchError = null;
 
-    const smartKeywords = getSmartSearchKeywords();
+    var smartKeywords = getSmartSearchKeywords();
 
     if (forceSearch) {
         shouldSearch = true;
@@ -55,7 +55,7 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
         updateBubbleSearchStatus(bubble, `🔍 强制搜索 (${finalType})`);
         if (getChecked('searchShowPromptToggle')) showToast(`🔍 强制搜索 (${finalType})`, 'info');
     } else if (getChecked('searchToggle')) {
-        const aiJudge = getChecked('aiSearchJudgeToggle');
+        var aiJudge = getChecked('aiSearchJudgeToggle');
         if (aiJudge) {
             updateBubbleSearchStatus(bubble, '🤖 AI 判断是否需要搜索...');
             if (getChecked('searchShowPromptToggle')) showToast('🤖 AI智能判断是否需要搜索...', 'info', 2000);
@@ -85,7 +85,7 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
         }
         if (shouldSearch && !finalType) {
             finalType = await determineSearchType(text, history, signal, null);
-            const hasImageIntent = getImageKeywords().some(kw => text.toLowerCase().includes(kw));
+            var hasImageIntent = getImageKeywords().some(kw => text.toLowerCase().includes(kw));
             if (finalType === 'web' && hasImageIntent && getChecked('searchShowPromptToggle')) {
                 showToast('💡 检测到您可能需要图片,可尝试使用 /image 命令', 'info', 5000);
             }
@@ -93,16 +93,16 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
     }
 
     if (shouldSearch && finalType) {
-        const typeIcons = { web: '🔍', news: '📰', images: '🖼️' };
-        const typeNames = { web: '网页', news: '新闻', images: '图片' };
+        var typeIcons = { web: '🔍', news: '📰', images: '🖼️' };
+        var typeNames = { web: '网页', news: '新闻', images: '图片' };
         updateBubbleSearchStatus(bubble, `${typeIcons[finalType] || '🔍'} 正在搜索${typeNames[finalType] || ''}中...`);
         if (getChecked('searchShowPromptToggle')) showToast(`🔍 正在搜索${typeNames[finalType] || ''}中...`, 'info');
 
-        const searchQuery = forceSearch ? queryText : (aiDecision === true ? await generateSearchQuery(text, history, signal) : text);
+        var searchQuery = forceSearch ? queryText : (aiDecision === true ? await generateSearchQuery(text, history, signal) : text);
         try {
             searchResults = await performWebSearch(searchQuery, signal, finalType);
             // 直接使用原始结果,不再优化
-            const optimized = formatRawResults(searchResults);
+            var optimized = formatRawResults(searchResults);
             updateBubbleSearchStatus(bubble, '📝 搜索完成,正在生成回答...');
             if (getChecked('searchShowPromptToggle')) showToast('📝 搜索完成,正在生成回答...', 'info');
             return { searchPerformed: true, searchResults, optimized, searchError: null, searchType: finalType };
@@ -120,16 +120,16 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
 // 检查对话历史中是否有图片(用于自动切换到 VL-01 视觉模型)
 // 注意:这里只检查历史中是否有图片,不影响当前消息的发送
 function hasImagesInChat(chatId) {
-    const msgs = chats[chatId]?.messages || [];
+    var msgs = chats[chatId]?.messages || [];
     return msgs.some(m => m.files?.some(f => f.isImage || f.type?.startsWith('image/')));
 }
 
 // 检查最新一条用户消息是否包含图片
 function currentMessageHasImage(chatId) {
-    const msgs = chats[chatId]?.messages || [];
+    var msgs = chats[chatId]?.messages || [];
     // 找到最后一条用户消息
     for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i];
+        var m = msgs[i];
         if (m.role === 'user') {
             return m.files?.some(f => f.isImage || f.type?.startsWith('image/')) || false;
         }
@@ -162,11 +162,11 @@ function injectCachedImageAnalyses(chatId, apiMessages) {
 }
 
 function buildApiMessages(chatId) {
-    const apiMessagesUnfiltered = [];
+    var apiMessagesUnfiltered = [];
     // ★ 提前声明,供后续原生视觉判断使用
     var _curModelName = (getVal('modelSelect') || '').toLowerCase();
     // 只检查当前消息是否包含图片,避免历史图片触发视觉模型
-    const currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/')) || !!window.__currentMessageHasImages;
+    var currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/')) || !!window.__currentMessageHasImages;
 
     // ★ 模型配置:根据模型类型决定 system 消息处理方式
     // MiniMax/部分模型不支持多条 system 消息,需要合并为一条
@@ -177,13 +177,13 @@ function buildApiMessages(chatId) {
     // QwQ 等思考模型:合并 system 消息
     if (_curModelLower.indexOf('qwq') !== -1) _needMergeSystem = true;
     if (_needMergeSystem) {
-        const sysMsgs = [];
+        var sysMsgs = [];
         for (const msg of chats[chatId].messages) {
             if (msg.role === 'system' && !msg.temporary) {
                 sysMsgs.push(msg.content);
             }
         }
-        const merged = sysMsgs.length > 0 ? sysMsgs.join('\n\n') : (getVal('systemPrompt') || DEFAULT_CONFIG.system);
+        var merged = sysMsgs.length > 0 ? sysMsgs.join('\n\n') : (getVal('systemPrompt') || DEFAULT_CONFIG.system);
         // ★ 追加工作空间信息
         var _wsInfo = '\n\n## 🗂 工作空间\n' +
             '你必须使用 server_file_write 工具保存所有生成的项目文件到工作空间。\n' +
@@ -254,7 +254,7 @@ function buildApiMessages(chatId) {
             return val.replace(/\[object Object\]/g, '');
         }
         if (val && typeof val === 'object') {
-            const extracted = val.text || val.content || val.value || '';
+            var extracted = val.text || val.content || val.value || '';
             if (extracted) return '' + extracted;
             if (Array.isArray(val)) {
                 return val.map(c => typeof c === 'object' ? (c.text || c.content || '') : String(c)).filter(Boolean).join('');
@@ -264,14 +264,14 @@ function buildApiMessages(chatId) {
         return val === undefined || val === null ? '' : String(val);
     }
 
-    const msgs = chats[chatId].messages;
+    var msgs = chats[chatId].messages;
     for (let i = 0; i < msgs.length; i++) {
-        const msg = msgs[i];
+        var msg = msgs[i];
         // ★ 跳过内部消息(不发送给 API,仅用于内部逻辑)
         if (msg._internal) continue;
         if (msg.role === 'system') continue;
         if (msg.role === 'user') {
-            const files = msg.files;
+            var files = msg.files;
             // ★ 所有带图片的用户消息都传递 image_url,确保后续追问也能看到图片
             var msgHasImage = files && files.length > 0 && files.some(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
             var prev = window._forceVisionFormat;

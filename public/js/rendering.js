@@ -6,7 +6,7 @@
 function showWelcome() {
 let container = $.chatMessagesContainer;
     if (!container) return;
-    const letters = 'Hi, Nice to meet you!'.split('');
+    var letters = 'Hi, Nice to meet you!'.split('');
     var html = '<div class="welcome-container"><div class="brand">';
     for (var i = 0; i < letters.length; i++) {
         var cls = (letters[i] === ',' || letters[i] === '!') ? 'wl-dot' : 'wl';
@@ -51,7 +51,7 @@ function autoLinkURLs(markdownText) {
     return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, url, after) => {
         if (/!\[.*?\]\(/.test(match) || /\[.*?\]\(/.test(match)) return match;
         try {
-            const u = new URL(url);
+            var u = new URL(url);
             let label = u.hostname;
             if (u.pathname && u.pathname !== '/') {
                 label += u.pathname.slice(0, 20) + (u.pathname.length > 20 ? '...' : '');
@@ -65,18 +65,18 @@ function autoLinkURLs(markdownText) {
 
 function showImageLightbox(images, startIdx) {
     // 移除已有灯箱
-    const existing = document.querySelector('.img-lightbox');
+    var existing = document.querySelector('.img-lightbox');
     if (existing) existing.remove();
 
     var idx = startIdx || 0;
-    const overlay = document.createElement('div');
+    var overlay = document.createElement('div');
     overlay.className = 'img-lightbox';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;';
 
     var img = document.createElement('img');
     img.style.cssText = 'max-width:90vw;max-height:80vh;object-fit:contain;border-radius:4px;cursor:grab;transition:transform 0.15s ease;';
 
-    const counter = document.createElement('div');
+    var counter = document.createElement('div');
     counter.style.cssText = 'color:#fff;margin-bottom:12px;font-size:14px;';
 
     var actions = document.createElement('div');
@@ -84,8 +84,8 @@ function showImageLightbox(images, startIdx) {
 
     // ════ 缩放状态 ════
     var scale = 1;
-    const minScale = 1;
-    const maxScale = 5;
+    var minScale = 1;
+    var maxScale = 5;
     // 拖拽平移状态
     var isDragging = false;
     var dragStartX = 0, dragStartY = 0;
@@ -119,7 +119,7 @@ function showImageLightbox(images, startIdx) {
     img.addEventListener('wheel', function(e) {
         e.preventDefault();
         e.stopPropagation();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        var delta = e.deltaY > 0 ? -0.1 : 0.1;
         var newScale = Math.max(minScale, Math.min(maxScale, scale + delta));
         newScale = Math.round(newScale * 10) / 10;
         scale = newScale;
@@ -148,13 +148,13 @@ function showImageLightbox(images, startIdx) {
 
     // 左右切换
     if (images.length > 1) {
-        const prev = document.createElement('button');
+        var prev = document.createElement('button');
         prev.textContent = '\u25c0';
         prev.style.cssText = 'position:absolute;left:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;z-index:10000;';
         prev.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx - 1 + images.length) % images.length; updateView(); });
         overlay.appendChild(prev);
 
-        const next = document.createElement('button');
+        var next = document.createElement('button');
         next.textContent = '\u25b6';
         next.style.cssText = 'position:absolute;right:20px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;z-index:10000;';
         next.addEventListener('click', function(e) { e.stopPropagation(); idx = (idx + 1) % images.length; updateView(); });
@@ -162,7 +162,7 @@ function showImageLightbox(images, startIdx) {
     }
 
     // ════ 缩放按钮 ════
-    const zoomInBtn = document.createElement('button');
+    var zoomInBtn = document.createElement('button');
     zoomInBtn.innerHTML = '+'; zoomInBtn.title = '放大';
     zoomInBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:16px;font-weight:bold;cursor:pointer;line-height:1;';
     zoomInBtn.addEventListener('click', function(e) {
@@ -172,7 +172,7 @@ function showImageLightbox(images, startIdx) {
     });
     actions.appendChild(zoomInBtn);
 
-    const zoomOutBtn = document.createElement('button');
+    var zoomOutBtn = document.createElement('button');
     zoomOutBtn.innerHTML = '\u2212'; zoomOutBtn.title = '缩小';
     zoomOutBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:16px;font-weight:bold;cursor:pointer;line-height:1;';
     zoomOutBtn.addEventListener('click', function(e) {
@@ -182,7 +182,7 @@ function showImageLightbox(images, startIdx) {
     });
     actions.appendChild(zoomOutBtn);
 
-    const resetBtn = document.createElement('button');
+    var resetBtn = document.createElement('button');
     resetBtn.textContent = '1:1'; resetBtn.title = '重置缩放';
     resetBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;';
     resetBtn.addEventListener('click', function(e) {
@@ -198,7 +198,7 @@ function showImageLightbox(images, startIdx) {
     download.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:6px 16px;font-size:13px;cursor:pointer;text-decoration:none;';
     download.addEventListener('click', function(e) {
         e.stopPropagation();
-        const a = document.createElement('a');
+        var a = document.createElement('a');
         a.href = images[idx];
         a.download = 'image_' + (idx + 1) + '.png';
         a.click();
@@ -206,7 +206,7 @@ function showImageLightbox(images, startIdx) {
     actions.appendChild(download);
 
     // 关闭
-    const close = document.createElement('button');
+    var close = document.createElement('button');
     close.textContent = '\u2715';
     close.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10000;';
     close.addEventListener('click', function() { overlay.remove(); });
@@ -251,17 +251,17 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     var card = document.createElement('div');
     card.className = 'tool-call-card';
 
-    const meta = (window.toolRegistry && toolRegistry.has(toolName)) ? toolRegistry.get(toolName) : null;
-    const capHint = meta ? meta.capabilities.slice(0, 2).join(', ') : '';
-    const toolHint = meta ? meta.searchHint : '';
+    var meta = (window.toolRegistry && toolRegistry.has(toolName)) ? toolRegistry.get(toolName) : null;
+    var capHint = meta ? meta.capabilities.slice(0, 2).join(', ') : '';
+    var toolHint = meta ? meta.searchHint : '';
 
-    const typeIcons = {
+    var typeIcons = {
         'web_search': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>',
         'web_fetch': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
         'server_exec': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
         'delegate_task': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
     };
-    const iconHtml = typeIcons[toolName] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
+    var iconHtml = typeIcons[toolName] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
 
     var summary = (meta && meta.getSummary) ? meta.getSummary(args) : (toolName + ': ' + JSON.stringify(args).substring(0, 60));
 
@@ -281,9 +281,9 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
         else durationStr = Math.floor(durationMs / 60000) + 'm ' + Math.floor((durationMs % 60000) / 1000) + 's';
     }
 
-    const isError = result && result.error;
-    const statusColor = isError ? '#ef4444' : (durationStr ? '#059669' : '#6366f1');
-    const statusText = isError ? '失败' : '成功';
+    var isError = result && result.error;
+    var statusColor = isError ? '#ef4444' : (durationStr ? '#059669' : '#6366f1');
+    var statusText = isError ? '失败' : '成功';
 
     var html = '<details class="tool-call-details">' +
         '<summary class="tool-call-summary" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;">' +
@@ -314,8 +314,8 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
         '</details>';
 
     if (resultText) {
-        const displayResult = resultText.length > 500 ? resultText.substring(0, 500) : resultText;
-        const isLongResult = resultText.length > 500;
+        var displayResult = resultText.length > 500 ? resultText.substring(0, 500) : resultText;
+        var isLongResult = resultText.length > 500;
         html += '<details class="tool-result-details" style="margin-top:4px;" ' + (isError ? 'open' : '') + '>' +
             '<summary class="tool-result-summary" style="cursor:pointer;font-size:10px;color:' + (isError ? '#ef4444' : '#059669') + ';">' + (isError ? '错误' : '结果') + (isLongResult ? ' (' + resultText.length + ' 字符)' : '') + '</summary>' +
             '<pre class="tool-call-result" style="margin:4px 0 0 16px;padding:6px;background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border-radius:4px;font-size:10px;max-height:200px;overflow:auto;white-space:pre-wrap;color:' + (isError ? '#dc2626' : '#374151') + ';">' + escapeHtml(displayResult) + '</pre>' +
@@ -374,13 +374,13 @@ function _renderWebFetchUrls(bubble, urls) {
     details.style.cssText = 'font-size:11px;';
     details.appendChild(summary);
 
-    const list = document.createElement('ol');
+    var list = document.createElement('ol');
     list.style.cssText = 'margin:4px 0 0 0;padding-left:18px;list-style-position:outside;';
 
     urls.forEach(function(u, i) {
-        const li = document.createElement('li');
+        var li = document.createElement('li');
         li.style.cssText = 'margin-bottom:2px;line-height:1.3;';
-        const link = document.createElement('a');
+        var link = document.createElement('a');
         link.href = u;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
@@ -397,7 +397,7 @@ function _renderWebFetchUrls(bubble, urls) {
 
 function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false) {
 // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
-    const safeStr = (val) => {
+    var safeStr = (val) => {
         if (val === null || val === undefined) return '';
         if (typeof val !== 'string') val = String(val);
         return val.replace(/\[object Object\]/gi, '');
@@ -405,7 +405,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     text = safeStr(text);
     reasoning = typeof reasoning === 'string' ? reasoning.replace(/\[object Object\]/gi, '') : '';
     // ★ 如果已有独立显示的生成图片,去除回复文本中对应的图片链接(避免重复和点击跳转报错)
-    const _urls = (generatedImages || []).concat(generatedImage ? [generatedImage] : []).filter(Boolean);
+    var _urls = (generatedImages || []).concat(generatedImage ? [generatedImage] : []).filter(Boolean);
     if (_urls.length > 0 && text) {
         _urls.forEach(function(u) {
             if (!u) return;
@@ -418,7 +418,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     // ★ 欢迎页淡出过渡
     if (container.children.length === 1 && container.children[0].classList.contains('welcome-container')) {
-        const welcome = container.children[0];
+        var welcome = container.children[0];
         welcome.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
         welcome.style.opacity = '0';
         welcome.style.transform = 'scale(0.95)';
@@ -443,27 +443,27 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         var details = document.createElement('details');
         details.className = 'reasoning-details';
         // 默认折叠,如果推理内容较短(<200字)则展开
-        const reasoningLen = (reasoning || '').length;
+        var reasoningLen = (reasoning || '').length;
         details.open = reasoningLen < 200;
-        const summaryText = '🤔 推理过程' + (reasoningLen >= 200 ? ' (' + reasoningLen + '字符)' : '');
+        var summaryText = '🤔 推理过程' + (reasoningLen >= 200 ? ' (' + reasoningLen + '字符)' : '');
         details.innerHTML = `<summary>${summaryText}</summary><div class="reasoning-content">${compressNewlines(reasoning, 2)}</div>`;
         bubble.appendChild(details);
     }
 
     // 用户文件
     if (role === 'user' && files?.length) {
-        const fileList = document.createElement('div');
+        var fileList = document.createElement('div');
         fileList.className = 'file-list';
         files.forEach(f => {
             if (f.isVideo || (f.type && f.type.startsWith('video/')))  {
                 var _vsrc = f.serverUrl || f.content || '';
                 if (_vsrc && _vsrc.startsWith('/')) _vsrc = window.location.origin + _vsrc;
                 if (_vsrc) {
-                    const vid = document.createElement('video');
+                    var vid = document.createElement('video');
                     vid.controls = true;
                     vid.preload = 'metadata';
                     vid.style.cssText = 'max-width:100%;max-height:300px;border-radius:8px;margin-top:4px';
-                    const src = document.createElement('source');
+                    var src = document.createElement('source');
                     src.src = _vsrc;
                     src.type = f.type || 'video/mp4';
                     vid.appendChild(src);
@@ -481,10 +481,10 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 // 点击放大
                 img.style.cursor = 'pointer';
                 img.onclick = () => {
-                    const modal = document.createElement('div');
+                    var modal = document.createElement('div');
                     modal.className = 'image-modal';
                     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;';
-                    const modalImg = document.createElement('img');
+                    var modalImg = document.createElement('img');
                     modalImg.src = f.content;
                     modalImg.style.maxWidth = '90%';
                     modalImg.style.maxHeight = '90%';
@@ -498,8 +498,8 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 fileList.appendChild(img);
             } else {
                 // 非图片文件:显示下载链接
-                const url = URL.createObjectURL(new Blob([f.content], { type: 'text/plain' }));
-                const fileItem = document.createElement('span');
+                var url = URL.createObjectURL(new Blob([f.content], { type: 'text/plain' }));
+                var fileItem = document.createElement('span');
                 fileItem.className = 'file-item';
                 fileItem.innerHTML = `<svg class="file-icon" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2 1.5C2 0.67 2.67 0 3.5 0h5.88c.4 0 .78.16 1.06.44l3.12 3.12c.28.28.44.66.44 1.06V14.5c0 .83-.67 1.5-1.5 1.5h-9c-.83 0-1.5-.67-1.5-1.5v-13zM3.5 1c-.28 0-.5.22-.5.5v13c0 .28.22.5.5.5h9c.28 0 .5-.22.5-.5V4.62L10.38 1H3.5z"/><path d="M9 1v3.5c0 .28.22.5.5.5H13v1H9.5C8.67 6 8 5.33 8 4.5V1h1z"/></svg><a href="${url}" download="${escapeHtml(f.name)}">${escapeHtml(f.name)}</a>`;
                 fileList.appendChild(fileItem);
@@ -509,7 +509,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     }
 
     // 主要内容
-    const contentDiv = document.createElement('div');
+    var contentDiv = document.createElement('div');
     contentDiv.className = 'markdown-body';
 
     if (role === 'user') {
@@ -525,10 +525,10 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             // ★ 延迟Mermaid渲染(appendMessage自身有内联处理,不与_triggerPostRender冲突)
             setTimeout(() => {
                 // 查找所有 language-mermaid 的代码块(来自 ```mermaid)
-                const mermaidCodes = contentDiv.querySelectorAll('pre code[class*="mermaid"]');
+                var mermaidCodes = contentDiv.querySelectorAll('pre code[class*="mermaid"]');
                 mermaidCodes.forEach(codeBlock => {
                     var pre = codeBlock.parentNode;
-                    const mermaidDiv = document.createElement('div');
+                    var mermaidDiv = document.createElement('div');
                     mermaidDiv.className = 'mermaid';
                     // 修复中文引号(常见导致 Mermaid 语法错误的原因)
                     var code = codeBlock.textContent;
@@ -543,7 +543,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                     // 3. Normalize line data (comma separated)
                     if (code.includes('xychart-beta')) {
                         code = code.replace(/line\s+"([^"]+)"\s+([\d.\s,]+)/g, (m, label, nums) => {
-                            const formatted = nums.trim().split(/\s+/).join(', ');
+                            var formatted = nums.trim().split(/\s+/).join(', ');
                             return `line "${label}" ${formatted}`;
                         });
                     }
@@ -566,8 +566,8 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                         // 渲染成功后检查:是否产生了有效的SVG而非CSS文本
                         contentDiv.querySelectorAll('.mermaid').forEach(div => {
                             if (!div.isConnected) return;
-                            const hasSVG = div.querySelector('svg');
-                            const hasBadOutput = div.textContent.includes('#mermaid') && div.textContent.includes('font-family');
+                            var hasSVG = div.querySelector('svg');
+                            var hasBadOutput = div.textContent.includes('#mermaid') && div.textContent.includes('font-family');
                             if (hasBadOutput && !hasSVG) {
                                 // Mermaid输出了CSS而非SVG,说明渲染失败
                                 var originalCode = div.getAttribute('data-original-code') || div.textContent;
@@ -583,7 +583,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                             if (!div.isConnected) return;
                             var originalCode = div.getAttribute('data-original-code') || div.textContent;
                             // 检查是否是 UnsupportedDiagramError / UnknownDiagramError
-                            const isUnsupported = err && (err.message?.includes('No diagram type detected') || err.message?.includes('UnsupportedDiagramError'));
+                            var isUnsupported = err && (err.message?.includes('No diagram type detected') || err.message?.includes('UnsupportedDiagramError'));
 
                             if (isUnsupported) {
                                 // 对于不支持的图表类型,静默降级为代码块,不显示错误提示
@@ -620,38 +620,38 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     // ★ 如果消息仍在生成中(partial),显示加载动画
     if (partial && role === 'assistant') {
-        const loadingEl = document.createElement('div');
+        var loadingEl = document.createElement('div');
         loadingEl.className = 'msg-loading-indicator';
         loadingEl.innerHTML = '<span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>';
         bubble.appendChild(loadingEl);
     }
 
     // 如果有生成的图片,显示在内容下方
-    const allImages = generatedImages || (generatedImage ? [generatedImage] : []);
+    var allImages = generatedImages || (generatedImage ? [generatedImage] : []);
     if (allImages.length > 0) {
-        const imgContainer = document.createElement('div');
+        var imgContainer = document.createElement('div');
         imgContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
         allImages.forEach(function(imgData, idx) {
             var wrapper = document.createElement('div');
             wrapper.style.cssText = 'position:relative;cursor:pointer;';
             var img = document.createElement('img');
-            const cleanUrl = cleanImageUrl(imgData);
+            var cleanUrl = cleanImageUrl(imgData);
             img.src = cleanUrl;
-            const maxW = allImages.length > 1 ? '160px' : '320px';
+            var maxW = allImages.length > 1 ? '160px' : '320px';
             img.style.cssText = 'max-width:' + maxW + ';width:100%;border-radius:8px;display:block;';
             img.setAttribute('loading', 'lazy');
             // ★ 点击放大预览
             img.addEventListener('click', function() { showImageLightbox(allImages, idx); });
             img.onerror = function() {
                 this.style.display = 'none';
-                const fallback = document.createElement('div');
+                var fallback = document.createElement('div');
                 fallback.style.cssText = 'padding:10px;border-radius:8px;background:#fef3c7;border:1px solid #f59e0b;margin:4px 0;color:#92400e;font-size:0.75rem;text-align:center;';
                 fallback.textContent = '\u26a0\ufe0f \u56fe\u7247\u52a0\u8f7d\u5931\u8d25';
                 wrapper.appendChild(fallback);
             };
             wrapper.appendChild(img);
             // 悬停显示放大图标
-            const hint = document.createElement('div');
+            var hint = document.createElement('div');
             hint.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.5);color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;opacity:0;transition:opacity 0.2s;pointer-events:none;';
             hint.textContent = '\ud83d\udd0d';
             wrapper.addEventListener('mouseenter', function() { hint.style.opacity = '1'; });
@@ -675,7 +675,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     copyBtn.onclick = (e) => {
         e.stopPropagation();
         // ★ 修复: 动态读取气泡当前文本,而非闭包里初始的 text 变量
-        const _bubbleText = bubble.querySelector('.markdown-body')?.textContent || bubble.textContent || text;
+        var _bubbleText = bubble.querySelector('.markdown-body')?.textContent || bubble.textContent || text;
         copyMessageContent(_bubbleText);
         copyBtn.style.background = '#bbf7d0';
         setTimeout(() => copyBtn.style.background = '', 300);
@@ -684,7 +684,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     if (role === 'user') {
         // 编辑按钮 — 所有用户消息都显示
-        const editBtn = document.createElement('div');
+        var editBtn = document.createElement('div');
             editBtn.className = 'msg-action-btn edit-btn';
             editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
             editBtn.onclick = (e) => {
@@ -711,12 +711,12 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             if (partial) { /* 不渲染操作按钮 */ }
             else {
             // ★ 判断是否是最后一条 assistant 消息
-            const _allAsst = (chats[currentChatId]?.messages || []).filter(m => m.role === 'assistant' && !m.partial);
-            const _isLastAsst = _allAsst.length > 0 && _allAsst[_allAsst.length - 1] === chats[currentChatId]?.messages.find(m => m.role === 'assistant' && m.content === text);
+            var _allAsst = (chats[currentChatId]?.messages || []).filter(m => m.role === 'assistant' && !m.partial);
+            var _isLastAsst = _allAsst.length > 0 && _allAsst[_allAsst.length - 1] === chats[currentChatId]?.messages.find(m => m.role === 'assistant' && m.content === text);
 
             if (_isLastAsst) {
                 // ★ 最后一条: 重新生成按钮
-                const regenBtn = document.createElement('div');
+                var regenBtn = document.createElement('div');
                 regenBtn.className = 'msg-action-btn regenerate-btn';
                 regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
                 regenBtn.title = '重新生成回复';
@@ -737,7 +737,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 actions.appendChild(regenBtn);
             } else {
                 // ★ 旧回复: 还原按钮 — 回到此位置，忽略之后的内容
-                const restoreBtn = document.createElement('div');
+                var restoreBtn = document.createElement('div');
                 restoreBtn.className = 'msg-action-btn restore-btn';
                 restoreBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/><line x1="9" y1="12" x2="21" y2="12"/><path d="M3 12a9 9 0 0 1 9-9"/></svg>';
                 restoreBtn.title = '还原到此处（忽略后续对话）';
@@ -761,9 +761,9 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     // 底部统计(改用SVG图标)
     // ★ 防止历史脏数据: time > 1天(86400000ms)视为绝对时间戳,不显示
-    const _validTime = (time > 0 && time < 86400000);
+    var _validTime = (time > 0 && time < 86400000);
     if (role === 'assistant' && (usage || _validTime)) {
-        const footer = document.createElement('div');
+        var footer = document.createElement('div');
         footer.className = 'message-footer';
         let foot = '';
         if (_validTime) {
@@ -771,7 +771,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             if (usage) foot += ' <span class="msg-foot-sep"></span> ';
         }
         if (usage) {
-            const ct = Number(usage.completion_tokens) || 0; var pt = Number(usage.prompt_tokens) || 0; var tokens = Number(usage.total_tokens) || (ct + pt) || 0;
+            var ct = Number(usage.completion_tokens) || 0; var pt = Number(usage.prompt_tokens) || 0; var tokens = Number(usage.total_tokens) || (ct + pt) || 0;
             // ★ 兜底: 从其他命名字段提取 token 数
             if (!tokens && (usage.input_tokens !== undefined || usage.output_tokens !== undefined)) {
                 tokens = (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
@@ -790,7 +790,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             }
             // OpenAI / oneapi 标准: prompt_tokens_details.cached_tokens
             if (!cacheHit && usage.prompt_tokens_details) {
-                const _cached = Number(usage.prompt_tokens_details.cached_tokens) || Number(usage.prompt_tokens_details.cached) || 0;
+                var _cached = Number(usage.prompt_tokens_details.cached_tokens) || Number(usage.prompt_tokens_details.cached) || 0;
                 if (_cached > 0) { cacheHit = _cached; cacheMiss = (pt || ct) - cacheHit; if (cacheMiss < 0) cacheMiss = 0; }
             }
             // Anthropic Claude: cache_read_input_tokens / cache_creation_input_tokens
@@ -805,7 +805,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 if (cacheMiss < 0) cacheMiss = 0;
             }
             if (cacheHit !== null && cacheHit > 0) {
-                const cacheTotal = cacheHit + cacheMiss;
+                var cacheTotal = cacheHit + cacheMiss;
                 if (foot.length > 0) foot += ' <span class="msg-foot-sep"></span> ';
                 foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5 6h6M5 9h4M5 12h6"/></svg> ';
                 foot += cacheTotal > 0 ? ((cacheHit / cacheTotal) * 100).toFixed(1) + '%缓存命中(' + cacheHit + '/' + cacheTotal + ')' : '缓存未启用';
@@ -836,13 +836,13 @@ function attachCodeCopyButtons(container) {
     container.querySelectorAll('pre').forEach(pre => {
         if (pre.querySelector('.code-actions')) return;
         var code = pre.innerText.trim();
-        const isHtml = /^(<!DOCTYPE|<html|<HTML|<svg[\s>])/.test(code) || (code.indexOf('<') >= 0 && code.indexOf('>') >= 0 && (code.indexOf('style') >= 0 || code.indexOf('script') >= 0 || code.indexOf('div') >= 0 || code.indexOf('body') >= 0 || code.indexOf('h1') >= 0 || code.indexOf('p>') >= 0));
+        var isHtml = /^(<!DOCTYPE|<html|<HTML|<svg[\s>])/.test(code) || (code.indexOf('<') >= 0 && code.indexOf('>') >= 0 && (code.indexOf('style') >= 0 || code.indexOf('script') >= 0 || code.indexOf('div') >= 0 || code.indexOf('body') >= 0 || code.indexOf('h1') >= 0 || code.indexOf('p>') >= 0));
 
         var actions = document.createElement('div');
         actions.className = 'code-actions';
 
         if (isHtml) {
-            const runBtn = document.createElement('div');
+            var runBtn = document.createElement('div');
             runBtn.className = 'code-run-btn';
             runBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>';
             runBtn.title = '\u8fd0\u884c\u6b64HTML';
@@ -871,7 +871,7 @@ function attachCodeCopyButtons(container) {
 function applySyntaxHighlighting(container) {
     if (window.hljs) {
         // 静默 highlight.js 的安全警告(代码块中含 HTML 标签时触发,非真安全问题)
-        const _warn = console.warn;
+        var _warn = console.warn;
         console.warn = function() {};
         container.querySelectorAll('pre code:not([class*="mermaid"])').forEach(function(block) {
             try { hljs.highlightElement(block); } catch(e) {}

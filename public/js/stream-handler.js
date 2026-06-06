@@ -5,8 +5,8 @@
 // SSE 格式: "event: TYPE\ndata: JSON\n\n"
 // 解析时需要识别 "event:" 行来确定事件类型
 window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgId) {
-    const reader = sseResponse.body.getReader();
-    const decoder = new TextDecoder();
+    var reader = sseResponse.body.getReader();
+    var decoder = new TextDecoder();
     let buffer = '';
     let currentEventType = 'chunk';
     let fullText = '';
@@ -40,12 +40,12 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
         // 处理 SSE 数据:SSE 格式为 "event: TYPE\ndata: JSON\n\n"
         // 每条消息由 "event:xxx\ndata:xxx\n\n" 组成,lines 会包含多行
-        const lines = buffer.split('\n');
+        var lines = buffer.split('\n');
         // 最后一行是可能不完整的下一条消息,保留在 buffer
         buffer = lines.pop() || '';
 
         for (const rawLine of lines) {
-            const line = rawLine.trim();
+            var line = rawLine.trim();
             if (!line) continue;
 
             // 检测 "event: TYPE" 行 - 设置当前事件类型
@@ -56,20 +56,20 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
             // 检测 "data: JSON" 行 - 用当前事件类型解析
             if (!line.startsWith('data: ')) continue;
-            const dataStr = line.substring(6).trim();
+            var dataStr = line.substring(6).trim();
             if (!dataStr || dataStr === '[DONE]') continue;
 
             try {
-                const event = JSON.parse(dataStr);
+                var event = JSON.parse(dataStr);
 
                 if (currentEventType === 'content' || event.type === 'content') {
-                    const delta = event.delta || event.content || '';
+                    var delta = event.delta || event.content || '';
                     if (delta) {
                         fullText += delta;
                         applyStreamRender(chatId, fullText);
                     }
                 } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
-                    const rd = event.delta || event.reasoning || '';
+                    var rd = event.delta || event.reasoning || '';
                     if (rd) {
                         reasoningText += rd;
                         var cb = activeBubbleMap[chatId];
@@ -155,8 +155,8 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 };
 
 async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDelay) {
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
     let reasoningText = '';
@@ -269,9 +269,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             }
             break;
         }
-        const decoded = decoder.decode(value, { stream: true });
+        var decoded = decoder.decode(value, { stream: true });
         buffer += decoded;
-        const lines = buffer.split('\n');
+        var lines = buffer.split('\n');
         buffer = lines.pop() || '';
         for (const line of lines) {
             // 支持两种格式: SSE (data: {...}) 和 裸JSON ({...})
@@ -292,7 +292,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         data = JSON.parse(jsonStr);
                     } catch (parseErr) {
                         // 如果解析失败,尝试找到有效的JSON部分
-                        const match = jsonStr.match(/\{[\s\S]*\}/);
+                        var match = jsonStr.match(/\{[\s\S]*\}/);
                         if (match) {
                             try {
                                 data = JSON.parse(match[0]);
@@ -308,7 +308,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                     }
 
-                    const delta = data.choices?.[0]?.delta;
+                    var delta = data.choices?.[0]?.delta;
                     // 如果 delta 为空,跳过此条数据
                     if (!delta) {
                         console.warn('[流式解析] delta 为空,跳过');
@@ -337,11 +337,11 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 if (typeof currentToolCall.function.arguments === 'object') {
                                     currentToolCall.function.arguments = JSON.stringify(currentToolCall.function.arguments);
                                 }
-                                const currentArgs = typeof currentToolCall.function.arguments === 'string'
+                                var currentArgs = typeof currentToolCall.function.arguments === 'string'
                                     ? currentToolCall.function.arguments
                                     : JSON.stringify(currentToolCall.function.arguments || '');
                                 // 只保存有实际内容的tool call(跳过空/碎片)
-                                const hasValidContent = currentArgs.length > 2 &&
+                                var hasValidContent = currentArgs.length > 2 &&
                                     (currentArgs.includes('query') || currentArgs.includes('prompt') || currentToolCall.function?.name);
                                 if (hasValidContent) {
                                     toolCalls.push(currentToolCall);
@@ -373,8 +373,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     // 对象是完整的arguments,直接替换
                                     currentToolCall.function.arguments = tc.function.arguments;
                                 } else if (typeof tc.function.arguments === 'string') {
-                                    const newArg = tc.function.arguments;
-                                    const isCompleteJSON = (newArg.trim().startsWith('{') && newArg.trim().endsWith('}')) ||
+                                    var newArg = tc.function.arguments;
+                                    var isCompleteJSON = (newArg.trim().startsWith('{') && newArg.trim().endsWith('}')) ||
                                                            (newArg.trim().startsWith('[') && newArg.trim().endsWith(']'));
 
                                     if (typeof currentToolCall.function.arguments === 'string') {
@@ -391,8 +391,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                             // ★ 修复: DeepSeek V4 Pro/Flash 在增量拼接完完整JSON后,
                                             // 会再发一遍同样的字符作为单独delta,导致无效累积
                                             // 检查 current 是否已经是闭合的有效JSON,如果是则跳过所有后续追加
-                                            const curTrimmed = currentToolCall.function.arguments.trim();
-                                            const looksComplete = (curTrimmed.startsWith('{') && curTrimmed.endsWith('}')) ||
+                                            var curTrimmed = currentToolCall.function.arguments.trim();
+                                            var looksComplete = (curTrimmed.startsWith('{') && curTrimmed.endsWith('}')) ||
                                                                   (curTrimmed.startsWith('[') && curTrimmed.endsWith(']'));
                                             if (looksComplete) {
                                                 // 已闭合成完整JSON,验证有效性
@@ -401,7 +401,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                                 if (isValid) {
                                                     // ★ 修复: 立即保存到toolCalls并标记完成,防止后续重放覆盖
                                                     if (!toolCallCompleted) {
-                                                        const savedCall = JSON.parse(JSON.stringify(currentToolCall));
+                                                        var savedCall = JSON.parse(JSON.stringify(currentToolCall));
                                                         savedCall.function.arguments = JSON.parse(curTrimmed);
                                                         toolCalls.push(savedCall);
                                                         toolCallCompleted = true;
@@ -415,12 +415,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                                 currentToolCall.function.arguments += newArg;
                                                 // ★ 事后检查: 累加后如果变成完整有效JSON,立即保存
                                                 if (!toolCallCompleted) {
-                                                    const afterTrim = currentToolCall.function.arguments.trim();
+                                                    var afterTrim = currentToolCall.function.arguments.trim();
                                                     if ((afterTrim.startsWith('{') && afterTrim.endsWith('}')) ||
                                                         (afterTrim.startsWith('[') && afterTrim.endsWith(']'))) {
                                                         try {
-                                                            const parsed = JSON.parse(afterTrim);
-                                                            const savedCall = JSON.parse(JSON.stringify(currentToolCall));
+                                                            var parsed = JSON.parse(afterTrim);
+                                                            var savedCall = JSON.parse(JSON.stringify(currentToolCall));
                                                             savedCall.function.arguments = parsed;
                                                             toolCalls.push(savedCall);
                                                             toolCallCompleted = true;
@@ -461,12 +461,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     }
 
                     // MiniMax reasoning_split 模式下,思考内容在 reasoning_details 数组中
-                    const hasReasoningDetails = delta.reasoning_details && Array.isArray(delta.reasoning_details);
+                    var hasReasoningDetails = delta.reasoning_details && Array.isArray(delta.reasoning_details);
                     // 普通 reasoning_content (排除空字符串MiniMax空chunk)
-                    const hasReasoningContent = delta.reasoning_content !== undefined && delta.reasoning_content !== null && delta.reasoning_content !== '';
+                    var hasReasoningContent = delta.reasoning_content !== undefined && delta.reasoning_content !== null && delta.reasoning_content !== '';
 
                     if (!placeholderCleared && (hasReasoningContent || hasReasoningDetails || delta.content !== undefined)) {
-                        const currentBubble = activeBubbleMap[chatId];
+                        var currentBubble = activeBubbleMap[chatId];
                         if (currentBubble && document.body.contains(currentBubble)) {
                             currentBubble.querySelector('.search-status')?.remove();
                         }
@@ -482,7 +482,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                         pendingMsg.reasoning = reasoningText;
                         if (currentChatId === chatId) {
-                            const currentBubble = activeBubbleMap[chatId];
+                            var currentBubble = activeBubbleMap[chatId];
                             if (currentBubble) {
                                 let details = currentBubble.querySelector('details.reasoning-details');
                                 if (!details) {
@@ -490,7 +490,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     details.className = 'reasoning-details';
                                     details.open = true;
                                     details.innerHTML = `<summary>深度思考</summary><div class="reasoning-content"></div>`;
-                                    const markdownBody = currentBubble.querySelector('.markdown-body');
+                                    var markdownBody = currentBubble.querySelector('.markdown-body');
                                     currentBubble.insertBefore(details, markdownBody);
                                 }
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
@@ -510,7 +510,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         reasoningText += String(delta.reasoning_content);
                         pendingMsg.reasoning = reasoningText;
                         if (currentChatId === chatId) {
-                            const currentBubble = activeBubbleMap[chatId];
+                            var currentBubble = activeBubbleMap[chatId];
                             if (currentBubble) {
                                 let details = currentBubble.querySelector('details.reasoning-details');
                                 if (!details) {
@@ -518,7 +518,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     details.className = 'reasoning-details';
                                     details.open = true;
                                     details.innerHTML = `<summary>深度思考</summary><div class="reasoning-content"></div>`;
-                                    const markdownBody = currentBubble.querySelector('.markdown-body');
+                                    var markdownBody = currentBubble.querySelector('.markdown-body');
                                     currentBubble.insertBefore(details, markdownBody);
                                 }
                                 details.querySelector('.reasoning-content').textContent = reasoningText;
@@ -534,7 +534,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                     }
 
-                    const rawContent = delta.content ?? delta.text ?? delta.message?.content;
+                    var rawContent = delta.content ?? delta.text ?? delta.message?.content;
                     // 处理各种可能的数据类型,避免对象被错误地转为 [object Object]
                     let textContent = null;
                     if (rawContent !== undefined && rawContent !== null) {
@@ -542,8 +542,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                             textContent = rawContent;
                         } else if (typeof rawContent === 'object' && rawContent !== null) {
                             // ★ 修复: 不用 || 链式取值(空字符串 "" 是 falsy,会让 || 跳到下一项对象)
-                            const st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
-                            const ex = st(rawContent.text) || st(rawContent.content) || st(rawContent.value);
+                            var st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
+                            var ex = st(rawContent.text) || st(rawContent.content) || st(rawContent.value);
                             if (ex !== null) {
                                 textContent = ex;
                             } else if (Array.isArray(rawContent)) {
@@ -733,7 +733,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
 
     // 如果全部解析失败且无任何内容,给用户提示
     if (!fullText && !reasoningText && !toolCalls.length && parseErrors > 0) {
-        const currentBubble = activeBubbleMap[chatId];
+        var currentBubble = activeBubbleMap[chatId];
         if (currentBubble && document.body.contains(currentBubble)) {
             currentBubble.querySelector('.markdown-body').innerHTML = `<span style="color:#ef4444">⚠️ 部分响应解析失败,可能是 API 返回格式不兼容。</span>`;
             currentBubble.classList.remove('typing', 'gen-active');
@@ -793,17 +793,17 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         console.log('[ToolCall] 检测到文本格式工具调用,开始解析...');
 
         // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
-        const xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
+        var xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
         let xmlMatch;
         while ((xmlMatch = xmlRegex.exec(fullText)) !== null) {
-            const invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
+            var invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
             if (invokeMatch) {
-                const funcName = invokeMatch[1];
-                const args = {};
-                const paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
+                var funcName = invokeMatch[1];
+                var args = {};
+                var paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
                 let pMatch;
                 while ((pMatch = paramRegex.exec(invokeMatch[2])) !== null) {
-                    const paramName = pMatch[1];
+                    var paramName = pMatch[1];
                     let paramValue = pMatch[2].trim();
                     try { paramValue = JSON.parse(paramValue); } catch(e) {}
                     args[paramName] = paramValue;
@@ -814,17 +814,17 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         }
 
         // 格式2: [TOOL_CALL]\n{tool => "web_search", args => {--query "xxx"}}\n[/TOOL_CALL]
-        const tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
+        var tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
         let tcMatch;
         while ((tcMatch = tcRegex.exec(fullText)) !== null) {
-            const funcName = tcMatch[1];
-            const argsBlock = tcMatch[2];
-            const args = {};
-            const paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+            var funcName = tcMatch[1];
+            var argsBlock = tcMatch[2];
+            var args = {};
+            var paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
             let pMatch;
             while ((pMatch = paramRegex.exec(argsBlock)) !== null) {
-                const paramName = pMatch[1];
-                const paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
+                var paramName = pMatch[1];
+                var paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
                 args[paramName] = paramValue;
             }
             toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
@@ -882,20 +882,20 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         throw new Error(`API 错误: ${data.error.message || JSON.stringify(data.error)}`);
     }
 
-    const choice = data.choices?.[0];
+    var choice = data.choices?.[0];
     if (!choice) {
         throw new Error('API 返回无有效 choices');
     }
 
-    const msg = choice.message || {};
-    const st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
+    var msg = choice.message || {};
+    var st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
     let fullText = '';
     var _generatedImages = [];  // ★ 提前声明,供 content 数组提取图片使用
     if (msg.content !== undefined && msg.content !== null) {
         if (typeof msg.content === 'string') {
             fullText = msg.content;
         } else if (typeof msg.content === 'object') {
-            const ex = st(msg.content.text) || st(msg.content.content) || st(msg.content.value);
+            var ex = st(msg.content.text) || st(msg.content.content) || st(msg.content.value);
             if (ex !== null) {
                 fullText = ex;
             } else if (Array.isArray(msg.content)) {
@@ -983,17 +983,17 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         console.log('[ToolCall非流式] 检测到文本格式工具调用,开始解析...');
 
         // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
-        const xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
+        var xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
         let xmlMatch;
         while ((xmlMatch = xmlRegex.exec(fullText)) !== null) {
-            const invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
+            var invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
             if (invokeMatch) {
-                const funcName = invokeMatch[1];
-                const args = {};
-                const paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
+                var funcName = invokeMatch[1];
+                var args = {};
+                var paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
                 let pMatch;
                 while ((pMatch = paramRegex.exec(invokeMatch[2])) !== null) {
-                    const paramName = pMatch[1];
+                    var paramName = pMatch[1];
                     let paramValue = pMatch[2].trim();
                     try { paramValue = JSON.parse(paramValue); } catch(e) {}
                     args[paramName] = paramValue;
@@ -1004,17 +1004,17 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         }
 
         // 格式2: [TOOL_CALL]\n{tool => "web_search", args => {--query "xxx"}}\n[/TOOL_CALL]
-        const tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
+        var tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
         let tcMatch;
         while ((tcMatch = tcRegex.exec(fullText)) !== null) {
-            const funcName = tcMatch[1];
-            const argsBlock = tcMatch[2];
-            const args = {};
-            const paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+            var funcName = tcMatch[1];
+            var argsBlock = tcMatch[2];
+            var args = {};
+            var paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
             let pMatch;
             while ((pMatch = paramRegex.exec(argsBlock)) !== null) {
-                const paramName = pMatch[1];
-                const paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
+                var paramName = pMatch[1];
+                var paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
                 args[paramName] = paramValue;
             }
             toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
@@ -1025,7 +1025,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         fullText = fullText.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '').trim();
     }
 
-    const usage = data.usage;
+    var usage = data.usage;
 
     // 处理 reasoning_details(MiniMax 特有格式)
     if (msg.reasoning_details && Array.isArray(msg.reasoning_details)) {
@@ -1037,7 +1037,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     }
     // 兜底确保 reasoningText 是字符串(不再覆盖上面的提取结果)
     if (!reasoningText) {
-        const rc = msg.reasoning_content ?? msg.reasoning;
+        var rc = msg.reasoning_content ?? msg.reasoning;
         if (rc !== null && rc !== undefined) reasoningText = String(rc);
     }
     if (typeof reasoningText !== 'string') reasoningText = '';
@@ -1074,7 +1074,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     if (currentChatId === chatId && currentBubble) {
         try {
         currentBubble.classList.remove('typing', 'gen-active');
-        const markdownBody = currentBubble.querySelector('.markdown-body');
+        var markdownBody = currentBubble.querySelector('.markdown-body');
         if (markdownBody) {
             markdownBody.innerHTML = '';
             if (reasoningText) {
@@ -1085,7 +1085,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                 markdownBody.appendChild(_det);
             }
             if (fullText) {
-                const contentEl = document.createElement('div');
+                var contentEl = document.createElement('div');
                 contentEl.innerHTML = _renderMarkdownWithMath(fullText);
                 markdownBody.appendChild(contentEl);
                 _triggerPostRender(contentEl);
@@ -1136,12 +1136,12 @@ function handleError(e, chatId, pendingMsg, currentBubble) {
     cleanupStreamState(chatId);
     // ★ 通知模式解锁
     window._agentNotifyProcessing = false;
-    const hasContent = pendingMsg && pendingMsg.content && typeof pendingMsg.content === 'string' && pendingMsg.content.trim() !== '';
-    const hasReasoning = pendingMsg && pendingMsg.reasoning && typeof pendingMsg.reasoning === 'string' && pendingMsg.reasoning.trim() !== '';
+    var hasContent = pendingMsg && pendingMsg.content && typeof pendingMsg.content === 'string' && pendingMsg.content.trim() !== '';
+    var hasReasoning = pendingMsg && pendingMsg.reasoning && typeof pendingMsg.reasoning === 'string' && pendingMsg.reasoning.trim() !== '';
     if (!hasContent && !hasReasoning) {
-        const chatMessages = (chats && chats[chatId]) ? chats[chatId].messages : null;
+        var chatMessages = (chats && chats[chatId]) ? chats[chatId].messages : null;
         if (chatMessages) {
-            const idx = chatMessages.findIndex(m => m.partial);
+            var idx = chatMessages.findIndex(m => m.partial);
             if (idx !== -1) chatMessages.splice(idx, 1);
         }
     } else {
@@ -1178,7 +1178,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
         return false;
     }
     // 获取当前模型
-    const currentModel = getVal('modelSelect') || '';
+    var currentModel = getVal('modelSelect') || '';
 
     if (!currentModel) {
         return false;
@@ -1186,7 +1186,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 
     // 将模型添加到文本模型列表
     try {
-        const autoTextModels = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
+        var autoTextModels = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
         if (!autoTextModels.includes(currentModel)) {
             autoTextModels.push(currentModel);
             localStorage.setItem('autoDetectedTextModels', JSON.stringify(autoTextModels));
@@ -1206,7 +1206,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 
     // 从聊天历史中移除最后的助手消息
     if (chatId && chats[chatId]) {
-        const msgs = chats[chatId].messages;
+        var msgs = chats[chatId].messages;
         for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'assistant' && msgs[i].partial) {
                 msgs.splice(i, 1);
@@ -1218,7 +1218,7 @@ window.autoDetectAndRetryImageUrlError = async function(errorMessage, chatId, pe
 
     // 重新发送之前的用户消息
     if (chatId && chats[chatId]) {
-        const lastUser = [...chats[chatId].messages].reverse().find(m => m.role === 'user' && !m.temporary);
+        var lastUser = [...chats[chatId].messages].reverse().find(m => m.role === 'user' && !m.temporary);
         if (lastUser) {
 
             setTimeout(async () => {

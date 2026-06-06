@@ -6,7 +6,7 @@
 function cleanImageUrl(url) {
     if (!url) return '';
     // 如果 URL 指向已知无法访问的域名,替换为占位图
-    const deadDomains = [
+    var deadDomains = [
         'service-6kr3fbnm-1251723757.usw.apigw.tencentcs.com',
         'service-6kr3fbnm-1251723757',
         'apigw.tencentcs.com',
@@ -53,7 +53,7 @@ async function uploadImageToServer(imageInput) {
         let actualData = base64Data;
 
         if (base64Data.startsWith('data:')) {
-            const match = base64Data.match(/^data:([^;]+);base64,(.+)$/);
+            var match = base64Data.match(/^data:([^;]+);base64,(.+)$/);
             if (match) {
                 mimeType = match[1];
                 actualData = match[2];
@@ -62,8 +62,8 @@ async function uploadImageToServer(imageInput) {
 
         console.log('[uploadImageToServer] 上传中... 数据长度:', (base64Data || '').length, 'chars');
 
-        const token = getAuthToken();
-        const response = await fetch(SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token), {
+        var token = getAuthToken();
+        var response = await fetch(SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -76,10 +76,10 @@ async function uploadImageToServer(imageInput) {
         console.log('[uploadImageToServer] HTTP:', response.status, 'Content-Type:', response.headers.get('content-type'));
 
         if (response.ok) {
-            const text = await response.text();
+            var text = await response.text();
             console.log('[uploadImageToServer] 响应前100字符:', text.substring(0, 100));
             try {
-                const result = JSON.parse(text);
+                var result = JSON.parse(text);
                 if (result.url) {
                     console.log('[uploadImageToServer] ✅ 上传成功:', result.url);
                     return result.url;
@@ -106,7 +106,7 @@ async function uploadVideoBlob(file, progressFn) {
     try {
         var formData = new FormData();
         formData.append('image', file, file.name);
-        const token = getAuthToken();
+        var token = getAuthToken();
         var url = SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token);
         
         // 用 XMLHttpRequest 以支持上传进度

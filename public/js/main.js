@@ -25,7 +25,7 @@ window.fixImageAnalysisConfig = function() {
 // 一键配置
 window.quickSetupOneAPIChat = function() {
 
-    const config = {
+    var config = {
         key: window.ONEAPI_KEY || '',
         url: 'https://oneapi.naujtrats.xyz/v1',
         model: 'deepseek-v4-flash',
@@ -77,9 +77,9 @@ function setupKeyboardDetection() {
     // 优先使用 visualViewport API
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', () => {
-            const viewport = window.visualViewport;
+            var viewport = window.visualViewport;
             // 如果视口宽度没变但高度减少了,说明键盘弹出了
-            const heightDiff = lastInnerHeight - viewport.height;
+            var heightDiff = lastInnerHeight - viewport.height;
             keyboardActive = heightDiff > 50; // 高度减少超过50px认为是键盘
             lastInnerHeight = viewport.height;
         });
@@ -89,7 +89,7 @@ function setupKeyboardDetection() {
     } else {
         // 回退方案:监听 window 的 resize 事件
         window.addEventListener('resize', () => {
-            const heightDiff = lastInnerHeight - window.innerHeight;
+            var heightDiff = lastInnerHeight - window.innerHeight;
             keyboardActive = heightDiff > 50;
             lastInnerHeight = window.innerHeight;
         });
@@ -109,7 +109,7 @@ function setupKeyboardDetection() {
     document.addEventListener('focusout', (e) => {
         setTimeout(() => {
             // 检查是否还有其他输入框聚焦
-            const focused = document.querySelector('input:focus, textarea:focus, select:focus');
+            var focused = document.querySelector('input:focus, textarea:focus, select:focus');
             if (!focused) {
                 keyboardActive = false;
             }
@@ -160,7 +160,7 @@ var $ = window.$ || {
 const Safe = {
     get(obj, path, defaultValue = undefined) {
         if (obj == null) return defaultValue;
-        const keys = Array.isArray(path) ? path : path.split('.');
+        var keys = Array.isArray(path) ? path : path.split('.');
         let result = obj;
         for (const key of keys) {
             if (result == null) return defaultValue;
@@ -194,7 +194,7 @@ class AppError extends Error {
 const ErrorHandler = {
     categorize(error) {
         if (error instanceof AppError) return error;
-        const msg = Safe.string(error?.message).toLowerCase();
+        var msg = Safe.string(error?.message).toLowerCase();
         if (msg.includes('network') || msg.includes('fetch')) return new AppError('网络错误', 'NETWORK', error);
         if (msg.includes('timeout') || msg.includes('aborted')) return new AppError('请求超时', 'TIMEOUT', error);
         if (msg.includes(' unauthorized') || msg.includes('401') || msg.includes('403')) return new AppError('API Key无效', 'AUTH', error);
@@ -203,12 +203,12 @@ const ErrorHandler = {
         return new AppError(Safe.string(error?.message, '未知错误'), 'UNKNOWN', error);
     },
     show(error, bubble = null) {
-        const appError = this.categorize(error);
+        var appError = this.categorize(error);
         console.error('[Error]', appError.code, appError.message);
         showToast(appError.message, 'error', 4000);
         if (bubble) {
             bubble.classList.remove('typing');
-            const div = document.createElement('div');
+            var div = document.createElement('div');
             div.className = 'error-message';
             div.innerHTML = `<span class="error-icon">❌</span> ${escapeHtml(appError.message)}`;
             bubble.querySelector('.message-content')?.appendChild(div);
@@ -222,7 +222,7 @@ const rateLimit = {
     last: 0,
     min: 1000,
     allowed() {
-        const now = Date.now();
+        var now = Date.now();
         if (now - this.last < this.min) return false;
         this.last = now;
         return true;
@@ -277,9 +277,9 @@ window.stopGeneration = function () {
 };
 
 function buildHistorySummary(chatId, maxLength = MAX_HISTORY_LENGTH) {
-    const messages = chats[chatId]?.messages || [];
-    const recent = messages.slice(-10);
-    const summary = recent.map(m => {
+    var messages = chats[chatId]?.messages || [];
+    var recent = messages.slice(-10);
+    var summary = recent.map(m => {
         if (m.role === 'user') return `用户: ${(m.text || '').slice(0, 300)}`;
         if (m.role === 'assistant') return `助手: ${(m.content || '').slice(0, 300)}`;
         return '';
@@ -290,16 +290,16 @@ function buildHistorySummary(chatId, maxLength = MAX_HISTORY_LENGTH) {
 // 改进:更全面的时间关键词检测,按需返回时间消息(不保存)
 function createTemporaryTimestampIfNeeded(text) {
     // 扩展时间关键词列表,覆盖常见时间相关表达
-    const timeKeywords = [
+    var timeKeywords = [
         '现在时间', '当前时间', '现在几点', '几点钟', '时间', 'date', 'time', 'now',
         '今天', '明天', '昨天', '星期', '周', '几号', '几月', '哪年', '今年', '去年', '明年',
         'weather', '天气', '新闻', 'news', '实时', '最新', '动态'
     ];
-    const lowerText = text.toLowerCase();
+    var lowerText = text.toLowerCase();
     if (timeKeywords.some(kw => lowerText.includes(kw))) {
-        const now = new Date();
-        const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var pad=function(n){return n<10?'0'+n:n};var off=-Math.round(now.getTimezoneOffset()/60);var tz='GMT'+(off>=0?'+':'')+off;var ts=days[now.getDay()]+' '+now.getFullYear()+'-'+months[now.getMonth()]+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())+' '+tz;
-        const timeContent = '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。';
+        var now = new Date();
+        var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var pad=function(n){return n<10?'0'+n:n};var off=-Math.round(now.getTimezoneOffset()/60);var tz='GMT'+(off>=0?'+':'')+off;var ts=days[now.getDay()]+' '+now.getFullYear()+'-'+months[now.getMonth()]+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())+' '+tz;
+        var timeContent = '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。';
         return { role: 'system', content: timeContent, temporary: true };
     }
     return null;
@@ -316,7 +316,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // 用户发起的消息 → 新任务批次开始
         // ★ 创建任务,后续代理将关联到这个任务ID
         var _inputEl = $.userInput;
-        const _msgText = userTextForRegen || (_inputEl ? _inputEl.value.trim() : '') || '';
+        var _msgText = userTextForRegen || (_inputEl ? _inputEl.value.trim() : '') || '';
         window._lastMsgTaskId = window.createTask(_msgText, currentChatId);
         console.log('[Agent] 新任务批次开始,taskId=' + window._lastMsgTaskId);
 
@@ -338,11 +338,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     var modelVal = getVal('modelSelect');
     if (!modelVal || modelVal === '加载中...') {
         // ★ 等待模型列表加载完成,最多等6秒
-        const _waitModelStart = Date.now();
+        var _waitModelStart = Date.now();
         var _modelLoaded = false;
         await new Promise(function(resolve) {
-            const _check = function() {
-                const _mv = getVal('modelSelect');
+            var _check = function() {
+                var _mv = getVal('modelSelect');
                 if (_mv && _mv !== '加载中...') {
                     _modelLoaded = true;
                     resolve();
@@ -363,18 +363,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         modelVal = getVal('modelSelect');
     }
 
-    const chatId = currentChatId;
+    var chatId = currentChatId;
     if (!chatId) return;
     if (isTypingMap[chatId]) {
         // ★ AI 正在生成:所有模式都推入队列
         if (!skipUserAdd) {
             var _inputEl = $.userInput;
-            const _qText = userTextForRegen || (_inputEl ? _inputEl.value.trim() : '');
+            var _qText = userTextForRegen || (_inputEl ? _inputEl.value.trim() : '');
             if (_qText || (pendingFiles && pendingFiles.length > 0)) {
-                const safeFiles = (pendingFiles || []).map(function(f) {
+                var safeFiles = (pendingFiles || []).map(function(f) {
                     return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
                 });
-                const _qId = ++window._queueIdCounter;
+                var _qId = ++window._queueIdCounter;
                 window._messageQueue.push({ id: _qId, text: _qText, files: safeFiles });
                 
                 pendingFiles = [];
@@ -390,9 +390,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         return;
     }
 
-    const input = $.userInput;
+    var input = $.userInput;
     let text = skipUserAdd ? userTextForRegen : input?.value.trim() || '';
-    const files = skipUserAdd ? userFilesForRegen : pendingFiles;
+    var files = skipUserAdd ? userFilesForRegen : pendingFiles;
 
     // ★ 新消息: 重置滚动状态 + 滚动到底部
     if (!skipUserAdd) { userScrolled = false; setTimeout(function() { if ($.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight; }, 30); }
@@ -407,7 +407,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 按需生成临时时间戳消息(基于关键词)
-    const temporaryTimestamp = createTemporaryTimestampIfNeeded(text);
+    var temporaryTimestamp = createTemporaryTimestampIfNeeded(text);
 
     // 移除旧的临时消息
     chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary);
@@ -415,15 +415,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     userScrolled = false;
     streamingScrollLock = false;
     window._streamContentRendered = false;
-    const partialIdx = chats[chatId].messages.findIndex(m => m.partial);
+    var partialIdx = chats[chatId].messages.findIndex(m => m.partial);
     if (partialIdx !== -1) chats[chatId].messages.splice(partialIdx, 1);
 
     // 停止旧请求(不设置用户停止标记,以便新请求可以正常重试)
     abortExistingRequest(chatId);
 
-    const abortMain = new AbortController();
+    var abortMain = new AbortController();
     abortControllerMap[chatId] = abortMain;
-    const abortSearch = new AbortController();
+    var abortSearch = new AbortController();
     searchAbortControllerMap[chatId] = abortSearch;
 
     isTypingMap[chatId] = true;
@@ -433,7 +433,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     window._updateQueueUI();
 
     // 处理命令
-    const command = parseCommand(text);
+    var command = parseCommand(text);
     if (command && command.type === 'command') {
         isTypingMap[chatId] = false;
         if ($.sendBtn) $.sendBtn.classList.remove('hidden');
@@ -442,16 +442,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         input.value = '';
         return;
     }
-    const forceSearch = !!command;
-    const queryText = command ? command.query : text;
-    const forcedType = command ? command.kind : null;
+    var forceSearch = !!command;
+    var queryText = command ? command.query : text;
+    var forcedType = command ? command.kind : null;
 
     // 构建历史摘要
-    const historySummary = buildHistorySummary(chatId);
+    var historySummary = buildHistorySummary(chatId);
 
     // 添加用户消息
     // 保存当前消息是否包含图片(在 clearAllFiles 之前)
-    const currentMessageHasImages = files && files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/'));
+    var currentMessageHasImages = files && files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/'));
     // ★ 保存标记供 buildApiMessages 使用(pendingFiles 即将被清空)
     window.__currentMessageHasImages = currentMessageHasImages;
 
@@ -476,7 +476,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         clearAllFiles();
     } else if (window._isQueueMessage) {
         // ★ 队列消息:插入聊天记录并立即渲染到界面
-        const _qFiles = (files && files.length > 0) ? files.map(function(f) {
+        var _qFiles = (files && files.length > 0) ? files.map(function(f) {
             return { name: f.name, content: f.content || null, serverUrl: f.serverUrl || '', size: f.size || 0, type: f.type || (f.isImage ? 'image/' : '') };
         }) : [];
         chats[chatId].messages.push({ role: 'user', text: text, files: _qFiles });
@@ -492,7 +492,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 创建占位气泡（typing 动画等第一批内容到达时自动移除）
-    const pendingMsg = { role: 'assistant', content: '', reasoning: '', partial: true };
+    var pendingMsg = { role: 'assistant', content: '', reasoning: '', partial: true };
     chats[chatId].messages.push(pendingMsg);
     let currentBubble = null;
     if (currentChatId === chatId) {
@@ -503,9 +503,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 执行搜索
-    const _modelMiniMax2 = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
+    var _modelMiniMax2 = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     // ★ 修复: MiniMax 也启用工具调用模式,让模型通过 tool_calls 决定何时搜索
-    const useToolCall = getChecked('searchToolCallToggle') || (files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/')));
+    var useToolCall = getChecked('searchToolCallToggle') || (files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/')));
     let searchResult = { searchPerformed: false, searchResults: null, optimized: null, searchError: null };
     // 工具调用模式下不主动搜索,让模型通过tool_calls决定何时搜索
     if (!useToolCall && (getChecked('searchToggle') || forceSearch)) {
@@ -524,11 +524,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ 非工具调用模式下:自动分析上传的图片并告诉模型
     // 手动关闭搜索工具调用 或 模型不支持工具时，AI无法调用 analyze_image
     if (currentMessageHasImages && !useToolCall) {
-        const _allImageAnalyses = [];
+        var _allImageAnalyses = [];
         var _imageFiles = files ? files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }) : [];
         // 也检查聊天记录中的图片
         if (!_imageFiles.length && chats[chatId]) {
-            const _lastMsgs = chats[chatId].messages;
+            var _lastMsgs = chats[chatId].messages;
             for (var _imi = _lastMsgs.length - 1; _imi >= 0; _imi--) {
                 var _m = _lastMsgs[_imi];
                 if (_m.role === 'user' && _m.files && _m.files.length) {
@@ -540,10 +540,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (_imageFiles.length) {
             showToast('🔍 正在自动分析' + _imageFiles.length + '张图片...', 'info', 5000);
             if (currentBubble) {
-                const _imgStatus = document.createElement('div');
+                var _imgStatus = document.createElement('div');
                 _imgStatus.className = 'search-status';
                 _imgStatus.textContent = '🔍 自动分析' + _imageFiles.length + '张图片...';
-                const _mb = currentBubble.querySelector('.markdown-body');
+                var _mb = currentBubble.querySelector('.markdown-body');
                 if (_mb) _mb.appendChild(_imgStatus);
             }
             for (var _iai = 0; _iai < _imageFiles.length; _iai++) {
@@ -556,7 +556,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
                 if (_imgInput) {
                     try {
-                        const _analysis = await window.analyzeImage(_imgInput, '请详细描述这张图片的内容,包括物体、场景、文字等所有可见信息。');
+                        var _analysis = await window.analyzeImage(_imgInput, '请详细描述这张图片的内容,包括物体、场景、文字等所有可见信息。');
                         if (_analysis && typeof _analysis === 'string' && _analysis.length > 10) {
                             _allImageAnalyses.push('【图片' + (_iai + 1) + '分析结果】\n' + _analysis);
                         }
@@ -571,7 +571,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             }
             if (_allImageAnalyses.length) {
-                const _analysisText = '\n\n以下是对用户上传图片的自动分析结果(AI无法直接看到图片,请根据以下描述回答):\n\n' + _allImageAnalyses.join('\n\n---\n\n');
+                var _analysisText = '\n\n以下是对用户上传图片的自动分析结果(AI无法直接看到图片,请根据以下描述回答):\n\n' + _allImageAnalyses.join('\n\n---\n\n');
                 // 注入到最近的非 system 消息中
                 var _sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
                 if (_sysIdx !== -1) {
@@ -607,8 +607,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // 可选:上下文压缩
     if (!skipUserAdd && getChecked('compressToggle')) {
-        const threshold = parseInt(getVal('compressThreshold')) || 10;
-        const nonSys = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial && !m.temporary).length;
+        var threshold = parseInt(getVal('compressThreshold')) || 10;
+        var nonSys = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial && !m.temporary).length;
         if (nonSys > threshold) await compressContextIfNeeded(chatId);
     }
 
@@ -625,16 +625,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 如果有临时时间戳,插入到系统消息之后
     // ★ MiniMax 合并: 时间戳合并到 system 消息,避免 extra system message
     if (temporaryTimestamp) {
-        const _isMm = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
+        var _isMm = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
         if (_isMm) {
             let sysIdx = apiMessages.findIndex(m => m.role === 'system');
             if (sysIdx !== -1) {
                 apiMessages[sysIdx].content += '\n\n' + temporaryTimestamp.content;
             } else {
                 // 没有 system 消息,找到 user 消息前面插入
-                const userIdx = apiMessages.findIndex(m => m.role === 'user');
+                var userIdx = apiMessages.findIndex(m => m.role === 'user');
                 if (userIdx !== -1) {
-                    const _uc2 = apiMessages[userIdx].content;
+                    var _uc2 = apiMessages[userIdx].content;
                     if (Array.isArray(_uc2)) {
                         _uc2.unshift({ type: 'text', text: temporaryTimestamp.content + '\n\n' });
                     } else {
@@ -645,7 +645,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             }
         } else {
-            const sysIndex = apiMessages.findIndex(m => m.role === 'system');
+            var sysIndex = apiMessages.findIndex(m => m.role === 'system');
             if (sysIndex !== -1) {
                 apiMessages.splice(sysIndex + 1, 0, temporaryTimestamp);
             } else {
@@ -655,10 +655,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // ★ MiniMax: 工具提示注入到 system 消息（而非 user 消息，避免模型误以为是用户指令）
-    const __isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
+    var __isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     if (__isMiniMaxModel && getChecked('searchToggle')) {
-        const toolHint = '你可以使用 web_search 搜索最新信息,使用 web_fetch 抓取网页详情。';
-        const _sysIdx2 = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+        var toolHint = '你可以使用 web_search 搜索最新信息,使用 web_fetch 抓取网页详情。';
+        var _sysIdx2 = apiMessages.findIndex(function(m) { return m.role === 'system'; });
         if (_sysIdx2 >= 0 && typeof apiMessages[_sysIdx2].content === 'string') {
             if (!apiMessages[_sysIdx2].content.includes('web_search')) {
                 apiMessages[_sysIdx2].content += '\n\n' + toolHint;
@@ -670,7 +670,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     if (isAgentToolsActive()) {
         let agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         // ★ 注入工具调用上限(模型一开始就知道最多调用几次)
-        const _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+        var _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
         agentPrompt += '\n\n## 工具调用限制\n本轮对话最多调用 ' + _maxRounds + ' 次工具。请合理规划,避免浪费配额。如果接近上限,优先给出已有结果而不是继续调用。';
         // ★ plan_update 使用提示（精简版，已有则不重复注入）
         if (agentPrompt.indexOf('plan_update') === -1) {
@@ -682,11 +682,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             let sysContent = agentPrompt;
             // 尝试从内存缓存获取人格/身份/记忆并注入
             try {
-                const _cachedPersona = window.__agentPersonaCache || window.__cloudPersona;
-                const _cachedIdentity = window.__agentIdentityCache || window.__cloudIdentity;
-                const _cachedUser = window.__cloudUser;
-                const _cachedMemories = window.__agentMemoryCache;
-                const _cloudMemories = window.__cloudMemories;
+                var _cachedPersona = window.__agentPersonaCache || window.__cloudPersona;
+                var _cachedIdentity = window.__agentIdentityCache || window.__cloudIdentity;
+                var _cachedUser = window.__cloudUser;
+                var _cachedMemories = window.__agentMemoryCache;
+                var _cloudMemories = window.__cloudMemories;
                 let _inject = '';
                 // 人格
                 if (_cachedPersona && _cachedPersona.name) {
@@ -737,7 +737,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // ★ 内部 Agent 上下文注入(必须在 agent 提示词之后,确保覆盖创建子代理指令)
     if (window.__internalAgentContext) {
-        const ctx = window.__internalAgentContext;
+        var ctx = window.__internalAgentContext;
         delete window.__internalAgentContext;
         var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
         if (sysIdx !== -1) {
@@ -752,12 +752,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 图片由 analyze_image 工具处理,不切换模型(analyze_image 会调用 MCP 桥接)
     // 保持使用当前文本模型即可
     if (searchResult.searchPerformed && searchResult.searchResults?.length) {
-        const searchModel = getVal('searchModel');
+        var searchModel = getVal('searchModel');
         if (searchModel && searchModel !== '加载中...') model = searchModel;
     }
 
     // 估算tokens(排除base64图片数据,处理数组格式)
-    const totalText = apiMessages.map(m => {
+    var totalText = apiMessages.map(m => {
         if (Array.isArray(m.content)) {
             // 数组格式(视觉模型):提取所有文本部分
             return m.content.map(item => {
@@ -772,13 +772,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         }
         return '';
     }).join(' ');
-    const estimated = estimateTokens(totalText);
+    var estimated = estimateTokens(totalText);
     // ★ 完全按用户配置,不按模型自动调整
     let requestedTokens = parseInt(getVal('maxTokens')) || 4096;
 
     // 构建请求体
     // ★ MiniMax M3 Anthropic 兼容（暂时禁用，OpenAI 端点已稳定）
-    const _useAnthropicFormat = false; // (getVal('modelSelect') || '').toLowerCase().includes('minimax-m3');
+    var _useAnthropicFormat = false; // (getVal('modelSelect') || '').toLowerCase().includes('minimax-m3');
     let _aSysContent = '';
     if (_useAnthropicFormat) {
         // 提取 system 消息
@@ -796,7 +796,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var _am2 = _nonSysMsgs[_ami2];
             if (_am2.role === 'user') {
                 // ★ 跳过已转换的 Anthropic 格式消息（含 tool_result 或 tool_use 块）
-                const _alreadyAnthropic = Array.isArray(_am2.content) && _am2.content.some(function(c) { return c.type === 'tool_result' || c.type === 'tool_use'; });
+                var _alreadyAnthropic = Array.isArray(_am2.content) && _am2.content.some(function(c) { return c.type === 'tool_result' || c.type === 'tool_use'; });
                 if (_alreadyAnthropic) continue; // 已经是 Anthropic 格式，跳过
                 if (typeof _am2.content === 'string') {
                     _am2.content = [{ type: 'text', text: _am2.content }];
@@ -810,7 +810,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     });
                 }
             } else if (_am2.role === 'assistant' && _am2.tool_calls) {
-                const _blocks = [];
+                var _blocks = [];
                 if (typeof _am2.content === 'string' && _am2.content.trim()) {
                     _blocks.push({ type: 'text', text: _am2.content });
                 }
@@ -850,10 +850,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 统一获取模型选择并转小写
-    const currentModel = getVal('modelSelect') || '';
-    const modelLower = currentModel.toLowerCase();
+    var currentModel = getVal('modelSelect') || '';
+    var modelLower = currentModel.toLowerCase();
 
-    const body = {
+    var body = {
         model,
         messages: apiMessages,
         stream: ((window.isProxyEnabled() && !modelLower.includes('minimax') && !_useAnthropicFormat) ? false : getChecked('streamToggle')),
@@ -863,8 +863,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // ★ MiniMax M3: thinking 和 token 控制（Anthropic 格式跳过，由格式自身处理）
     if (!_useAnthropicFormat && (modelLower.includes('m3') || modelLower.includes('minimax-m3'))) {
-        const _tm = localStorage.getItem('thinkingMode') || 'adaptive';
-        const _hasTools = body.tools && body.tools.length > 0;
+        var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
+        var _hasTools = body.tools && body.tools.length > 0;
         if (_hasTools || _tm === 'disabled') {
             body.thinking = { type: 'disabled' };
         } else {
@@ -876,16 +876,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // MiniMax M2: 启用 reasoning_split 以分离思考内容
-    const isMiniMaxModel = modelLower.includes('minimax');
+    var isMiniMaxModel = modelLower.includes('minimax');
     // MiniMax M2: 默认使用<think>标签模式(不传reasoning_split以避免参数错误)
 
     // ★ Agent 模式: 始终启用工具调用
-    const agentModeActive = isAgentToolsActive();
+    var agentModeActive = isAgentToolsActive();
     var effectiveToolCall = useToolCall || currentMessageHasImages || agentModeActive;
 
     // ★ 终极检查: 模型在 no-tool 列表中就直接跳过整个工具注册
-    const _noToolCheckList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
-    const _modelNameLC = modelLower;
+    var _noToolCheckList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+    var _modelNameLC = modelLower;
     for (var _ntci = 0; _ntci < _noToolCheckList.length; _ntci++) {
         if (_modelNameLC.indexOf(_noToolCheckList[_ntci]) !== -1) {
             effectiveToolCall = false;
@@ -899,17 +899,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // 只对支持视觉的模型添加图生图工具,文本模型无法处理图片参数
     // 图生图工具:所有模型都可使用,因为系统会自动获取用户上传的图片
     // 注意:generate_image_i2i 工具的参数 image 会由系统自动填充,不需要AI处理
-    const i2iTool = IMAGE_I2I_TOOL_DEFINITION;
+    var i2iTool = IMAGE_I2I_TOOL_DEFINITION;
 
     // 构建工具列表
-    const imageTools = [IMAGE_TOOL_DEFINITION, ANALYZE_IMAGE_TOOL];
+    var imageTools = [IMAGE_TOOL_DEFINITION, ANALYZE_IMAGE_TOOL];
     if (i2iTool) imageTools.push(i2iTool);
     imageTools.push(VIDEO_UNDERSTANDING_TOOL);
     imageTools.push(VIDEO_EDIT_TOOL);
 
     // 构建工具列表:根据搜索开关和工具模式动态选择
-    const searchOn = getChecked('searchToggle');
-    const toolMode = effectiveToolCall;
+    var searchOn = getChecked('searchToggle');
+    var toolMode = effectiveToolCall;
     if (toolMode) {
         // ★ 工具分类: A类(始终可用) | B类(Agent模式启用后额外可用) | C类(始终在列表中)
         var tools = [];
@@ -934,13 +934,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push(SERVER_FILE_GREP_TOOL);
         // ask_agent: 仅在普通模式且当前对话无临时授权时注册
         // Agent模式/yolo模式/当前对话已有临时授权时无需此工具
-        const _hasTempForThisChat = !!(window._tempAgentGranted && window._tempAgentChatId === chatId);
+        var _hasTempForThisChat = !!(window._tempAgentGranted && window._tempAgentChatId === chatId);
         if (!agentModeActive && !_hasTempForThisChat) {
             tools.push(ASK_AGENT_TOOL);
         }
 
         // ★ 临时授权的有效范围: 仅当前对话的临时授权才启用 B 类工具
-        const _effectiveAgent = agentModeActive || _hasTempForThisChat;
+        var _effectiveAgent = agentModeActive || _hasTempForThisChat;
 
         // ===== B 类工具: Agent 模式启用后额外可用 =====
         if (_effectiveAgent) {
@@ -1028,8 +1028,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         })();
         // ★ 工具启用开关过滤
         (function() {
-            const _filteredTools = [];
-            const _toolFuncNameToToggleKey = {
+            var _filteredTools = [];
+            var _toolFuncNameToToggleKey = {
                 'web_search': 'SEARCH_TOOL_DEFINITION',
                 'rag_search': 'RAG_SEARCH_TOOL_DEFINITION',
                 'web_fetch': 'WEB_FETCH_TOOL_DEFINITION',
@@ -1111,14 +1111,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
-                const _ftName = _ft.function?.name || '';
-                const _toggleKey = _toolFuncNameToToggleKey[_ftName];
+                var _ftName = _ft.function?.name || '';
+                var _toggleKey = _toolFuncNameToToggleKey[_ftName];
                 if (_toggleKey) {
                     if (window.isToolEnabled(_toggleKey)) {
                         // ★ Agent 模式关闭时,过滤掉 Agent 专属工具(除非有当前对话的临时授权 OR ask_agent 也在列表中)
-                        const _agentOn = isAgentToolsActive() || (window._tempAgentGranted && window._tempAgentChatId === chatId);
+                        var _agentOn = isAgentToolsActive() || (window._tempAgentGranted && window._tempAgentChatId === chatId);
                         // ★ ask_agent 存在时,提前放出核心 Agent 工具(避免授权后无工具可用)
-                        const _hasAskAgent = tools.some(function(t) { return t.function?.name === 'ask_agent'; });
+                        var _hasAskAgent = tools.some(function(t) { return t.function?.name === 'ask_agent'; });
                         if (!_agentOn && AGENT_ONLY_KEYS.indexOf(_toggleKey) >= 0) {
                             if (_hasAskAgent) {
                                 _filteredTools.push(_ft);  // ask_agent 同行 → 全部 Agent 工具放行
@@ -1151,7 +1151,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             window._toolToggleMap = _toolFuncNameToToggleKey;
         })();
         // ★ 检查模型是否已在"不支持工具"列表中(自动降级 + 模型配置内置)
-        const _noToolModels = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+        var _noToolModels = JSON.parse(localStorage.getItem('noToolModels') || '[]');
         // 匹配方式: 列表中的模式如果出现在模型名中就算匹配
         var _matchedLocal = false;
         for (var _nti = 0; _nti < _noToolModels.length; _nti++) {
@@ -1163,7 +1163,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // 同时检查模型配置中是否内置为 no-tool
         var _cfgBuiltinNoTool = false;
         try { _cfgBuiltinNoTool = _getModelCfg().isNoToolsBuiltin(currentModel); } catch(e) {}
-        const _isInNoToolList = _matchedLocal || _cfgBuiltinNoTool;
+        var _isInNoToolList = _matchedLocal || _cfgBuiltinNoTool;
         if (!_isInNoToolList) {
             // ★ MiniMax M3: 限制工具数量避免 400
             if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
@@ -1216,13 +1216,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // ★ modelName 提升到函数作用域,以便后续 sanitizeBody 和 agent 代码使用
-    const modelName = currentModel || getVal('modelSelect') || '';
+    var modelName = currentModel || getVal('modelSelect') || '';
 
     if (getChecked('customParamsToggle')) {
         try {
             // MiniMax 不支持部分 OpenAI 参数,过滤掉以避免 2013 错误
             // ★ 模型配置:使用模型专属约束过滤 custom params
-            const _mcParamsBanned = _getModelCfg().getBannedParams(modelName);
+            var _mcParamsBanned = _getModelCfg().getBannedParams(modelName);
             let customParams = {};
             try { customParams = JSON.parse(getVal('customParams') || '{}'); } catch(e) {}
             if (_mcParamsBanned.length) {
@@ -1233,12 +1233,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // ★ Agent 模式: 如果本轮创建了子代理,禁止模型继续说话
-    const _hasCreatedSubAgent = false;
+    var _hasCreatedSubAgent = false;
 
     // ★ Agent 模式: 思考深度处理 - 使用模型配置判断是否支持 reasoning_effort
     if (_effectiveAgent) {
-        const _mcSupportsReasonEffort = _getModelCfg().supportsReasonEffort(modelName);
-        const thinkingDepth = localStorage.getItem('agentThinkingDepth') || 'standard';
+        var _mcSupportsReasonEffort = _getModelCfg().supportsReasonEffort(modelName);
+        var thinkingDepth = localStorage.getItem('agentThinkingDepth') || 'standard';
         if (thinkingDepth === 'deep' && _mcSupportsReasonEffort) {
             body.reasoning_effort = 'high';
         } else if (thinkingDepth === 'shallow' && _mcSupportsReasonEffort) {
@@ -1252,7 +1252,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     _getModelCfg().sanitizeBody(modelName, body);
 
     // ★ 图像模型需要更长超时 (生成图片可达 2-15 分钟)
-    const _isImageModel = modelName.toLowerCase().indexOf('image') !== -1
+    var _isImageModel = modelName.toLowerCase().indexOf('image') !== -1
         || modelName.toLowerCase().indexOf('dall-e') !== -1
         || modelName.toLowerCase().indexOf('imagen') !== -1
         || modelName.toLowerCase().indexOf('flux') !== -1;
@@ -1265,8 +1265,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             body.modalities = ['image', 'text'];
         }
         if (!body.image_config) {
-            const _imgSize = localStorage.getItem('imageSize') || '1K';
-            const _imgRatio = localStorage.getItem('imageAspectRatio') || '1:1';
+            var _imgSize = localStorage.getItem('imageSize') || '1K';
+            var _imgRatio = localStorage.getItem('imageAspectRatio') || '1:1';
             body.image_config = {
                 aspect_ratio: _imgRatio,
                 image_size: _imgSize
@@ -1297,14 +1297,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ MiniMax M3: 复杂工具调用需要更长时间
     var _timeoutSec = parseInt(getVal('requestTimeout')) || 120;
     if (modelLower.includes('minimax-m3') || modelLower.includes('minimax')) _timeoutSec = Math.max(_timeoutSec, 180);
-    const timeout = _isImageModel ? 900000 : _timeoutSec * 1000;
-    const timeoutId = setTimeout(() => abortMain.abort(), timeout);
-    const startTime = Date.now();
+    var timeout = _isImageModel ? 900000 : _timeoutSec * 1000;
+    var timeoutId = setTimeout(() => abortMain.abort(), timeout);
+    var startTime = Date.now();
 
     // 网络错误重试配置
-    const maxRetries = 3;
+    var maxRetries = 3;
     // Agent 模式使用自定义最大工具调用轮次
-    const maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+    var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
     let toolCallCount = 0;
 
     // 离线检测
@@ -1353,7 +1353,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 var _tc = _mm.tool_calls[_tj];
                 if (_tc.function && typeof _tc.function.arguments === 'string') {
                     try {
-                        const _parsed = JSON.parse(_tc.function.arguments);
+                        var _parsed = JSON.parse(_tc.function.arguments);
                         _tc.function.arguments = JSON.stringify(_parsed);
                     } catch(e) {
                         _tc.function.arguments = '{}';
@@ -1367,19 +1367,19 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     async function _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble) {
         let _fullText = '';
         let _reasoningText = '';
-        const _toolCalls = [];
+        var _toolCalls = [];
         var _usage = null;
 
         // ★ 流式 SSE 解析
-        const _contentType = res.headers.get('content-type') || '';
+        var _contentType = res.headers.get('content-type') || '';
         if (_contentType.includes('text/event-stream') || _contentType.includes('stream')) {
-            const _reader = res.body.getReader();
-            const _decoder = new TextDecoder();
+            var _reader = res.body.getReader();
+            var _decoder = new TextDecoder();
             var _buf = '';
             var _currentBlockIdx = -1;
             var _currentBlockType = '';
             var _toolUseIdx = -1;
-            const _toolUseMap = {}; // index → {id, name, input_json}
+            var _toolUseMap = {}; // index → {id, name, input_json}
             var _done = false;
 
             while (!_done) {
@@ -1395,9 +1395,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (!_ln) continue;
                     if (_ln.startsWith('event: ')) { _event = _ln.substring(7); continue; }
                     if (!_ln.startsWith('data: ')) continue;
-                    const _js = _ln.substring(6);
+                    var _js = _ln.substring(6);
                     try {
-                        const _d = JSON.parse(_js);
+                        var _d = JSON.parse(_js);
 
                         if (_event === 'message_start' || !_event) {
                             if (_d.message && _d.message.usage) {
@@ -1414,7 +1414,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 }
                             }
                         } else if (_event === 'content_block_delta') {
-                            const _delta = _d.delta;
+                            var _delta = _d.delta;
                             if (_delta) {
                                 if (_delta.type === 'text_delta') {
                                     _fullText += _delta.text;
@@ -1431,7 +1431,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             }
                         } else if (_event === 'content_block_stop') {
                             if (_toolUseIdx >= 0 && _toolUseMap[_toolUseIdx]) {
-                                const _tu = _toolUseMap[_toolUseIdx];
+                                var _tu = _toolUseMap[_toolUseIdx];
                                 var _input = {};
                                 try { _input = JSON.parse(_tu.input_json); } catch(e) {}
                                 _toolCalls.push({ id: _tu.id, type: 'function', function: { name: _tu.name, arguments: JSON.stringify(_input) } });
@@ -1460,7 +1460,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
         // ★ 非流式 JSON 解析
         try {
-            const _data = await res.json();
+            var _data = await res.json();
             if (_data.usage) {
                 _usage = { prompt_tokens: _data.usage.input_tokens || 0, completion_tokens: _data.usage.output_tokens || 0, total_tokens: (_data.usage.input_tokens || 0) + (_data.usage.output_tokens || 0) };
             }
@@ -1485,9 +1485,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     async function attemptRequestWithFreshAbort(attempt, abortCtrl, timeoutIdVal) {
         try {
             // ★ 终极防护: 每次发送前检查 no-tool 列表,确保不发送 tools
-            const _curSendModel = getVal('modelSelect') || '';
-            const _curSendLower = _curSendModel.toLowerCase();
-            const _noToolSend = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+            var _curSendModel = getVal('modelSelect') || '';
+            var _curSendLower = _curSendModel.toLowerCase();
+            var _noToolSend = JSON.parse(localStorage.getItem('noToolModels') || '[]');
             // 匹配方式: 列表中的模式如果出现在模型名中就算匹配(如 'deepseek-r1' 匹配 'deepseek-r1:latest')
             var _matchedNoTool = false;
             for (var _noi = 0; _noi < _noToolSend.length; _noi++) {
@@ -1517,9 +1517,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
 
             // ★ MiniMax 直连: 自定义 URL 和 API Key
-            const _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || (getVal('baseUrl').replace(/\/v1$/, '') + '/anthropic/v1/messages')) : getVal('baseUrl') + '/chat/completions';
+            var _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || (getVal('baseUrl').replace(/\/v1$/, '') + '/anthropic/v1/messages')) : getVal('baseUrl') + '/chat/completions';
             if (_useAnthropicFormat) delete body._anthropicUrl;
-            const _reqBody = JSON.parse(JSON.stringify(body));
+            var _reqBody = JSON.parse(JSON.stringify(body));
             // 统一声明,后续两个分支都会赋值
             let usage = null;
             let toolCalls = [];
@@ -1528,8 +1528,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             console.log('[API-REQ] model:', body.model, 'stream:', !!_reqBody.stream, 'tools:', (_reqBody.tools||[]).length, 'msgs:', body.messages.length);
 
             // ★ 硬编码终极防护: 已知不支持工具的模型直接剥离 tools
-            const _modelStr = (body.model || '').toLowerCase();
-            const _noToolKeywords = ['deepseek-r1', 'deepseek-reasoner', 'qwq',
+            var _modelStr = (body.model || '').toLowerCase();
+            var _noToolKeywords = ['deepseek-r1', 'deepseek-reasoner', 'qwq',
                 'gpt-5.4-image', 'gpt-4o-image', 'image-01', 'image-02', 'dall-e', 'dalle', 'imagen'];
             if (body.tools && _noToolKeywords.some(function(k){return _modelStr.indexOf(k) !== -1;})) {
                 console.log('[HARD-SAFE] 模型', body.model, '禁止工具,硬编码移除');
@@ -1581,13 +1581,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // ★ 可恢复流式: 开关打开时走后端引擎
             // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
-            const useStream = _isImageModel ? false : (_useAnthropicFormat ? getChecked('streamToggle') : ((window.isProxyEnabled() && !modelLower.includes('minimax')) ? false : getChecked('streamToggle')));
-            const _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
-            const _isContinuation = (toolCallCount > 0);
+            var useStream = _isImageModel ? false : (_useAnthropicFormat ? getChecked('streamToggle') : ((window.isProxyEnabled() && !modelLower.includes('minimax')) ? false : getChecked('streamToggle')));
+            var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
+            var _isContinuation = (toolCallCount > 0);
             var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
                 // ★ WebSocket 模式：发送到后端网关，由网关管理 LLM 流
-                const _rsResult = await window._wsSendChat(
+                var _rsResult = await window._wsSendChat(
                     body.messages,
                     { model: body.model, apiKey: getVal('apiKey'), baseUrl: getVal('baseUrl'),
                       temp: body.temperature, tokens: body.max_tokens, tools: body.tools },
@@ -1612,16 +1612,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 _imgPlaceholder.style.cssText = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
                 _imgPlaceholder.innerHTML = '<div style="font-size:32px;margin-bottom:12px;">🎨</div><div style="font-size:18px;font-weight:600;">正在生成图片...</div><div id="img-gen-timer" style="font-size:13px;margin-top:8px;opacity:0.8;">已等待 0s</div><div style="font-size:11px;margin-top:8px;opacity:0.6;">图像生成最多需要 15 分钟</div>';
                 currentBubble.querySelector('.markdown-body')?.appendChild(_imgPlaceholder);
-                const _imgStart = Date.now();
+                var _imgStart = Date.now();
                 _imgTimerInterval = setInterval(function() {
-                    const el = document.getElementById('img-gen-timer');
+                    var el = document.getElementById('img-gen-timer');
                     if (el) el.textContent = '已等待 ' + Math.floor((Date.now() - _imgStart) / 1000) + 's';
                 }, 1000);
             }
 
-            const _fetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
-            const _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getVal('apiKey') };
-            const res = await _fetchFn(_reqUrl, {
+            var _fetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+            var _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getVal('apiKey') };
+            var res = await _fetchFn(_reqUrl, {
                 method: 'POST',
                 headers: _headers,
                 body: JSON.stringify(body),
@@ -1633,12 +1633,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
 
             let model = getVal('modelSelect') || '';
-            const isMiniMax = model.toLowerCase().includes('minimax');
+            var isMiniMax = model.toLowerCase().includes('minimax');
 
             // ★ Anthropic 格式响应处理
             if (_useAnthropicFormat) {
                 try {
-                    const _aResult = await _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble);
+                    var _aResult = await _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble);
                     usage = _aResult.usage;
                     toolCalls = _aResult.toolCalls || [];
                     if (_aResult.reasoningText && !pendingMsg.reasoning) pendingMsg.reasoning = _aResult.reasoningText;
@@ -1652,21 +1652,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     toolCalls = result.toolCalls || [];
                     // ★ 成本追踪: 累加 token 用量
                     if (usage) {
-                        const _pt = usage.prompt_tokens || usage.input_tokens || 0;
-                        const _ct = usage.completion_tokens || usage.output_tokens || 0;
+                        var _pt = usage.prompt_tokens || usage.input_tokens || 0;
+                        var _ct = usage.completion_tokens || usage.output_tokens || 0;
                         sessionUsage.promptTokens += _pt;
                         sessionUsage.completionTokens += _ct;
                         sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
                         // Feature 7: 增强缓存追踪
-                        const _cHit = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                        const _totalCache = (_pt || _ct);
+                        var _cHit = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                        var _totalCache = (_pt || _ct);
                         if (_cHit > 0) {
                             sessionUsage.cacheHitTokens += _cHit;
                             sessionUsage.cacheMissTokens += (_totalCache > _cHit) ? (_totalCache - _cHit) : 0;
                         }
                         // 估算费用 (基于 DeepSeek V4 定价: $0.5/M input, $2/M output)
-                        const pt = _pt / 1000000;
-                        const ct = _ct / 1000000;
+                        var pt = _pt / 1000000;
+                        var ct = _ct / 1000000;
                         sessionUsage.totalCost += pt * 0.5 + ct * 2;
                     }
                     // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
@@ -1675,16 +1675,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                 } catch (streamErr) {
                     // ★ HTTP2/网络错误降级: 非流式重试一次
-                    const isStreamNetErr = streamErr.name === 'TypeError' ||
+                    var isStreamNetErr = streamErr.name === 'TypeError' ||
                         (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
                     if (isStreamNetErr) {
                         console.warn('[STREAM] 流式读取失败,尝试非流式降级:', streamErr.message);
                         showToast('流式中断,切换非流式重试...', 'warning', 2000);
                         // 重新构造非流式请求体(清除stream标记)
-                        const _nsBody = JSON.parse(JSON.stringify(body));
+                        var _nsBody = JSON.parse(JSON.stringify(body));
                         if (_nsBody.stream !== undefined) _nsBody.stream = false;
-                        const _nsFetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
-                        const _nsRes = await _nsFetchFn(_reqUrl, {
+                        var _nsFetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+                        var _nsRes = await _nsFetchFn(_reqUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
                             body: JSON.stringify(_nsBody),
@@ -1692,21 +1692,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         });
                         clearTimeout(timeoutIdVal);
                         if (!_nsRes.ok) throw new Error(`HTTP ${_nsRes.status}: ${await _nsRes.text()}`);
-                        const _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
+                        var _nsResult = await handleNonStream(_nsRes, chatId, pendingMsg, currentBubble);
                         usage = _nsResult.usage;
                         if (usage) {
-                            const _pt2 = usage.prompt_tokens || usage.input_tokens || 0;
-                            const _ct2 = usage.completion_tokens || usage.output_tokens || 0;
+                            var _pt2 = usage.prompt_tokens || usage.input_tokens || 0;
+                            var _ct2 = usage.completion_tokens || usage.output_tokens || 0;
                             sessionUsage.promptTokens += _pt2;
                             sessionUsage.completionTokens += _ct2;
                             sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                            const _cHit2 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                            var _cHit2 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
                             if (_cHit2 > 0) {
                                 sessionUsage.cacheHitTokens += _cHit2;
                                 sessionUsage.cacheMissTokens += (_pt2 + _ct2 > _cHit2) ? (_pt2 + _ct2 - _cHit2) : 0;
                             }
-                            const pt2 = _pt2 / 1000000;
-                            const ct2 = _ct2 / 1000000;
+                            var pt2 = _pt2 / 1000000;
+                            var ct2 = _ct2 / 1000000;
                             sessionUsage.totalCost += pt2 * 0.5 + ct2 * 2;
                         }
                         toolCalls = _nsResult.toolCalls || [];
@@ -1717,17 +1717,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                     pendingMsg.generatedImages.push(_nsResult.generatedImages[_gii2]);
                                     if (_gii2 === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _nsResult.generatedImages[_gii2];
                                     // ★ 上传到服务器,确保刷新后图片不消失
-                                    const _imgSf = _nsResult.generatedImages[_gii2];
+                                    var _imgSf = _nsResult.generatedImages[_gii2];
                                     if (_imgSf && !_imgSf.startsWith(window.location.origin) && !_imgSf.startsWith('/oneapichat')) {
                                         (function(_origSf, _sfIdx) {
                                             uploadImageToServer(_origSf).then(function(srvUrl) {
                                                 if (srvUrl) {
-                                                    const _pSf = pendingMsg.generatedImages.indexOf(_origSf);
+                                                    var _pSf = pendingMsg.generatedImages.indexOf(_origSf);
                                                     if (_pSf !== -1) pendingMsg.generatedImages[_pSf] = srvUrl;
                                                     if (pendingMsg.generatedImage === _origSf) pendingMsg.generatedImage = srvUrl;
-                                                    const _cSf = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                                    var _cSf = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                                     if (_cSf !== -1) {
-                                                        const _cmSf = chats[chatId].messages[_cSf];
+                                                        var _cmSf = chats[chatId].messages[_cSf];
                                                         if (_cmSf.generatedImages && _cmSf.generatedImages[_sfIdx] === _origSf) _cmSf.generatedImages[_sfIdx] = srvUrl;
                                                         if (_cmSf.generatedImage === _origSf) _cmSf.generatedImage = srvUrl;
                                                     }
@@ -1740,10 +1740,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 }
                             }
                             // 直接插入 DOM
-                            const _tb2 = currentBubble || activeBubbleMap[chatId];
+                            var _tb2 = currentBubble || activeBubbleMap[chatId];
                             if (_tb2) {
                                 _tb2.classList.remove('typing');
-                                const _ph2 = _tb2.querySelector('#image-placeholder');
+                                var _ph2 = _tb2.querySelector('#image-placeholder');
                                 if (_ph2) _ph2.remove();
                             }
                         }
@@ -1763,10 +1763,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (!pendingMsg.content) pendingMsg.content = '(图片生成中发生内部错误,但图片已保存)';
                     if (currentBubble) {
                         currentBubble.classList.remove('typing', 'gen-active');
-                        const _phHns = currentBubble.querySelector('#image-placeholder');
+                        var _phHns = currentBubble.querySelector('#image-placeholder');
                         if (_phHns) _phHns.remove();
                         // 显示兜底文本
-                        const _mbHns = currentBubble.querySelector('.markdown-body');
+                        var _mbHns = currentBubble.querySelector('.markdown-body');
                         if (_mbHns && !_mbHns.textContent.trim()) {
                             _mbHns.innerHTML = '<p>' + pendingMsg.content + '</p>';
                         }
@@ -1775,18 +1775,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 console.log('[ImageModel DEBUG] result.generatedImages:', result.generatedImages ? result.generatedImages.length : 'undefined/null', 'toolCalls len:', (result.toolCalls || []).length);
                 usage = result.usage;
                 if (usage) {
-                    const _pt3 = usage.prompt_tokens || usage.input_tokens || 0;
-                    const _ct3 = usage.completion_tokens || usage.output_tokens || 0;
+                    var _pt3 = usage.prompt_tokens || usage.input_tokens || 0;
+                    var _ct3 = usage.completion_tokens || usage.output_tokens || 0;
                     sessionUsage.promptTokens += _pt3;
                     sessionUsage.completionTokens += _ct3;
                     sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                    const _cHit3 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                    var _cHit3 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
                     if (_cHit3 > 0) {
                         sessionUsage.cacheHitTokens += _cHit3;
                         sessionUsage.cacheMissTokens += (_pt3 + _ct3 > _cHit3) ? (_pt3 + _ct3 - _cHit3) : 0;
                     }
-                    const pt3 = _pt3 / 1000000;
-                    const ct3 = _ct3 / 1000000;
+                    var pt3 = _pt3 / 1000000;
+                    var ct3 = _ct3 / 1000000;
                     sessionUsage.totalCost += pt3 * 0.5 + ct3 * 2;
                 }
                 toolCalls = result.toolCalls || [];
@@ -1800,7 +1800,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         if (_ph) _ph.remove();
                     }
                     // ★ 直接插入图片到气泡
-                    const _targetBubble = currentBubble || activeBubbleMap[chatId];
+                    var _targetBubble = currentBubble || activeBubbleMap[chatId];
                     if (_targetBubble) {
                         var _imgCont = _targetBubble.querySelector('.generated-images-container');
                         if (!_imgCont) {
@@ -1819,13 +1819,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                     (function(_origUrl, _di) {
                                         uploadImageToServer(_origUrl).then(function(srvUrl) {
                                             if (srvUrl) {
-                                                const _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
+                                                var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
                                                 if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
                                                 if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
                                                 // ★ 同步到 chats
-                                                const _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                                var _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                                 if (_cmi !== -1) {
-                                                    const _cmsg = chats[chatId].messages[_cmi];
+                                                    var _cmsg = chats[chatId].messages[_cmi];
                                                     if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _origUrl) _cmsg.generatedImages[_di] = srvUrl;
                                                     if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
                                                 }
@@ -1837,7 +1837,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 }
                             }
                             // ★ 去重 DOM: 检查是否已有相同 src 的图片
-                            const _existingImgs = _imgCont.querySelectorAll('img');
+                            var _existingImgs = _imgCont.querySelectorAll('img');
                             var _alreadyExists = false;
                             for (var _exi = 0; _exi < _existingImgs.length; _exi++) {
                                 if (_existingImgs[_exi].src === (_imgData.startsWith('data:') ? _imgData : _imgData)) {
@@ -1867,24 +1867,24 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             if (toolCalls.length > 0) {
                 toolCallCount++;
                 setTimeout(function() {
-                    const _tEl = getEl("agentToolCount"); if (_tEl) _tEl.textContent = toolCallCount;
-                    const _rEl = getEl("agentRoundCount"); if (_rEl) _rEl.textContent = toolCallCount;
-                    const _s = toolCallStats.getSummary();
-                    const _sEl = getEl("agentSuccessCount"); if (_sEl) _sEl.textContent = _s.success;
-                    const _eEl = getEl("agentErrorCount"); if (_eEl) _eEl.textContent = _s.error;
-                    const _dEl = getEl("agentTaskDetail");
+                    var _tEl = getEl("agentToolCount"); if (_tEl) _tEl.textContent = toolCallCount;
+                    var _rEl = getEl("agentRoundCount"); if (_rEl) _rEl.textContent = toolCallCount;
+                    var _s = toolCallStats.getSummary();
+                    var _sEl = getEl("agentSuccessCount"); if (_sEl) _sEl.textContent = _s.success;
+                    var _eEl = getEl("agentErrorCount"); if (_eEl) _eEl.textContent = _s.error;
+                    var _dEl = getEl("agentTaskDetail");
                     if (_dEl && _s.failedTools.length > 0) {
                         var _lines = _s.failedTools.map(function(ft) {
-                            const _last = ft.errors[ft.errors.length - 1] || {};
+                            var _last = ft.errors[ft.errors.length - 1] || {};
                             return '<span style=color:#ef4444>❌ ' + ft.name + '</span>: ' + (_last.msg || '未知错误').substring(0,60);
                         });
                         _dEl.innerHTML = _lines.join('<br>');
                     }
-                    const _mEl = getEl("agentMaxCount"); if (_mEl) _mEl.textContent = maxToolCalls;
-                    const _pBar = getEl("agentProgressBar");
-                    const _pFill = getEl("agentProgressFill");
+                    var _mEl = getEl("agentMaxCount"); if (_mEl) _mEl.textContent = maxToolCalls;
+                    var _pBar = getEl("agentProgressBar");
+                    var _pFill = getEl("agentProgressFill");
                     if (_pBar && _pFill) {
-                        const _pct = Math.min(100, Math.round((toolCallCount / Math.max(maxToolCalls, 1)) * 100));
+                        var _pct = Math.min(100, Math.round((toolCallCount / Math.max(maxToolCalls, 1)) * 100));
                         _pBar.style.display = 'block';
                         _pFill.setAttribute('width', _pct + '%');
                     }
@@ -1904,8 +1904,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 // 将助手消息添加到历史(包含tool_calls)
                 // 确保tool_calls中的arguments是字符串(API要求)
                 // 过滤掉没有有效function.arguments的碎片
-                const validToolCalls = toolCalls.filter(tc => tc && tc.function && tc.function.name && (typeof tc.function.arguments === 'object' || (typeof tc.function.arguments === 'string' && tc.function.arguments.length > 2)));
-                const normalizedToolCalls = validToolCalls.map(tc => {
+                var validToolCalls = toolCalls.filter(tc => tc && tc.function && tc.function.name && (typeof tc.function.arguments === 'object' || (typeof tc.function.arguments === 'string' && tc.function.arguments.length > 2)));
+                var normalizedToolCalls = validToolCalls.map(tc => {
                     var argStr = typeof tc.function.arguments === 'string'
                         ? tc.function.arguments
                         : JSON.stringify(tc.function.arguments || {});
@@ -1920,7 +1920,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     // 针对 engine_agent_create 的 prompt 做特殊处理:截断过长内容
                     if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
                         try {
-                            const parsed = JSON.parse(argStr);
+                            var parsed = JSON.parse(argStr);
                             if (parsed.prompt && parsed.prompt.length > 500) {
                                 parsed.prompt = parsed.prompt.substring(0, 500) + '...(截断)请完成后用 engine_push 推送结果给用户';
                                 argStr = JSON.stringify(parsed);
@@ -1942,7 +1942,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         }
                     };
                 });
-                const assistantMsg = {
+                var assistantMsg = {
                     role: 'assistant',
                     content: (typeof pendingMsg.content === 'string' && pendingMsg.content.trim())
                         ? pendingMsg.content
@@ -2004,8 +2004,8 @@ window.useAlternativeVisionModel = function() {
                     var _argPreview = '';
                     try {
                         if (tc.function && tc.function.arguments) {
-                            const _a = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-                            const _keys = Object.keys(_a || {});
+                            var _a = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
+                            var _keys = Object.keys(_a || {});
                             _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
                         }
                     } catch(e) {}
@@ -2024,8 +2024,8 @@ window.useAlternativeVisionModel = function() {
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running');
 
                     // ★ 传递工具调用的 abort 信号,让 fetch 也能被中断
-                    const _toolAbortCtrl = new AbortController();
-                    const _toolAbortKey = chatId + '_tool_' + Date.now();
+                    var _toolAbortCtrl = new AbortController();
+                    var _toolAbortKey = chatId + '_tool_' + Date.now();
                     window.__toolAbortControllers = window.__toolAbortControllers || {};
                     window.__toolAbortControllers[_toolAbortKey] = _toolAbortCtrl;
                     
@@ -2034,7 +2034,7 @@ window.useAlternativeVisionModel = function() {
                         _toolAbortCtrl.abort();
                     }
                     
-                    const toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
+                    var toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
                     
                     // 清理控制器
                     delete window.__toolAbortControllers[_toolAbortKey];
@@ -2045,17 +2045,17 @@ window.useAlternativeVisionModel = function() {
                     if (tc.function && tc.function.name === 'web_fetch' && toolResult._webFetchUrls && toolResult._webFetchUrls.length > 0) {
                         _allWebFetchUrls = _allWebFetchUrls.concat(toolResult._webFetchUrls);
                         // 去重
-                        const _seenUrls = new Set();
+                        var _seenUrls = new Set();
                         _allWebFetchUrls = _allWebFetchUrls.filter(function(u) {
                             if (_seenUrls.has(u)) return false;
                             _seenUrls.add(u);
                             return true;
                         });
                     }
-                    const resultContent = toolResult.error || toolResult.result || '(empty)';
+                    var resultContent = toolResult.error || toolResult.result || '(empty)';
 
                     // 确保content是字符串
-                    const contentStr = typeof resultContent === 'string'
+                    var contentStr = typeof resultContent === 'string'
                         ? resultContent
                         : (resultContent ? JSON.stringify(resultContent) : '(empty)');
 
@@ -2086,7 +2086,7 @@ window.useAlternativeVisionModel = function() {
                             }
                             // 如果生成了图片,确保存入消息对象
                             if ((tc.function.name === 'generate_image' || tc.function.name === 'generate_image_i2i') && (pendingMsg.generatedImage || pendingMsg.generatedImages)) {
-                                const msgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                var msgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
                                 if (msgIdx !== -1) {
                                     if (pendingMsg.generatedImage) chats[chatId].messages[msgIdx].generatedImage = pendingMsg.generatedImage;
                                     if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages;
@@ -2108,7 +2108,7 @@ window.useAlternativeVisionModel = function() {
                     if (!validToolCalls || !Array.isArray(validToolCalls)) {
                         console.log('[Agent] 已创建子代理,跳过等待逻辑');
                     } else {
-                    const onlyCreatedSubAgents = validToolCalls.every(function(tc) {
+                    var onlyCreatedSubAgents = validToolCalls.every(function(tc) {
                         return tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create');
                     });
                     if (onlyCreatedSubAgents) {
@@ -2117,12 +2117,12 @@ window.useAlternativeVisionModel = function() {
                     } else {
                         // ★ 优雅方式: 不暴力截断,而是给模型注入一个"总结提示"让它自己在下一轮自然结束
                         // 通过修改 pendingMsg.content 末尾追加提示,让模型在下一轮 API 调用时自主收尾
-                        const _createdNames = [];
+                        var _createdNames = [];
                         validToolCalls.forEach(function(tc) {
                             if (tc.function && (tc.function.name === 'delegate_task' || tc.function.name === 'engine_agent_create')) {
                                 try {
-                                    const _args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {});
-                                    const _n = _args.name || _args.agent_name || _args.role || 'worker';
+                                    var _args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {});
+                                    var _n = _args.name || _args.agent_name || _args.role || 'worker';
                                     if (_createdNames.indexOf(_n) === -1) _createdNames.push(_n);
                                 } catch(e) {}
                             }
@@ -2141,8 +2141,8 @@ window.useAlternativeVisionModel = function() {
                         saveChats();
                         // ★ 追加一条 user hint 到消息历史,作为模型的"自然引导"
                         // 模型下一次 API 调用时会读到这条,然后自主决定: 继续操作 / 总结等待
-                        const _namesStr = _createdNames.join(', ');
-                        const _hintMsg = '已委派子代理: ' + _namesStr + '。' +
+                        var _namesStr = _createdNames.join(', ');
+                        var _hintMsg = '已委派子代理: ' + _namesStr + '。' +
                             '请用一句话总结当前进度,告知用户已委派的任务,然后等待子代理完成。' +
                             '子代理完成后系统会自动通知你整合结果。';
                         chats[chatId].messages.push({
@@ -2158,11 +2158,11 @@ window.useAlternativeVisionModel = function() {
 
                 // ★ 重置前先杀死旧的 AbortController
                 try { abortMain.abort(); } catch(e) {}
-                const newAbortCtrl = new AbortController();
+                var newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutId);
-                const newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
-                const newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
+                var newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
+                var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
 
                 // 继续循环获取下一个响应
                 return attemptRequestWithFreshAbort(attempt, newAbortCtrl, newTimeoutId);
@@ -2181,10 +2181,10 @@ window.useAlternativeVisionModel = function() {
             saveChats();  // 立即保存,不用 debounce
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
-                const _bubble = activeBubbleMap[chatId];
+                var _bubble = activeBubbleMap[chatId];
                 console.log('[ImageModel] completion: chatId match=', (currentChatId === chatId), 'bubble exists=', !!_bubble, 'hasImages=', !!(pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0));
                 if (_bubble) {
-                    const _md = _bubble.querySelector('.markdown-body');
+                    var _md = _bubble.querySelector('.markdown-body');
                     if (_md && pendingMsg.content) {
                         _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
                         _triggerPostRender(_md);
@@ -2193,7 +2193,7 @@ window.useAlternativeVisionModel = function() {
                     // ★ 追加生成的图片到气泡(如果有)
                     console.log('[ImageModel] render: generatedImages count=', pendingMsg.generatedImages ? pendingMsg.generatedImages.length : 0, 'bubble=', !!_bubble);
                     if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
-                        const _existingImg = _bubble.querySelector('.generated-images-container');
+                        var _existingImg = _bubble.querySelector('.generated-images-container');
                         if (!_existingImg) {
                             var _imgCont = document.createElement('div');
                             _imgCont.className = 'generated-images-container';
@@ -2210,7 +2210,7 @@ window.useAlternativeVisionModel = function() {
                                     var _imgEl = document.createElement('img');
                                     _imgEl.src = _imgData.startsWith('data:') ? _imgData : _imgData;
                                     _imgEl.decoding = 'async';
-                                    const _maxW = pendingMsg.generatedImages.length > 1 ? '160px' : '320px';
+                                    var _maxW = pendingMsg.generatedImages.length > 1 ? '160px' : '320px';
                                     _imgEl.style.cssText = 'max-width:' + _maxW + ';width:100%;border-radius:8px;display:block;';
                                     _imgEl.setAttribute('loading', 'lazy');
                                     _wrap.appendChild(_imgEl);
@@ -2227,22 +2227,22 @@ window.useAlternativeVisionModel = function() {
             }
             // ★ 确保最后一条用户消息有编辑按钮(sendMessage 时 isLast=false,缺失)
             if (currentChatId === chatId) {
-                const _userRows = $.chatMessagesContainer.querySelectorAll('.message-row.user');
-                const _lastUserRow = _userRows[_userRows.length - 1];
+                var _userRows = $.chatMessagesContainer.querySelectorAll('.message-row.user');
+                var _lastUserRow = _userRows[_userRows.length - 1];
                 if (_lastUserRow && !_lastUserRow.querySelector('.edit-btn')) {
-                    const _userBubble = _lastUserRow.querySelector('.bubble.user');
-                    const _userText = _userBubble ? (_userBubble.querySelector('.markdown-body')?.textContent || '') : '';
-                    const _editBtn = document.createElement('div');
+                    var _userBubble = _lastUserRow.querySelector('.bubble.user');
+                    var _userText = _userBubble ? (_userBubble.querySelector('.markdown-body')?.textContent || '') : '';
+                    var _editBtn = document.createElement('div');
                     _editBtn.className = 'msg-action-btn edit-btn';
                     _editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
                     _editBtn.onclick = function(e) {
                         e.stopPropagation();
-                        const _msgs = chats[chatId].messages;
+                        var _msgs = chats[chatId].messages;
                         var _idx = _msgs.findIndex(function(m) { return m.role === 'user' && m.text === _userText; });
                         if (_idx === -1) _idx = _msgs.length - 1;
-                        const _sys = _msgs.filter(function(m) { return m.role === 'system' && !m.temporary && !m.timestamp; });
-                        const _ts = _msgs.find(function(m) { return m.timestamp; });
-                        const _others = _msgs.slice(0, _idx).filter(function(m) { return m.role !== 'system' || m.temporary || m.timestamp; });
+                        var _sys = _msgs.filter(function(m) { return m.role === 'system' && !m.temporary && !m.timestamp; });
+                        var _ts = _msgs.find(function(m) { return m.timestamp; });
+                        var _others = _msgs.slice(0, _idx).filter(function(m) { return m.role !== 'system' || m.temporary || m.timestamp; });
                         chats[chatId].messages = _sys.concat(_others).concat(_ts ? [_ts] : []);
                         saveChatsDebounced();
                         loadChat(chatId);
@@ -2251,7 +2251,7 @@ window.useAlternativeVisionModel = function() {
                             window.autoResize($.userInput);
                         }
                     };
-                    const _existingActions = _lastUserRow.querySelector('.msg-actions');
+                    var _existingActions = _lastUserRow.querySelector('.msg-actions');
                     if (_existingActions) {
                         _existingActions.insertBefore(_editBtn, _existingActions.firstChild);
                     }
@@ -2263,13 +2263,13 @@ window.useAlternativeVisionModel = function() {
             }
             // ★ 保存聊天到 localStorage (确保图片等数据持久化,工具路径和直接路径都需要)
             saveChats();
-            const defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
+            var defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
             if (!skipUserAdd && chats[chatId].title === defaultTitle) {
                 autoGenerateTitle(chatId);
             }
             // ★ Agent 模式: 主动建议(不阻塞主流程)
             if (getAgentMode() === 'agent' && localStorage.getItem('agentProactive') === 'true') {
-                const lastContent = typeof pendingMsg.content === 'string' ? pendingMsg.content : '';
+                var lastContent = typeof pendingMsg.content === 'string' ? pendingMsg.content : '';
                 if (lastContent) {
                     // 延迟执行,让 UI 先完成渲染
                     setTimeout(function() {
@@ -2279,7 +2279,7 @@ window.useAlternativeVisionModel = function() {
             }
         } catch (e) {
             clearTimeout(timeoutId);
-            const isUserAbort = userAbortMap[chatId];  // 检查是否用户主动停止
+            var isUserAbort = userAbortMap[chatId];  // 检查是否用户主动停止
             if (isUserAbort) {
                 delete userAbortMap[chatId];  // 清理标记
                 throw new Error('用户停止');  // 不重试,直接结束
@@ -2288,10 +2288,10 @@ window.useAlternativeVisionModel = function() {
             // ★ 智能降级: 模型不支持工具调用 → 移除 tools 重试
             if (e.message && e.message.includes('does not support tools')) {
                 console.warn('[AutoDowngrade] 模型不支持工具调用,降级为普通模式');
-                const _curModel = getVal('modelSelect') || '';
+                var _curModel = getVal('modelSelect') || '';
                 var _noToolList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
                 // 提取核心模型名(去掉 :tag 后缀),存储为通用模式
-                const _coreModel = (_curModel || '').replace(/:.*$/, '').toLowerCase();
+                var _coreModel = (_curModel || '').replace(/:.*$/, '').toLowerCase();
                 if (_noToolList.indexOf(_coreModel) === -1 && _coreModel) {
                     _noToolList.push(_coreModel);
                     localStorage.setItem('noToolModels', JSON.stringify(_noToolList));
@@ -2313,19 +2313,19 @@ window.useAlternativeVisionModel = function() {
                 }
                 showToast('⚠️ 模型不支持工具调用,已切换为普通问答模式', 'warning', 4000);
                 try { abortMain.abort(); } catch(e) {}
-                const _downgradeCtrl = new AbortController();
+                var _downgradeCtrl = new AbortController();
                 abortControllerMap[chatId] = _downgradeCtrl;
                 clearTimeout(timeoutId);
-                const _downgradeTimeout = parseInt(getVal('requestTimeout')) * 1000;
-                const _downgradeTimer = setTimeout(function() { _downgradeCtrl.abort(); }, _downgradeTimeout);
+                var _downgradeTimeout = parseInt(getVal('requestTimeout')) * 1000;
+                var _downgradeTimer = setTimeout(function() { _downgradeCtrl.abort(); }, _downgradeTimeout);
                 return attemptRequestWithFreshAbort(attempt, _downgradeCtrl, _downgradeTimer);
             }
 
             // ★ 智能调整 max_tokens: 从 API 错误信息中提取有效范围并自动修正
-            const maxTokensMatch = e.message?.match(/max_tokens.*?\[(\d+),\s*(\d+)\]/);
+            var maxTokensMatch = e.message?.match(/max_tokens.*?\[(\d+),\s*(\d+)\]/);
             if (maxTokensMatch) {
-                const maxVal = parseInt(maxTokensMatch[2]);
-                const curMaxTokens = parseInt(getVal('maxTokens')) || 4096;
+                var maxVal = parseInt(maxTokensMatch[2]);
+                var curMaxTokens = parseInt(getVal('maxTokens')) || 4096;
                 if (curMaxTokens > maxVal) {
                     console.warn('[AutoAdjust] max_tokens ' + curMaxTokens + ' -> ' + maxVal);
                     let m = getVal('modelSelect') || '';
@@ -2336,21 +2336,21 @@ window.useAlternativeVisionModel = function() {
                     body.max_tokens = maxVal;
                     showToast('max_tokens 自动调整为 ' + maxVal, 'warning', 3000);
                     try { abortMain.abort(); } catch(e) {}
-                    const retryCtrl = new AbortController();
+                    var retryCtrl = new AbortController();
                     abortControllerMap[chatId] = retryCtrl;
                     clearTimeout(timeoutId);
-                    const retryTimeoutId = setTimeout(function() { retryCtrl.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                    var retryTimeoutId = setTimeout(function() { retryCtrl.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
                     return attemptRequestWithFreshAbort(attempt, retryCtrl, retryTimeoutId);
                 }
             }
 
-            const isUpstreamError = e.message === 'UPSTREAM_ERROR' || e.message.includes('upstream') || e.message.includes('bad response');
-            const isHTTP2Error = (e.name === 'TypeError' && (e.message.includes('fetch') || e.message.includes('Failed to') || e.message.includes('net::') || e.message.includes('ERR_')))
+            var isUpstreamError = e.message === 'UPSTREAM_ERROR' || e.message.includes('upstream') || e.message.includes('bad response');
+            var isHTTP2Error = (e.name === 'TypeError' && (e.message.includes('fetch') || e.message.includes('Failed to') || e.message.includes('net::') || e.message.includes('ERR_')))
                 || e.message.includes('HTTP2') || e.message.includes('h2') || e.message.includes('protocol error') || e.message.includes('protocol_error');
-            const isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError || isHTTP2Error;
+            var isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError || isHTTP2Error;
 
             // ★ 400/404 错误智能重试: 解析错误原因，尝试修复后重试
-            const is400Error = e.message && (e.message.startsWith('HTTP 400') || e.message.includes('HTTP 400:') || e.message.startsWith('HTTP 404') || e.message.includes('HTTP 404:'));
+            var is400Error = e.message && (e.message.startsWith('HTTP 400') || e.message.includes('HTTP 400:') || e.message.startsWith('HTTP 404') || e.message.includes('HTTP 404:'));
             if (is400Error && attempt < maxRetries) {
                 var _errBody = '';
                 var _errJson = null;
@@ -2359,14 +2359,14 @@ window.useAlternativeVisionModel = function() {
                     _errJson = JSON.parse(_errBody);
                 } catch(_parseErr) { /* ignore parse errors */ }
 
-                const _errMsg = (_errJson && (_errJson.error && _errJson.error.message || _errJson.message)) || _errBody || '';
-                const _errType = (_errJson && _errJson.error && _errJson.error.type) || '';
+                var _errMsg = (_errJson && (_errJson.error && _errJson.error.message || _errJson.message)) || _errBody || '';
+                var _errType = (_errJson && _errJson.error && _errJson.error.type) || '';
                 var _shouldRetry = false;
                 var _retryAction = '';
 
                 // ★ 持久化 400 错误详情到气泡，便于用户查看
                 if (_errMsg && pendingMsg && currentBubble) {
-                    const _errDetail = '🔴 **HTTP ' + (e.message.includes('404') ? '404' : '400') + ' 错误**\n```\n' + _errMsg.substring(0, 500) + '\n```';
+                    var _errDetail = '🔴 **HTTP ' + (e.message.includes('404') ? '404' : '400') + ' 错误**\n```\n' + _errMsg.substring(0, 500) + '\n```';
                     if (!pendingMsg._400errors) pendingMsg._400errors = [];
                     pendingMsg._400errors.push({ time: Date.now(), msg: _errMsg, action: 'analyzing' });
                     // 在气泡底部追加错误详情（最多保留最近3条）
@@ -2379,7 +2379,7 @@ window.useAlternativeVisionModel = function() {
                     }
                     if (_errFooter) {
                         _errFooter.innerHTML = pendingMsg._400errors.slice(-3).map(function(e) {
-                            const _errCode = e.msg && e.msg.includes('404') ? '404' : '400';
+                            var _errCode = e.msg && e.msg.includes('404') ? '404' : '400';
                             return '<div style="margin:4px 0">🔴 <b>' + _errCode + ' @ ' + new Date(e.time).toLocaleTimeString() + '</b><br>' + escapeHtml(e.msg.substring(0, 400)) + '</div>';
                         }).join('<hr style="border-color:#fecaca;margin:4px 0">');
                     }
@@ -2387,17 +2387,17 @@ window.useAlternativeVisionModel = function() {
 
                 // 检测可恢复的 400 错误类型
                 // ★ 先检查 max_tokens 超限（必须在 token/context 之前，否则会被错误归类为 trim_context）
-                const _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i) || _errMsg.match(/max_tokens.*?(\d{4,})/i);
+                var _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i) || _errMsg.match(/max_tokens.*?(\d{4,})/i);
                 if (_maxTokensLimit || _errMsg.includes('max_tokens') || _errMsg.includes('max completion') || _errMsg.includes('does not support max tokens')) {
                     _shouldRetry = true;
                     _retryAction = 'adjust_max_tokens';
                     if (_maxTokensLimit) {
                         // 从错误消息中提取确切限制值并持久化
-                        const _limitVal = parseInt(_maxTokensLimit[1]);
+                        var _limitVal = parseInt(_maxTokensLimit[1]);
                         if (_limitVal > 0) {
-                            const _curMax2 = parseInt(getVal('maxTokens')) || 4096;
+                            var _curMax2 = parseInt(getVal('maxTokens')) || 4096;
                             // ★ 持久化：更新缓存 + localStorage，刷新后不丢失
-                            const _curModel3 = getVal('modelSelect') || '';
+                            var _curModel3 = getVal('modelSelect') || '';
                             modelMaxOutputTokens[_curModel3] = _limitVal;
                             try { localStorage.setItem('modelMaxOutputTokens', JSON.stringify(modelMaxOutputTokens)); } catch(e) {}
                             // 立即修正
@@ -2444,13 +2444,13 @@ window.useAlternativeVisionModel = function() {
 
                     if (_retryAction === 'trim_context') {
                         // 裁剪消息历史：保留 system + 最后 N 条消息
-                        const _sysMsgs = body.messages.filter(function(m) { return m.role === 'system'; });
+                        var _sysMsgs = body.messages.filter(function(m) { return m.role === 'system'; });
                         var _nonSysMsgs = body.messages.filter(function(m) { return m.role !== 'system'; });
-                        const _keepCount = Math.max(2, Math.floor(_nonSysMsgs.length * 0.5));
+                        var _keepCount = Math.max(2, Math.floor(_nonSysMsgs.length * 0.5));
                         body.messages = _sysMsgs.concat(_nonSysMsgs.slice(-_keepCount));
                         // ★ 同时降低 max_tokens 防止输出超限 (OpenRouter 报 "in the output")
                         if (_errMsg.includes('in the output') || _errMsg.includes('output')) {
-                            const _curOut = body.max_completion_tokens || body.max_tokens || 4096;
+                            var _curOut = body.max_completion_tokens || body.max_tokens || 4096;
                             if (_curOut > 4096) {
                                 body.max_completion_tokens = 4096;
                                 body.max_tokens = 4096;
@@ -2459,7 +2459,7 @@ window.useAlternativeVisionModel = function() {
                         showToast('⚠️ 上下文过长，已自动裁剪消息历史后重试...', 'warning', 10000);
                     } else if (_retryAction === 'adjust_max_tokens') {
                         // ★ 如果错误消息已提取到精确限制值，直接用；否则保守缩减
-                        const _curMax = body.max_completion_tokens || body.max_tokens || 4096;
+                        var _curMax = body.max_completion_tokens || body.max_tokens || 4096;
                         if (!_maxTokensLimit) {
                             body.max_completion_tokens = Math.floor(_curMax * 0.7);
                             body.max_tokens = Math.floor(_curMax * 0.7);
@@ -2470,7 +2470,7 @@ window.useAlternativeVisionModel = function() {
                         // 截断 system 消息到 2000 字符
                         for (var _smi = 0; _smi < body.messages.length; _smi++) {
                             if (body.messages[_smi].role === 'system' && typeof body.messages[_smi].content === 'string') {
-                                const _sc = body.messages[_smi].content;
+                                var _sc = body.messages[_smi].content;
                                 if (_sc.length > 2000) {
                                     body.messages[_smi].content = _sc.substring(0, 2000) + '\n\n[System prompt truncated to fit context limit]';
                                 }
@@ -2490,9 +2490,9 @@ window.useAlternativeVisionModel = function() {
                                             // 尝试修复截断的 JSON
                                             var _raw2 = _tcall.function.arguments;
                                             _raw2 = _raw2.replace(/[\x00-\x1f]/g, ' ');
-                                            const _qc = (_raw2.match(/"/g) || []).length;
+                                            var _qc = (_raw2.match(/"/g) || []).length;
                                             if (_qc % 2 !== 0) _raw2 += '"';
-                                            const _ob = (_raw2.match(/\{/g) || []).length;
+                                            var _ob = (_raw2.match(/\{/g) || []).length;
                                             var _cb = (_raw2.match(/\}/g) || []).length;
                                             while (_cb < _ob) { _raw2 += '}'; _cb++; }
                                             try {
@@ -2520,7 +2520,7 @@ window.useAlternativeVisionModel = function() {
                         for (var _tmi2 = 0; _tmi2 < body.messages.length; _tmi2++) {
                             var _tmsg2 = body.messages[_tmi2];
                             if (_tmsg2.role === 'user' && Array.isArray(_tmsg2.content)) {
-                                const _newContent = [];
+                                var _newContent = [];
                                 for (var _tci2 = 0; _tci2 < _tmsg2.content.length; _tci2++) {
                                     var _tblock = _tmsg2.content[_tci2];
                                     if (_tblock.type === 'tool_result' && (!_tblock.tool_use_id || _tblock.tool_use_id === '')) {
@@ -2577,7 +2577,7 @@ window.useAlternativeVisionModel = function() {
                         body.messages = body.messages.filter(function(m) { return m.role !== 'tool'; });
                         // ★ 持久化: 记住此模型不支持工具
                         var _noToolList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
-                        const _curModelLower = (getVal('modelSelect') || '').toLowerCase();
+                        var _curModelLower = (getVal('modelSelect') || '').toLowerCase();
                         if (_curModelLower && _noToolList.indexOf(_curModelLower) === -1) {
                             _noToolList.push(_curModelLower);
                             localStorage.setItem('noToolModels', JSON.stringify(_noToolList));
@@ -2587,9 +2587,9 @@ window.useAlternativeVisionModel = function() {
                         // ★ 联网搜索回退: 工具不可用时，自动用预注入模式补搜索
                         if (typeof handleSearchFlow === 'function' && getChecked('searchToggle') && typeof text !== 'undefined') {
                             try {
-                                const _searchCtrl = new AbortController();
-                                const _searchTimer = setTimeout(function() { _searchCtrl.abort(); }, 8000);
-                                const _sr = await handleSearchFlow(chatId, text, true, queryText || text, historySummary, _searchCtrl.signal, currentBubble, null);
+                                var _searchCtrl = new AbortController();
+                                var _searchTimer = setTimeout(function() { _searchCtrl.abort(); }, 8000);
+                                var _sr = await handleSearchFlow(chatId, text, true, queryText || text, historySummary, _searchCtrl.signal, currentBubble, null);
                                 clearTimeout(_searchTimer);
                                 if (_sr && _sr.optimized && !_searchCtrl.signal.aborted) {
                                     // 注入搜索结果到系统提示词(放在已有 system 消息最前面)
@@ -2618,7 +2618,7 @@ window.useAlternativeVisionModel = function() {
                         showToast('⚠️ 参数异常，已清理后重试...', 'warning', 8000);
                     } else {
                         // generic_retry: 显示完整错误详情，持续 12 秒便于排查
-                        const _shortMsg = _errMsg.substring(0, 200);
+                        var _shortMsg = _errMsg.substring(0, 200);
                         console.error('[400-Detail]', _errMsg);
                         showToast('🔴 HTTP 400: ' + _shortMsg + ' (' + (attempt + 1) + '/' + maxRetries + ' 重试中...)', 'error', 12000);
                     }
@@ -2629,28 +2629,28 @@ window.useAlternativeVisionModel = function() {
                         pendingMsg.reasoning = '';
                     }
 
-                    const _delay400 = Math.min(1000 * Math.pow(2, attempt), 8000);
+                    var _delay400 = Math.min(1000 * Math.pow(2, attempt), 8000);
                     await new Promise(function(r) { return setTimeout(r, _delay400); });
                     try { abortCtrl.abort(); } catch(e) {}
-                    const _retryCtrl400 = new AbortController();
+                    var _retryCtrl400 = new AbortController();
                     abortControllerMap[chatId] = _retryCtrl400;
                     clearTimeout(timeoutIdVal);
-                    const _retryTimeout400 = setTimeout(function() { _retryCtrl400.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                    var _retryTimeout400 = setTimeout(function() { _retryCtrl400.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
                     return attemptRequestWithFreshAbort(attempt + 1, _retryCtrl400, _retryTimeout400);
                 }
             }
 
             if (isNetError && attempt < maxRetries) {
-                const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+                var delay = Math.min(1000 * Math.pow(2, attempt), 8000);
                 showToast(`网络超时,${attempt + 1}/${maxRetries},${(delay/1000).toFixed(0)}s后重试...`, 'warning', 3000);
                 await new Promise(r => setTimeout(r, delay));
                 // ★ 重试前先杀死旧请求,避免新旧请求并发
                 try { abortCtrl.abort(); } catch(e) {}
-                const newAbortCtrl = new AbortController();
+                var newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutIdVal);
-                const newTimeoutVal = parseInt(getVal('requestTimeout')) * 1000;
-                const newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
+                var newTimeoutVal = parseInt(getVal('requestTimeout')) * 1000;
+                var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
                 return attemptRequestWithFreshAbort(attempt + 1, newAbortCtrl, newTimeoutId);
             }
             throw e;
@@ -2662,21 +2662,21 @@ window.useAlternativeVisionModel = function() {
     } catch (e) {
         // ★ 智能错误恢复: image_url 格式错误 → 自动切换为分析工具模式重试
         if (e.message && (e.message.includes('unknown variant') || e.message.includes('image_url'))) {
-            const retried = await autoDetectAndRetryImageUrlError(e.message, chatId, pendingMsg, currentBubble);
+            var retried = await autoDetectAndRetryImageUrlError(e.message, chatId, pendingMsg, currentBubble);
             if (retried) return;
         }
         // ★ 智能降级(外层兜底): 模型不支持工具调用
         if (e.message && e.message.includes('does not support tools')) {
-            const _ocModel = getVal('modelSelect') || '';
-            const _ocList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
-            const _ocCore = (_ocModel || '').replace(/:.*$/, '').toLowerCase();
+            var _ocModel = getVal('modelSelect') || '';
+            var _ocList = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+            var _ocCore = (_ocModel || '').replace(/:.*$/, '').toLowerCase();
             if (_ocList.indexOf(_ocCore) === -1 && _ocCore) {
                 _ocList.push(_ocCore);
                 localStorage.setItem('noToolModels', JSON.stringify(_ocList));
             }
             // 删掉失败的助手消息,重新发送
             if (chatId && chats[chatId]) {
-                const _ocMsgs = chats[chatId].messages;
+                var _ocMsgs = chats[chatId].messages;
                 for (var _oci = _ocMsgs.length - 1; _oci >= 0; _oci--) {
                     if (_ocMsgs[_oci].role === 'assistant' && _ocMsgs[_oci].partial) {
                         _ocMsgs.splice(_oci, 1);
@@ -2689,7 +2689,7 @@ window.useAlternativeVisionModel = function() {
             // 不清除 pendingMsg,让用户看到气泡
             if (currentBubble) {
                 currentBubble.classList.remove('typing', 'gen-active');
-                const _ocMb = currentBubble.querySelector('.markdown-body');
+                var _ocMb = currentBubble.querySelector('.markdown-body');
                 if (_ocMb) _ocMb.innerHTML = '⚠️ 该模型不支持工具调用,已自动降级为普通模式。请重新发送。';
             }
             if (pendingMsg) {
@@ -2701,10 +2701,10 @@ window.useAlternativeVisionModel = function() {
         // ★ 402 余额不足自动降级: 提取可负担的 token 数，降低 max_tokens 后重试
         if (e.message && /402|credits|insufficient|can only afford/i.test(e.message)) {
             var _affordable = null;
-            const _creditsMatch402 = e.message.match(/can only afford (\d+)/i);
+            var _creditsMatch402 = e.message.match(/can only afford (\d+)/i);
             if (_creditsMatch402) _affordable = parseInt(_creditsMatch402[1]);
             if (_affordable && _affordable > 256 && requestedTokens > _affordable) {
-                const _reduced402 = Math.floor(_affordable * 0.9);
+                var _reduced402 = Math.floor(_affordable * 0.9);
                 console.log('[402降级] 原 max_tokens=' + requestedTokens + ' → ' + _reduced402 + ' (可负担: ' + _affordable + ')');
                 requestedTokens = _reduced402;
                 body.max_tokens = _reduced402;
@@ -2712,14 +2712,14 @@ window.useAlternativeVisionModel = function() {
                 cleanupStreamState(chatId);
                 if (currentBubble) {
                     currentBubble.classList.remove('typing', 'gen-active');
-                    const _mb402 = currentBubble.querySelector('.markdown-body');
+                    var _mb402 = currentBubble.querySelector('.markdown-body');
                     if (_mb402) _mb402.innerHTML = '';
                 }
                 showToast('余额不足，已自动降低 max_tokens 至 ' + _reduced402 + '，重试中...', 'warning', 3000);
                 try { abortMain.abort(); } catch(_e402) {}
-                const _retryCtrl402 = new AbortController();
+                var _retryCtrl402 = new AbortController();
                 abortControllerMap[chatId] = _retryCtrl402;
-                const _retryTimeout402 = setTimeout(function() { _retryCtrl402.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                var _retryTimeout402 = setTimeout(function() { _retryCtrl402.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
                 try {
                     await attemptRequestWithFreshAbort(0, _retryCtrl402, _retryTimeout402);
                 } catch(_retryErr402) {
