@@ -45,7 +45,7 @@ window.quickSetupOneAPIChat = function() {
 
 
 
-window.onProviderChange = function(){};
+// ★ 工具函数已迁至 utils.js — onProviderChange 等不再在此定义
 
 // ==================== SRC (StarRailCopilot) 操控工具 ====================
 const SRC_API_BASE = '/src';

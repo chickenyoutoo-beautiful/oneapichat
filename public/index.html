@@ -536,7 +536,7 @@ window.VISION_API_KEY = '';
             <div class="details-content">
             <div class="config-field">
                 <label class="config-label">提供商</label>
-                <select id="baseUrlProvider" class="config-input config-select">
+                <select id="baseUrlProvider" class="config-input config-select" onchange="window.onProviderChange()">
                     <option value="deepseek">DeepSeek</option>
                     <option value="openai">OpenAI</option>
                     <option value="xai">xAI (Grok)</option>

@@ -62,6 +62,13 @@ window.onProviderChange = async function() {
     console.log('[PROVIDER] ->' + provider + ' key:' + (cleanKey ? '***' : 'empty') + ' url:' + getVal('baseUrl'));
     console.log('[PROVIDER] localStorage apiKey:', localStorage.getItem('apiKey') ? 'SET' : 'EMPTY');
     console.log('[PROVIDER] input apiKey.value:', getEl('apiKey')?.value ? 'SET' : 'EMPTY');
+
+    // ★ 切换厂商后自动刷新模型列表(延迟让 UI 先更新)
+    setTimeout(function() {
+        if (typeof window.fetchModels === 'function') {
+            window.fetchModels(true).catch(function(){});
+        }
+    }, 200);
 };
 function getCurrentApiKeyLSKey() {
     var p = getEl('baseUrlProvider')?.value || 'custom';
