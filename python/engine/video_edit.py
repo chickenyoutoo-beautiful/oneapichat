@@ -87,3 +87,15 @@ def draw_rounded_rect(draw, rect, radius, fill):
     draw.pieslice([x2-2*r, y1, x2, y1+2*r], 270, 360, fill=fill)
     draw.pieslice([x1, y2-2*r, x1+2*r, y2], 90, 180, fill=fill)
     draw.pieslice([x2-2*r, y2-2*r, x2, y2], 0, 90, fill=fill)
+
+# ── 模块级共享状态 (由 engine_server 初始化) ──
+_project_root = None
+_temp_dir = None
+_http_session = None
+
+def init_video_context(project_root, temp_dir=None, http_session=None):
+    """由 engine_server 在启动时调用,初始化视频模块的共享状态"""
+    global _project_root, _temp_dir, _http_session
+    _project_root = str(project_root) if project_root else None
+    _temp_dir = str(temp_dir) if temp_dir else None
+    _http_session = http_session

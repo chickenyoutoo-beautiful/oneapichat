@@ -90,7 +90,7 @@ from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind
 from engine.event_frame import EventFlowBuilder, EventType, EventLog
 from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
 from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
-    str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect)
+    str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect, init_video_context)
 from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
 from engine.agent_memory import read_memory_json, write_memory_json
@@ -110,6 +110,7 @@ ENGINE_DIR.mkdir(parents=True, exist_ok=True)
 STREAM_DIR = ENGINE_DIR / "streams"
 STREAM_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR = Path(tempfile.gettempdir())
+init_video_context(PROJECT_ROOT, TEMP_DIR, _http_session)
 
 # ── 引擎层全局实例 ──────────────────────────────────────────
 exec_policy = ExecPolicy(rules_file=str(ENGINE_DIR / "exec_policy.json"))
