@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-06**: 📦 Phase 9 拆分 — 删除重复工具函数(333行) + 提取 resume-stream.js(158) + commands.js(210)，main.js 5,105→4,408 (-13.6%)
 - **2026-06-06**: ✅ 存储层模块化 — 提取 `python/engine/store.py` (EngineStore+ChatStore)，engine_server.py 4917→4719行
 - **2026-06-06**: 🧪 单元测试 — `python/tests/test_store.py` (14 tests)，覆盖 EngineStore/ChatStore 核心功能
 - **2026-06-06**: 🔒 SSL证书验证 — 移除全部 6 处 `verify=False`，启用 HTTPS 证书验证防 MITM
@@ -114,8 +115,10 @@
 | `js/core.js` | 309 | ★ 全局常量、数学公式保护、跨域Cookie、安全Fetch、DOM工具、加密、工具函数 |
 | `js/image-gen.js` | 490 | 图像生成（generateImage / generateImageI2I / OpenRouter GPT Image） |
 | `js/markdown.js` | 490 | 流式渲染（applyStreamRender）、MarkdownRenderer缓存、ChartRenderer/Mermaid |
-| `js/main.js` | 5,611 | 主应用逻辑（聊天、Agent、工具执行、UI、存储、配置） |
+| `js/main.js` | 4,408 | 主应用逻辑（聊天、Agent、工具执行、UI、存储、配置） |
 | `js/tools.js` | 1,502 | 工具定义、toolRegistry、工具分类和中文标签 |
+| `js/commands.js` | 210 | /斜杠命令解析与分派 (Phase 9 拆分) |
+| `js/resume-stream.js` | 158 | 可恢复流式续接模块 (Phase 9 拆分) |
 | `js/models.js` | ~300 | 模型配置适配 |
 
 - **聊天流**: `sendMessage()` → `attemptRequestWithFreshAbort()` → SSE/非流式处理
