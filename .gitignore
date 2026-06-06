@@ -58,6 +58,8 @@ uploads/*.flv
 __pycache__/
 *.pyc
 test_*
+!python/tests/
+!python/tests/**
 debug_*
 *_backup_*
 .fix_backup_*
