@@ -2094,6 +2094,19 @@ window.useAlternativeVisionModel = function() {
                                 } else {
                                     status.textContent = `✅ 工具完成: ${tc.function.name}`;
                                 }
+                                // ★ server_file_edit: 在气泡中展示 diff 预览卡片
+                                if (tc.function.name === 'server_file_edit' && !toolResult.error && toolResult.result) {
+                                    try {
+                                        var _args = {};
+                                        try { _args = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
+                                        var _oldStr = _args.old_string || _args.old_str || '';
+                                        var _newStr = _args.new_string || _args.new_str || '';
+                                        var _filePath = _args.path || '';
+                                        if (_oldStr && _newStr && window.showDiffView) {
+                                            window.showDiffView(_filePath, _oldStr, _newStr, currentBubble.querySelector('.markdown-body') || currentBubble);
+                                        }
+                                    } catch(e) {}
+                                }
                             }
                             // 如果生成了图片,确保存入消息对象
                             if ((tc.function.name === 'generate_image' || tc.function.name === 'generate_image_i2i') && (pendingMsg.generatedImage || pendingMsg.generatedImages)) {

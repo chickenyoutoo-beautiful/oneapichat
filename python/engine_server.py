@@ -94,7 +94,8 @@ from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _vi
     _apply_subtitle, _apply_filter, _apply_transition, _apply_tts,
     _apply_voice_to_video, _apply_crop, _apply_reverse, _apply_mute,
     _apply_bgm, _apply_enhance, _apply_gif, _apply_silent_cut,
-    _apply_subtitle_style, _apply_ffmpeg_filter, _apply_ffmpeg_transition, _apply_compose)
+    _apply_subtitle_style, _apply_ffmpeg_filter, _apply_ffmpeg_transition, _apply_compose,
+    _apply_stt, _apply_stt_to_timeline)
 from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
 from engine.server_tools import register_server_tools
@@ -795,6 +796,10 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     return _apply_gif(input_path, output_path, params)
                 elif action == "silent_cut":
                     return _apply_silent_cut(input_path, output_path, params)
+                elif action == "stt":
+                    return _apply_stt(input_path, output_path, params)
+                elif action == "stt_to_timeline":
+                    return _apply_stt_to_timeline(input_path, output_path, params)
                 elif action == "style":
                     return _apply_subtitle_style(input_path, output_path, params)
                 elif action == "tts":
@@ -812,7 +817,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 elif action == "compose":
                     return _apply_compose(input_path, output_path, params)
                 else:
-                    return f"未知操作: {action}, 支持: compose/crop/reverse/mute/bgm/enhance/gif/silent_cut/style/trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/frames/info"
+                    return f"未知操作: {action}, 支持: compose/crop/reverse/mute/bgm/enhance/gif/silent_cut/stt/stt_to_timeline/style/trim/concat/speed/resize/overlay/text/rotate/audio/filter/video_filter/transition/video_transition/tts/voice/frames/info"
             except ImportError as _e:
                 return f"缺少依赖: {str(_e)}, 请先安装: pip install moviepy --break-system-packages"
             except Exception as _e:
@@ -2395,6 +2400,10 @@ async def video_edit_endpoint(request: Request):
             return {"result": _apply_gif(input_path, output_path, params)}
         elif action == "silent_cut":
             return {"result": _apply_silent_cut(input_path, output_path, params)}
+        elif action == "stt":
+            return {"result": _apply_stt(input_path, output_path, params)}
+        elif action == "stt_to_timeline":
+            return {"result": _apply_stt_to_timeline(input_path, output_path, params)}
         elif action == "style":
             return {"result": _apply_subtitle_style(input_path, output_path, params)}
         elif action == "frames":

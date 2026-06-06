@@ -1079,5 +1079,202 @@ def _apply_subtitle_style(input_path, output_path, params):
     return _apply_compose(input_path, output_path, compose_params)
 
 
-# _hex_to_rgba / _draw_rounded_rect → engine.video_edit (imported above)
-    draw.rectangle([x1 + r, y1 + r, x2 - r, y2 - r], fill=fill)
+def _apply_stt(input_path, output_path, params):
+    """
+    语音转文字 (Speech-to-Text)
+    调用 OpenAI Whisper API 或 MiniMax STT 将音频/视频转换为文字
+
+    参数:
+        input_path: 输入音频/视频文件路径
+        output_path: 输出 SRT 字幕文件路径（如提供）
+        params:
+            engine: "whisper" | "minimax" (默认: minimax)
+            api_key: API key（如不提供则从 config 读取）
+            language: 音频语言 (默认: zh)
+            response_format: "srt" | "vtt" | "text" | "json" (默认: srt)
+            prompt: Whisper 提示词（可选）
+    """
+    engine = params.get("engine", "minimax")
+    api_key = params.get("api_key", "")
+    language = params.get("language", "zh")
+    response_format = params.get("response_format", "srt")
+    prompt = params.get("prompt", "")
+
+    # 读取 API key
+    if not api_key:
+        try:
+            import json as _json
+            config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    cfg = _json.load(f)
+                api_key = cfg.get("api_key", "") or cfg.get("mmx_api_key", "") or cfg.get("openai_api_key", "")
+        except Exception:
+            pass
+
+    if not api_key:
+        return "❌ STT 失败: 未配置 API key"
+
+    if engine == "whisper":
+        # OpenAI Whisper API
+        import requests as _req
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        try:
+            with open(input_path, "rb") as f:
+                files = {"file": (os.path.basename(input_path), f)}
+                data = {"model": "whisper-1", "language": language,
+                        "response_format": response_format}
+                if prompt:
+                    data["prompt"] = prompt
+                resp = _req.post(url, headers=headers, files=files, data=data, timeout=120)
+                if resp.status_code == 200:
+                    result = resp.text
+                    if output_path:
+                        with open(output_path, "w", encoding="utf-8") as of:
+                            of.write(result)
+                        return f"STT 完成(srt): {output_path}"
+                    return result
+                else:
+                    return f"❌ Whisper API 错误: {resp.status_code} {resp.text[:200]}"
+        except Exception as e:
+            return f"❌ STT 失败: {str(e)}"
+
+    elif engine == "minimax":
+        # MiniMax STT — 使用 ffmpeg 提取音频后调用 mmx-cli
+        import tempfile as _tmp
+        audio_file = input_path
+        is_video = input_path.lower().endswith(('.mp4', '.webm', '.mov', '.avi', '.mkv', '.flv', '.wmv'))
+        tmp_audio = None
+        if is_video:
+            # 提取音频为 wav
+            tmp_audio = _tmp.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp_audio.close()
+            extract_cmd = ["ffmpeg", "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le",
+                          "-ar", "16000", "-ac", "1", tmp_audio.name]
+            r = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                if tmp_audio and os.path.exists(tmp_audio.name):
+                    os.unlink(tmp_audio.name)
+                return f"❌ 音频提取失败: {r.stderr[-200:]}"
+            audio_file = tmp_audio.name
+
+        try:
+            # 使用 mmx-cli 进行 STT
+            mmx_bin = os.path.expanduser("~/.npm-global/bin/mmx")
+            if not os.path.exists(mmx_bin):
+                mmx_bin = "mmx-cli"
+
+            lang_map = {"zh": "Chinese", "en": "English", "ja": "Japanese", "ko": "Korean"}
+            lang_name = lang_map.get(language, "Chinese")
+
+            cmd = [mmx_bin, "stt", audio_file, "--language", lang_name,
+                   "--format", response_format, "--api-key", api_key]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if r.returncode == 0 and r.stdout.strip():
+                result = r.stdout.strip()
+                if output_path:
+                    with open(output_path, "w", encoding="utf-8") as of:
+                        of.write(result)
+                    return f"STT 完成: {output_path}"
+                return result
+            else:
+                err = r.stderr or r.stdout or "未知错误"
+                return f"❌ MiniMax STT 失败: {err[:300]}"
+        finally:
+            if tmp_audio and os.path.exists(tmp_audio.name):
+                try:
+                    os.unlink(tmp_audio.name)
+                except Exception:
+                    pass
+
+    else:
+        return f"❌ 不支持的 STT 引擎: {engine}（可选: whisper, minimax）"
+
+
+def _apply_stt_to_timeline(input_path, output_path, params):
+    """
+    STT → 自动生成时间轴字幕
+    先做语音识别，再将识别结果转换为时间轴格式供 compose 使用
+    """
+    style = params.get("style", "bilibili")
+    engine = params.get("stt_engine", "minimax")
+    language = params.get("language", "zh")
+
+    # 提取视频帧率信息
+    fps = 30.0
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                           "-show_entries", "stream=r_frame_rate",
+                           "-of", "csv=p=0", input_path],
+                          capture_output=True, text=True, timeout=10)
+        if r.stdout.strip():
+            parts = r.stdout.strip().split("/")
+            if len(parts) == 2:
+                fps = float(parts[0]) / float(parts[1])
+            else:
+                fps = float(parts[0])
+    except Exception:
+        pass
+
+    # 获取视频时长
+    duration = 0
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                           "-of", "csv=p=0", input_path],
+                          capture_output=True, text=True, timeout=10)
+        if r.stdout.strip():
+            duration = float(r.stdout.strip())
+    except Exception:
+        pass
+
+    # 调用 STT 获取 SRT
+    stt_params = dict(params)
+    stt_params["engine"] = engine
+    stt_params["language"] = language
+    stt_params["response_format"] = "srt"
+    srt_result = _apply_stt(input_path, None, stt_params)
+
+    if srt_result.startswith("❌"):
+        return srt_result
+
+    # 解析 SRT → timeline
+    timeline = []
+    try:
+        import re as _re
+        blocks = srt_result.strip().split("\n\n")
+        for block in blocks:
+            lines = block.strip().split("\n")
+            if len(lines) < 3:
+                continue
+            # 格式: index, time, text...
+            time_line = lines[1] if len(lines) > 1 else ""
+            text = " ".join(lines[2:]) if len(lines) > 2 else ""
+            time_match = _re.match(r"(\d+):(\d+):(\d+)[.,](\d+)\s*-->\s*(\d+):(\d+):(\d+)[.,](\d+)", time_line)
+            if time_match:
+                h1, m1, s1, ms1 = [int(x) for x in time_match.groups()[:4]]
+                h2, m2, s2, ms2 = [int(x) for x in time_match.groups()[4:]]
+                start_sec = h1 * 3600 + m1 * 60 + s1 + ms1 / 1000.0
+                end_sec = h2 * 3600 + m2 * 60 + s2 + ms2 / 1000.0
+                # 转换为帧
+                start_frame = max(0, int(start_sec * fps))
+                end_frame = max(start_frame + 1, int(end_sec * fps))
+                if text.strip():
+                    timeline.append({
+                        "start_frame": start_frame,
+                        "end_frame": end_frame,
+                        "text": text.strip(),
+                        "start_sec": round(start_sec, 3),
+                        "end_sec": round(end_sec, 3)
+                    })
+    except Exception as e:
+        return f"❌ SRT 解析失败: {str(e)}"
+
+    if not timeline:
+        return "❌ 未从 STT 结果中提取到字幕"
+
+    # 使用 compose 合成
+    compose_params = dict(params)
+    compose_params["timeline"] = timeline
+    compose_params["style"] = style
+    return _apply_compose(input_path, output_path, compose_params)
