@@ -4,6 +4,8 @@
 
 ## 最近变更
 
+- **2026-06-06**: 🧩 verifyToken 统一 — 4 实现→1 共享 `verifyAuthToken` (auth_helpers.php)，消除重复
+- **2026-06-06**: 🔄 fetchWithRetry 合并 — main.js + agent.js 重复 → utils.js 统一版本
 - **2026-06-06**: 🖥️ 服务器工具提取 — engine/server_tools.py (399行, 14端点)，engine_server.py 3,119→2,736 (-12.3%)
 - **2026-06-06**: 🛠️ 厂商切换修复 — onProviderChange 空壳移除 + onchange 接线 + fetchModels 自动刷新
 - **2026-06-06**: 📻 小米 MiMo — 新增 `mimo` 厂商 (api.xiaomimimo.com/v1, MiMo-V2-Flash)
