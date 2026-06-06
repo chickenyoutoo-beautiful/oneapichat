@@ -99,7 +99,15 @@ if ($method === 'POST' && $action === 'save_memory') {
         }
     }
     if (!$found) {
-        $memories[] = ['key' => $key, 'content' => $content, 'created_at' => date('c'), 'updated_at' => date('c')];
+        $entry = ['key' => $key, 'content' => $content, 'created_at' => date('c'), 'updated_at' => date('c')];
+        // ★ 生成 embedding（异步不阻塞保存）
+        $embedding = getEmbedding($content);
+        if ($embedding) $entry['embedding'] = $embedding;
+        $memories[] = $entry;
+    } else {
+        // 更新时重新生成 embedding
+        $embedding = getEmbedding($content);
+        if ($embedding) $m['embedding'] = $embedding;
     }
     // 限制最多50条
     if (count($memories) > 50) $memories = array_slice($memories, -50);
@@ -116,19 +124,50 @@ if ($method === 'POST' && $action === 'save_memory') {
     $memories = loadMemories($memoryFile);
     if (!$query) { jsonSuccess(['memories' => $memories]); exit; }
 
-    // 简单关键词匹配
+    // 混合搜索: 关键词(快) + 语义(有embedding时)
     $queryLower = mb_strtolower($query);
     $results = [];
-    foreach ($memories as $m) {
+    $useSemantic = ($_GET['semantic'] ?? '1') === '1';
+
+    // 尝试语义搜索（如果记忆有embedding且用户配置了API）
+    if ($useSemantic) {
+        $hasEmbeddings = false;
+        foreach ($memories as $m) {
+            if (!empty($m['embedding'])) { $hasEmbeddings = true; break; }
+        }
+        if ($hasEmbeddings) {
+            $queryEmb = getEmbedding($query);
+            if ($queryEmb) {
+                foreach ($memories as &$m) {
+                    if (!empty($m['embedding'])) {
+                        $m['semantic_score'] = cosineSimilarity($queryEmb, $m['embedding']);
+                    }
+                }
+            }
+        }
+    }
+
+    // 关键词匹配 + 语义得分 + 时间衰减
+    $now = time();
+    foreach ($memories as &$m) {
         $score = 0;
         if (mb_stripos($m['key'], $queryLower) !== false) $score += 3;
         if (mb_stripos($m['content'], $queryLower) !== false) $score += 1;
-        if ($score > 0) {
-            $m['score'] = $score;
+        // 语义得分加权
+        if (isset($m['semantic_score']) && $m['semantic_score'] > 0.3) {
+            $score += $m['semantic_score'] * 5;
+        }
+        // 时间衰减: 每30天衰减一半
+        $updatedAt = strtotime($m['updated_at'] ?? $m['created_at'] ?? 'now');
+        $ageDays = max(0, ($now - $updatedAt) / 86400);
+        $decay = pow(0.5, $ageDays / 30);
+        $m['final_score'] = $score * $decay;
+        $m['score'] = $score; // 保持兼容
+        if ($score > 0 || (isset($m['semantic_score']) && $m['semantic_score'] > 0.5)) {
             $results[] = $m;
         }
     }
-    usort($results, function($a, $b) { return $b['score'] - $a['score']; });
+    usort($results, function($a, $b) { return $b['final_score'] - $a['final_score']; });
     jsonSuccess(['memories' => array_slice($results, 0, 10)]);
 
 } elseif ($method === 'POST' && $action === 'delete_memory') {
@@ -177,4 +216,73 @@ if ($method === 'POST' && $action === 'save_memory') {
 
 } else {
     jsonError(400, '未知操作: ' . $action);
+}
+
+// ═══════════════════════════════════════════════════════
+// 语义搜索辅助: Embedding API 调用 + 余弦相似度
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 调用配置的 AI API 生成文本 embedding
+ * 复用用户的 API 配置（baseUrl + apiKey）
+ */
+function getEmbedding(string $text): ?array {
+    static $configCache = null;
+    if ($configCache === null) {
+        // 尝试读取用户配置
+        $configDir = dirname(__DIR__) . '/config/';
+        $configFile = $configDir . '.mmx_config.json';
+        $configCache = [];
+        if (file_exists($configFile)) {
+            $cfg = json_decode(file_get_contents($configFile), true);
+            if (is_array($cfg)) $configCache = $cfg;
+        }
+    }
+
+    $baseUrl = $configCache['api_base'] ?? $configCache['base_url'] ?? '';
+    $apiKey = $configCache['api_key'] ?? $configCache['mmx_api_key'] ?? '';
+    if (!$baseUrl || !$apiKey) return null;
+
+    // 构建 embedding 请求（OpenAI 兼容格式）
+    $embedUrl = rtrim($baseUrl, '/') . '/embeddings';
+    $body = json_encode([
+        'model' => $configCache['embed_model'] ?? 'text-embedding-3-small',
+        'input' => mb_substr($text, 0, 2048),
+    ]);
+
+    $ch = curl_init($embedUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code !== 200 || !$resp) return null;
+    $data = json_decode($resp, true);
+    $embedding = $data['data'][0]['embedding'] ?? null;
+    return $embedding;
+}
+
+/**
+ * 余弦相似度（两个等长向量）
+ */
+function cosineSimilarity(array $a, array $b): float {
+    $dot = 0.0; $normA = 0.0; $normB = 0.0;
+    $len = min(count($a), count($b));
+    for ($i = 0; $i < $len; $i++) {
+        $dot += $a[$i] * $b[$i];
+        $normA += $a[$i] * $a[$i];
+        $normB += $b[$i] * $b[$i];
+    }
+    if ($normA == 0.0 || $normB == 0.0) return 0.0;
+    return $dot / (sqrt($normA) * sqrt($normB));
 }

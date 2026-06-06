@@ -723,6 +723,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 if (_cloudMemories && !_cachedMemories) {
                     _inject += '\n' + _cloudMemories;
                 }
+                // ★ RAG 知识库上下文注入
+                if (window.RAG_ENABLED && window.__ragLastSearchResults && window.__ragLastSearchResults.length > 0) {
+                    _inject += '\n\n## 知识库检索结果\n以下是从本地知识库中检索到的相关内容:\n';
+                    window.__ragLastSearchResults.slice(0, 5).forEach(function(r) {
+                        _inject += '- [' + (r.filename || 'doc') + '] ' + (r.text || '').substring(0, 600) + '\n';
+                    });
+                }
                 if (_inject) sysContent += _inject;
             } catch(e) {
                 console.warn('[AgentMemory] 注入缓存失败:', e);

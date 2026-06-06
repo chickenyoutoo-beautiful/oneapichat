@@ -89,6 +89,8 @@ from engine.retry import RetryEngine, RetryStatus
 from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind, get_global_registry
 from engine.event_frame import EventFlowBuilder, EventType, EventLog
 from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
+from engine.rag_engine import (rag_list_collections, rag_create_collection, rag_delete_collection,
+                                rag_upload_document, rag_search, rag_list_documents, rag_delete_document)
 from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
     str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect, init_video_context,
     _apply_subtitle, _apply_filter, _apply_transition, _apply_tts,
@@ -2436,6 +2438,111 @@ async def video_edit_endpoint(request: Request):
         return JSONResponse({"error": f"缺少依赖: {str(e)}"}, status_code=503)
     except Exception as e:
         return JSONResponse({"error": f"视频剪辑失败: {str(e)}"}, status_code=500)
+
+# ═══════════════════════════════════════════════════════════════
+# RAG (Retrieval Augmented Generation) API — 知识库检索
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/engine/rag/collections")
+async def rag_collections(user_id: str = Query("")):
+    return rag_list_collections(user_id)
+
+@app.post("/engine/rag/collections")
+async def rag_create_col(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    name = body.get("name", "")
+    if not name:
+        return {"error": "集合名称不能为空"}
+    return rag_create_collection(name, user_id)
+
+@app.delete("/engine/rag/collections")
+async def rag_delete_col(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    name = body.get("name", "")
+    if not name:
+        return {"error": "集合名称不能为空"}
+    return rag_delete_collection(name, user_id)
+
+@app.get("/engine/rag/knowledge")
+async def rag_knowledge(collection: str = Query("default"), user_id: str = Query("")):
+    return rag_list_documents(collection, user_id)
+
+@app.post("/engine/rag/upload")
+async def rag_upload(request: Request, user_id: str = Query("")):
+    try:
+        body = await request.json()
+        collection = body.get("collection", "default")
+        filename = body.get("filename", "upload.txt")
+        content = body.get("content", "")
+        chunk_size = int(body.get("chunk_size", 512))
+        chunk_overlap = int(body.get("chunk_overlap", 50))
+        api_key = body.get("api_key", "")
+        base_url = body.get("base_url", "")
+        embed_model = body.get("embed_model", "")
+
+        if not content:
+            return {"error": "文档内容不能为空"}
+
+        return rag_upload_document(collection, filename, content, user_id,
+                                   chunk_size, chunk_overlap, api_key, base_url, embed_model)
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/engine/rag/search")
+async def rag_search_endpoint(q: str = Query(""), collection: str = Query("default"),
+                               top_k: int = Query(5), user_id: str = Query(""),
+                               api_key: str = Query(""), base_url: str = Query(""),
+                               embed_model: str = Query("")):
+    if not q:
+        return {"results": [], "error": "查询不能为空"}
+    return rag_search(q, collection, top_k, user_id, api_key, base_url, embed_model)
+
+@app.post("/engine/rag/search")
+async def rag_search_post(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    q = body.get("q", body.get("query", ""))
+    collection = body.get("collection", "default")
+    top_k = int(body.get("top_k", 5))
+    api_key = body.get("api_key", "")
+    base_url = body.get("base_url", "")
+    embed_model = body.get("embed_model", "")
+    if not q:
+        return {"results": [], "error": "查询不能为空"}
+    return rag_search(q, collection, top_k, user_id, api_key, base_url, embed_model)
+
+@app.delete("/engine/rag/knowledge")
+async def rag_delete_doc(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    doc_id = body.get("doc_id", "")
+    collection = body.get("collection", "default")
+    if not doc_id:
+        return {"error": "doc_id 不能为空"}
+    return rag_delete_document(doc_id, collection, user_id)
+
+@app.get("/engine/rag/embed_config")
+async def rag_embed_config():
+    """返回嵌入模型配置（从 config 读取）"""
+    import json as _json
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
+    cfg = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                cfg = _json.load(f)
+        except Exception:
+            pass
+    return {
+        "embed_model": cfg.get("embed_model", "text-embedding-3-small"),
+        "embed_api_base": cfg.get("api_base", cfg.get("base_url", "")),
+        "embed_api_key": cfg.get("api_key", cfg.get("mmx_api_key", ""))[:8] + "***" if cfg.get("api_key") else "",
+        "chunk_size": 512,
+        "chunk_overlap": 50
+    }
+
+@app.get("/engine/rag/list_models")
+async def rag_list_models():
+    return {"models": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"]}
+
 
 # ═══════════════════════════════════════════════════════════════
 # SRC (StarRailCopilot) REST API — 最小可用端点
