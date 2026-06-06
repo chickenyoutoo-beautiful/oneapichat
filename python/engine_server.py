@@ -1727,7 +1727,7 @@ class StreamBuffer:
 
     def append(self, sse_payload: str):
         self.chunks.append(sse_payload)
-        if len(self.chunks) % 20 == 0:
+        if len(self.chunks) % 5 == 0:
             self._save()
 
     def since(self, offset: int):

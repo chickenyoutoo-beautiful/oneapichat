@@ -112,16 +112,20 @@ window.ResumeStream = (function() {
         },
 
         // ★ 续接：尝试连接引擎流，连不上就返回 false
-        resume: async function(chatId) {
-            var sid = '';
-            try { sid = localStorage.getItem('_rs_sid')||''; } catch(e) {}
+        // 可选 sid/msgId 参数（从引擎 active_tasks 恢复时传入）
+        resume: async function(chatId, optSid, optMsgId) {
+            var sid = optSid || '';
+            if (!sid) {
+                try { sid = localStorage.getItem('_rs_sid')||''; } catch(e) {}
+            }
             if (!sid || sid.indexOf('pending_')===0) return false;
 
             var scid = localStorage.getItem('_rs_cid')||'';
             if (scid && scid !== 'pending' && scid !== chatId) chatId = scid;
 
             var ts = parseInt(localStorage.getItem('_rs_ts')||'0');
-            if (Date.now() - ts > 1800000) return false;  // 30min TTL
+            // ★ TTL 放宽到 60min（引擎 _resumable 也是 30min，但 StreamBuffer 磁盘持久化更长）
+            if (Date.now() - ts > 3600000) return false;
 
             if (_active[chatId]) return false;
             _active[chatId] = true;

@@ -385,9 +385,18 @@ window._recoverActiveTasks = async function() {
         for (var i = 0; i < tasks.length; i++) {
             var task = tasks[i];
             if (task.chat_id && chats[task.chat_id]) {
+                // ★ 恢复 stream_id 到 localStorage（ResumeStream.resume 依赖 _rs_sid）
+                if (task.stream_id) {
+                    try { localStorage.setItem('_rs_sid', task.stream_id); } catch(e) {}
+                }
+                if (task.msg_id) {
+                    try { localStorage.setItem('_rs_msgid', task.msg_id); } catch(e) {}
+                }
+                try { localStorage.setItem('_rs_cid', task.chat_id); } catch(e) {}
+                try { localStorage.setItem('_rs_ts', Date.now()); } catch(e) {}
                 // Try resuming the stream
                 try {
-                    var resumed = await ResumeStream.resume(task.chat_id);
+                    var resumed = await ResumeStream.resume(task.chat_id, task.stream_id, task.msg_id);
                     if (resumed) {
                         console.log('[recoverTasks] Resumed stream', task.stream_id);
                     }

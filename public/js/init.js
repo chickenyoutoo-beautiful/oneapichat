@@ -871,9 +871,18 @@ function initializeApp() {
         loadInitialData();
         initRAGPanel();
 
-        // ★ 自动续生:检测到刷新前未完成的流式(仅当后端 SSE 未恢复时才触发)
+        // ★ 自动续生: 优先从引擎恢复活跃流, 回退到 _savedPartial 再生
         try {
-            (function _autoRecover() {
+            (async function _autoRecover() {
+                // ★ Phase 1: 先尝试从引擎恢复活跃任务（无感断点续传）
+                if (window._recoverActiveTasks) {
+                    try {
+                        await window._recoverActiveTasks();
+                        // 短暂等待恢复完成
+                        await new Promise(function(r) { setTimeout(r, 1500); });
+                    } catch(e) { console.warn('[AutoRecover] Engine recovery error:', e.message); }
+                }
+                // Phase 2: 如果引擎恢复成功, 跳过旧的 _pendingRecovery 再生
                 if (!window._pendingRecovery) return;
                 // ★ 后端 SSE 恢复过就不再从头重发
                 if (window._backendRecovered) { window._pendingRecovery = null; return; }

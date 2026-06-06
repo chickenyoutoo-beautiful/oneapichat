@@ -1582,27 +1582,38 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
             var useStream = _isImageModel ? false : (_useAnthropicFormat ? getChecked('streamToggle') : ((window.isProxyEnabled() && !modelLower.includes('minimax')) ? false : getChecked('streamToggle')));
-            var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
+            // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
+            // 用户可设置 __enableResumeStream='0' 显式禁用
+            var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
             var _isContinuation = (toolCallCount > 0);
             var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
-                // ★ WebSocket 模式：发送到后端网关，由网关管理 LLM 流
-                var _rsResult = await window._wsSendChat(
+                // ★ 通过引擎后端创建可恢复流，刷新/断线后无感续接
+                var _rsResult = await ResumeStream.create(
                     body.messages,
                     { model: body.model, apiKey: getVal('apiKey'), baseUrl: getVal('baseUrl'),
                       temp: body.temperature, tokens: body.max_tokens, tools: body.tools },
                     chatId, pendingMsg
                 );
-                if (_rsResult && _rsResult.fullText === '__WS_PENDING__') {
-                    // WebSocket 已发送，等待异步 token 通过 onmessage 渲染
+                if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
+                    // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
+                    usage = _rsResult.usage;
+                    toolCalls = _rsResult.toolCalls || [];
+                    if (_rsResult.reasoningText && !pendingMsg.reasoning) pendingMsg.reasoning = _rsResult.reasoningText;
+                    // ★ 图像模型: 进度条清除
+                    try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
                     clearTimeout(timeoutIdVal);
-                    return;  // ★ 不继续走下面的 HTTP 流路径
+                    // ★ 设置 _rsDone 标记跳过 HTTP 直连路径，但继续工具调用处理
+                    var _rsDone = true;
+                } else {
+                    // 引擎流失败：回退普通 HTTP 直连流
+                    console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
+                    _useRS = false;
+                    var _rsDone = false;
                 }
-                // WebSocket 未连接：回退普通 HTTP 流
-                _useRS = false;
-            }
+            } else { var _rsDone = false; }
 
-            if (!_useRS) {
+            if (!_useRS && !_rsDone) {
             // ★ 图像模型: 显示生成进度 (生成图片可能需要 1-15 分钟)
             var _imgPlaceholder = null;
             var _imgTimerInterval = null;
