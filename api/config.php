@@ -8,24 +8,13 @@
  */
 
 require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
 setCorsHeaders();
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
-}
-
-function verifyToken($token) {
-    $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = json_read_file($sessionsFile);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > 30*24*3600) unset($sessions[$t]);
-    }
-    return $sessions[$token]['user_id'] ?? null;
 }
 
 function jsonReply($data, $code = 200) {
@@ -39,7 +28,7 @@ function getUserConfigFile($userId) {
 }
 
 $token = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
-$userId = verifyToken($token);
+$userId = verifyAuthToken($token);
 if (!$userId) jsonReply(['error' => 'Unauthorized'], 401);
 
 $method = $_SERVER['REQUEST_METHOD'];

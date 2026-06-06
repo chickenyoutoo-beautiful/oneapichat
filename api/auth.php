@@ -128,16 +128,8 @@ function cleanExpiredSessions(&$sessions) {
     }
 }
 
-// ---- Token 验证 ----
-function verifyToken($token) {
-    global $sessionsFile;
-    if (empty($token) || strlen($token) < 20) return null;
-    $sessions = readJson($sessionsFile);
-    cleanExpiredSessions($sessions);
-    $info = $sessions[$token] ?? null;
-    if (!$info) return null;
-    return $info['user_id'] ?? null;
-}
+require_once __DIR__ . '/auth_helpers.php';
+// ★ verifyAuthToken → auth_helpers.php (共享实现)
 
 // ---- 请求处理 ----
 $method = $_SERVER['REQUEST_METHOD'];
@@ -381,7 +373,7 @@ switch ($method) {
         } elseif ($action === 'update_profile') {
             $token = $input['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
 
             $users = readJson($usersFile);
@@ -424,7 +416,7 @@ switch ($method) {
             $token = $input['token'] ?? '';
             $email = trim($input['email'] ?? '');
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError(400, '邮箱格式不正确');
 
@@ -454,7 +446,7 @@ switch ($method) {
             $token = $input['token'] ?? '';
             $code = trim($input['code'] ?? '');
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
             if (strlen($code) !== 6) jsonError(400, '验证码格式不正确');
 
@@ -476,7 +468,7 @@ switch ($method) {
         } elseif ($action === 'unbind_email') {
             $token = $input['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
             $users = readJson($usersFile);
             if (!isset($users[$userId])) jsonError(404, '用户不存在');
@@ -487,7 +479,7 @@ switch ($method) {
         } elseif ($action === 'delete_account') {
             $token = $input['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
             $users = readJson($usersFile);
             if (!isset($users[$userId])) jsonError(404, '用户不存在');
@@ -508,7 +500,7 @@ switch ($method) {
     case 'GET':
         if ($action === 'verify') {
             $token = $_GET['token'] ?? '';
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) {
                 echo json_encode(['valid' => false]);
                 exit;
@@ -531,7 +523,7 @@ switch ($method) {
         } elseif ($action === 'get_profile') {
             $token = $_GET['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
-            $userId = verifyToken($token);
+            $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');
 
             $users = readJson($usersFile);

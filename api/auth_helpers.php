@@ -15,6 +15,9 @@ if (!defined('ONECHAT_ROOT')) {
  * @return string|null 用户 ID 或 null
  */
 function verifyAuthToken(string $token): ?string {
+    // 快速拒绝无效 token
+    if (strlen($token) < 20) return null;
+
     $sessionsFile = ONECHAT_ROOT . '/users/sessions.json';
     if (!file_exists($sessionsFile)) return null;
     $raw = file_get_contents($sessionsFile);
