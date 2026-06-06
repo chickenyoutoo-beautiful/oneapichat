@@ -15,15 +15,15 @@ function beaconSaveChats() {
         if (!token) return;
         var url = SERVER_API_BASE + '/chat.php?auth_token=' + token;
         // ★ 精简数据:只保留消息骨架(去掉大体积 base64 图片),确保 sendBeacon 不超 64KB 限制
-        var slimData = compressChatsForStorage(chats);
+        const slimData = compressChatsForStorage(chats);
         var payload = JSON.stringify({ chat_id: 'all', chats: slimData, title: '聊天备份' });
         // 如果 payload 仍然过大(>60KB),进一步压缩
         if (payload.length > 60000) {
-            var ultraSlim = {};
+            const ultraSlim = {};
             var ids = Object.keys(slimData);
             for (var si = 0; si < ids.length; si++) {
                 var id = ids[si];
-                var c = slimData[id];
+                const c = slimData[id];
                 ultraSlim[id] = {
                     title: c.title || '新对话',
                     updated_at: c.updated_at || '',
@@ -65,9 +65,9 @@ function beaconSaveConfig() {
 
 async function saveChatsToServer() {
     try {
-        var now = Date.now();
+        const now = Date.now();
         // ★ 有待删除的聊天时，跳过频率限制（必须立即同步）
-        var _hasPendingDeletes = Object.keys(_deletedChatIds).length > 0;
+        const _hasPendingDeletes = Object.keys(_deletedChatIds).length > 0;
         if (!_hasPendingDeletes && now - _lastServerBackup < SERVER_BACKUP_INTERVAL) return false;
         _lastServerBackup = now;
 
@@ -80,7 +80,7 @@ async function saveChatsToServer() {
         // ★ 防丢失:如果本地聊天数过少,视为异常,不强制覆盖服务器
         // ★ Agent 主聊(_agent_main)同步到服务器(含 system prompt,供第三方设备恢复)
         var _localCount = 0;
-        var mergedChats = {};
+        const mergedChats = {};
         for (var _cid in chats) {
             // ★ 跳过已标记删除的聊天（防止复活）
             if (_deletedChatIds[_cid]) continue;
@@ -102,13 +102,13 @@ async function saveChatsToServer() {
         var _serverChats = {};  // 用于防误覆盖检查
         var _getOk = false;    // GET是否成功
         try {
-            var getUrl = url + '&chat_id=all';
+            const getUrl = url + '&chat_id=all';
             console.log('[save] GET:', getUrl.substring(0,80));
-            var getResp = await fetch(getUrl);
+            const getResp = await fetch(getUrl);
             console.log('[save] GET响应:', getResp.status);
             _getOk = getResp.ok;
             if (getResp.ok) {
-                var serverData = await getResp.json();
+                const serverData = await getResp.json();
                 _serverChats = serverData.chats || {};
                 console.log('[save] 已删IDs:', Object.keys(_deletedChatIds).join(','));
                 console.log('[save] 服务器聊天数:', Object.keys(_serverChats).length);
@@ -152,15 +152,15 @@ async function saveChatsToServer() {
         console.warn('[saveChatsToServer] 备份失败:', e.message);
         // ★ 重试一次:进一步压缩后重发
         try {
-            var retrySlim = {};
+            const retrySlim = {};
             var ids = Object.keys(mergedChats || chats || {});
-            var recentIds = ids.slice(-10);
+            const recentIds = ids.slice(-10);
             for (var _si2 = 0; _si2 < recentIds.length; _si2++) {
                 var _id2 = recentIds[_si2];
-                var _c2 = (mergedChats || chats)[_id2];
+                const _c2 = (mergedChats || chats)[_id2];
                 retrySlim[_id2] = { title: _c2.title || '新对话', updated_at: _c2.updated_at || '', messages: (_c2.messages || []).slice(-4) };
             }
-            var retryResp = await fetch(url, {
+            const retryResp = await fetch(url, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ chat_id: 'all', chats: retrySlim, title: '聊天备份(精简)' }),
                 keepalive: false
@@ -177,7 +177,7 @@ async function saveConfigToServer() {
     if (!token) return;
     try {
         var config = {};
-        var allKeys = [];
+        const allKeys = [];
         for (var i = 0; i < localStorage.length; i++) {
             var k = localStorage.key(i);
             if (!k || k === 'chats' || k === 'lastChatId' || k === 'deviceId' ||
@@ -200,7 +200,7 @@ async function saveConfigToServer() {
         } catch(e1) { console.warn('[save] 保存失败:', e1.message); }
         if (!saved) {
             try {
-                var resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
+                const resp2 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), keepalive: true });
                 if (resp2.ok) saved = true;
             } catch(e2) { console.warn('[save] 重试保存也失败:', e2.message); }
         }
@@ -260,7 +260,7 @@ async function loadConfigFromServer() {
         }
         // 静默写入所有键,只在出错时记录
         // ★ 跳过无效值:含中文/英文提示语的模型名、明显错误数据
-        var _invalidModel = function(v) {
+        const _invalidModel = function(v) {
             if (!v || typeof v !== 'string') return true;
             // 过滤提示语(加载中、请输入API Key、空字符串、未设置)
             if (/^[\s\S]*(加载|请输入|请先|未设置|默认|选择|请选择)/.test(v)) return true;
@@ -291,7 +291,7 @@ async function loadChatsFromServer() {
     try {
         // ★ 兼容跨域 cookie(从 www 过来时 localStorage 暂无 token)
         var token = localStorage.getItem('authToken') || getCookie('auth_token');
-        var deviceId = localStorage.getItem('deviceId');
+        const deviceId = localStorage.getItem('deviceId');
         if (!token && !deviceId) return null;
         var url = SERVER_API_BASE + '/chat.php?chat_id=all';
         if (token) {
@@ -301,7 +301,7 @@ async function loadChatsFromServer() {
         }
         var response = await fetch(url);
         if (response.ok) {
-            var result = await response.json();
+            const result = await response.json();
             if (result.chats) return result.chats;
         }
         return null;
@@ -320,12 +320,12 @@ async function restoreUserData() {
     console.log('[restoreUserData] token:', token ? token.substring(0,20)+'...' : 'null');
     if (!token) { console.log('[restoreUserData] 无token,跳过'); return; }
 
-    var uid = localStorage.getItem('authUserId') || '';
+    const uid = localStorage.getItem('authUserId') || '';
 
     // ★ 安全隔离: 检查本地 chats 是否有不属于当前用户的数据
     //     (修复 bfcache/竞态条件导致切换账号后旧数据残留)
     if (uid) {
-        var foreignChatIds = [];
+        const foreignChatIds = [];
         for (var _cid in chats) {
             var _cUid = chats[_cid].userId;
             // 如果有 userId 标记且不等于当前用户 → 标记为外来数据
@@ -373,7 +373,7 @@ async function restoreUserData() {
                 if (_serverChats && typeof _serverChats === 'object' && Object.keys(_serverChats).length > 0) {
                     // ★ 合并:本地优先(最新数据),服务器补充缺失项
                     // ★ 排除 Agent 聊天(但保留 Agent 主聊的 system prompt)
-                    var merged = {};
+                    const merged = {};
                     for (var _cid2 in chats) {
                         if (_cid2 === AGENT_CHAT_ID || _cid2 === '_agent_main') {
                             // Agent 主聊:只保留 system prompt,不合并到普通聊天
@@ -393,8 +393,8 @@ async function restoreUserData() {
                             if (!_serverChats[_lcid]) {
                                 // 本地有但服务器没有 → 可能在其他域名被删了
                                 // ★ 只移除旧的（>5分钟前更新过），保留刚创建的新聊天
-                                var _lc = merged[_lcid];
-                                var _age = Date.now() - (_lc.updated_at || 0);
+                                const _lc = merged[_lcid];
+                                const _age = Date.now() - (_lc.updated_at || 0);
                                 if (_age > 300000) {
                                     console.log('[restoreUserData] 移除本地残留聊天(服务器已不存在):', _lcid, _lc.title);
                                     delete merged[_lcid];
@@ -412,19 +412,19 @@ async function restoreUserData() {
                             continue;
                         }
                         if (_deletedChatIds && _deletedChatIds[_scid]) continue; // 跳过已删除
-                        var _sc = _serverChats[_scid];
+                        const _sc = _serverChats[_scid];
                         if (!merged[_scid]) {
                             merged[_scid] = _sc;
                             added++;
                         } else {
-                            var _mc = merged[_scid];
+                            const _mc = merged[_scid];
                             // ★ 修复: 服务器有更多消息时,优先保留本地消息的图片数据
                             if (_sc.messages && _mc.messages) {
                                 // 如果服务器消息更多,说明有新消息,用服务器数据补充
                                 // 但要保留本地消息中的 generatedImages (服务器备份可能丢失图片数据)
                                 if (_sc.messages.length > _mc.messages.length) {
                                     // 先保存本地消息中的图片数据
-                                    var _localImages = {};
+                                    const _localImages = {};
                                     for (var _li = 0; _li < _mc.messages.length; _li++) {
                                         var _lm = _mc.messages[_li];
                                         if (_lm.generatedImages && _lm.generatedImages.length > 0) {
@@ -453,10 +453,10 @@ async function restoreUserData() {
                             }
                             // 图片数据恢复
                             if (_sc.messages && _mc.messages) {
-                                var _minLen = Math.min(_sc.messages.length, _mc.messages.length);
+                                const _minLen = Math.min(_sc.messages.length, _mc.messages.length);
                                 for (var _smi = 0; _smi < _minLen; _smi++) {
                                     var _sm = _sc.messages[_smi];
-                                    var _mm = _mc.messages[_smi];
+                                    const _mm = _mc.messages[_smi];
                                     if (_sm && _mm) {
                                         if (_sm.generatedImage && (!_mm.generatedImage || _mm.generatedImage.indexOf('data:') !== 0)) {
                                             _mm.generatedImage = _sm.generatedImage;
@@ -475,7 +475,7 @@ async function restoreUserData() {
                         console.warn('[restoreUserData] 写入localStorage失败,尝试精简:', e.message);
                         // 极简模式:只保留标题骨架
                         try {
-                            var mini = {};
+                            const mini = {};
                             Object.keys(chats).slice(-5).forEach(function(id) {
                                 mini[id] = { title: chats[id].title || '新对话', updated_at: chats[id].updated_at || '', messages: [] };
                             });
@@ -498,9 +498,9 @@ async function restoreUserData() {
     initializeConfig();
     // ★ 模型配置:预填充已知不支持工具的模型到 noToolModels 列表
     try {
-        var _existingNoTool = JSON.parse(localStorage.getItem('noToolModels') || '[]');
+        const _existingNoTool = JSON.parse(localStorage.getItem('noToolModels') || '[]');
         // 硬编码已知不支持工具的模型(即使 models.js 未加载也能生效)
-        var _builtinNoTools = [
+        const _builtinNoTools = [
             'deepseek-reasoner', 'deepseek-r1', 'qwq', 'qwq-',
             'grok-3-reasoning', 'grok-3-reasoner',
             // 图像生成模型不支持工具调用
@@ -516,7 +516,7 @@ async function restoreUserData() {
         }
         // 从 models.js 自动加载更多
         if (window.MODEL_CONFIGS) {
-            var _allConfigs = window.MODEL_CONFIGS.getAllConfigs();
+            const _allConfigs = window.MODEL_CONFIGS.getAllConfigs();
             for (var _ci = 0; _ci < _allConfigs.length; _ci++) {
                 var _m = _allConfigs[_ci];
                 if (_m && _m[0] && _m[0] !== '*' && window.MODEL_CONFIGS.isNoToolsBuiltin(_m[0])) {
@@ -533,18 +533,18 @@ async function restoreUserData() {
     } catch(e) { console.warn('[ModelCfg] 初始化 no-tool 列表失败:', e.message); }
     // ★ 核心逻辑: 只在真正没有任何对话时才新建
     // ★ 恢复 Agent 主聊:即使服务器合并时排除了 _agent_main,也要确保加载前存在
-    var _agentMainId = '_agent_main';
+    const _agentMainId = '_agent_main';
     if (!chats[_agentMainId]) {
         // 看看 localStorage 是否有缓存的 agent system prompt (表示之前是 agent 模式)
-        var _agentWasActive = localStorage.getItem('agentMode') && localStorage.getItem('agentMode') !== 'off';
+        const _agentWasActive = localStorage.getItem('agentMode') && localStorage.getItem('agentMode') !== 'off';
         // 看看服务器数据里有没有 agent 主聊
         if (_serverChats && _serverChats[_agentMainId]) {
             chats[_agentMainId] = JSON.parse(JSON.stringify(_serverChats[_agentMainId]));
             console.log('[restoreUserData] 从服务器恢复了 Agent 主聊');
         } else if (_agentWasActive) {
             // 之前是 agent 模式但数据丢了,重新创建 (用缓存的 system prompt)
-            var _agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
-            var _uid = localStorage.getItem('authUserId') || '';
+            const _agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+            const _uid = localStorage.getItem('authUserId') || '';
             chats[_agentMainId] = {
                 title: 'Agent',
                 userId: _uid,
@@ -576,7 +576,7 @@ async function restoreUserData() {
         var lastId = localStorage.getItem('lastChatId');
         // ★ 如果是 agent 聊天但当前模式不是 agent,跳过,恢复上一个普通聊天
         if (lastId === '_agent_main') {
-            var _currentAgentMode = getAgentMode();
+            const _currentAgentMode = getAgentMode();
             if (_currentAgentMode === 'off') {
                 // agent 模式关闭时自动切到上一个普通聊天
                 lastId = localStorage.getItem('lastNormalChatId') || null;
@@ -588,15 +588,15 @@ async function restoreUserData() {
                 loadChat(lastId);
             }
         } else {
-            var firstKey = chatKeys.sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
+            const firstKey = chatKeys.sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); })[0];
             loadChat(firstKey || chatKeys[0]);
         }
     }
     // ★ 恢复刷新前输入框中的文本
     try {
-        var _savedText = localStorage.getItem('_savedInputText');
+        const _savedText = localStorage.getItem('_savedInputText');
         if (_savedText) {
-            var _input = getEl('chatInput');
+            const _input = getEl('chatInput');
             if (_input) {
                 _input.value = _savedText;
                 // 自动聚焦并移动光标到末尾
@@ -641,9 +641,9 @@ async function restoreUserData() {
     setTimeout(function() { window._recoverActiveTasks(); }, 1500);
 
     // ★ Agent 模式恢复:如果刷新前 agentMode 是激活的,自动恢复
-    var _agentModeSaved = localStorage.getItem('agentMode');
+    const _agentModeSaved = localStorage.getItem('agentMode');
     if (_agentModeSaved && _agentModeSaved !== 'off') {
-        var _currentMode = getAgentMode();
+        const _currentMode = getAgentMode();
         if (_currentMode !== _agentModeSaved) {
             // 直接写 localStorage 和恢复，绕过 setAgentMode 的同模式退出逻辑
             localStorage.setItem('agentMode', _agentModeSaved);
@@ -678,8 +678,8 @@ function saveUserDataBeforeLogout() {
         }
         console.log('[logout] 配置项:', Object.keys(config).length);
         // ★ 使用 sendBeacon 确保页面卸载前请求送达(比 fetch 可靠)
-        var _saveBlob = new Blob([JSON.stringify(config)], { type: 'application/json' });
-        var _saveUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
+        const _saveBlob = new Blob([JSON.stringify(config)], { type: 'application/json' });
+        const _saveUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
         navigator.sendBeacon(_saveUrl, _saveBlob);
         console.log('[logout] sendBeacon 已发送');
     } catch(e) { console.warn('[logout] 配置保存错误:', e.message); }

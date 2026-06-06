@@ -5,7 +5,7 @@
 async function cloudreveApiHandler(action, args) {
     var token = localStorage.getItem('authToken') || '';
     var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-    var base = '/oneapichat/api/cloudreve_api.php?action=' + action + authSuffix;
+    const base = '/oneapichat/api/cloudreve_api.php?action=' + action + authSuffix;
 
     // 拼接额外参数
     if (args) {
@@ -41,7 +41,7 @@ async function engineApiHandler(action, args) {
             if (names.length === 0) return { result: '暂无后台任务' };
             var msg = '📋 后台任务列表:\n';
             names.forEach(function(n) {
-                var j = d[n];
+                const j = d[n];
                 msg += '- ' + n + ' (每' + j.interval + '秒, ' + (j.enabled ? '运行中' : '已停止') + ')';
                 if (j.last_run) msg += ' 上次: ' + (j.last_run.time || '') + ' 状态: ' + (j.last_run.exit_code === 0 ? '✅' : '❌');
                 msg += '\n';
@@ -66,10 +66,10 @@ async function engineApiHandler(action, args) {
         }
         if (action === 'agent_create') {
             // 继承当前用户的 API Key 和 baseUrl
-            var currentKey = localStorage.getItem('apiKey') || '';
-            var currentUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1';
-            var currentModel = args.model || localStorage.getItem('model') || 'deepseek-chat';
-            var agentRole = args.role || 'general';
+            const currentKey = localStorage.getItem('apiKey') || '';
+            const currentUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1';
+            const currentModel = args.model || localStorage.getItem('model') || 'deepseek-chat';
+            const agentRole = args.role || 'general';
             var url = '/oneapichat/api/engine_api.php?action=agent_create&name=' + encodeURIComponent(args.name);
             url += '&prompt=' + encodeURIComponent(args.prompt || args.task || '');
             url += '&role=' + encodeURIComponent(agentRole);
@@ -126,7 +126,7 @@ async function engineApiHandler(action, args) {
             // 运行子代理(直接触发一次)
             await fetch(_apiBase + '?action=agent_run&name=' + encodeURIComponent(name) + '&message=' + encodeURIComponent(message) + '&from_ask=1' + authSuffix);
             // 等待完成
-            var waitStart = Date.now();
+            const waitStart = Date.now();
             var resultMsg = '';
             while (Date.now() - waitStart < 120000) {
                 await new Promise(r2 => setTimeout(r2, 2000));
@@ -160,7 +160,7 @@ async function engineApiHandler(action, args) {
             var r = await fetch(_apiBase + '?action=sys_info' + authSuffix);
             var d = await r.json();
             if (d.ok) {
-                var info = '🖥️ 系统信息:\n' +
+                const info = '🖥️ 系统信息:\n' +
                     '主机: ' + d.hostname + '\n' +
                     '系统: ' + d.os + '\n' +
                     'Python: ' + d.python + '\n' +
@@ -201,30 +201,30 @@ async function engineApiHandler(action, args) {
             return { error: d.error || 'Python 脚本执行失败' };
         }
         if (action === 'file_read') {
-            var _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
+            const _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
             if (args.start_line) _frUrl += '&start_line=' + args.start_line;
             if (args.end_line) _frUrl += '&end_line=' + args.end_line;
             _frUrl += authSuffix;
             var r = await fetch(_frUrl);
             var d = await r.json();
             if (d.ok) {
-                var _range = d.shown_range ? ' [' + d.shown_range + '/' + d.total_lines + '行]' : '';
+                const _range = d.shown_range ? ' [' + d.shown_range + '/' + d.total_lines + '行]' : '';
                 var out = '📄 ' + args.path + _range + ' (' + (d.size || 0) + ' bytes)\n' + d.content;
                 return { result: out };
             }
             return { error: d.error || '读取失败' };
         }
         if (action === 'file_grep') {
-            var _fgUrl = _apiBase + '?action=file_grep&pattern=' + encodeURIComponent(args.pattern) + '&path=' + encodeURIComponent(args.path || '/var/www/html/oneapichat');
+            const _fgUrl = _apiBase + '?action=file_grep&pattern=' + encodeURIComponent(args.pattern) + '&path=' + encodeURIComponent(args.path || '/var/www/html/oneapichat');
             if (args.context_lines) _fgUrl += '&context_lines=' + args.context_lines;
             if (args.file_pattern) _fgUrl += '&file_pattern=' + encodeURIComponent(args.file_pattern);
             if (args.max_results) _fgUrl += '&max_results=' + args.max_results;
             if (args.ignore_case === false) _fgUrl += '&ignore_case=false';
             _fgUrl += authSuffix;
-            var _fgr = await fetch(_fgUrl);
-            var _fgd = await _fgr.json();
+            const _fgr = await fetch(_fgUrl);
+            const _fgd = await _fgr.json();
             if (_fgd.ok && _fgd.results) {
-                var _fgOut = '🔍 搜索 "' + args.pattern + '" (' + _fgd.total_matches + ' 处匹配):\n\n';
+                const _fgOut = '🔍 搜索 "' + args.pattern + '" (' + _fgd.total_matches + ' 处匹配):\n\n';
                 _fgd.results.forEach(function(_fr) {
                     _fgOut += '─── ' + _fr.file + ' ───\n';
                     _fr.matches.forEach(function(_m) { _fgOut += _m + '\n\n'; });
@@ -234,22 +234,22 @@ async function engineApiHandler(action, args) {
             return { error: _fgd.error || '搜索失败' };
         }
         if (action === 'file_edit') {
-            var _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(args.path);
+            const _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(args.path);
             if (args.replace_all) _feUrl += '&replace_all=true';
             _feUrl += authSuffix + '&t=' + Date.now();
-            var _fer = await fetch(_feUrl, {
+            const _fer = await fetch(_feUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ old_string: args.old_string, new_string: args.new_string })
             });
-            var _fed = await _fer.json();
+            const _fed = await _fer.json();
             if (_fed.ok) {
                 return { result: '✅ 已编辑 ' + args.path + ' (' + _fed.replaced + ' 处替换)' + (_fed.backup ? ' [备份: ' + _fed.backup + ']' : '') };
             }
             return { error: _fed.error || '编辑失败', old_string_preview: _fed.old_string_preview };
         }
         if (action === 'file_write') {
-            var appendParam = args.append ? '&append=true' : '';
+            const appendParam = args.append ? '&append=true' : '';
             var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + appendParam + authSuffix + '&t=' + Date.now(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
@@ -258,14 +258,14 @@ async function engineApiHandler(action, args) {
             var d = await r.json();
             if (d.ok) {
                 // ★ 自动生成可访问URL（根据当前访问域名动态生成）
-                var _fp = args.path;
+                const _fp = args.path;
                 var _webUrl = '';
                 if (_fp.indexOf('/oneapichat/') !== -1) {
                     _webUrl = window.location.origin + '/' + _fp.substring(_fp.indexOf('oneapichat/'));
                 } else if (_fp.startsWith('/tmp/')) {
                     _webUrl = '(服务器临时文件: ' + _fp + ', 如需访问请用 engine_push 推送)';
                 }
-                var _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
+                const _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
                 if (_webUrl && !_webUrl.startsWith('(')) {
                     _resultMsg += '\n🔗 在线访问: ' + _webUrl;
                 } else if (_webUrl) {
@@ -302,13 +302,13 @@ async function engineApiHandler(action, args) {
             return { error: _d.error || 'unreachable' };
         }
         // ===== 浏览��工具 (无头浏览器操控) =====
-        var browserActions = ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot'];
+        const browserActions = ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot'];
         if (browserActions.indexOf(action) >= 0) {
             // ★ PHP 期望的 action 名 (去掉 browser_ 前缀的变化)
-            var _phpAction = action.replace('browser_', 'browser_');  // keep as-is
-            var _burl = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
+            const _phpAction = action.replace('browser_', 'browser_');  // keep as-is
+            const _burl = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // POST body 用于 navigate/click/type
-            var _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
+            const _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
             if (_bmethod === 'POST') {
                 var _r = await fetch(_burl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(args || {}) });
                 var _d = await _r.json();
@@ -333,11 +333,11 @@ async function engineApiHandler(action, args) {
             }
         }
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
-        var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
+        const directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
-            var _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
+            const _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
-            var _skipKeys = ['action_cmd', 'auth_token'];
+            const _skipKeys = ['action_cmd', 'auth_token'];
             Object.keys(args || {}).forEach(function(k) {
                 var v = args[k];
                 if (_skipKeys.indexOf(k) >= 0) return;
@@ -370,15 +370,15 @@ async function engineApiHandler(action, args) {
             }
         }
         if (action === 'workflow_create') {
-            var _wfUrl = _apiBase + '?action=workflow_create&name=' + encodeURIComponent(args.name);
+            const _wfUrl = _apiBase + '?action=workflow_create&name=' + encodeURIComponent(args.name);
             _wfUrl += '&steps=' + encodeURIComponent(args.steps || '[]');
             _wfUrl += authSuffix;
-            var _wfr = await fetch(_wfUrl);
-            var _wfd = await _wfr.json();
+            const _wfr = await fetch(_wfUrl);
+            const _wfd = await _wfr.json();
             return _wfd;
         }
         if (action === 'workflow_run') {
-            var _wrUrl = _apiBase + '?action=workflow_run&name=' + encodeURIComponent(args.name) + authSuffix;
+            const _wrUrl = _apiBase + '?action=workflow_run&name=' + encodeURIComponent(args.name) + authSuffix;
             fetch(_wrUrl).catch(function(){}); // 异步启动，不等待
             return { ok: true };
         }
@@ -390,10 +390,10 @@ async function engineApiHandler(action, args) {
 }
 
 function queryRAG() {
-    var input = getEl('ragQueryInput');
+    const input = getEl('ragQueryInput');
     if (!input || !input.value.trim()) return;
-    var q = input.value.trim();
-    var btn = getEl('ragQueryBtn');
+    const q = input.value.trim();
+    const btn = getEl('ragQueryBtn');
     if (btn) { btn.textContent = '...'; btn.disabled = true; }
     var uid = localStorage.getItem('authUserId') || '';
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
@@ -449,9 +449,9 @@ function loadEmbedConfig() {
             var sm = getEl('ragEmbedModel');
             if (!sm) return;
             // 保留当前选中值
-            var curVal = sm.value;
+            const curVal = sm.value;
             // 构建选项:API模型 + 本地模型
-            var html = '<option value="">TF-IDF(纯词法)</option>';
+            const html = '<option value="">TF-IDF(纯词法)</option>';
             html += '<option value="text-embedding-3-small">text-embedding-3-small(OpenAI)</option>';
             html += '<option value="text-embedding-3-large">text-embedding-3-large(OpenAI)</option>';
             if (data && data.models) {
@@ -472,13 +472,13 @@ function loadEmbedConfig() {
         .then(function(d) {
             if (!d) return;
             var sm = getEl('ragEmbedModel');
-            var sm2 = getEl('ragSearchMode');
-            var st = getEl('ragEmbedStatus');
+            const sm2 = getEl('ragSearchMode');
+            const st = getEl('ragEmbedStatus');
             if (sm && d.embed_model) sm.value = d.embed_model;
             if (sm2) sm2.value = d.mode || 'hybrid';
             if (st) {
                 if (d.embed_model) {
-                    var modeLabel = {hybrid:'混合模式',embedding:'语义搜索',tfidf:'纯词法'}[d.mode] || d.mode;
+                    const modeLabel = {hybrid:'混合模式',embedding:'语义搜索',tfidf:'纯词法'}[d.mode] || d.mode;
                     st.innerHTML = '嵌入: ' + d.embed_model + ' (' + modeLabel + ')';
                 } else {
                     st.innerHTML = '嵌入: 未启用(纯TF-IDF词法检索)';

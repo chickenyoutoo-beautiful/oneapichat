@@ -138,7 +138,7 @@ try {
             $response = @curl_multi_getcontent($ch);
             $httpCode = @curl_getinfo($ch, CURLINFO_HTTP_CODE);
             if ($httpCode === 200 && $response && strlen($response) > 0) {
-                $data = @json_decode($response, true);
+                $data = json_decode($response, true);
                 if ($data) {
                     $frameAnalyses[] = $data['choices'][0]['message']['content'] ?? $data['content'] ?? $data['result'] ?? '帧' . ($i+1) . ': 分析完成';
                 } else {

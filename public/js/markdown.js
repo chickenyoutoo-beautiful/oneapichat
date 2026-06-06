@@ -29,10 +29,10 @@ function applyStreamRender(chatId, fullText) {
     if (!st.rafId) {
         st.lastTime = performance.now();
         st.rafId = requestAnimationFrame(function _streamLoop(now) {
-            var st2 = _streamState[chatId];
+            const st2 = _streamState[chatId];
             if (!st2) return;
             // ★ 自适应帧率: 快速阶段(前100 tokens) 16ms/帧, 稳定后 33ms/帧
-            var interval = st2.tickCount < 100 ? 16 : 33;
+            const interval = st2.tickCount < 100 ? 16 : 33;
             if (now - st2.lastTime < interval && st2.text.length - st2.lastRenderLen < 40) {
                 // 数据量不够一帧,继续等待
                 st2.rafId = requestAnimationFrame(_streamLoop);
@@ -41,8 +41,8 @@ function applyStreamRender(chatId, fullText) {
             st2.lastTime = now;
             st2.tickCount++;
             var bubble = st2.bubble;
-            var isAlive = bubble && document.body.contains(bubble);
-            var isTyping = isTypingMap[chatId];
+            const isAlive = bubble && document.body.contains(bubble);
+            const isTyping = isTypingMap[chatId];
             if (!isAlive || !isTyping) {
                 // 气泡被移除或流已停止,清除状态
                 cancelAnimationFrame(st2.rafId);
@@ -68,14 +68,14 @@ function applyStreamRender(chatId, fullText) {
 }
 
 function _flushStreamRender_batched(chatId, st) {
-    var text = st.text;
+    const text = st.text;
     if (!text || text.length === st.lastRenderLen) return;
     st.lastRenderLen = text.length;
     var bubble = st.bubble;
     if (!bubble) return;
-    var mb = bubble.querySelector('.markdown-body');
+    const mb = bubble.querySelector('.markdown-body');
     if (!mb) return;
-    var prevH = mb.offsetHeight;
+    const prevH = mb.offsetHeight;
     if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
         mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
@@ -103,7 +103,7 @@ function _renderMarkdownWithMath_cached(text, st) {
     if (!st._lastFormulaCount) st._lastFormulaCount = 0;
 
     // 提取所有公式及其位置
-    var formulas = [];
+    const formulas = [];
     var protected_ = text;
     var _mathCounter = 0;
 
@@ -308,8 +308,8 @@ const MarkdownRenderer = {
         // 步骤1: 将 marked 输出的 language-mermaid 代码块转换为 .mermaid div
         container.querySelectorAll('pre code[class*="language-mermaid"]').forEach(function(codeBlock) {
             if (codeBlock.closest('.mermaid')) return;
-            var pre = codeBlock.parentNode;
-            var mermaidDiv = document.createElement('div');
+            const pre = codeBlock.parentNode;
+            const mermaidDiv = document.createElement('div');
             mermaidDiv.className = 'mermaid';
             var code = codeBlock.textContent;
             mermaidDiv.textContent = code;
@@ -318,13 +318,13 @@ const MarkdownRenderer = {
         });
 
         // 步骤2: 渲染所有尚未渲染的 .mermaid div(流式渲染时每帧重建,会自动重试)
-        var mermaidDivs = container.querySelectorAll('.mermaid');
+        const mermaidDivs = container.querySelectorAll('.mermaid');
         if (!mermaidDivs.length) return;
         mermaidDivs.forEach(function(div) {
             var code = div.getAttribute('data-original-code') || div.textContent;
             if (!code || div.querySelector('svg')) return;
             // 流式渲染: 如果 mermaid 代码还在不断变化,跳过本次渲染避免闪烁
-            var prevCode = div.getAttribute('data-prev-code') || '';
+            const prevCode = div.getAttribute('data-prev-code') || '';
             if (code === prevCode) return;
             div.setAttribute('data-prev-code', code);
             window.ChartRenderer.render(code.trim()).then(function(result) {
@@ -340,7 +340,7 @@ const MarkdownRenderer = {
      */
     highlightCode(container) {
         if (typeof hljs === 'undefined') return;
-        var _warn = console.warn; console.warn = function() {};
+        const _warn = console.warn; console.warn = function() {};
         container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(block => {
             try { hljs.highlightElement(block); } catch (e) {}
         });
@@ -434,14 +434,14 @@ window.ChartRenderer = {
                 return `line "${label}" ${formatted}`;
             });
         // ★ 修复 x-axis 标签数量与数据点不匹配的问题
-        var xMatch = c.match(/x-axis[^[]*\[([^\]]*)\]/);
-        var lineMatches = c.match(/line\s+"[^"]*"\s+([\d.,\s]+)/g);
+        const xMatch = c.match(/x-axis[^[]*\[([^\]]*)\]/);
+        const lineMatches = c.match(/line\s+"[^"]*"\s+([\d.,\s]+)/g);
         if (xMatch && lineMatches && lineMatches.length > 0) {
-            var xLabels = xMatch[1].split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-            var lastLine = lineMatches[lineMatches.length - 1];
-            var dataPoints = lastLine.replace(/line\s+"[^"]*"\s+/, '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            const xLabels = xMatch[1].split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            const lastLine = lineMatches[lineMatches.length - 1];
+            const dataPoints = lastLine.replace(/line\s+"[^"]*"\s+/, '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
             if (xLabels.length > 0 && dataPoints.length > 0 && xLabels.length < dataPoints.length) {
-                var newLabels = [];
+                const newLabels = [];
                 for (var li = 0; li < dataPoints.length; li++) {
                     newLabels.push(xLabels[li % xLabels.length]);
                 }

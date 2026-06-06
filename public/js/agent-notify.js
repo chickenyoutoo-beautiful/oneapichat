@@ -5,9 +5,9 @@
 // ==================== 代理聊天室实时更新 (Feature 4) ====================
 var _agentPollTimer = null;
 var _agentPanelRefreshTimer = null;
-var _agentChatPollTimer = null;
-var _selectedAgentName = null;
-var _lastAgentListJson = '';
+const _agentChatPollTimer = null;
+const _selectedAgentName = null;
+const _lastAgentListJson = '';
 
 /**
  * 开始代理聊天室实时更新
@@ -57,16 +57,16 @@ window.syncAgentChat = function(agentName) {
     if (!agentName || !_selectedAgentName) return;
     if (agentName !== _selectedAgentName) return;
 
-    var msgArea = getEl('agentChatMessages');
+    const msgArea = getEl('agentChatMessages');
     if (!msgArea) return;
 
-    var key = 'agent_chat_' + agentName;
+    const key = 'agent_chat_' + agentName;
     var msgs = JSON.parse(localStorage.getItem(key) || '[]');
     if (msgs.length > 0) {
-        var html = msgs.map(function(m) {
-            var roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
-            var timeStr = m.time ? new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
-            var contentPreview = (m.content || '').substring(0, 3000);
+        const html = msgs.map(function(m) {
+            const roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
+            const timeStr = m.time ? new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
+            const contentPreview = (m.content || '').substring(0, 3000);
             return '<div class="agent-chat-bubble ' + roleClass + '">' +
                 '<div class="text-xs text-gray-400 mb-1">' + (m.role === 'user' ? '你' : escapeHtml(agentName)) + (timeStr ? ' · ' + timeStr : '') + '</div>' +
                 '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(contentPreview) + '</div>' +
@@ -84,7 +84,7 @@ window.syncAgentChat = function(agentName) {
  * 为运行中的代理应用脉冲动画
  */
 function _applyRunningAgentAnimation() {
-    var runningDots = document.querySelectorAll('.agent-sub-dot.running');
+    const runningDots = document.querySelectorAll('.agent-sub-dot.running');
     runningDots.forEach(function(dot) {
         if (!dot.style.animation) {
             dot.style.animation = 'agent-pulse 1.5s ease-in-out infinite';
@@ -94,9 +94,9 @@ function _applyRunningAgentAnimation() {
 
 // 在 _renderAgentList 后触发动画
 (function() {
-    var _origRender = window._renderAgentList;
+    const _origRender = window._renderAgentList;
     if (_origRender) {
-        var _wrapped = function(agents, container) {
+        const _wrapped = function(agents, container) {
             _origRender(agents, container);
             setTimeout(_applyRunningAgentAnimation, 100);
         };
@@ -106,7 +106,7 @@ function _applyRunningAgentAnimation() {
 
 function ensureChatExists() {
     if (!currentChatId || !chats[currentChatId]) {
-        var keys = Object.keys(chats);
+        const keys = Object.keys(chats);
         if (keys.length > 0) {
             loadChat(keys[keys.length - 1]);
         } else {
@@ -203,7 +203,7 @@ window._broadcastEvent = function(eventType, data) {
         if (!uid || !token) return;
         if (!data) data = {};
         data.source = window._sseSourceId;
-        var payload = JSON.stringify({ event_type: eventType, data: data });
+        const payload = JSON.stringify({ event_type: eventType, data: data });
         navigator.sendBeacon(
             '/oneapichat/api/engine_api.php?action=events_broadcast&auth_token=' + encodeURIComponent(token) + '&user_id=' + encodeURIComponent(uid),
             new Blob([payload], { type: 'application/json' })
@@ -212,7 +212,7 @@ window._broadcastEvent = function(eventType, data) {
 };
 
 window._broadcastChatUpdate = function(chatId) {
-    var now = Date.now();
+    const now = Date.now();
     if (now - _lastChatSyncBroadcast < 2000) return;
     _lastChatSyncBroadcast = now;
     window._broadcastEvent('chat:updated', { chat_id: chatId, ts: now });
@@ -233,7 +233,7 @@ window._wsConnect = function() {
     if (!uid) return;
     if (window._wsClient && window._wsClient.readyState === WebSocket.OPEN) return;
 
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var url = proto + '//' + location.host + '/engine/ws/' + uid;
     console.log('[WS] Connecting:', url);
     try {
@@ -267,7 +267,7 @@ window._wsConnect = function() {
             } else if (ev === 'content') {
                 window._wsChunkCount++;
                 var chatId = currentChatId;
-                var pm = chats[chatId]?.messages?.find(function(m){return m.partial;});
+                const pm = chats[chatId]?.messages?.find(function(m){return m.partial;});
                 if (pm) {
                     pm.content = (pm.content||'') + (d.delta||'');
                     applyStreamRender(chatId, pm.content);
@@ -278,19 +278,19 @@ window._wsConnect = function() {
                 // 思考内容累积到 pending message
             } else if (ev === 'tool_call') {
                 // ★ 多端同步看到工具调用
-                var pm2 = chats[currentChatId]?.messages?.find(function(m){return m.partial;});
+                const pm2 = chats[currentChatId]?.messages?.find(function(m){return m.partial;});
                 if (pm2) {
                     if (!pm2.tool_calls) pm2.tool_calls = [];
                     pm2.tool_calls.push(d);
                 }
             } else if (ev === 'done') {
                 console.log('[WS] ✅ Stream done');
-                var pm3 = chats[currentChatId]?.messages?.find(function(m){return m.partial;});
+                const pm3 = chats[currentChatId]?.messages?.find(function(m){return m.partial;});
                 if (pm3) {
                     delete pm3.partial;
                 }
                 if (currentChatId) {
-                    var bubble = activeBubbleMap[currentChatId];
+                    const bubble = activeBubbleMap[currentChatId];
                     if (bubble) bubble.classList.remove('typing', 'gen-active');
                     delete isTypingMap[currentChatId];
                 }
@@ -329,7 +329,7 @@ window._wsConnect = function() {
 window._wsSendChat = async function(messages, config, chatId, pendingMsg) {
     console.log('[WS] _wsSendChat called');
     // 等待连接就绪（最多 5 秒）
-    var _waitStart = Date.now();
+    const _waitStart = Date.now();
     while (!window._wsClient || window._wsClient.readyState === WebSocket.CONNECTING) {
         if (Date.now() - _waitStart > 5000) return null;
         await new Promise(function(r) { setTimeout(r, 100); });
@@ -376,9 +376,9 @@ window._recoverActiveTasks = async function() {
     var token = localStorage.getItem('authToken') || '';
     if (!uid || !token) return;
     try {
-        var resp = await fetch('/engine/tasks/active?user_id=' + encodeURIComponent(uid));
+        const resp = await fetch('/engine/tasks/active?user_id=' + encodeURIComponent(uid));
         if (!resp.ok) return;
-        var result = await resp.json();
+        const result = await resp.json();
         var tasks = (result && result.tasks) || [];
         if (tasks.length === 0) return;
         console.log('[recoverTasks] Found', tasks.length, 'active tasks from engine');
@@ -387,7 +387,7 @@ window._recoverActiveTasks = async function() {
             if (task.chat_id && chats[task.chat_id]) {
                 // Try resuming the stream
                 try {
-                    var resumed = await ResumeStream.resume(task.chat_id);
+                    const resumed = await ResumeStream.resume(task.chat_id);
                     if (resumed) {
                         console.log('[recoverTasks] Resumed stream', task.stream_id);
                     }
@@ -416,8 +416,8 @@ window.checkAgentNotifications = function() {
             if (!data || data.error) return;
             if (data.cron_results && Array.isArray(data.cron_results)) {
                 data.cron_results.forEach(function(r) {
-                    var _status = r.error ? 'error' : 'success';
-                    var _fullMsg = '[' + (r.name || 'Cron') + '] ' + (r.result || r.error || '完成');
+                    const _status = r.error ? 'error' : 'success';
+                    const _fullMsg = '[' + (r.name || 'Cron') + '] ' + (r.result || r.error || '完成');
                     window.showAgentNotification(_status, _fullMsg);
                 });
             }
@@ -436,7 +436,7 @@ window.checkAgentNotifications = function() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.count === 0) return;
-            var notifs = data.notifications || [];
+            const notifs = data.notifications || [];
             console.log('[AgentNotify] 收到', data.count, '条未处理通知:', notifs.map(function(n) { return n.agent; }));
 
             // 红点提示
@@ -447,12 +447,12 @@ window.checkAgentNotifications = function() {
             }
 
             notifs.forEach(function(n) {
-                var agentName = n.agent || '未知代理';
+                const agentName = n.agent || '未知代理';
 
                 // 保存到代理专属聊天(供面板查看)
-                var fullResult = n.result || n.error || '';
+                const fullResult = n.result || n.error || '';
                 if (fullResult) {
-                    var agentKey = 'agent_chat_' + agentName;
+                    const agentKey = 'agent_chat_' + agentName;
                     var agentMsgs = JSON.parse(localStorage.getItem(agentKey) || '[]');
                     agentMsgs.push({ role: 'assistant', content: fullResult, time: Date.now() });
                     if (agentMsgs.length > 50) agentMsgs = agentMsgs.slice(-50);
@@ -502,13 +502,13 @@ function _showAgentToast(type, message, source) {
         _container.style.cssText = 'position:fixed;top:70px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
         document.body.appendChild(_container);
     }
-    var _toast = document.createElement('div');
+    const _toast = document.createElement('div');
     _toast.className = 'agent-toast';
     _toast.style.cssText = 'pointer-events:auto;';
-    var _icon = type === 'error' ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>'
+    const _icon = type === 'error' ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>'
         : type === 'success' ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
         : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>';
-    var _srcLabel = source ? escapeHtml(source) : '';
+    const _srcLabel = source ? escapeHtml(source) : '';
     _toast.innerHTML = '<div style="display:flex;align-items:flex-start;gap:10px;background:rgba(255,255,255,0.96);backdrop-filter:blur(12px);border:1px solid rgba(0,0,0,0.08);border-radius:12px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.08);max-width:380px;font-size:13px;">' +
         '<div style="flex-shrink:0;margin-top:1px;">' + _icon + '</div>' +
         '<div style="flex:1;min-width:0;">' +
@@ -523,14 +523,14 @@ function _showAgentToast(type, message, source) {
     _toast.style.transition = 'all 0.3s cubic-bezier(0.16,1,0.3,1)';
     requestAnimationFrame(function() { _toast.style.opacity = '1'; _toast.style.transform = 'translateX(0)'; });
     // 自动消失
-    var _dur = type === 'error' ? 8000 : 5000;
+    const _dur = type === 'error' ? 8000 : 5000;
     setTimeout(function() {
         _toast.style.opacity = '0';
         _toast.style.transform = 'translateX(40px)';
         setTimeout(function() { if (_toast.parentNode) _toast.remove(); }, 300);
     }, _dur);
     // 限制最多 5 个
-    var _all = _container.querySelectorAll('.agent-toast');
+    const _all = _container.querySelectorAll('.agent-toast');
     if (_all.length > 5) _all[0].remove();
 }
 
@@ -573,7 +573,7 @@ window.__dumpImages = function() {
                 }
             }
         }
-        var hasImages = msgs.some(function(m) { return m.generatedImages && m.generatedImages.length > 0; });
+        const hasImages = msgs.some(function(m) { return m.generatedImages && m.generatedImages.length > 0; });
         console.log('聊天中有图片:', hasImages);
     } else {
         console.log('无当前聊天');
@@ -581,10 +581,10 @@ window.__dumpImages = function() {
 
     // 检查 localStorage
     try {
-        var stored = JSON.parse(localStorage.getItem('chats') || '{}');
+        const stored = JSON.parse(localStorage.getItem('chats') || '{}');
         console.log('localStorage chats 键数:', Object.keys(stored).length);
         if (currentChatId && stored[currentChatId]) {
-            var smsgs = stored[currentChatId].messages || [];
+            const smsgs = stored[currentChatId].messages || [];
             for (var si = 0; si < smsgs.length; si++) {
                 var sm = smsgs[si];
                 if (sm.generatedImages && sm.generatedImages.length > 0) {

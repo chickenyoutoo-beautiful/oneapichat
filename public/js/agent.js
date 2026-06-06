@@ -5,7 +5,7 @@
 
 /** 获取当前 Agent 模式: 'off' | 'plan' | 'agent' | 'yolo' */
 function getAgentMode() {
-    var val = localStorage.getItem('agentMode');
+    const val = localStorage.getItem('agentMode');
     // 从旧版布尔格式迁移
     if (val === 'true') { localStorage.setItem('agentMode', 'agent'); return 'agent'; }
     if (val === 'false' || val === null || val === undefined) { localStorage.setItem('agentMode', 'off'); return 'off'; }
@@ -16,7 +16,7 @@ function getAgentMode() {
 /** 设置 Agent 模式并更新 UI */
 function setAgentMode(mode) {
     if (['off','plan','agent','yolo'].indexOf(mode) === -1) mode = 'off';
-    var prevMode = getAgentMode();
+    const prevMode = getAgentMode();
 
     // ★ 同模式再次点击 = 退出到 off
     if (mode !== 'off' && mode === prevMode) {
@@ -40,8 +40,8 @@ function setAgentMode(mode) {
     }
 
     // ★ 消息队列隔离：切换模式前保存当前队列，切换后恢复目标模式队列
-    var _newIsAgent = (mode !== 'off');
-    var _prevIsAgent = (prevMode !== 'off');
+    const _newIsAgent = (mode !== 'off');
+    const _prevIsAgent = (prevMode !== 'off');
     // ★ 动画互斥锁: 如果有动画正在播放,立即清除
     if (window._agentAnimLock) {
         _clearAllAgentOverlays();
@@ -143,8 +143,8 @@ function setAgentMode(mode) {
 
 /** 循环切换模式: off → plan → agent → yolo → off */
 function cycleAgentMode() {
-    var modes = ['off', 'plan', 'agent', 'yolo'];
-    var current = getAgentMode();
+    const modes = ['off', 'plan', 'agent', 'yolo'];
+    const current = getAgentMode();
     var idx = modes.indexOf(current);
     if (idx === -1 || idx >= modes.length - 1) idx = 0;
     else idx++;
@@ -178,7 +178,7 @@ function isPlanMode() {
 let _agentOverlayMap = {}; // mode -> { el, timer }
 
 function _clearAgentOverlay(mode) {
-    var entry = _agentOverlayMap[mode];
+    const entry = _agentOverlayMap[mode];
     if (!entry) return;
     clearTimeout(entry.timer);
     if (entry.el && entry.el.parentNode) {
@@ -195,20 +195,20 @@ function _clearAllAgentOverlays() {
 
 function playAgentEnterEffect(mode) {
     _clearAllAgentOverlays();
-    var isPlan = mode === 'plan';
-    var isYolo = mode === 'yolo';
-    var c1 = isYolo ? [239,68,68] : isPlan ? [59,130,246] : [99,102,241];
-    var c2 = isYolo ? [245,158,11] : isPlan ? [96,165,250] : [168,85,247];
-    var glow = 'rgba(' + c1.join(',') + ',';
-    var glow2 = 'rgba(' + c2.join(',') + ',';
-    var titleGrad = isYolo ? '#ef4444,#f97316,#eab308' : isPlan ? '#3b82f6,#60a5fa,#93c5fd' : '#6366f1,#a855f7,#ec4899';
-    var titleWord = isYolo ? 'YOLO' : isPlan ? 'PLAN' : 'AGENT';
-    var subtitle = isYolo ? 'AUTONOMOUS' : isPlan ? 'READ-ONLY' : 'ENHANCED';
-    var hexStroke = 'rgba(' + c1.join(',') + ',0.12)';
+    const isPlan = mode === 'plan';
+    const isYolo = mode === 'yolo';
+    const c1 = isYolo ? [239,68,68] : isPlan ? [59,130,246] : [99,102,241];
+    const c2 = isYolo ? [245,158,11] : isPlan ? [96,165,250] : [168,85,247];
+    const glow = 'rgba(' + c1.join(',') + ',';
+    const glow2 = 'rgba(' + c2.join(',') + ',';
+    const titleGrad = isYolo ? '#ef4444,#f97316,#eab308' : isPlan ? '#3b82f6,#60a5fa,#93c5fd' : '#6366f1,#a855f7,#ec4899';
+    const titleWord = isYolo ? 'YOLO' : isPlan ? 'PLAN' : 'AGENT';
+    const subtitle = isYolo ? 'AUTONOMOUS' : isPlan ? 'READ-ONLY' : 'ENHANCED';
+    const hexStroke = 'rgba(' + c1.join(',') + ',0.12)';
 
     // 预载艺术字
     if (!document.getElementById('agent-font-link')) {
-        var fl = document.createElement('link');
+        const fl = document.createElement('link');
         fl.id = 'agent-font-link';
         fl.rel = 'stylesheet';
         fl.href = 'https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&display=swap';
@@ -235,8 +235,8 @@ function playAgentEnterEffect(mode) {
             '<div style="opacity:0;animation:agent-mask-in 0.3s 0.08s ease forwards;will-change:opacity;">' +
                 '<div style="font-family:\'Orbitron\',\'Inter\',system-ui,sans-serif;font-size:64px;font-weight:900;letter-spacing:4px;line-height:1;text-align:center;opacity:0;animation:agent-title-in 0.5s 0.1s cubic-bezier(0.16,1,0.3,1) forwards;">' +
                     titleWord.split('').map(function(letter, i) {
-                        var grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
-                        var shadow = 'filter:drop-shadow(0 0 ' + (12+i*2) + 'px ' + glow + '0.3));';
+                        const grad = 'background:linear-gradient(135deg,' + titleGrad + ');-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+                        const shadow = 'filter:drop-shadow(0 0 ' + (12+i*2) + 'px ' + glow + '0.3));';
                         return '<span style="' + grad + shadow + '">' + letter + '</span>';
                     }).join('') +
                 '</div>' +
@@ -244,14 +244,14 @@ function playAgentEnterEffect(mode) {
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    var enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.25s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 250); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 900);
+    const enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.25s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 250); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 900);
     _agentOverlayMap[mode] = { el: overlay, timer: enterTimer };
 }
 
 function playAgentExitEffect(mode) {
     _clearAgentOverlay('exit:' + mode);
     // ★ 退出: 暗色淡出,柔和醒目
-    var exitWord = 'OFF';
+    const exitWord = 'OFF';
 
     var overlay = document.createElement('div');
     overlay.className = 'agent-transition-overlay';
@@ -263,8 +263,8 @@ function playAgentExitEffect(mode) {
             '<div style="font-family:system-ui,sans-serif;font-size:42px;font-weight:600;letter-spacing:5px;color:rgba(255,255,255,0.7);opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    var exitKey = 'exit:' + mode;
-    var exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.2s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 200); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 650);
+    const exitKey = 'exit:' + mode;
+    const exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.2s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 200); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 650);
     _agentOverlayMap[exitKey] = { el: overlay, timer: exitTimer };
 }
 
@@ -282,8 +282,8 @@ window.toggleAgentMode = function() {
  */
 function createAgentChat() {
     return new Promise(function(resolve) {
-        var uid = localStorage.getItem('authUserId') || '';
-        var agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+        const uid = localStorage.getItem('authUserId') || '';
+        const agentSys = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         var agentId = '_agent_main';
         chats[agentId] = {
             title: 'Agent',
@@ -301,17 +301,17 @@ function createAgentChat() {
 function _inheritChatContext(agentId) {
     try {
         // 找到最近活跃的普通聊天
-        var normalChats = Object.keys(chats).filter(function(id) {
+        const normalChats = Object.keys(chats).filter(function(id) {
             return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
         }).sort(function(a, b) {
             return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
         });
-        var sourceId = currentChatId && currentChatId !== '_agent_main' ? currentChatId : normalChats[0];
+        const sourceId = currentChatId && currentChatId !== '_agent_main' ? currentChatId : normalChats[0];
         if (!sourceId || !chats[sourceId]) return;
 
-        var sourceMsgs = chats[sourceId].messages;
+        const sourceMsgs = chats[sourceId].messages;
         // 取最近 20 条非 system 消息
-        var recentMsgs = [];
+        const recentMsgs = [];
         for (var i = sourceMsgs.length - 1; i >= 0 && recentMsgs.length < 20; i--) {
             var m = sourceMsgs[i];
             if (m.role === 'system' || m.temporary || m._internal) continue;
@@ -321,9 +321,9 @@ function _inheritChatContext(agentId) {
 
         // 在 system prompt 后插入上下文摘要
         var sysMsg = chats[agentId].messages[0];
-        var contextLines = ['[上下文 - 从普通聊天继承]'];
+        const contextLines = ['[上下文 - 从普通聊天继承]'];
         recentMsgs.forEach(function(m) {
-            var prefix = m.role === 'user' ? '用户' : 'AI';
+            const prefix = m.role === 'user' ? '用户' : 'AI';
             var text = (m.text || m.content || '').substring(0, 300);
             if (text) contextLines.push(prefix + ': ' + text);
         });
@@ -407,7 +407,7 @@ window.saveAgentMemory = async function(key, content, tags) {
 
 /** 加载记忆(支持关键词搜索) */
 window.loadAgentMemory = async function(query) {
-    var params = {};
+    const params = {};
     if (query) params.query = query;
     return await _agentApiGet('agent_memory_load', params);
 };
@@ -474,9 +474,9 @@ window._loadCloudIdentity = async function() {
         var data = await resp.json();
         if (data && data.memories) {
             // 查找 identity_ 前缀的记忆
-            var identity = {};
-            var persona = {};
-            var user = {};
+            const identity = {};
+            const persona = {};
+            const user = {};
             data.memories.forEach(function(m) {
                 if (m.key === 'identity_ai_name') identity.name = m.content;
                 else if (m.key === 'identity_ai_style') identity.style = m.content;
@@ -497,7 +497,7 @@ window._loadCloudIdentity = async function() {
 
 window.refreshMemoryList = async function() {
     var token = localStorage.getItem('authToken');
-    var listEl = document.getElementById('memoryList');
+    const listEl = document.getElementById('memoryList');
     if (!listEl || !token) return;
     try {
         var resp = await fetch('/oneapichat/api/memory_api.php?action=get_memories&token=' + encodeURIComponent(token));
@@ -507,8 +507,8 @@ window.refreshMemoryList = async function() {
             listEl.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">暂无记忆</div>';
         } else {
             listEl.innerHTML = memories.map(function(m) {
-                var k = escapeHtml(m.key || '');
-                var c = escapeHtml((m.content || '').substring(0, 60));
+                const k = escapeHtml(m.key || '');
+                const c = escapeHtml((m.content || '').substring(0, 60));
                 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;font-size:11px;border-bottom:1px solid #f3f4f6;" class="dark:border-gray-700">' +
                     '<span><b>' + k + '</b>: ' + c + '</span>' +
                     '<button onclick="window.deleteMemoryEntry(\'' + k.replace(/'/g, "\\'") + '\')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;">✕</button>' +
@@ -523,7 +523,7 @@ window.refreshMemoryList = async function() {
 };
 
 window.addMemoryEntry = async function() {
-    var keyEl = document.getElementById('memoryKeyInput');
+    const keyEl = document.getElementById('memoryKeyInput');
     var contentEl = document.getElementById('memoryContentInput');
     var key = (keyEl?.value || '').trim();
     var content = (contentEl?.value || '').trim();
@@ -595,16 +595,16 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     if (msgs.length < 3) return; // 太短的对话不提取
 
     // 取最后5条非system消息作为分析素材
-    var recent = msgs.filter(function(m) { return m.role !== 'system' && !m.temporary && !m._internal; }).slice(-6);
+    const recent = msgs.filter(function(m) { return m.role !== 'system' && !m.temporary && !m._internal; }).slice(-6);
     if (recent.length < 2) return;
 
-    var conversation = recent.map(function(m) {
+    const conversation = recent.map(function(m) {
         return (m.role === 'user' ? '用户: ' : 'AI: ') + (m.text || m.content || '').substring(0, 200);
     }).join('\n');
 
     // 用廉价模型,但必须用 DeepSeek API(不能走 MiniMax)
     var key = localStorage.getItem('apiKey') || '';
-    var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
+    const baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
     if (baseUrl.includes('minimaxi.com') || baseUrl.includes('openrouter.ai') || baseUrl.includes('api.x.ai') || baseUrl.includes('anthropic.com') || baseUrl.includes('generativelanguage.googleapis.com')) {
         // 非 DeepSeek API 不兼容 deepseek-chat 模型,跳过
         return;
@@ -630,7 +630,7 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
         var data = await resp.json();
         var text = data.choices?.[0]?.message?.content || '';
         // 提取JSON
-        var jsonMatch = text.match(/\[[\s\S]*\]/);
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (!jsonMatch) return;
         var items = JSON.parse(jsonMatch[0]);
         if (!Array.isArray(items) || items.length === 0) return;
@@ -663,7 +663,7 @@ window._autoAskIdentity = async function() {
     try {
         var resp = await fetch('/oneapichat/api/memory_api.php?action=search_memories&q=identity_user_name&token=' + encodeURIComponent(token));
         var data = await resp.json();
-        var hasIdentity = data.memories && data.memories.some(function(m) { return m.key === 'identity_user_name'; });
+        const hasIdentity = data.memories && data.memories.some(function(m) { return m.key === 'identity_user_name'; });
         if (hasIdentity) return; // 已有身份,不需要问
     } catch(e) { return; }
 
@@ -678,11 +678,11 @@ window._autoAskIdentity = async function() {
 
 // ★ 身份卡片 - 漂亮弹窗代替丑陋系统消息
 window.showIdentityCard = function() {
-    var container = document.querySelector('.chat-messages') || document.getElementById('chat-messages');
+    const container = document.querySelector('.chat-messages') || document.getElementById('chat-messages');
     if (!container) return;
 
     // 移除已有的
-    var old = container.querySelector('.identity-card-wrapper');
+    const old = container.querySelector('.identity-card-wrapper');
     if (old) old.remove();
 
     var wrapper = document.createElement('div');
@@ -723,7 +723,7 @@ window._handleIdentityQuick = function(name) {
  */
 async function _injectAgentMemoryIntoSystem(chatId) {
     if (chatId !== AGENT_CHAT_ID) return;
-    var chat = chats[chatId];
+    const chat = chats[chatId];
     if (!chat || !chat.messages) return;
 
     try {
@@ -739,21 +739,21 @@ async function _injectAgentMemoryIntoSystem(chatId) {
         window.__agentIdentityCache = null;
         window.__agentMemoryCache = null;
 
-        var sysIdx = chat.messages.findIndex(function(m) { return m.role === 'system'; });
-        var baseSys = '';
+        const sysIdx = chat.messages.findIndex(function(m) { return m.role === 'system'; });
+        const baseSys = '';
 
         // 构建记忆注入块
-        var memoryBlock = '';
+        const memoryBlock = '';
 
         if (personaRes && personaRes.ok && personaRes.persona) {
             window.__agentPersonaCache = personaRes.persona;
-            var p = personaRes.persona;
+            const p = personaRes.persona;
             if (p.name) {
                 memoryBlock += '\n\n## 人格设定\n';
                 memoryBlock += '- AI名称: ' + (p.name || 'AI助手') + '\n';
                 if (p.style) memoryBlock += '- 风格: ' + p.style + '\n';
                 if (p.preferences) {
-                    var prefs = p.preferences;
+                    const prefs = p.preferences;
                     if (prefs.language) memoryBlock += '- 语言: ' + prefs.language + '\n';
                     if (prefs.response_style) memoryBlock += '- 回复风格: ' + prefs.response_style + '\n';
                 }
@@ -834,7 +834,7 @@ function _startAgentHeartbeatIfNeeded() {
 
 // 在 setAgentMode 后启动心跳 + 关闭popup
 (function() {
-    var origSetAgentMode = window.setAgentMode;
+    const origSetAgentMode = window.setAgentMode;
     window.setAgentMode = function(mode) {
         origSetAgentMode(mode);
         // ★ 选完关闭 popup(桌面端hover也适用)
@@ -847,7 +847,7 @@ function _startAgentHeartbeatIfNeeded() {
 
 window.openAgentPanel = function() {
     var ap = $.agentPanel || getEl('agentPanel');
-    var cp = $.configPanel || getEl('configPanel');
+    const cp = $.configPanel || getEl('configPanel');
     if (!ap) return;
 
     if (isMobile()) {
@@ -932,7 +932,7 @@ function startAgentPanelRefresh() {
                         if (!msgArea) return;
                         if (!a) { return; }
                         // ★ 只在 agent 状态变化时更新,避免闪烁
-                        var prevStatus = msgArea.getAttribute('data-status') || '';
+                        const prevStatus = msgArea.getAttribute('data-status') || '';
                         if (a.status === prevStatus && prevStatus === 'completed') return;
                         msgArea.setAttribute('data-status', a.status || '');
                         if (a.status === 'running') {
@@ -980,22 +980,22 @@ window._renderAgentList = function(agents, container) {
         return;
     }
     // ★ 角色颜色映射
-    var roleColors = {'explorer':'#27AE60','planner':'#F39C12','developer':'#E74C3C','verifier':'#9B59B6','general':'#4A90D9'};
-    var roleLabels = {'explorer':'🔍搜','planner':'📐规','developer':'⚡开','verifier':'✅验','general':'🌐全'};
+    const roleColors = {'explorer':'#27AE60','planner':'#F39C12','developer':'#E74C3C','verifier':'#9B59B6','general':'#4A90D9'};
+    const roleLabels = {'explorer':'🔍搜','planner':'📐规','developer':'⚡开','verifier':'✅验','general':'🌐全'};
     container.innerHTML = names.map(function(name) {
         var a = agents[name];
-        var dotClass = a.status === 'running' ? 'running' : a.status === 'completed' ? 'completed' : a.status === 'failed' ? 'offline' : 'idle';
+        const dotClass = a.status === 'running' ? 'running' : a.status === 'completed' ? 'completed' : a.status === 'failed' ? 'offline' : 'idle';
         var preview = '';
         if (a.result) {
             preview = '<div class="text-xs text-gray-400 truncate mt-0.5" style="font-size:10px;">' + escapeHtml(a.result.substring(0, 50)) + '</div>';
         } else if (a.error) {
             preview = '<div class="text-xs text-red-400 truncate mt-0.5" style="font-size:10px;">' + escapeHtml(a.error.substring(0, 50)) + '</div>';
         }
-        var safeName = escapeHtml(name);
-        var statusColor = a.status==='completed'?'#6366f1' : a.status==='failed'?'#ef4444' : a.status==='running'?'#10b981' : '#9ca3af';
-        var role = a.role || 'general';
-        var roleColor = roleColors[role] || '#9ca3af';
-        var roleLabel = roleLabels[role] || role;
+        const safeName = escapeHtml(name);
+        const statusColor = a.status==='completed'?'#6366f1' : a.status==='failed'?'#ef4444' : a.status==='running'?'#10b981' : '#9ca3af';
+        const role = a.role || 'general';
+        const roleColor = roleColors[role] || '#9ca3af';
+        const roleLabel = roleLabels[role] || role;
         return '<div class="agent-sub-item" onclick="window.selectAgentChat(\'' + safeName + '\')">' +
             '<div class="flex items-center gap-2 min-w-0 flex-1">' +
                 '<span class="agent-sub-dot ' + dotClass + '"></span>' +
@@ -1029,12 +1029,12 @@ window._refreshAllAgentLists = async function() {
         window._agentListCacheTime = Date.now();
         window._renderAgentList(agents, getEl('agentSubList'));
         window._renderAgentList(agents, getEl('engineAgentList'));
-        var dptuiContainer = getEl('agentSubListDptui');
+        const dptuiContainer = getEl('agentSubListDptui');
         if (dptuiContainer && dptuiContainer !== getEl('agentSubList')) window._renderAgentList(agents, dptuiContainer);
     } catch(e) {
         // 显示错误但不中断,保留上次缓存
-        var msg = '加载失败: ' + e.message;
-        var lists = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
+        const msg = '加载失败: ' + e.message;
+        const lists = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
         lists.forEach(function(id) {
             var el = getEl(id);
             if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
@@ -1051,13 +1051,13 @@ window.refreshAgentPanel = window._refreshAllAgentLists;
 
 /** 更新 Agent 面板中的费用/用量显示 */
 function updateAgentUsageDisplay() {
-    var usageEl = getEl('agentUsageDisplay');
+    const usageEl = getEl('agentUsageDisplay');
     if (!usageEl) return;
-    var cost = sessionUsage.totalCost.toFixed(4);
-    var pt = sessionUsage.promptTokens;
-    var ct = sessionUsage.completionTokens;
-    var cacheHits = sessionUsage.prefixCacheHits;
-    var toolCalls = sessionUsage.toolCalls;
+    const cost = sessionUsage.totalCost.toFixed(4);
+    const pt = sessionUsage.promptTokens;
+    const ct = sessionUsage.completionTokens;
+    const cacheHits = sessionUsage.prefixCacheHits;
+    const toolCalls = sessionUsage.toolCalls;
     // 使用增强可视化
     usageEl.innerHTML = usageVisualizer.fullDisplay();
 }
@@ -1105,14 +1105,14 @@ window.selectAgentChat = function(agentName) {
                     return;
                 }
                 if (a.result) {
-                        var rEl = getEl('agentChatMessages');
+                        const rEl = getEl('agentChatMessages');
                         if (rEl) {
                             rEl.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
                                 '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(agentName) + '</div>' +
                                 '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div>' +
                                 '</div>';
                         }
-                        var ms = [{ role: 'assistant', content: a.result, time: Date.now() }];
+                        const ms = [{ role: 'assistant', content: a.result, time: Date.now() }];
                         localStorage.setItem(key, JSON.stringify(ms));
                     }
                 }).catch(function(err) {
@@ -1121,7 +1121,7 @@ window.selectAgentChat = function(agentName) {
         return;
     } else {
         msgArea.innerHTML = msgs.map(function(m) {
-            var roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
+            const roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
             return '<div class="agent-chat-bubble ' + roleClass + '">' +
                 '<div class="text-xs text-gray-400 mb-1">' + (m.role === 'user' ? '你' : escapeHtml(agentName)) + ' · ' + new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) + '</div>' +
                 '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(m.content || '') + '</div>' +
@@ -1131,7 +1131,7 @@ window.selectAgentChat = function(agentName) {
 };
 
 window.mainAgentReply = function() {
-    var statusEl = getEl('agentReplyStatus');
+    const statusEl = getEl('agentReplyStatus');
     if (statusEl) {
         statusEl.classList.remove('hidden');
         statusEl.textContent = '正在触发主代理思考...';
@@ -1189,7 +1189,7 @@ function updateAgentUI() {
         }
     }
     // Header Agent 按钮圆点
-    var splitBtn = getEl('agentSplitBtn');
+    const splitBtn = getEl('agentSplitBtn');
     if (splitBtn) {
         splitBtn.classList.toggle('active', isActive);
     }
@@ -1200,31 +1200,31 @@ function updateAgentUI() {
         dot.style.removeProperty('background');
         dot.style.removeProperty('box-shadow');
         // ★ 跳过条件: 仅在非 Agent 模式 + 有临时授权时(让 temp-grant CSS 接管)
-        var _skipForTemp = (mode === 'off' && window._tempAgentGranted);
+        const _skipForTemp = (mode === 'off' && window._tempAgentGranted);
         if (!_skipForTemp && mode !== 'off') {
-            var dotColors = { 'plan': '#3b82f6', 'agent': '#22c55e', 'yolo': '#ef4444' };
+            const dotColors = { 'plan': '#3b82f6', 'agent': '#22c55e', 'yolo': '#ef4444' };
             dot.style.setProperty('background', dotColors[mode] || dotColors['off'], 'important');
-            var dotShadow = { 'plan': '0 0 6px rgba(59,130,246,0.6)', 'agent': '0 0 6px rgba(34,197,94,0.6)', 'yolo': '0 0 6px rgba(239,68,68,0.6)' };
+            const dotShadow = { 'plan': '0 0 6px rgba(59,130,246,0.6)', 'agent': '0 0 6px rgba(34,197,94,0.6)', 'yolo': '0 0 6px rgba(239,68,68,0.6)' };
             dot.style.setProperty('box-shadow', dotShadow[mode] || 'none', 'important');
         }
         // off 模式 + 无临时授权: 清除 inline style,让 CSS 默认样式接管
     }
     // 配置面板开关
-    var configToggle = getEl('agentModeToggle');
+    const configToggle = getEl('agentModeToggle');
     if (configToggle) {
         configToggle.checked = isActive;
     }
     // SVG 图标定义(不依赖 emoji)
-    var _svgIcons = {
+    const _svgIcons = {
         'off': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>',
         'plan': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
         'agent': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="3"/></svg>',
         'yolo': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L4 21h16L12 3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
     };
     // 聊天区 Agent 模式标签
-    var agentLabel = getEl('agentModeLabel');
+    const agentLabel = getEl('agentModeLabel');
     if (agentLabel) {
-        var labelTexts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
+        const labelTexts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
         agentLabel.innerHTML = _svgIcons[mode] + ' ' + (labelTexts[mode] || 'Agent');
     }
     // 输入框上方模式提示
@@ -1234,22 +1234,22 @@ function updateAgentUI() {
             banner.classList.add('hidden');
         } else {
             banner.classList.remove('hidden');
-            var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
-            var bannerClasses = { 'plan': 'banner-plan', 'agent': 'banner-agent', 'yolo': 'banner-yolo' };
+            const tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
+            const bannerClasses = { 'plan': 'banner-plan', 'agent': 'banner-agent', 'yolo': 'banner-yolo' };
             banner.className = 'agent-banner ' + (bannerClasses[mode] || '');
             banner.innerHTML = '<span class="agent-banner-icon">' + _svgIcons[mode] + '</span>' +
                 '<span class="agent-banner-text">' + (tips[mode] || '') + '</span>';
         }
     }
     // 更新 Agent 面板中的模式标识
-    var modeDisplay = getEl('agentModeDisplay');
+    const modeDisplay = getEl('agentModeDisplay');
     if (modeDisplay) {
-        var modeSymbolSvg = _svgIcons[mode] || _svgIcons['off'];
+        const modeSymbolSvg = _svgIcons[mode] || _svgIcons['off'];
         modeDisplay.innerHTML = modeSymbolSvg + ' ' + mode.charAt(0).toUpperCase() + mode.slice(1);
     }
     // ★ Agent/YOLO 模式下自动启用工具调用,隐藏工具调用开关
-    var toolCallToggle = getEl('searchToolCallToggle');
-    var toolCallRow = toolCallToggle ? toolCallToggle.closest('.config-toggle-row') : null;
+    const toolCallToggle = getEl('searchToolCallToggle');
+    const toolCallRow = toolCallToggle ? toolCallToggle.closest('.config-toggle-row') : null;
     if (isActive) {
         if (toolCallToggle && !toolCallToggle.checked) {
             toolCallToggle.checked = true;
@@ -1295,8 +1295,8 @@ function updateAgentUI() {
 
 // ★ 根据模式过滤命令 (普通模式禁用 Agent 命令)
 function _updateCommandFilter(mode) {
-    var agentCmds = ['mode', 'model'];
-    var isAgent = mode !== 'off';
+    const agentCmds = ['mode', 'model'];
+    const isAgent = mode !== 'off';
     SLASH_COMMANDS.forEach(function(c) {
         if (agentCmds.indexOf(c.cmd) !== -1) {
             c._disabled = !isAgent;
@@ -1311,7 +1311,7 @@ function _positionModePopup() {
     var wrapper = document.querySelector('.agent-mode-wrapper');
     if (!popup || !wrapper) return;
 
-    var rect = wrapper.getBoundingClientRect();
+    const rect = wrapper.getBoundingClientRect();
 
     if (window.matchMedia('(max-width: 640px)').matches) {
         // ★ 移动端: 紧贴按钮下方弹出
@@ -1321,9 +1321,9 @@ function _positionModePopup() {
         popup.style.bottom = 'auto';
         return;
     }
-    var popupRect = popup.getBoundingClientRect();
-    var POPUP_HEIGHT = popupRect.height || 40;
-    var spaceBelow = window.innerHeight - rect.bottom;
+    const popupRect = popup.getBoundingClientRect();
+    const POPUP_HEIGHT = popupRect.height || 40;
+    const spaceBelow = window.innerHeight - rect.bottom;
 
     // 下方空间够就向下弹,否则向上
     if (spaceBelow >= POPUP_HEIGHT + 8) {
@@ -1361,13 +1361,13 @@ window._setupAgentPopup = function() {
     }
     updateBtnLabel();
 
-    var isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer:coarse)').matches;
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer:coarse)').matches;
 
     if (isTouch) {
         var tapTimer = null, lastTap = 0;
         mainBtn.addEventListener('click', function(e) {
             e.preventDefault();
-            var now = Date.now();
+            const now = Date.now();
             if (now - lastTap < 400) {
                 clearTimeout(tapTimer); lastTap = 0;
                 popup.classList.remove('show');
@@ -1458,20 +1458,20 @@ window._setupAgentPopup = function() {
 function updateModeSelector(mode) {
     mode = mode || getAgentMode();
     // 更新下拉菜单中的模式按钮
-    var dropdown = getEl('agentModeDropdown');
+    const dropdown = getEl('agentModeDropdown');
     if (dropdown) {
-        var opts = dropdown.querySelectorAll('.agent-mode-opt');
+        const opts = dropdown.querySelectorAll('.agent-mode-opt');
         opts.forEach(function(opt) {
-            var optMode = opt.getAttribute('data-mode');
+            const optMode = opt.getAttribute('data-mode');
             opt.classList.toggle('active', optMode === mode);
         });
     }
     // 也更新旧模式选择器(兼容)
-    var selector = getEl('agentModeSelector');
+    const selector = getEl('agentModeSelector');
     if (selector) {
-        var btns = selector.querySelectorAll('.mode-btn');
+        const btns = selector.querySelectorAll('.mode-btn');
         btns.forEach(function(btn) {
-            var btnMode = btn.getAttribute('data-mode');
+            const btnMode = btn.getAttribute('data-mode');
             btn.classList.toggle('active', btnMode === mode);
         });
     }
@@ -1489,8 +1489,8 @@ function getToolApprovalLevel(toolName) {
     return toolRegistry.getApprovalLevel(toolName);
   }
   // 回退: 检查是否在旧的高危列表中
-  var oldHighRisk = ['server_file_write','server_file_op','server_exec','server_python','server_docker','engine_cron_create','engine_cron_delete'];
-  var oldMediumRisk = ['delegate_task','engine_agent_create','server_db_query','autonomous_mode'];
+  const oldHighRisk = ['server_file_write','server_file_op','server_exec','server_python','server_docker','engine_cron_create','engine_cron_delete'];
+  const oldMediumRisk = ['delegate_task','engine_agent_create','server_db_query','autonomous_mode'];
   if (oldHighRisk.indexOf(toolName) !== -1) return 'required';
   if (oldMediumRisk.indexOf(toolName) !== -1) return 'suggest';
   return 'auto';
@@ -1507,15 +1507,15 @@ function isReadOnlyTool(toolName) {
     return toolRegistry.isReadOnly(toolName);
   }
   // 回退旧逻辑
-  var readOnlyTools = ['web_search','web_fetch','rag_search','server_file_read','server_file_search','server_sys_info','server_ps','server_disk','server_network','server_db_query','engine_agent_status','engine_agent_list','engine_cron_list','engine_push','ask_agent','autonomous_mode'];
+  const readOnlyTools = ['web_search','web_fetch','rag_search','server_file_read','server_file_search','server_sys_info','server_ps','server_disk','server_network','server_db_query','engine_agent_status','engine_agent_list','engine_cron_list','engine_push','ask_agent','autonomous_mode'];
   return readOnlyTools.indexOf(toolName) !== -1;
 }
 
 /** 判断命令是否危险(需要审批) */
 function isDangerousCommand(cmd) {
     if (!cmd || typeof cmd !== 'string') return false;
-    var dangerPatterns = ['rm ', 'dd ', 'mkfs', 'shutdown', 'reboot', 'kill ', '>:'];
-    var lower = cmd.toLowerCase();
+    const dangerPatterns = ['rm ', 'dd ', 'mkfs', 'shutdown', 'reboot', 'kill ', '>:'];
+    const lower = cmd.toLowerCase();
     for (var i = 0; i < dangerPatterns.length; i++) {
         if (lower.indexOf(dangerPatterns[i]) !== -1) return true;
     }
@@ -1573,7 +1573,7 @@ function requestToolApproval(toolName, args) {
         var mode = getAgentMode();
 
         // ★ 超时保护: 30秒内未响应则自动拒绝
-        var _approvalTimer = setTimeout(function() {
+        const _approvalTimer = setTimeout(function() {
             console.warn('[审批] 超时未响应,自动拒绝:', toolName);
             sessionUsage.approvalsRejected++;
             resolve(false);
@@ -1628,10 +1628,10 @@ function requestToolApproval(toolName, args) {
         try { remembered = JSON.parse(sessionStorage.getItem('approvalRemembered') || '{}'); } catch(e) {}
         var cmdPart = (args && args.cmd) ? args.cmd.substring(0, 50) : '';
         if (args && args.name && !cmdPart) cmdPart = args.name.substring(0, 50);
-        var rememberKey = toolName + '_' + (cmdPart || '');
+        const rememberKey = toolName + '_' + (cmdPart || '');
         if (remembered[rememberKey] !== undefined) {
             _cleanup();
-            var approved = remembered[rememberKey];
+            const approved = remembered[rememberKey];
             if (approved) { sessionUsage.approvalsGranted++; } else { sessionUsage.approvalsRejected++; }
             resolve(approved);
             return;
@@ -1642,7 +1642,7 @@ function requestToolApproval(toolName, args) {
         var argsPreview = '';
         try {
             if (typeof args === 'object' && args !== null) {
-                var previewParts = [];
+                const previewParts = [];
                 for (var k in args) {
                     var v = typeof args[k] === 'string' ? args[k].substring(0, 100) : JSON.stringify(args[k]).substring(0, 100);
                     previewParts.push(k + ': ' + v);
@@ -1658,7 +1658,7 @@ function requestToolApproval(toolName, args) {
         // 检测是否需要额外的危险警告
         var extraWarning = '';
         if (toolName === 'server_exec') {
-            var cmd = (args && args.cmd) || '';
+            const cmd = (args && args.cmd) || '';
             if (isDangerousCommand(cmd)) {
                 extraWarning = '⚠️ 此命令包含危险操作,请谨慎确认!';
             }
@@ -1714,8 +1714,8 @@ function requestToolApproval(toolName, args) {
 
 
         // 按钮事件
-        var confirmBtn = overlay.querySelector('#approvalConfirmBtn');
-        var rejectBtn = overlay.querySelector('#approvalRejectBtn');
+        const confirmBtn = overlay.querySelector('#approvalConfirmBtn');
+        const rejectBtn = overlay.querySelector('#approvalRejectBtn');
 
         confirmBtn.onclick = function() {
             _cleanup();
@@ -1725,7 +1725,7 @@ function requestToolApproval(toolName, args) {
                 try { sessionStorage.setItem('approvalRemembered', JSON.stringify(remembered)); } catch(e) {}
             }
             // Feature 2: 始终允许此类型
-            var alwaysAllow = overlay.querySelector('#approvalAlwaysAllowCheck');
+            const alwaysAllow = overlay.querySelector('#approvalAlwaysAllowCheck');
             if (alwaysAllow && alwaysAllow.checked) {
                 addAlwaysAllowRule(toolName);
             }
@@ -1752,18 +1752,18 @@ function requestToolApproval(toolName, args) {
 async function generateProactiveSuggestions(chatId, lastResponse) {
     if (!chatId || !lastResponse) return;
     var isActive = isAgentToolsActive();
-    var proactive = localStorage.getItem('agentProactive') === 'true';  // default false
+    const proactive = localStorage.getItem('agentProactive') === 'true';  // default false
     if (!isActive || !proactive) return;
 
-    var bubble = activeBubbleMap[chatId];
+    const bubble = activeBubbleMap[chatId];
     if (!bubble) return;
 
     try {
-        var recentHistory = chats[chatId].messages.slice(-4).map(function(m) {
+        const recentHistory = chats[chatId].messages.slice(-4).map(function(m) {
             return (m.role === 'user' ? '用户: ' : 'AI: ') + (typeof m.content === 'string' ? m.content.substring(0, 200) : '');
         }).join('\n');
 
-        var suggestionPrompt = {
+        const suggestionPrompt = {
             role: 'user',
             content: '基于最近对话:\n' + recentHistory + '\n\n请给出2-3个简短、具体的后续行动建议(每行一个,用-开头,每个不超过50字)。只返回建议列表。'
         };
@@ -1790,7 +1790,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
         if (!resp.ok) return;
         var data = await resp.json();
         var content = data.choices?.[0]?.message?.content || '';
-        var suggestions = content.split('\n').filter(function(l) {
+        const suggestions = content.split('\n').filter(function(l) {
             return l.trim().startsWith('-') || l.trim().match(/^\d+\./);
         }).map(function(l) {
             return l.replace(/^[-\s\d.]+/, '').trim();
@@ -1798,10 +1798,10 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 
         if (suggestions.length === 0) return;
 
-        var markdownBody = bubble.querySelector('.markdown-body');
+        const markdownBody = bubble.querySelector('.markdown-body');
         if (!markdownBody) return;
 
-        var suggestionsDiv = document.createElement('div');
+        const suggestionsDiv = document.createElement('div');
         suggestionsDiv.className = 'agent-suggestions';
         var label = document.createElement('div');
         label.className = 'agent-suggestions-label';
@@ -1809,7 +1809,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
         suggestionsDiv.appendChild(label);
 
         suggestions.forEach(function(s) {
-            var btn = document.createElement('button');
+            const btn = document.createElement('button');
             btn.className = 'agent-suggestion-btn';
             btn.textContent = s.substring(0, 40);
             btn.onclick = function() {
@@ -1910,7 +1910,7 @@ window.pushAgentResultToTask = function(taskId, agentName, status, result, error
         var _planUpdated = false;
         window._agentPlan.tasks.forEach(function(pt) {
             // 尝试多种匹配方式
-            var _match = pt.id === agentName ||
+            const _match = pt.id === agentName ||
                 pt.title.indexOf(agentName) >= 0 ||
                 (pt.title.toLowerCase().indexOf(agentName.toLowerCase().replace(/_/g, '')) >= 0);
             if (_match && (pt.status === 'running' || pt.status === 'pending')) {
@@ -1981,21 +1981,21 @@ window._triggerMainAgentForTask = function(taskId) {
     task.mainResponded = true;
 
     var agentNames = Object.keys(task.agents);
-    var results = [];
+    const results = [];
     var hasFailed = false;
     agentNames.forEach(function(name) {
         var stored = task.subResults[name];
         if (stored) {
-            var statusLabel = stored.status === 'completed' ? '✅完成' :
+            const statusLabel = stored.status === 'completed' ? '✅完成' :
                              stored.status === 'failed' ? '❌失败' : '🔄超时';
             if (stored.status === 'failed' || stored.status === 'error') hasFailed = true;
-            var detail = (stored.error || stored.result || '').substring(0, 6000);
+            const detail = (stored.error || stored.result || '').substring(0, 6000);
             results.push(statusLabel + ' ' + name + '\n' + detail);
         } else {
             results.push('⏰超时 ' + name + ' (无返回)');
         }
     });
-    var ctx = results.join('\n\n---\n\n');
+    const ctx = results.join('\n\n---\n\n');
 
     var chatId = task.chatId;
     if (chatId && chats[chatId] && typeof window.sendMessage === 'function') {
@@ -2021,7 +2021,7 @@ window._triggerMainAgentForTask = function(taskId) {
         // ★ OpenClaw 风格: 不打断当前生成,等 AI 空闲后再发送
         // 当前 turn 的 finally 中会调 _drainQueue 来处理
         // _drainQueue 会检查 isTypingMap 然后发下一条
-        var _sendSummary = function() {
+        const _sendSummary = function() {
             if (!isTypingMap[chatId]) {
                 window.sendMessage(true, '请整合子代理结果并告知用户进展');
                 console.log('[Task] ' + taskId + ' 已触发主代理回复');
@@ -2123,8 +2123,8 @@ window.createFlowPanel = function(plan) {
     // 滚动聊天区域使面板可见
     setTimeout(function() {
         if ($.chatBox) {
-            var panelBottom = panel.getBoundingClientRect().bottom;
-            var chatBottom = $.chatBox.getBoundingClientRect().bottom;
+            const panelBottom = panel.getBoundingClientRect().bottom;
+            const chatBottom = $.chatBox.getBoundingClientRect().bottom;
             if (panelBottom > chatBottom - 60) {
                 $.chatBox.scrollTop = $.chatBox.scrollHeight;
             }
@@ -2144,13 +2144,13 @@ window.renderPlanTasks = function(tasks) {
         return;
     }
 
-    var html = '';
+    const html = '';
     tasks.forEach(function(task, idx) {
-        var status = task.status || 'pending';
-        var dotHtml = window._flowTaskDotHtml(status);
-        var descHtml = task.description ? '<div class="flow-task-desc">' + escapeHtml(task.description) + '</div>' : '';
-        var noteHtml = task.note ? '<div class="flow-task-note">' + escapeHtml(task.note) + '</div>' : '';
-        var isLast = (idx === tasks.length - 1);
+        const status = task.status || 'pending';
+        const dotHtml = window._flowTaskDotHtml(status);
+        const descHtml = task.description ? '<div class="flow-task-desc">' + escapeHtml(task.description) + '</div>' : '';
+        const noteHtml = task.note ? '<div class="flow-task-note">' + escapeHtml(task.note) + '</div>' : '';
+        const isLast = (idx === tasks.length - 1);
 
         html += '<div class="flow-task-item status-' + status + (isLast ? ' flow-task-last' : '') + '" data-task-id="' + escapeHtml(task.id) + '">' +
             '<div class="flow-task-dot">' + dotHtml + '</div>' +
@@ -2165,7 +2165,7 @@ window.renderPlanTasks = function(tasks) {
 
     window._updateFlowProgress(tasks);
 
-    var toggleIcon = document.querySelector('#flowPanelToggleBtn svg');
+    const toggleIcon = document.querySelector('#flowPanelToggleBtn svg');
     if (toggleIcon) toggleIcon.style.transform = 'rotate(0deg)';
 };
 
@@ -2207,7 +2207,7 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     if (!list) return;
 
     try {
-        var item = list.querySelector('.flow-task-item[data-task-id="' + CSS.escape(taskId) + '"]');
+        const item = list.querySelector('.flow-task-item[data-task-id="' + CSS.escape(taskId) + '"]');
     } catch(e) {
         // CSS.escape 不可用时回退到全量渲染
         window.renderPlanTasks(window._agentPlan.tasks);
@@ -2227,7 +2227,7 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     item.classList.add('status-' + newStatus);
 
     // 更新圆点
-    var dotEl = item.querySelector('.flow-task-dot');
+    const dotEl = item.querySelector('.flow-task-dot');
     if (dotEl) {
         dotEl.innerHTML = window._flowTaskDotHtml(newStatus);
     }
@@ -2236,13 +2236,13 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     var taskData = null;
     window._agentPlan.tasks.forEach(function(t) { if (t.id === taskId) taskData = t; });
     if (taskData && taskData.note) {
-        var noteEl = item.querySelector('.flow-task-note');
+        const noteEl = item.querySelector('.flow-task-note');
         if (noteEl) {
             noteEl.textContent = taskData.note;
         } else {
             var contentEl = item.querySelector('.flow-task-content');
             if (contentEl) {
-                var newNote = document.createElement('div');
+                const newNote = document.createElement('div');
                 newNote.className = 'flow-task-note';
                 newNote.textContent = taskData.note;
                 contentEl.appendChild(newNote);
@@ -2274,7 +2274,7 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
 /** 更新进度计数器和进度条 */
 window._updateFlowProgress = function(tasks) {
     if (!tasks) return;
-    var total = tasks.length;
+    const total = tasks.length;
     var done = 0;
     tasks.forEach(function(t) {
         if (t.status === 'completed' || t.status === 'failed' || t.status === 'skipped') done++;
@@ -2292,13 +2292,13 @@ window._updateFlowProgress = function(tasks) {
         var r, g, b;
         if (pct <= 50) {
             // 0%→50%: indigo→violet
-            var t = pct / 50;
+            const t = pct / 50;
             r = Math.round(99 + t * (139 - 99));
             g = Math.round(102 + t * (92 - 102));
             b = Math.round(241 + t * (246 - 241));
         } else {
             // 50%→100%: violet→emerald
-            var t2 = (pct - 50) / 50;
+            const t2 = (pct - 50) / 50;
             r = Math.round(139 + t2 * (16 - 139));
             g = Math.round(92 + t2 * (185 - 92));
             b = Math.round(246 + t2 * (129 - 246));
@@ -2363,7 +2363,7 @@ window._autoDismissIfAllDone = function() {
     if (!window._agentPlan || !window._agentPlan.tasks) return;
     if (window._agentPlan.tasks.length === 0) return;
 
-    var allTerminal = window._agentPlan.tasks.every(function(t) {
+    const allTerminal = window._agentPlan.tasks.every(function(t) {
         return t.status === 'completed' || t.status === 'failed' || t.status === 'skipped';
     });
 
@@ -2372,7 +2372,7 @@ window._autoDismissIfAllDone = function() {
         setTimeout(function() {
             if (window._agentPlan && window._agentPlan.status === 'running') {
                 // 再次检查（可能已被手动关闭）
-                var stillAllDone = window._agentPlan.tasks.every(function(t) {
+                const stillAllDone = window._agentPlan.tasks.every(function(t) {
                     return t.status === 'completed' || t.status === 'failed' || t.status === 'skipped';
                 });
                 if (stillAllDone) {
@@ -2414,7 +2414,7 @@ function showConfirmDialog(title, message, confirmText) {
             '</div>';
         document.body.appendChild(overlay);
         // ★ ESC 关闭
-        var escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); resolve(false); } };
+        const escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); resolve(false); } };
         document.addEventListener('keydown', escHandler);
 
         overlay.querySelector('#confirmOkBtn').onclick = function() {
@@ -2468,7 +2468,7 @@ window.deleteAgent = async function(name) {
  * 清理所有子代理
  */
 window.clearAllAgents = async function() {
-    var confirmed = await showConfirmDialog('清理所有子代理', '确定要删除所有子代理吗?\n\n此操作不可撤销,同时会删除所有子代理的聊天记录。', '全部删除');
+    const confirmed = await showConfirmDialog('清理所有子代理', '确定要删除所有子代理吗?\n\n此操作不可撤销,同时会删除所有子代理的聊天记录。', '全部删除');
     if (!confirmed) return;
     try {
         var r = await fetchWithRetry('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + getAuthToken());
@@ -2499,7 +2499,7 @@ window._startEngineAutoRefresh = function() {
     if (window._engineAutoRefreshTimer) return;
     window.refreshEngineStatus();
     window._engineAutoRefreshTimer = setInterval(function() {
-        var _panel = getEl('configPanel');
+        const _panel = getEl('configPanel');
         // 仅在配置面板可见时刷新
         if (_panel && !_panel.classList.contains('hidden-panel')) {
             window.refreshEngineStatus();
@@ -2532,17 +2532,17 @@ window.refreshEngineStatus = async function() {
     }
 
     // 加载 cron 列表
-    var cronList = getEl('engineCronList');
+    const cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch(_apiBase + '?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
-            var cronData = await cronResp.json();
+            const cronResp = await fetch(_apiBase + '?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+            const cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
-            var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
-            var runningJobs = cronJobs.filter(function(j) { return j.enabled; });
+            const cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
+            const runningJobs = cronJobs.filter(function(j) { return j.enabled; });
             if (runningJobs.length > 0) {
                 cronList.innerHTML = runningJobs.map(function(j) {
-                    var next = j.next_run ? new Date(j.next_run * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--';
+                    const next = j.next_run ? new Date(j.next_run * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--';
                     var name = escapeHtml(j.name);
                     return '<div class="engine-status-item" style="display:flex;align-items:center;justify-content:space-between;"><div><span class="engine-status-dot running"></span><span style="font-size:11px;">' + name + '<br><span style="color:#9ca3af;">下次 ' + next + ' · 每' + j.interval + 's</span></span></div>' +
                     '<button onclick="deleteCron(\'' + name + '\')" class="text-xs text-red-400 hover:text-red-600 transition px-2 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20" title="删除">✕</button></div>';
@@ -2556,13 +2556,13 @@ window.refreshEngineStatus = async function() {
     }
 
     // 加载子代理列表(统一使用 _renderAgentList)
-    var agentList = getEl('engineAgentList');
+    const agentList = getEl('engineAgentList');
     if (agentList && Object.keys(window._agentListCache || {}).length > 0) {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
         try {
-            var agentResp = await fetch(_apiBase + '?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
-            var agentData = await agentResp.json();
+            const agentResp = await fetch(_apiBase + '?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+            const agentData = await agentResp.json();
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
         } catch(e) {
@@ -2580,14 +2580,14 @@ window.syncTokenFromRange = function () {
 
 window.syncTokenFromInput = function () {
     let v = parseInt(getVal('maxTokensInput')) || 4096;
-    var _curModel = getVal('modelSelect') || '';
-    var _modelMax = window._getModelMaxTokens(_curModel);
+    const _curModel = getVal('modelSelect') || '';
+    const _modelMax = window._getModelMaxTokens(_curModel);
     v = Math.min(_modelMax, Math.max(256, v));
     setVal('maxTokensInput', v);
     setVal('maxTokens', v);
     // ★ 同步更新滑块和输入框的 max 属性
-    var _slider = getEl('maxTokens');
-    var _input = getEl('maxTokensInput');
+    const _slider = getEl('maxTokens');
+    const _input = getEl('maxTokensInput');
     if (_slider) _slider.max = _modelMax;
     if (_input) _input.max = _modelMax;
     localStorage.setItem('tokens', String(v));
@@ -2598,9 +2598,9 @@ window.syncTokenFromInput = function () {
 window._getModelMaxTokens = function(model) {
     try {
         if (window.MODEL_CONFIGS) {
-            var _max = window.MODEL_CONFIGS.getMaxOutputTokens(model);
+            const _max = window.MODEL_CONFIGS.getMaxOutputTokens(model);
             if (_max && _max > 0) return _max;
-            var _ctx = window.MODEL_CONFIGS.getContextWindow(model);
+            const _ctx = window.MODEL_CONFIGS.getContextWindow(model);
             if (_ctx && _ctx > 0) return _ctx;
         }
     } catch(e) {}

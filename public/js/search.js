@@ -41,14 +41,14 @@ async function aiChooseSearchType(text, historySummary, signal) {
 }
 
 async function performWebSearch(query, signal, type = 'web') {
-    var provider = getVal('searchProvider') || 'duckduckgo';
-    var timeout = parseInt(getVal('searchTimeout')) * 1000;
-    var max = parseInt(getVal('maxSearchResults')) || 3;
-    var region = getVal('searchRegion') || '';
+    const provider = getVal('searchProvider') || 'duckduckgo';
+    const timeout = parseInt(getVal('searchTimeout')) * 1000;
+    const max = parseInt(getVal('maxSearchResults')) || 3;
+    const region = getVal('searchRegion') || '';
     var t = Date.now();
 
     // 获取对应引擎的API Key
-    var providerKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
+    const providerKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
     var apiKey = '';
     if (providerKeyId) {
         apiKey = getVal(providerKeyId) || getVal('searchApiKey') || '';
@@ -59,10 +59,10 @@ async function performWebSearch(query, signal, type = 'web') {
     var country = region && region.length === 2 ? region : '';
 
     var url = '';
-    var headers = { 'Accept': 'application/json' };
+    const headers = { 'Accept': 'application/json' };
 
     if (provider === 'brave') {
-        var params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
+        const params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
         if (country) params += `&country=${country}`;
         params += '&safesearch=off';
         if (SEARCH_PROXY) {
@@ -82,7 +82,7 @@ async function performWebSearch(query, signal, type = 'web') {
     } else if (provider === 'tavily') {
         // Tavily AI Search API - POST JSON
         url = 'https://api.tavily.com/search';
-        var body = JSON.stringify({
+        const body = JSON.stringify({
             api_key: apiKey,
             query: query,
             search_depth: 'basic',
@@ -108,7 +108,7 @@ async function performWebSearch(query, signal, type = 'web') {
     } else if (provider === 'minimax') {
         // MiniMax 搜索通过服务器端 CLI 调用
         // MiniMax 搜索通过服务器端 CLI 调用,传 API Key(从聊天模型配置复用)
-        var _k = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
+        const _k = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
         var _mmxApiKey = _k; try { _mmxApiKey = await decrypt(_k) || _k; } catch(e) {}
         url = SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(_mmxApiKey);
     } else {
@@ -200,13 +200,13 @@ function formatRawResults(results) {
 async function performWebFetch(urls) {
     if (!Array.isArray(urls) || urls.length === 0) return { results: [], error: 'No URLs provided' };
 
-    var BLOCKED_HOSTS = [];
-    var isBlocked = function(u) {
+    const BLOCKED_HOSTS = [];
+    const isBlocked = function(u) {
         try { return BLOCKED_HOSTS.some(function(h) { return new URL(u).hostname.includes(h); }); } catch { return false; }
     };
 
-    var seen = new Set();
-    var validUrls = urls.filter(function(u) {
+    const seen = new Set();
+    const validUrls = urls.filter(function(u) {
         if (seen.has(u)) return false;
         seen.add(u);
         if (isBlocked(u)) return false;
@@ -214,23 +214,23 @@ async function performWebFetch(urls) {
     }).slice(0, 5);
     if (validUrls.length === 0) return { results: [], error: 'No valid HTTP URLs (或全部被反爬保护)' };
 
-    var TIMEOUT_MS = 300000;
+    const TIMEOUT_MS = 300000;
 
     var results = await Promise.all(validUrls.map(async function(url) {
         try {
-            var ctrl = new AbortController();
-            var tid = setTimeout(function() { ctrl.abort(); }, TIMEOUT_MS);
+            const ctrl = new AbortController();
+            const tid = setTimeout(function() { ctrl.abort(); }, TIMEOUT_MS);
             var r = await fetch(
                 FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1',
                 { signal: ctrl.signal }
             );
             clearTimeout(tid);
             if (!r.ok) {
-                var errMap = { 502: '抓取失败(可能反爬)', 403: '网站反爬保护', 404: '页面不存在', 429: '请求过于频繁' };
-                var msg = errMap[r.status] || 'HTTP ' + r.status;
+                const errMap = { 502: '抓取失败(可能反爬)', 403: '网站反爬保护', 404: '页面不存在', 429: '请求过于频繁' };
+                const msg = errMap[r.status] || 'HTTP ' + r.status;
                 return { url: url, content: '', error: msg };
             }
-            var d = await r.json();
+            const d = await r.json();
             return { url: url, content: d.content || '', error: d.error || '' };
         } catch (e) {
             return { url: url, content: '', error: e.name === 'AbortError' ? '请求超时' : e.message };
@@ -311,9 +311,9 @@ async function aiShouldSearch(text, history, signal) {
         clearTimeout(timeoutId);
         if (!res.ok) throw new Error();
         var data = await res.json();
-        var ans = data.choices?.[0]?.message?.content?.trim().toLowerCase() || '';
+        const ans = data.choices?.[0]?.message?.content?.trim().toLowerCase() || '';
         // 增强正则提取 true/false
-        var match = ans.match(/\b(true|false)\b/);
+        const match = ans.match(/\b(true|false)\b/);
         if (match) return match[0] === 'true';
         // 如果包含中文关键词也尝试理解
         if (ans.includes('需要') || ans.includes('应该') || ans.includes('true')) return true;
@@ -338,8 +338,8 @@ function updateBubbleSearchStatus(bubble, status, isError = false) {
         statusDiv = document.createElement('div');
         statusDiv.className = 'search-status';
         // 放在 reasoning details 下方、markdown-body 上方
-        var _rsn = bubble.querySelector('details.reasoning-details');
-        var _md = bubble.querySelector('.markdown-body');
+        const _rsn = bubble.querySelector('details.reasoning-details');
+        const _md = bubble.querySelector('.markdown-body');
         if (_rsn && _md) {
             _rsn.after(statusDiv);
         } else if (_md) {

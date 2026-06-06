@@ -7,10 +7,10 @@ function saveOngoingChatsSnapshot() {
 }
 
 async function restoreOngoingChats() {
-    var ongoing = JSON.parse(localStorage.getItem('ongoingChats') || '[]');
+    const ongoing = JSON.parse(localStorage.getItem('ongoingChats') || '[]');
     for (const id of ongoing) {
         if (chats[id]) {
-            var lastUser = [...chats[id].messages].reverse().find(m => m.role === 'user');
+            const lastUser = [...chats[id].messages].reverse().find(m => m.role === 'user');
             if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
         }
     }
@@ -20,13 +20,13 @@ async function restoreOngoingChats() {
 /** 获取当前模型的 context 长度 */
 function getModelContextLength(modelName) {
     if (!modelName) modelName = getVal('modelSelect') || DEFAULT_CONFIG.model;
-    var key = modelName.toLowerCase().trim();
-    var fromLocal = modelContextLength[key];
+    const key = modelName.toLowerCase().trim();
+    const fromLocal = modelContextLength[key];
     if (fromLocal && !isNaN(fromLocal)) return parseInt(fromLocal);
     // 尝试从 models.js / MODEL_CONFIGS 获取
     if (window.MODEL_CONFIGS && typeof window.MODEL_CONFIGS.getContext === 'function') {
         try {
-            var ctx = window.MODEL_CONFIGS.getContext(modelName);
+            const ctx = window.MODEL_CONFIGS.getContext(modelName);
             if (ctx && !isNaN(ctx)) return parseInt(ctx);
         } catch(e) {}
     }
@@ -38,8 +38,8 @@ function getModelContextLength(modelName) {
 function estimateTokenCount(text) {
     if (!text) return 0;
     // 英文 ~1 token/4 chars, 中文 ~1 token/2 chars
-    var en = (text.match(/[a-zA-Z0-9\s.,!?;:'"()\[\]{}\/\\@#$%^&*+=<>~`\-|_]/g) || []).length;
-    var cn = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
+    const en = (text.match(/[a-zA-Z0-9\s.,!?;:'"()\[\]{}\/\\@#$%^&*+=<>~`\-|_]/g) || []).length;
+    const cn = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
     return Math.ceil(en / 4) + Math.ceil(cn / 1.5);
 }
 
@@ -67,7 +67,7 @@ function estimateMessagesTokenCount(msgs) {
  */
 function selectCompressModel() {
     var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
-    var ctxLen = getModelContextLength(currentModel);
+    const ctxLen = getModelContextLength(currentModel);
     if (ctxLen >= 131072) {
         return currentModel;
     }
@@ -116,12 +116,12 @@ async function compressContextIfNeeded(chatId) {
 
     var msgs = chats[chatId].messages;
     var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
-    var contextLimit = getModelContextLength(currentModel);
-    var estimatedTokens = estimateMessagesTokenCount(msgs);
-    var thresholdPct = parseInt(getVal('compressThreshold')) || 10;
+    const contextLimit = getModelContextLength(currentModel);
+    const estimatedTokens = estimateMessagesTokenCount(msgs);
+    const thresholdPct = parseInt(getVal('compressThreshold')) || 10;
 
     // 检测是否达到 context 的 80%
-    var limit80 = Math.floor(contextLimit * 0.8);
+    const limit80 = Math.floor(contextLimit * 0.8);
     if (estimatedTokens < limit80) {
         // 还没到 80%, 按原消息数量阈值检查
         var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
@@ -152,7 +152,7 @@ async function compressContextIfNeeded(chatId) {
             }
         }
 
-        var keep = Math.max(4, Math.floor(thresholdPct / 2));
+        const keep = Math.max(4, Math.floor(thresholdPct / 2));
         var toSummarize = [];
         var toKeepNonPartial = [];
 
@@ -160,7 +160,7 @@ async function compressContextIfNeeded(chatId) {
             // 保留第一条用户消息
             toKeepNonPartial.push(nonPartial[firstUserIndex]);
             // 保留最近 keep 条
-            var recentStart = Math.max(firstUserIndex + 1, nonPartial.length - keep);
+            const recentStart = Math.max(firstUserIndex + 1, nonPartial.length - keep);
             for (var j = recentStart; j < nonPartial.length; j++) {
                 toKeepNonPartial.push(nonPartial[j]);
             }
@@ -180,7 +180,7 @@ async function compressContextIfNeeded(chatId) {
         }
 
         // 构建摘要
-        var conv = '';
+        const conv = ''
         for (var si = 0; si < toSummarize.length; si++) {
             var m = toSummarize[si];
             if (m.role === 'user') {
@@ -190,12 +190,12 @@ async function compressContextIfNeeded(chatId) {
             }
         }
 
-        var compressPrompt = '总结以下对话的核心内容,保留关键信息和你作为助手的推理结论:\n' + conv;
+        const compressPrompt = '总结以下对话的核心内容,保留关键信息和你作为助手的推理结论:\n' + conv
 
         // ★ 自动选择压缩模型
-        var compressModel = selectCompressModel();
+        const compressModel = selectCompressModel();
 
-        var compressBody = {
+        const compressBody = {
             model: compressModel,
             messages: [{ role: 'user', content: compressPrompt }],
             temperature: 0.3,
@@ -212,7 +212,7 @@ async function compressContextIfNeeded(chatId) {
             body: JSON.stringify(compressBody)
         });
         var data = await res.json();
-        var summary = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || '';
+        const summary = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || '';
 
         if (!summary) {
             hideCompressSpinner();
@@ -220,8 +220,8 @@ async function compressContextIfNeeded(chatId) {
             return;
         }
 
-        var summaryMsg = { role: 'system', content: '[智能摘要] ' + summary, temporary: true };
-        var newMessages = sysMessages.concat([summaryMsg]).concat(toKeepNonPartial).concat(partial);
+        const summaryMsg = { role: 'system', content: '[智能摘要] ' + summary, temporary: true }
+        const newMessages = sysMessages.concat([summaryMsg]).concat(toKeepNonPartial).concat(partial);
         chats[chatId].messages = newMessages;
         saveChats();
         if (currentChatId === chatId) loadChat(chatId);
@@ -238,22 +238,22 @@ async function compressContextIfNeeded(chatId) {
 async function autoGenerateTitle(chatId) {
     var msgs = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial);
     if (msgs.length < 2) return;
-    var recent = '';
+    const recent = ''
     for (const m of msgs.slice(0, 4)) {
         if (m.role === 'user') recent += '用户: ' + buildUserContent(m.text, m.files) + '\n';
         else recent += '助手: ' + m.content + '\n';
     }
     // ★ 标题生成: 优先用 titleModel, 没设置就用当前主模型, 实在没有再 fallback
-    var model = getVal('titleModel') || getVal('modelSelect') || 'deepseek-v4-flash';
+    const model = getVal('titleModel') || getVal('modelSelect') || 'deepseek-v4-flash';
     // ★ 用当前 API 生成标题,对不兼容的 API 做参数清理
-    var _titleBaseUrl = getVal('baseUrl');
-    var _titleApiKey = getVal('apiKey');
-    var _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
-    var _isMiniMax = _titleBaseUrl.includes('minimaxi.com');
+    const _titleBaseUrl = getVal('baseUrl');
+    const _titleApiKey = getVal('apiKey');
+    const _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
+    const _isMiniMax = _titleBaseUrl.includes('minimaxi.com');
     if (!model) return;
     if (!_titleApiKey && !_isLocalTitle) return;
     try {
-        var body = {
+        const body = {
             model,
             messages: [{
                 role: 'user',
@@ -269,7 +269,7 @@ async function autoGenerateTitle(chatId) {
         }
         body.reasoning_split = false;
         // ★ 标题生成也走代理(否则国内直连超时)
-        var _titleFetch = (typeof window.proxyFetch === 'function') ? window.proxyFetch : fetch;
+        const _titleFetch = (typeof window.proxyFetch === 'function') ? window.proxyFetch : fetch;
         var res = await _titleFetch(_titleBaseUrl + '/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(_isLocalTitle ? {} : { Authorization: 'Bearer ' + _titleApiKey }) },
@@ -283,8 +283,8 @@ async function autoGenerateTitle(chatId) {
         }
         // ★ 如果 content 太长(>200字),说明可能包含了思考/废话,取最后一句
         if (rawTitle.length > 200) {
-            var _lines = rawTitle.split(/\n/);
-            var _last = _lines[_lines.length - 1] || rawTitle.slice(-50);
+            const _lines = rawTitle.split(/\n/);
+            const _last = _lines[_lines.length - 1] || rawTitle.slice(-50);
             rawTitle = _last.trim();
         }
         // 清理 think 标签
@@ -295,10 +295,10 @@ async function autoGenerateTitle(chatId) {
         rawTitle = rawTitle.replace(/^\*+\s*|\s*\*+$/g, '').trim();
         var finalTitle = rawTitle;
         if (!finalTitle) {
-            var reasoning = data.choices[0].message.reasoning_content || '';
+            const reasoning = data.choices[0].message.reasoning_content || '';
             // 从 reasoning 里提取最后一句作为标题
-            var cleanReasoning = reasoning.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-            var lines = cleanReasoning.split(/\n|。/);
+            const cleanReasoning = reasoning.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            const lines = cleanReasoning.split(/\n|。/);
             for (let i = lines.length - 1; i >= 0; i--) {
                 var line = lines[i].trim().replace(/^\*+\s*|\s*\*+$/g, '').trim();
                 if (line.length >= 2 && line.length <= TITLE_MAX_LENGTH + 5 &&
@@ -316,7 +316,7 @@ async function autoGenerateTitle(chatId) {
             .replace(/^[：:;；\s]+|[：:;；\s]+$/g, '')
             .trim();
         if (!finalTitle || finalTitle.length < 1 || /^(我们|只|你|输出|生成|返回|请|需要|应该)/.test(finalTitle)) {
-            var firstUserMsg = msgs.find(m => m.role === 'user');
+            const firstUserMsg = msgs.find(m => m.role === 'user');
             finalTitle = firstUserMsg ? firstUserMsg.text.slice(0, TITLE_MAX_LENGTH) : '新对话';
         }
         if (finalTitle.length > TITLE_MAX_LENGTH) finalTitle = finalTitle.slice(0, TITLE_MAX_LENGTH);
@@ -371,17 +371,17 @@ function saveChats() {
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
 function compressChatsForStorage(chatsObj) {
     // ★ 精简副本:保留图片等完整数据,仅在 localStorage 超出配额时降级
-    var slim = {};
-    var chatIds = Object.keys(chatsObj).sort(function(a, b) {
+    const slim = {}
+    const chatIds = Object.keys(chatsObj).sort(function(a, b) {
         var ta = String(chatsObj[a].updated_at || '');
         var tb = String(chatsObj[b].updated_at || '');
         return tb.localeCompare(ta); // 最新的排前面
     });
 
     // 保留最近 N 个聊天的完整数据（包括 Agent 聊天，刷新后不丢失）
-    var MAX_CHATS = 50;
+    const MAX_CHATS = 50
     chatIds.forEach((id, idx) => {
-        var chat = chatsObj[id];
+        const chat = chatsObj[id];
         // 保留所有聊天的完整消息,不做截断
         slim[id] = JSON.parse(JSON.stringify(chat));
         if (slim[id].messages) {
@@ -406,7 +406,7 @@ function compressChatsForStorage(chatsObj) {
                 // ★ 剥离用户上传文件中的 base64 content（仅保留元数据）
                 if (msg.files && msg.files.length > 0) {
                     msg.files = msg.files.map(function(f) {
-                        var isMedia = f.isImage || f.isVideo || (f.type && (f.type.startsWith('image/') || f.type.startsWith('video/')));
+                        const isMedia = f.isImage || f.isVideo || (f.type && (f.type.startsWith('image/') || f.type.startsWith('video/')));
                         if (isMedia && f.content && f.content.length > 500) {
                             // 保留元数据，清除 base64 内容（刷新后应从 serverUrl 恢复）
                             return { name: f.name, type: f.type || (f.isImage ? 'image/png' : 'video/mp4'), size: f.size, isImage: f.isImage, isVideo: f.isVideo, content: '', serverUrl: f.serverUrl || '' };
@@ -418,7 +418,7 @@ function compressChatsForStorage(chatsObj) {
                         }
                         // 非媒体文件也截断过大的 content
                         if (f.content && f.content.length > 50000) {
-                            var _newF = Object.assign({}, f);
+                            const _newF = Object.assign({}, f);
                             _newF.content = '';
                             return _newF;
                         }
@@ -433,9 +433,9 @@ function compressChatsForStorage(chatsObj) {
 }
 function slimSaveChats() {
     // ★ 三级降级策略：正常压缩 → 裁剪旧聊天 → 最简模式
-    var _slim = compressChatsForStorage(chats);
-    var _json = JSON.stringify(_slim);
-    var _size = _json.length;
+    const _slim = compressChatsForStorage(chats);
+    const _json = JSON.stringify(_slim);
+    const _size = _json.length;
     console.log('[slimSaveChats] 压缩后大小:', _size, 'chars, 聊天数:', Object.keys(_slim).length);
 
     if (_size < 4500000) {
@@ -447,12 +447,12 @@ function slimSaveChats() {
 
     console.warn('[slimSaveChats] 数据过大(' + _size + '), 降级: 仅保留最近20个聊天');
     try {
-        var _ids = Object.keys(_slim).sort(function(a, b) {
+        const _ids = Object.keys(_slim).sort(function(a, b) {
             return (_slim[b].updated_at || 0) - (_slim[a].updated_at || 0);
         });
-        var _recent = {};
+        const _recent = {}
         _ids.slice(0, 20).forEach(function(id) { _recent[id] = _slim[id]; });
-        var _json2 = JSON.stringify(_recent);
+        const _json2 = JSON.stringify(_recent);
         console.log('[slimSaveChats] Level2 大小:', _json2.length, 'chars');
         if (_json2.length < 4500000) {
             localStorage.setItem('chats', _json2);
@@ -462,12 +462,12 @@ function slimSaveChats() {
 
     console.warn('[slimSaveChats] 仍过大, 降级: 极限精简');
     try {
-        var _ids2 = Object.keys(_slim).sort(function(a, b) {
+        const _ids2 = Object.keys(_slim).sort(function(a, b) {
             return (_slim[b].updated_at || 0) - (_slim[a].updated_at || 0);
         });
-        var _minimal = {};
+        const _minimal = {}
         _ids2.slice(0, 10).forEach(function(id) {
-            var _c = JSON.parse(JSON.stringify(_slim[id]));
+            const _c = JSON.parse(JSON.stringify(_slim[id]));
             if (_c.messages) {
                 _c.messages = _c.messages.map(function(msg) {
                     delete msg.generatedImage;
@@ -485,7 +485,7 @@ function slimSaveChats() {
             }
             _minimal[id] = _c;
         });
-        var _json3 = JSON.stringify(_minimal);
+        const _json3 = JSON.stringify(_minimal);
         console.log('[slimSaveChats] Level3 大小:', _json3.length, 'chars');
         localStorage.setItem('chats', _json3);
         return true;
@@ -505,7 +505,7 @@ function saveChatsDebounced(wait = 300) {
 }
 
 function renderChatHistory() {
-    var list = getEl('chatHistoryList');
+    const list = getEl('chatHistoryList');
     if (!list) return;
     // ★ 登录用户只显示自己账号的聊天记录
     var _uid = localStorage.getItem('authUserId') || '';
@@ -516,10 +516,10 @@ function renderChatHistory() {
     });
     // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
     if (_chatIds.length === 0 && _uid) {
-        var _cached = localStorage.getItem('chats');
+        const _cached = localStorage.getItem('chats');
         if (_cached) {
             try {
-                var _parsed = JSON.parse(_cached);
+                const _parsed = JSON.parse(_cached);
                 if (_parsed && Object.keys(_parsed).length > 0) {
                     chats = _parsed;
                     _chatIds = Object.keys(chats).filter(function(id) {
@@ -552,11 +552,11 @@ window.RAG_ENABLED = RAG_ENABLED;
 
 /** 立即同步删除到服务器（绕过频率限制，确保刷新不复活） */
 async function _syncDeleteToServer(id) {
-    var token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('authToken');
     if (!token) return false;
-    var url = SERVER_API_BASE + '/chat.php?chat_id=' + encodeURIComponent(id) + '&auth_token=' + token;
+    const url = SERVER_API_BASE + '/chat.php?chat_id=' + encodeURIComponent(id) + '&auth_token=' + token;
     try {
-        var resp = await fetch(url, { method: 'DELETE' });
+        const resp = await fetch(url, { method: 'DELETE' });
         if (resp.ok) {
             console.log('[deleteChat] 服务器删除成功:', id);
             delete _deletedChatIds[id];
@@ -597,7 +597,7 @@ window.deleteChat = async function (e, id) {
 
     // ★ 只检查当前用户的聊天数量,忽略其他用户的残留
     var _uid = localStorage.getItem('authUserId') || '';
-    var myKeys = Object.keys(chats).filter(function(k) {
+    const myKeys = Object.keys(chats).filter(function(k) {
         return !_uid || !chats[k].userId || chats[k].userId === _uid;
     });
     if (myKeys.length) loadChat(myKeys[myKeys.length - 1]);
@@ -607,7 +607,7 @@ window.deleteChat = async function (e, id) {
 
 window.createNewChat = function () {
     var id = 'chat_' + Date.now();
-    var uid = localStorage.getItem('authUserId') || '';
+    const uid = localStorage.getItem('authUserId') || '';
     chats[id] = {
         title: '新对话',
         userId: uid,
@@ -625,7 +625,7 @@ window.createNewChat = function () {
 window.loadChat = async function (id) {
     if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
     // ★ 会话切换：先保存旧会话队列
-    var _oldChatId = currentChatId;
+    const _oldChatId = currentChatId;
     if (_oldChatId && _oldChatId !== id && window._messageQueue && !window._agentModeSwitching) {
         window._saveQueue();  // 普通切换：保存旧队列
     }
@@ -653,7 +653,7 @@ window.loadChat = async function (id) {
         window._isQueueProcessing = false;
         window._isQueueMessage = false;
         window._messageQueue = [];
-        var _restored = window._loadQueue();  // _getQueueKey 现在用新的 currentChatId ✅
+        const _restored = window._loadQueue();  // _getQueueKey 现在用新的 currentChatId ✅
         if (!_restored) {
             window._clearPersistedQueue();
         }
@@ -673,13 +673,13 @@ window.loadChat = async function (id) {
     var container = $.chatMessagesContainer;
     if (!container) return;
 
-    var prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
+    const prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
     container.innerHTML = '';
     applyParagraphPrefix(prefix);
 
     // ★ 清理所有残留 partial 消息
     if (chats[id] && chats[id].messages) {
-        var _before = chats[id].messages.length;
+        const _before = chats[id].messages.length;
         chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
         if (chats[id].messages.length !== _before) {
             console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial');
@@ -687,15 +687,15 @@ window.loadChat = async function (id) {
     }
     // ★ 删除残留的 typing DOM 气泡（sendMessage 创建但流已完成的）
     if (container) {
-        var _typingBubbles = container.querySelectorAll('.bubble.assistant.typing');
+        const _typingBubbles = container.querySelectorAll('.bubble.assistant.typing');
         _typingBubbles.forEach(function(b) { b.remove(); });
     }
 
     // ★ WebSocket 续接：恢复上次未完成的流
     if (localStorage.getItem('__enableResumeStream') === '1') {
         try {
-            var _savedSid = localStorage.getItem('_wsStreamId') || '';
-            var _savedCnt = parseInt(localStorage.getItem('_wsChunkCount') || '0');
+            const _savedSid = localStorage.getItem('_wsStreamId') || '';
+            const _savedCnt = parseInt(localStorage.getItem('_wsChunkCount') || '0');
             if (_savedSid && _savedCnt > 0) {
                 // 等待 WS 连接（_wsInit 已调用但可能还在连接中）
                 var _w = 0;
@@ -705,7 +705,7 @@ window.loadChat = async function (id) {
                 }
                 if (window._wsClient && window._wsClient.readyState === WebSocket.OPEN) {
                     chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
-                    var _rsPm = { role:'assistant', content:'', reasoning:'', partial:true, _recovered:true };
+                    const _rsPm = { role:'assistant', content:'', reasoning:'', partial:true, _recovered:true }
                     chats[id].messages.push(_rsPm);
                     window._wsClient.send(JSON.stringify({
                         action: 'resume', stream_id: _savedSid, since: _savedCnt
@@ -733,7 +733,7 @@ window.loadChat = async function (id) {
             chats[id].messages = chats[id].messages.filter(function(m) {
                 return !m.partial;
             });
-            var _recTime = savedPartial.time || Date.now();
+            const _recTime = savedPartial.time || Date.now();
             chats[id].messages.push({
                 role: 'assistant',
                 content: savedPartial.content || '',
@@ -746,8 +746,8 @@ window.loadChat = async function (id) {
     } catch(e) {}
     // ★ 标记待恢复:仅当流式确实在进行中(有内容且最近)才触发自动续生
     if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
-        var _age = Date.now() - (savedPartial.time || 0);
-        var _hasContent = (savedPartial.content && savedPartial.content.length > 0) || (savedPartial.reasoning && savedPartial.reasoning.length > 0);
+        const _age = Date.now() - (savedPartial.time || 0);
+        const _hasContent = (savedPartial.content && savedPartial.content.length > 0) || (savedPartial.reasoning && savedPartial.reasoning.length > 0);
         if (_hasContent && _age < 30000) {
             window._pendingRecovery = savedPartial;
         } else {
@@ -765,7 +765,7 @@ window.loadChat = async function (id) {
     }
 
     // ★ 过滤显示:system 消息和内部消息不显示给用户
-    var displayMsgs = chats[id].messages.filter(function(m) {
+    const displayMsgs = chats[id].messages.filter(function(m) {
         if (m._internal) return false;
         return m.role !== 'system';
     });
@@ -781,7 +781,7 @@ window.loadChat = async function (id) {
                     m.content = m.content.replace(/\[object Object\]/g, '');
                 }
             } else if (m.content && typeof m.content === 'object') {
-                var extracted = m.content.text || m.content.content || m.content.value || '';
+                const extracted = m.content.text || m.content.content || m.content.value || '';
                 if (extracted) {
                     m.content = '' + extracted;
                 } else if (Array.isArray(m.content)) {
@@ -827,7 +827,7 @@ window.loadChat = async function (id) {
                 if (toolDisplayHtml) {
                     displayText = toolDisplayHtml + displayText;
                 }
-                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial);
+                const _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial);
                 // ★ 恢复时也渲染 web_fetch 链接列表
                 if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
                     _renderWebFetchUrls(_bubble, m._webFetchUrls);

@@ -57,7 +57,7 @@ window.showImageProcessingHint = function(chatId, files) {
     // 避免重复创建
     if (bubble.querySelector('.native-vision-hint')) return;
 
-    var imgCount = files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }).length;
+    const imgCount = files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); }).length;
     var hintEl = document.createElement('div');
     hintEl.className = 'native-vision-hint';
     hintEl.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 12px;margin:4px 0;border-radius:8px;background:linear-gradient(135deg,#667eea0a,#764ba20a);border:1px solid #667eea18;font-size:12px;color:#a78bfa;animation:visionPulse 1.8s ease-in-out infinite;';
@@ -75,8 +75,8 @@ window.showImageProcessingHint = function(chatId, files) {
     }
 
     // ★ 正文出现后自动移除 (用 MutationObserver 监听)
-    var observer = new MutationObserver(function() {
-        var _md = bubble.querySelector('.markdown-body');
+    const observer = new MutationObserver(function() {
+        const _md = bubble.querySelector('.markdown-body');
         if (_md && _md.textContent && _md.textContent.trim().length > 5) {
             _fadeOut();
         }
@@ -122,7 +122,7 @@ window.showToolStatus = function(toolName, argPreview, status) {
         setTimeout(function() { if (old.parentNode) old.remove(); }, 180);
     });
 
-    var line = document.createElement('div');
+    const line = document.createElement('div');
 
     var iconHtml = '';
     if (status === 'running') {
@@ -151,9 +151,9 @@ window.showToolStatus = function(toolName, argPreview, status) {
         window._agentPlan.tasks.forEach(function(pt) {
             if (pt.status === 'pending') {
                 // 通过工具名或参数中匹配计划任务
-                var combined = (pt.title + ' ' + (pt.description || '')).toLowerCase();
-                var toolLower = toolName.toLowerCase();
-                var argLower = (argPreview || '').toLowerCase();
+                const combined = (pt.title + ' ' + (pt.description || '')).toLowerCase();
+                const toolLower = toolName.toLowerCase();
+                const argLower = (argPreview || '').toLowerCase();
                 if (combined.indexOf(toolLower) >= 0 || combined.indexOf(argLower) >= 0 ||
                     toolLower.indexOf('search') >= 0 && combined.indexOf('搜索') >= 0 ||
                     toolLower.indexOf('read') >= 0 && combined.indexOf('读取') >= 0 ||
@@ -169,7 +169,7 @@ window.showToolStatus = function(toolName, argPreview, status) {
 
     // 完成后 3 秒淡出
     if (status === 'success' || status === 'error') {
-        var self = line;
+        const self = line;
         setTimeout(function() {
             if (!self.parentNode) return;
             self.style.transition = 'all 0.35s ease';
@@ -187,7 +187,7 @@ function showToast(msg, type = 'info', dur = 3000) {
         container.className = 'toast-container';
         document.body.appendChild(container);
     }
-    var toast = document.createElement('div');
+    const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.innerHTML = `
         <div class="toast-icon">${ { success: '✓', error: '✕', warning: '⚠', info: 'i' }[type] }</div>
@@ -233,7 +233,7 @@ window._slashVisible = false;
 function handleSlashInput(el) {
     var val = el.value;
     if (!val.startsWith('/')) { hideSlashPopup(); return; }
-    var query = val.slice(1);
+    const query = val.slice(1);
     if (query.includes(' ')) { hideSlashPopup(); return; }
     updateSlashPopup(query.toLowerCase());
 }
@@ -246,22 +246,22 @@ function updateSlashPopup(query) {
         popup.className = 'slash-popup';
         popup.style.opacity = '0';
         popup.style.transform = 'translateY(8px)';
-        var wrap = document.getElementById('userInput')?.closest('.input-wrapper') || document.querySelector('.input-wrapper');
+        const wrap = document.getElementById('userInput')?.closest('.input-wrapper') || document.querySelector('.input-wrapper');
         if (wrap) wrap.appendChild(popup);
         else document.body.appendChild(popup);
     }
-    var matches = SLASH_COMMANDS.filter(function(c) { return !query || c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
+    const matches = SLASH_COMMANDS.filter(function(c) { return !query || c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
     if (matches.length === 0) { hideSlashPopup(); return; }
-    var groups = {};
+    const groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
     var html = '';
     var idx = 0;
     Object.keys(groups).forEach(function(g) {
         html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
         groups[g].forEach(function(m) {
-            var iconSvg = m.icon ? '<svg class="slash-item-icon-svg"><use href="#cmd-icon-' + m.icon + '"/></svg>' : '';
-            var argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
-            var disabledClass = m._disabled ? ' slash-item-disabled' : '';
+            const iconSvg = m.icon ? '<svg class="slash-item-icon-svg"><use href="#cmd-icon-' + m.icon + '"/></svg>' : '';
+            const argTag = m.args ? '<span class=slash-item-args>' + m.args + '</span>' : '';
+            const disabledClass = m._disabled ? ' slash-item-disabled' : '';
             html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + disabledClass + '" data-cmd="' + escapeHtml(m.cmd) + '" data-args="' + escapeHtml(m.args||'') + '"' + (m._disabled ? ' style="pointer-events:none;opacity:0.4"' : '') + '>' +
                 iconSvg +
                 '<span class=slash-item-cmd>/' + m.cmd + '</span>' + argTag +
@@ -280,7 +280,7 @@ function updateSlashPopup(query) {
         item.addEventListener('click', function() { selectSlashCommand(this.dataset.cmd, this.dataset.args); });
         item.addEventListener('touchstart', function(e) { _touchStartY = e.touches[0].clientY; });
         item.addEventListener('touchend', function(e) {
-            var _dy = Math.abs(e.changedTouches[0].clientY - _touchStartY);
+            const _dy = Math.abs(e.changedTouches[0].clientY - _touchStartY);
             // ★ 仅当滑动距离<8px时视为点击,否则是滚动
             if (_dy < 8) {
                 e.preventDefault();
@@ -297,18 +297,18 @@ function updateSlashPopup(query) {
 function navigateSlashPopup(dir) {
     var popup = getEl('slashPopup');
     if (!popup || !window._slashVisible) return;
-    var items = popup.querySelectorAll('.slash-popup-item');
+    const items = popup.querySelectorAll('.slash-popup-item');
     if (items.length === 0) return;
-    var cur = popup.querySelector('.slash-item-highlight');
+    const cur = popup.querySelector('.slash-item-highlight');
     if (cur) cur.classList.remove('slash-item-highlight');
     window._slashIdx = (window._slashIdx + dir + items.length) % items.length;
-    var target = items[window._slashIdx];
+    const target = items[window._slashIdx];
     target.classList.add('slash-item-highlight');
     target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function selectSlashCommand(cmd, args) {
-    var input = $.userInput;
+    const input = $.userInput;
     if (!input) return;
     if (args) {
         input.value = '/' + cmd + ' ';
@@ -462,7 +462,7 @@ window.toggleConfigPanel = () => {
         const isOpening = $.configPanel?.classList.contains('hidden-panel');
         // Close SRC panel when opening config panel
         if (isOpening) {
-            var sp = document.getElementById("srcPanel");
+            const sp = document.getElementById("srcPanel");
             if (sp && !sp.classList.contains("hidden-panel")) {
                 sp.classList.add("hidden-panel");
             }
@@ -493,14 +493,14 @@ async function toggleImageProviderFields() {
     var provider = getVal('imageProvider') || 'minimax';
     var keyInput = getEl('imageApiKey');       // MiniMax Key 输入框
     var urlInput = getEl('imageBaseUrl');       // MiniMax URL 输入框
-    var orKeyInput = getEl('imageApiKeyOpenrouter');  // OpenRouter Key 输入框
-    var orUrlInput = getEl('imageBaseUrlOpenrouter'); // OpenRouter URL 输入框
+    const orKeyInput = getEl('imageApiKeyOpenrouter');  // OpenRouter Key 输入框
+    const orUrlInput = getEl('imageBaseUrlOpenrouter'); // OpenRouter URL 输入框
     var modelInput = getEl('imageModel');
     var hintEl = getEl('imageProviderHint');
 
     // 切换前保存当前值到对应提供商的 localStorage 键
     if (window._lastImageProvider && window._lastImageProvider !== provider) {
-        var _prevFinal = window._lastImageProvider;
+        const _prevFinal = window._lastImageProvider;
         if (_prevFinal === 'minimax') {
             localStorage.setItem('imageApiKey', await encrypt(getVal('imageApiKey') || ''));
             localStorage.setItem('imageBaseUrl', getVal('imageBaseUrl') || '');
@@ -512,8 +512,8 @@ async function toggleImageProviderFields() {
     window._lastImageProvider = provider;
 
     // 切换字段可见性
-    var _miniFields = ['imageKeyField', 'imageUrlField'];
-    var _orFields = ['orKeyField', 'orUrlField'];
+    const _miniFields = ['imageKeyField', 'imageUrlField'];
+    const _orFields = ['orKeyField', 'orUrlField'];
     _miniFields.forEach(function(id) {
         var el = getEl(id); if (el) el.style.display = provider === 'minimax' ? '' : 'none';
     });
@@ -523,8 +523,8 @@ async function toggleImageProviderFields() {
 
     if (provider === 'openrouter') {
         // 从 localStorage 恢复 OpenRouter 密钥
-        var _storedOrKeyFinal = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '') || '';
-        var _storedOrUrlFinal = localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api';
+        const _storedOrKeyFinal = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '') || '';
+        const _storedOrUrlFinal = localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api';
         if (orKeyInput) orKeyInput.value = _storedOrKeyFinal !== 'not-needed' ? _storedOrKeyFinal : '';
         if (orUrlInput) orUrlInput.value = _storedOrUrlFinal;
         if (modelInput) {
@@ -535,8 +535,8 @@ async function toggleImageProviderFields() {
         if (hintEl) hintEl.textContent = 'OpenRouter: 使用 GPT Image 2。使用独立的 API Key,不影响频道聊天用的主 API Key。';
     } else {
         // 从 localStorage 恢复 MiniMax 密钥
-        var _storedMxKeyFinal = await decrypt(localStorage.getItem('imageApiKey') || '') || '';
-        var _storedMxUrlFinal = localStorage.getItem('imageBaseUrl') || 'https://api.minimaxi.com';
+        const _storedMxKeyFinal = await decrypt(localStorage.getItem('imageApiKey') || '') || '';
+        const _storedMxUrlFinal = localStorage.getItem('imageBaseUrl') || 'https://api.minimaxi.com';
         if (keyInput) keyInput.value = _storedMxKeyFinal !== 'not-needed' ? _storedMxKeyFinal : '';
         if (urlInput) urlInput.value = _storedMxUrlFinal;
         if (modelInput) {
@@ -559,8 +559,8 @@ window.onVisionProviderChange = async function() {
     var provider = getEl('visionProvider')?.value || 'minimax';
     var keyInput = getEl('visionApiKey');
     var urlInput = getEl('visionApiUrl');
-    var oaKeyInput = getEl('visionApiKeyOpenAI');
-    var oaUrlInput = getEl('visionApiUrlOpenAI');
+    const oaKeyInput = getEl('visionApiKeyOpenAI');
+    const oaUrlInput = getEl('visionApiUrlOpenAI');
     var modelInput = getEl('visionModel');
     var hintEl = getEl('visionProviderHint');
     
@@ -578,7 +578,7 @@ window.onVisionProviderChange = async function() {
     localStorage.setItem('visionProvider', provider);
     
     // 切换字段可见性
-    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'] };
+    const fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'] };
     Object.keys(fields).forEach(function(k) {
         fields[k].forEach(function(id) {
             var el = getEl(id); if (el) el.style.display = k === provider ? '' : 'none';
@@ -587,14 +587,14 @@ window.onVisionProviderChange = async function() {
     
     // 恢复对应提供商的配置值
     if (provider === 'openai') {
-        var _storedKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '') || '';
+        const _storedKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '') || '';
         var _storedUrl = localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1';
         if (oaKeyInput) oaKeyInput.value = _storedKey;
         if (oaUrlInput) oaUrlInput.value = _storedUrl;
         if (modelInput) modelInput.value = 'gpt-4o';
         if (hintEl) hintEl.textContent = 'OpenAI: 使用 GPT-4o 等视觉模型。使用独立的 API Key。';
     } else if (provider === 'minimax') {
-        var _storedKey2 = await decrypt(localStorage.getItem('visionApiKey') || '') || '';
+        const _storedKey2 = await decrypt(localStorage.getItem('visionApiKey') || '') || '';
         var _storedUrl = localStorage.getItem('visionApiUrl') || 'https://api.minimaxi.com/v1/coding_plan/vlm';
         if (keyInput) keyInput.value = _storedKey2;
         if (urlInput) urlInput.value = _storedUrl;
@@ -671,7 +671,7 @@ window.cancelConfig = () => {
 // 配置面板状态 - 用于防止键盘弹出时关闭面板
 let configPanelWasOpen = false;
 
-var handleResize = debounce(() => {
+const handleResize = debounce(() => {
     const newWidth = window.innerWidth;
     const wasMobile = prevWidth <= MOBILE_BREAKPOINT;
     const nowMobile = newWidth <= MOBILE_BREAKPOINT;
