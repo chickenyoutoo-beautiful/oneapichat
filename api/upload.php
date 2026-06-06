@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($fileSize > 50 * 1024 * 1024) {
             $imageData = null; // 不读入内存
         } else {
-            $imageData = @file_get_contents($tmpFile);
+            $imageData = file_get_contents($tmpFile);
         }
     } else {
         $input = file_get_contents('php://input');

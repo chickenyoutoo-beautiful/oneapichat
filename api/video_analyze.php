@@ -366,7 +366,7 @@ function extractKeyFrames($videoPath, $tmpDir, $count) {
     // 转为base64
     $result = [];
     foreach ($frameFiles as $f) {
-        $bin = @file_get_contents($f);
+        $bin = file_get_contents($f);
         if ($bin !== false) {
             $result[] = 'data:image/jpeg;base64,' . base64_encode($bin);
         }

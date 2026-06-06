@@ -332,10 +332,10 @@ if ($method === 'POST') {
             @unlink($outFile); @unlink($statusFile);
             continue;
         }
-        $content = @file_get_contents($outFile);
+        $content = file_get_contents($outFile);
         $httpCode = 200;
         if (file_exists($statusFile)) {
-            $codeStr = trim(@file_get_contents($statusFile) ?? '');
+            $codeStr = trim(file_get_contents($statusFile) ?? '');
             if (is_numeric($codeStr)) $httpCode = (int)$codeStr;
             @unlink($statusFile);
         }

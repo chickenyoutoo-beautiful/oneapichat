@@ -50,7 +50,7 @@ $sessionsFile = $usersDir . 'sessions.json';
 // ---- 读取/写入辅助函数 ----
 function readJson($path) {
     if (!file_exists($path)) return [];
-    $raw = @file_get_contents($path);
+    $raw = file_get_contents($path);
     if ($raw === false || trim($raw) === '') return [];
     $data = json_decode($raw, true);
     if (!is_array($data)) {

@@ -57,14 +57,14 @@ function parseFile($path, $ext, $mime) {
     $imageExts = ['jpg','jpeg','png','gif','webp','bmp','tiff','tif','svg','ico','webp'];
 
     if (in_array($ext, $imageExts) || strpos($mime, 'image/') === 0) {
-        $data = @file_get_contents($path);
+        $data = file_get_contents($path);
         if ($data === false) throw new Exception('Failed to read image');
         $detectedMime = $mime !== 'auto' && $mime !== '' ? $mime : 'image/' . $ext;
         return 'data:' . $detectedMime . ';base64,' . base64_encode($data);
     }
 
     if (in_array($ext, $textExts) || strpos($mime, 'text/') === 0 || $mime === 'application/octet-stream' || $mime === 'application/json') {
-        $content = @file_get_contents($path);
+        $content = file_get_contents($path);
         if ($content === false) throw new Exception('Failed to read text file');
         if (strlen($content) > 5 * 1024 * 1024) {
             $content = substr($content, 0, 5 * 1024 * 1024) . "\n\n[TRUNCATED: exceeds 5MB]";
@@ -81,7 +81,7 @@ function parseFile($path, $ext, $mime) {
     }
 
     // fallback
-    $content = @file_get_contents($path);
+    $content = file_get_contents($path);
     if ($content !== false) return $content;
     throw new Exception("Unsupported: $ext ($mime)");
 }
@@ -150,7 +150,7 @@ except Exception as e:
         if (!empty(trim($result))) return $result;
     }
     // fallback
-    $content = @file_get_contents($path);
+    $content = file_get_contents($path);
     if ($content !== false) return '[xlsx raw]' . substr($content, 0, 4096);
     throw new Exception('xlsx parse failed');
 }
