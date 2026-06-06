@@ -1411,7 +1411,7 @@ const _TOOL_LABELS = {
 
 
 // ==================== MiniMax CLI 工具 ====================
-var MMX_TOOLS = [
+const MMX_TOOLS = [
     { type: "function", function: { name: "mmx_chat", description: "通过 MiniMax 语言模型对话。用 MiniMax 模型回答用户问题，支持流式输出。适用于与主线模型不同的场景或需要多模型对比。", parameters: { type: "object", properties: { message: { type: "string", description: "用户消息" }, system: { type: "string", description: "系统提示词(可选)" }, max_tokens: { type: "integer", description: "最大生成token数,默认4096" } }, required: ["message"] } } },
     { type: "function", function: { name: "mmx_image", description: "使用 MiniMax image-01 生成图片。支持自定义宽高比和批量生成。", parameters: { type: "object", properties: { prompt: { type: "string", description: "图片描述" }, aspect_ratio: { type: "string", description: "宽高比，如 16:9, 1:1, 9:16，默认1:1" }, n: { type: "integer", description: "生成数量，默认1，最大4" } }, required: ["prompt"] } } },
     { type: "function", function: { name: "mmx_video", description: "使用 MiniMax Hailuo 生成视频。异步任务，返回任务ID。", parameters: { type: "object", properties: { prompt: { type: "string", description: "视频描述，如'夕阳下，一只猫坐在窗边望向远方'" } }, required: ["prompt"] } } },
@@ -1423,8 +1423,8 @@ var MMX_TOOLS = [
 ];
 
 // ==================== Windows 本机操控工具 ====================
-var WIN_POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
-var WIN_TOOLS = [
+const WIN_POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+const WIN_TOOLS = [
     { type: "function", function: { name: "win_info", description: "【⚠️ 仅限Windows宿主】获取Windows宿主机系统信息。本项目运行在WSL Linux内，服务器信息用 server_sys_info / server_ps / server_disk。", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "win_processes", description: "【⚠️ 仅限Windows宿主】列出Windows宿主机进程。本项目进程用 server_ps 查看。", parameters: { type: "object", properties: { filter: { type: "string", description: "按进程名过滤,如 'chrome'" } }, required: [] } } },
     { type: "function", function: { name: "win_kill", description: "终止Windows宿主机上的进程。name=进程名(如StarRail.exe)或pid=进程ID,二选一", parameters: { type: "object", properties: { name: { type: "string", description: "进程名,如 'notepad.exe'" }, pid: { type: "integer", description: "进程ID" } }, required: [] } } },
@@ -1455,7 +1455,7 @@ var WIN_TOOLS = [
 })();
 
 // ==================== Cloudreve 云盘工具 ====================
-var CLOUDREVE_TOOLS = [
+const CLOUDREVE_TOOLS = [
     // 认证
     { type: "function", function: { name: "cr_login", description: "登录 Cloudreve 云盘。传入邮箱和密码获取访问令牌。登录成功后会自动保存凭据，后续操作无需重复登录。", parameters: { type: "object", properties: { email: { type: "string", description: "Cloudreve 注册邮箱" }, password: { type: "string", description: "Cloudreve 密码" } }, required: ["email","password"] } } },
     { type: "function", function: { name: "cr_user_info", description: "获取当前 Cloudreve 用户信息（昵称、邮箱、用户组、注册时间等）。", parameters: { type: "object", properties: {}, required: [] } } },
@@ -1478,7 +1478,7 @@ var CLOUDREVE_TOOLS = [
 ];
 
 // ==================== SRC (StarRailCopilot) 操控工具 ====================
-var SRC_TOOLS = [
+const SRC_TOOLS = [
     // ── 状态与健康 ──
     { type: "function", function: { name: "src_status", description: "查询SRC服务存活状态、运行模式、state_label(stopped/running/error)", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "src_dashboard", description: "获取星穹铁道游戏资源面板(体力/星琼/信用点/燃料/沉浸器/大月卡进度等实时数据)", parameters: { type: "object", properties: {}, required: [] } } },

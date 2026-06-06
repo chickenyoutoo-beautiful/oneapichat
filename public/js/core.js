@@ -13,7 +13,7 @@
 
 // ==== extracted from main.js L11-L13 ====
 // ==================== 全局常量 ====================
-var _apiBase = window.location.origin + '/oneapichat/api/engine_api.php';
+const _apiBase = window.location.origin + '/oneapichat/api/engine_api.php';
 
 
 // ==== extracted from main.js L14-L30 ====
@@ -149,12 +149,12 @@ function syncAuthToken(token) {
 }
 
 // ==== extracted from main.js L487-L488 ====
-var MOBILE_BREAKPOINT = 786;
-var MAX_FILE_SIZE = 4096 * 1024 * 1024;
+const MOBILE_BREAKPOINT = 786;
+const MAX_FILE_SIZE = 4096 * 1024 * 1024;
 
 // ==== extracted from main.js L542-L544 ====
-var SEARCH_PROXY = 'https://search.naujtrats.xyz'; // GCP代理(国内绕过GFW)
-var FETCH_PROXY = '/oneapichat/api/fetch.php';  // ★ 网页内容抓取代理
+const SEARCH_PROXY = 'https://search.naujtrats.xyz'; // GCP代理(国内绕过GFW)
+const FETCH_PROXY = '/oneapichat/api/fetch.php';  // ★ 网页内容抓取代理
 var ENCRYPTION_KEY = 'naujtrats-secret';  // 默认值 (服务端密钥通过 _loadEncryptionKeyFromServer 覆盖)
 var __encryptionKeyLoaded = false;
 
@@ -180,7 +180,7 @@ async function _loadEncryptionKeyFromServer() {
 }
 
 // ==== extracted from main.js L548-L565 ====
-var API_PROVIDERS = {
+const API_PROVIDERS = {
     deepseek:  { label: 'DeepSeek',       baseUrl: 'https://api.deepseek.com',                      keyLS: 'apiKeyDeepseek', baseKey: 'apiKeyDeepseek' },
     openai:    { label: 'OpenAI',         baseUrl: 'https://api.openai.com/v1',                      keyLS: 'apiKeyOpenAI',   baseKey: 'apiKeyOpenAI' },
     xai:       { label: 'xAI (Grok)',     baseUrl: 'https://api.x.ai/v1',                            keyLS: 'apiKeyXAI',      baseKey: 'apiKeyXAI' },
@@ -201,8 +201,8 @@ let _currentProvider = '';
 
 
 // ==== extracted from main.js L2483-L2495 ====
-var getEl = id => document.getElementById(id);
-var getVal = id => {
+const getEl = id => document.getElementById(id);
+const getVal = id => {
     var el = getEl(id);
     if (!el) return undefined;
     var val = el.value;
@@ -211,9 +211,9 @@ var getVal = id => {
     if (!val && id === 'modelSelect' && DEFAULT_CONFIG && DEFAULT_CONFIG.model) return DEFAULT_CONFIG.model;
     return val;
 };
-var getChecked = id => getEl(id)?.checked || false;
-var setVal = (id, val) => { const el = getEl(id); if (el) el.value = (val === undefined || val === null) ? '' : val; };
-var setChecked = (id, val) => { const el = getEl(id); if (el) el.checked = val; };
+const getChecked = id => getEl(id)?.checked || false;
+const setVal = (id, val) => { const el = getEl(id); if (el) el.value = (val === undefined || val === null) ? '' : val; };
+const setChecked = (id, val) => { const el = getEl(id); if (el) el.checked = val; };
 
 // ==== AES-256-GCM 加密 (v2 — 替代 XOR) ====
 // 密钥缓存：避免每次操作都运行 PBKDF2
@@ -294,7 +294,7 @@ function estimateTokens(text) {
 }
 
 // ==== extracted from main.js L2588-L2611 ====
-var debounce = (fn, wait) => {
+const debounce = (fn, wait) => {
     let timeout;
     return (...args) => {
         clearTimeout(timeout);
@@ -302,7 +302,7 @@ var debounce = (fn, wait) => {
     };
 };
 
-var throttle = (fn, limit) => {
+const throttle = (fn, limit) => {
     let inThrottle;
     return (...args) => {
         if (!inThrottle) {
@@ -322,9 +322,9 @@ function escapeHtml(text) {
 // ════════════════════════════════════════════════════
 //  懒加载脚本系统 (代码分割)
 // ════════════════════════════════════════════════════
-var __loadedScripts = {};
-var __scriptLoadQueue = [];
-var __idleCallbackScheduled = false;
+const __loadedScripts = {};
+const __scriptLoadQueue = [];
+const __idleCallbackScheduled = false;
 
 /** 动态加载脚本(去重 + 回调) */
 function lazyLoadScript(src, onload) {
@@ -435,12 +435,12 @@ var $ = window.$ || {
 
 
 // ★ 全局状态 — 多模块共享，必须在所有模块之前定义
-var currentChatId = null;
-var chats = JSON.parse(localStorage.getItem("chats") || "{}");
+const currentChatId = null;
+const chats = JSON.parse(localStorage.getItem("chats") || "{}");
 
 // ★ Agent 模式常量 — agent.js 依赖，必须在 core.js 中
-var AGENT_CHAT_ID = '_agent_main';
-var lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
+const AGENT_CHAT_ID = '_agent_main';
+const lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
 
 // ★ 搜索按钮状态 (agent.js → 迁至 core.js 避免懒加载导致 ReferenceError)
 function getSearchButtonIcon(checked) {

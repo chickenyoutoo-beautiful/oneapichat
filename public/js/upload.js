@@ -148,7 +148,7 @@ async function uploadVideoBlob(file, progressFn) {
 // 普通模式下最后打开的聊天 ID (切换 agent 时保存,切回时恢复)
 // lastNormalChatId moved to core.js
 
-var DEFAULT_CONFIG = {
+const DEFAULT_CONFIG = {
     // 预置 oneapi API Key
     key: window.ONEAPI_KEY || '',
     url: 'https://oneapi.naujtrats.xyz/v1',
