@@ -4,6 +4,9 @@
 
 ## 最近变更
 
+- **2026-06-06**: 🖥️ 服务器工具提取 — engine/server_tools.py (399行, 14端点)，engine_server.py 3,119→2,736 (-12.3%)
+- **2026-06-06**: 🛠️ 厂商切换修复 — onProviderChange 空壳移除 + onchange 接线 + fetchModels 自动刷新
+- **2026-06-06**: 📻 小米 MiMo — 新增 `mimo` 厂商 (api.xiaomimimo.com/v1, MiMo-V2-Flash)
 - **2026-06-06**: 📦 Phase 9 拆分 — 删除重复工具函数(333行) + 提取 resume-stream.js(158) + commands.js(210)，main.js 5,105→4,408 (-13.6%)
 - **2026-06-06**: ✅ 存储层模块化 — 提取 `python/engine/store.py` (EngineStore+ChatStore)，engine_server.py 4917→4719行
 - **2026-06-06**: 🧪 单元测试 — `python/tests/test_store.py` (14 tests)，覆盖 EngineStore/ChatStore 核心功能
