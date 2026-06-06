@@ -94,6 +94,8 @@ from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _vi
 from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
 from engine.agent_memory import read_memory_json, write_memory_json
+from engine.workflow import create_workflow, run_workflow, list_workflows, status_workflow, delete_workflow, get_roles as _wf_get_roles
+
 
 
 app = FastAPI(title="OneAPIChat Engine")
@@ -2458,230 +2460,45 @@ def agent_notifications_mark(user_id: str = Query("")):
         n["processed"] = True
     store.set(notifs)
     return {"ok": True}
-
-# ==================== 工作流引擎 ====================
-# 工作流 = 有向无环图,子代理按顺序执行,前一步的输出可传给后一步
-
-@app.get("/engine/workflow/create")
-def workflow_create(
-    name: str = Query(...),
-    steps: str = Query(...),  # JSON数组: [{"role":"explorer","prompt":"搜索xx"},...]
-    user_id: str = Query("")
-):
-    """创建工作流
-    steps 示例: [{"role":"explorer","prompt":"搜索2026年AI新闻","output_key":"news"},{"role":"planner","prompt":"基于上一步结果制定方案","output_key":"plan"}]
-    """
-    wf_store = get_ns("workflows", user_id)
-    workflows = wf_store.get()
-    try:
-        parsed_steps = json.loads(steps)
-    except Exception:
-        return {"error": "steps 必须为有效 JSON 数组"}
-    if not isinstance(parsed_steps, list) or len(parsed_steps) == 0:
-        return {"error": "steps 必须为非空数组"}
-    for i, step in enumerate(parsed_steps):
-        if "role" not in step or "prompt" not in step:
-            return {"error": f"第{i+1}步缺少 role 或 prompt"}
-        if step["role"] not in AGENT_ROLES:
-            step["role"] = "general"
-        step.setdefault("output_key", f"step_{i}")
-
-    workflows[name] = {
-        "name": name,
-        "steps": parsed_steps,
-        "status": "created",
-        "current_step": 0,
-        "results": {},
-        "errors": [],
-        "created": datetime.now().isoformat()
-    }
-    wf_store.set(workflows)
     return {"ok": True, "workflow": name, "steps": len(parsed_steps)}
 
-@app.get("/engine/workflow/run")
-def workflow_run(
-    name: str = Query(...),
-    user_id: str = Query("")
-):
-    """运行工作流(异步后台执行)"""
-    wf_store = get_ns("workflows", user_id)
-    workflows = wf_store.get()
-    wf = workflows.get(name)
-    if not wf:
-        return {"error": "工作流不存在"}
-    if wf["status"] == "running":
-        return {"error": "工作流正在运行中"}
-
-    def _run_workflow():
-        wf_store = get_ns("workflows", user_id)
-        workflows = wf_store.get()
-        wf = workflows.get(name)
-        if not wf:
-            return
-        wf["status"] = "running"
-        wf["current_step"] = 0
-        wf["results"] = {}
-        wf["errors"] = []
-        wf_store.set(workflows)
-
-        for i, step in enumerate(wf["steps"]):
-            wf_store = get_ns("workflows", user_id)
-            workflows = wf_store.get()
-            wf = workflows.get(name)
-            if not wf or wf["status"] == "cancelled":
-                return
-
-            # 替换 prompt 中的变量引用 {prev_output_key}
-            prompt = step["prompt"]
-            for key, val in wf["results"].items():
-                prompt = prompt.replace("{" + key + "}", str(val)[:2000])
-
-            # 创建临时子代理执行当前步骤
-            step_agent_name = f"wf_{name}_step{i}_{datetime.now().strftime('%H%M%S')}"
-            step_role = step.get("role", "general")
-
-            # 用主配置创建子代理
-            main_config = _get_main_chat_config(user_id)
-            step_api_key = main_config.get("api_key", "") or os.getenv("OPENAI_API_KEY", "")
-            if not step_api_key:
-                wf["status"] = "failed"
-                wf["errors"].append({"step": i, "error": "未配置API Key"})
-                wf_store.set(workflows)
-                return
-
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=step_api_key, timeout=120)
-                step_tools = _filter_tools_by_role(step_role)
-                messages = [{"role": "user", "content": prompt}]
-                step_max_rounds = AGENT_ROLES.get(step_role, AGENT_ROLES["general"])["max_rounds"]
-                step_result_parts = []
-                step_model = main_config.get("model", "") or "MiniMax-M2.7"
-                if "api.minimaxi.com" in step_model and "minimax" not in step_model.lower():
-                    step_model = "MiniMax-M2.7"
-                if AGENT_ROLES.get(step_role, {}).get("model_tier") == "cheap":
-                    cheap_m = main_config.get("cheap_model", "")
-                    if cheap_m:
-                        step_model = cheap_m
-
-                for round_num in range(step_max_rounds):
-                    resp = client.chat.completions.create(
-                        model=step_model,
-                        messages=messages,
-                        tools=step_tools if step_tools else None,
-                        tool_choice="auto" if step_tools else None,
-                        temperature=0.3,
-                        max_tokens=2048,
-                        timeout=120
-                    )
-                    msg = resp.choices[0].message
-                    if msg.content:
-                        cleaned = msg.content
-                        if '<think>' in cleaned:
-                            cleaned = re.sub(r'<think>.*?</think>', '', cleaned, flags=re.DOTALL).strip()
-                        step_result_parts.append(cleaned)
-                    if not msg.tool_calls:
-                        break
-                    asst_msg = {"role": "assistant", "content": msg.content}
-                    msg_dict = msg.model_dump()
-                    if hasattr(msg.tool_calls, 'model_dump'):
-                        asst_msg["tool_calls"] = msg.tool_calls.model_dump()
-                    else:
-                        asst_msg["tool_calls"] = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
-                    messages.append(asst_msg)
-                    for tc in msg.tool_calls:
-                        tool_name = tc.function.name
-                        tool_args = json.loads(tc.function.arguments)
-                        result_text = f"[步骤{i}:{step_role}] 调用 {tool_name}"
-                        step_result_parts.append(f"[工具: {tool_name}]")
-                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": "工具已调用"})
-                    # 保存中间进度
-                    wf_store = get_ns("workflows", user_id)
-                    workflows = wf_store.get()
-                    wf = workflows.get(name, {})
-                    wf["results"][step.get("output_key", f"step_{i}")] = "\n".join(step_result_parts)
-                    wf["current_step"] = i
-                    workflows[name] = wf
-                    wf_store.set(workflows)
-
-                step_output = "\n".join(step_result_parts)
-            except Exception as e:
-                step_output = f"[错误] 步骤{i}执行失败: {str(e)}"
-                wf_store = get_ns("workflows", user_id)
-                workflows = wf_store.get()
-                wf = workflows.get(name, {})
-                wf["errors"].append({"step": i, "error": str(e)})
-                workflows[name] = wf
-                wf_store.set(workflows)
-
-            # 保存步骤结果
-            wf_store = get_ns("workflows", user_id)
-            workflows = wf_store.get()
-            wf = workflows.get(name, {})
-            wf["results"][step.get("output_key", f"step_{i}")] = step_output
-            wf["current_step"] = i + 1
-            workflows[name] = wf
-            wf_store.set(workflows)
-
-            # 工具调用通知
-            push_store = get_ns("heartbeat", user_id)
-            push_data = push_store.get()
-            pending = push_data.get("pending_messages", [])
-            pending.append({"msg": f"[工作流 {name}] 步骤{i+1}/{len(wf['steps'])} 完成 ({step_role})", "time": datetime.now().isoformat()})
-            push_data["pending_messages"] = pending
-            push_store.set(push_data)
-
-        # 全部完成
-        wf_store = get_ns("workflows", user_id)
-        workflows = wf_store.get()
-        wf = workflows.get(name, {})
-        has_errors = len(wf.get("errors", [])) > 0
-        wf["status"] = "failed" if has_errors else "completed"
-        workflows[name] = wf
-        wf_store.set(workflows)
-
-        # 推送完成通知
-        push_store = get_ns("heartbeat", user_id)
-        push_data = push_store.get()
-        pending = push_data.get("pending_messages", [])
-        status = "完成" if wf["status"] == "completed" else "失败"
-        pending.append({"msg": f"[工作流] {name} 执行{status}({len(wf['steps'])}步)", "time": datetime.now().isoformat()})
-        push_data["pending_messages"] = pending
-        push_store.set(push_data)
-
-    t = threading.Thread(target=_run_workflow, name=f"wf_{user_id}_{name}", daemon=True)
-    t.start()
     return {"ok": True, "workflow": name, "status": "running"}
+
+    return wf_store.get()
+
+    return wf
+
+    return {"ok": True}
+
+    return {"roles": [{"id": k, "label": v["label"], "desc": v["desc"]} for k, v in AGENT_ROLES.items()]}
+
+
+
+# ==================== 工作流引擎 (核心逻辑→engine.workflow) ====================
+
+@app.get("/engine/workflow/create")
+def workflow_create(name: str = Query(...), steps: str = Query(...), user_id: str = Query("")):
+    return create_workflow(name, steps, user_id, get_ns)
+
+@app.get("/engine/workflow/run")
+def workflow_run(name: str = Query(...), user_id: str = Query("")):
+    return run_workflow(name, user_id, get_ns, _get_main_chat_config, AGENT_ROLES, _filter_tools_by_role)
 
 @app.get("/engine/workflow/list")
 def workflow_list(user_id: str = Query("")):
-    wf_store = get_ns("workflows", user_id)
-    return wf_store.get()
+    return list_workflows(user_id, get_ns)
 
 @app.get("/engine/workflow/status")
 def workflow_status(name: str = Query(...), user_id: str = Query("")):
-    wf_store = get_ns("workflows", user_id)
-    workflows = wf_store.get()
-    wf = workflows.get(name)
-    if not wf:
-        return {"error": "工作流不存在"}
-    return wf
+    return status_workflow(name, user_id, get_ns)
 
 @app.get("/engine/workflow/delete")
 def workflow_delete(name: str = Query(...), user_id: str = Query("")):
-    wf_store = get_ns("workflows", user_id)
-    workflows = wf_store.get()
-    if name not in workflows:
-        return {"ok": False, "error": "不存在"}
-    del workflows[name]
-    wf_store.set(workflows)
-    return {"ok": True}
+    return delete_workflow(name, user_id, get_ns)
 
 @app.get("/engine/workflow/roles")
 def workflow_roles(user_id: str = Query("")):
-    """返回可用角色列表(供前端下拉选择)"""
-    return {"roles": [{"id": k, "label": v["label"], "desc": v["desc"]} for k, v in AGENT_ROLES.items()]}
-
+    return _wf_get_roles(AGENT_ROLES)
 
 # ==================== 引擎层 API ====================
 
