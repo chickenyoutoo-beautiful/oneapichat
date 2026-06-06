@@ -134,17 +134,7 @@ heartbeat_store = EngineStore(ENGINE_DIR / "heartbeat.json")
 
 # SUBTITLE_FONTS / DEFAULT_FONT → engine.video_edit (imported above)
 
-# _generate_srt → engine.video_edit.generate_srt (via _video_generate_srt import)
-
-
-
-
-# _str_to_rgb / _color_to_ass / _ypos_to_alignment → engine.video_edit (imported above)
-
-def _ypos_to_alignment_compat(y_pos):
-    """兼容包装: Y 位置转 ASS alignment 值"""
-    return ypos_to_alignment(y_pos)
-_ypos_to_alignment = _ypos_to_alignment_compat  # 保持旧名称兼容
+# 视频工具函数全部迁移到 engine.video_edit (通过 import 直接引用)
 
 
 
