@@ -180,7 +180,7 @@ async function compressContextIfNeeded(chatId) {
         }
 
         // 构建摘要
-        const conv = ''
+        let conv = ''
         for (var si = 0; si < toSummarize.length; si++) {
             var m = toSummarize[si];
             if (m.role === 'user') {
@@ -238,7 +238,7 @@ async function compressContextIfNeeded(chatId) {
 async function autoGenerateTitle(chatId) {
     var msgs = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial);
     if (msgs.length < 2) return;
-    const recent = ''
+    let recent = ''
     for (const m of msgs.slice(0, 4)) {
         if (m.role === 'user') recent += '用户: ' + buildUserContent(m.text, m.files) + '\n';
         else recent += '助手: ' + m.content + '\n';

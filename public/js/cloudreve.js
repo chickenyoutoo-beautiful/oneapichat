@@ -5,7 +5,7 @@
 async function cloudreveApiHandler(action, args) {
     var token = localStorage.getItem('authToken') || '';
     var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-    const base = '/oneapichat/api/cloudreve_api.php?action=' + action + authSuffix;
+    let base = '/oneapichat/api/cloudreve_api.php?action=' + action + authSuffix;
 
     // 拼接额外参数
     if (args) {
@@ -201,7 +201,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || 'Python 脚本执行失败' };
         }
         if (action === 'file_read') {
-            const _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
+            let _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
             if (args.start_line) _frUrl += '&start_line=' + args.start_line;
             if (args.end_line) _frUrl += '&end_line=' + args.end_line;
             _frUrl += authSuffix;
@@ -215,7 +215,7 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '读取失败' };
         }
         if (action === 'file_grep') {
-            const _fgUrl = _apiBase + '?action=file_grep&pattern=' + encodeURIComponent(args.pattern) + '&path=' + encodeURIComponent(args.path || '/var/www/html/oneapichat');
+            let _fgUrl = _apiBase + '?action=file_grep&pattern=' + encodeURIComponent(args.pattern) + '&path=' + encodeURIComponent(args.path || '/var/www/html/oneapichat');
             if (args.context_lines) _fgUrl += '&context_lines=' + args.context_lines;
             if (args.file_pattern) _fgUrl += '&file_pattern=' + encodeURIComponent(args.file_pattern);
             if (args.max_results) _fgUrl += '&max_results=' + args.max_results;
@@ -224,7 +224,7 @@ async function engineApiHandler(action, args) {
             const _fgr = await fetch(_fgUrl);
             const _fgd = await _fgr.json();
             if (_fgd.ok && _fgd.results) {
-                const _fgOut = '🔍 搜索 "' + args.pattern + '" (' + _fgd.total_matches + ' 处匹配):\n\n';
+                let _fgOut = '🔍 搜索 "' + args.pattern + '" (' + _fgd.total_matches + ' 处匹配):\n\n';
                 _fgd.results.forEach(function(_fr) {
                     _fgOut += '─── ' + _fr.file + ' ───\n';
                     _fr.matches.forEach(function(_m) { _fgOut += _m + '\n\n'; });
@@ -234,7 +234,7 @@ async function engineApiHandler(action, args) {
             return { error: _fgd.error || '搜索失败' };
         }
         if (action === 'file_edit') {
-            const _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(args.path);
+            let _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(args.path);
             if (args.replace_all) _feUrl += '&replace_all=true';
             _feUrl += authSuffix + '&t=' + Date.now();
             const _fer = await fetch(_feUrl, {
@@ -265,7 +265,7 @@ async function engineApiHandler(action, args) {
                 } else if (_fp.startsWith('/tmp/')) {
                     _webUrl = '(服务器临时文件: ' + _fp + ', 如需访问请用 engine_push 推送)';
                 }
-                const _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
+                let _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
                 if (_webUrl && !_webUrl.startsWith('(')) {
                     _resultMsg += '\n🔗 在线访问: ' + _webUrl;
                 } else if (_webUrl) {
@@ -306,7 +306,7 @@ async function engineApiHandler(action, args) {
         if (browserActions.indexOf(action) >= 0) {
             // ★ PHP 期望的 action 名 (去掉 browser_ 前缀的变化)
             const _phpAction = action.replace('browser_', 'browser_');  // keep as-is
-            const _burl = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
+            let _burl = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // POST body 用于 navigate/click/type
             const _bmethod = (action === 'browser_navigate' || action === 'browser_click' || action === 'browser_type') ? 'POST' : 'GET';
             if (_bmethod === 'POST') {
@@ -335,7 +335,7 @@ async function engineApiHandler(action, args) {
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
         const directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
-            const _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
+            let _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
             const _skipKeys = ['action_cmd', 'auth_token'];
             Object.keys(args || {}).forEach(function(k) {
@@ -370,7 +370,7 @@ async function engineApiHandler(action, args) {
             }
         }
         if (action === 'workflow_create') {
-            const _wfUrl = _apiBase + '?action=workflow_create&name=' + encodeURIComponent(args.name);
+            let _wfUrl = _apiBase + '?action=workflow_create&name=' + encodeURIComponent(args.name);
             _wfUrl += '&steps=' + encodeURIComponent(args.steps || '[]');
             _wfUrl += authSuffix;
             const _wfr = await fetch(_wfUrl);
@@ -451,7 +451,7 @@ function loadEmbedConfig() {
             // 保留当前选中值
             const curVal = sm.value;
             // 构建选项:API模型 + 本地模型
-            const html = '<option value="">TF-IDF(纯词法)</option>';
+            let html = '<option value="">TF-IDF(纯词法)</option>';
             html += '<option value="text-embedding-3-small">text-embedding-3-small(OpenAI)</option>';
             html += '<option value="text-embedding-3-large">text-embedding-3-large(OpenAI)</option>';
             if (data && data.models) {

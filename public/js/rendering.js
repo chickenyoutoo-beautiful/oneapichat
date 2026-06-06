@@ -4,7 +4,7 @@
 // ==== 消息渲染 ====
 // ==================== 消息渲染 ====================
 function showWelcome() {
-const container = $.chatMessagesContainer;
+let container = $.chatMessagesContainer;
     if (!container) return;
     const letters = 'Hi, Nice to meet you!'.split('');
     var html = '<div class="welcome-container"><div class="brand">';
@@ -52,7 +52,7 @@ function autoLinkURLs(markdownText) {
         if (/!\[.*?\]\(/.test(match) || /\[.*?\]\(/.test(match)) return match;
         try {
             const u = new URL(url);
-            const label = u.hostname;
+            let label = u.hostname;
             if (u.pathname && u.pathname !== '/') {
                 label += u.pathname.slice(0, 20) + (u.pathname.length > 20 ? '...' : '');
             }
@@ -765,7 +765,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     if (role === 'assistant' && (usage || _validTime)) {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
-        const foot = '';
+        let foot = '';
         if (_validTime) {
             foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg> ' + (time / 1000).toFixed(1) + 's';
             if (usage) foot += ' <span class="msg-foot-sep"></span> ';

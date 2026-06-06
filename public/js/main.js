@@ -627,7 +627,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     if (temporaryTimestamp) {
         const _isMm = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
         if (_isMm) {
-            const sysIdx = apiMessages.findIndex(m => m.role === 'system');
+            let sysIdx = apiMessages.findIndex(m => m.role === 'system');
             if (sysIdx !== -1) {
                 apiMessages[sysIdx].content += '\n\n' + temporaryTimestamp.content;
             } else {
@@ -668,7 +668,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // ★ Agent 模式: 合并 agent 系统提示词 + 记忆/人格/身份信息
     if (isAgentToolsActive()) {
-        const agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+        let agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         // ★ 注入工具调用上限(模型一开始就知道最多调用几次)
         const _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
         agentPrompt += '\n\n## 工具调用限制\n本轮对话最多调用 ' + _maxRounds + ' 次工具。请合理规划,避免浪费配额。如果接近上限,优先给出已有结果而不是继续调用。';
@@ -679,7 +679,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (agentPrompt) {
             // 追加到第一条 system 消息
             var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
-            const sysContent = agentPrompt;
+            let sysContent = agentPrompt;
             // 尝试从内存缓存获取人格/身份/记忆并注入
             try {
                 const _cachedPersona = window.__agentPersonaCache || window.__cloudPersona;
@@ -687,7 +687,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 const _cachedUser = window.__cloudUser;
                 const _cachedMemories = window.__agentMemoryCache;
                 const _cloudMemories = window.__cloudMemories;
-                const _inject = '';
+                let _inject = '';
                 // 人格
                 if (_cachedPersona && _cachedPersona.name) {
                     _inject += '\n\n## 人格设定\n- AI名称: ' + _cachedPersona.name + '\n';
@@ -779,7 +779,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 构建请求体
     // ★ MiniMax M3 Anthropic 兼容（暂时禁用，OpenAI 端点已稳定）
     const _useAnthropicFormat = false; // (getVal('modelSelect') || '').toLowerCase().includes('minimax-m3');
-    const _aSysContent = '';
+    let _aSysContent = '';
     if (_useAnthropicFormat) {
         // 提取 system 消息
         var _nonSysMsgs = [];
@@ -1365,8 +1365,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     /** 解析 Anthropic API 响应（支持流式 SSE + 非流式 JSON） */
     async function _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble) {
-        const _fullText = '';
-        const _reasoningText = '';
+        let _fullText = '';
+        let _reasoningText = '';
         const _toolCalls = [];
         var _usage = null;
 
@@ -1632,7 +1632,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             clearTimeout(timeoutIdVal);
             if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
 
-            const model = getVal('modelSelect') || '';
+            let model = getVal('modelSelect') || '';
             const isMiniMax = model.toLowerCase().includes('minimax');
 
             // ★ Anthropic 格式响应处理
@@ -1647,7 +1647,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             } else if (useStream) {
                 try {
-                    const result = await streamResponse(res, chatId, pendingMsg, 3, 2);
+                    let result = await streamResponse(res, chatId, pendingMsg, 3, 2);
                     usage = result.usage;
                     toolCalls = result.toolCalls || [];
                     // ★ 成本追踪: 累加 token 用量
@@ -2067,7 +2067,7 @@ window.useAlternativeVisionModel = function() {
 
                     // 更新UI
                     if (currentChatId === chatId) {
-                        const currentBubble = activeBubbleMap[chatId];
+                        let currentBubble = activeBubbleMap[chatId];
                         if (currentBubble) {
                             let status = currentBubble.querySelector('.search-status');
                             if (status) {
@@ -2328,7 +2328,7 @@ window.useAlternativeVisionModel = function() {
                 const curMaxTokens = parseInt(getVal('maxTokens')) || 4096;
                 if (curMaxTokens > maxVal) {
                     console.warn('[AutoAdjust] max_tokens ' + curMaxTokens + ' -> ' + maxVal);
-                    const m = getVal('modelSelect') || '';
+                    let m = getVal('modelSelect') || '';
                     modelMaxOutputTokens[m] = maxVal;
                     localStorage.setItem('modelMaxOutputTokens', JSON.stringify(modelMaxOutputTokens));
                     setVal('maxTokens', maxVal);

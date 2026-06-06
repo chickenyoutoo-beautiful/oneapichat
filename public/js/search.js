@@ -62,7 +62,7 @@ async function performWebSearch(query, signal, type = 'web') {
     const headers = { 'Accept': 'application/json' };
 
     if (provider === 'brave') {
-        const params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
+        let params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
         if (country) params += `&country=${country}`;
         params += '&safesearch=off';
         if (SEARCH_PROXY) {

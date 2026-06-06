@@ -276,7 +276,7 @@ window.renderToolPanel = function() {
     existingRows.forEach(function(r) { r.remove(); });
 
     const customSkillsEl = document.getElementById('customSkillsList');
-    const rendered = ''
+    let rendered = ''
     const _agentOn = isAgentToolsActive();
 
     const _cats = _TOOL_CATEGORIES;
@@ -423,7 +423,7 @@ window.renderCustomSkillsList = function() {
         container.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">暂无自定义技能</div>';
         return;
     }
-    const html = ''
+    let html = ''
     for (var i = 0; i < skills.length; i++) {
         var skill = skills[i];
         var enabled = window.isToolEnabled('CUSTOM_SKILL_' + skill.name);

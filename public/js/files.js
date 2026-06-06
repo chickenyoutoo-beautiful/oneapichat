@@ -190,7 +190,7 @@ async function extractFileContent(file) {
         const slideTexts = [];
         const MAX_SLIDE_CHARS = 5000;  // 每张幻灯片最多取前5000字符
         const MAX_TOTAL_CHARS = 80000; // 整个PPT最多取80000字符
-        const totalChars = 0;
+        let totalChars = 0;
         for (let i = 0; i < slideFiles.length; i++) {
             if (totalChars >= MAX_TOTAL_CHARS) {
                 slideTexts.push('...(后续' + (slideFiles.length - i) + '张幻灯片因内容过长已截断)');

@@ -743,7 +743,7 @@ async function _injectAgentMemoryIntoSystem(chatId) {
         const baseSys = '';
 
         // 构建记忆注入块
-        const memoryBlock = '';
+        let memoryBlock = '';
 
         if (personaRes && personaRes.ok && personaRes.persona) {
             window.__agentPersonaCache = personaRes.persona;
@@ -2144,7 +2144,7 @@ window.renderPlanTasks = function(tasks) {
         return;
     }
 
-    const html = '';
+    let html = '';
     tasks.forEach(function(task, idx) {
         const status = task.status || 'pending';
         const dotHtml = window._flowTaskDotHtml(status);

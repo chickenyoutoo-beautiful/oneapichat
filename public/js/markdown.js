@@ -258,7 +258,7 @@ const MarkdownRenderer = {
      */
     doRender(text, container) {
         const startTime = performance.now();
-        const cacheKey = this._getFingerprint(text);
+        let cacheKey = this._getFingerprint(text);
         let html;
 
         if (this.cache.has(cacheKey)) {
@@ -380,7 +380,7 @@ window.ChartRenderer = {
         if (!code) return { success: false, error: '代码为空' };
         if (typeof mermaid === 'undefined') return { success: false, error: 'Mermaid未加载' };
         const processed = this.preprocess(code);
-        const id = 'chart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        let id = 'chart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
         try {
             const result = await mermaid.render(id, processed);
             return { success: true, svg: result.svg, type: this.detectType(code) };
@@ -404,7 +404,7 @@ window.ChartRenderer = {
 
     detectType(code) {
         if (!code) return 'unknown';
-        const c = code.trim().toLowerCase();
+        let c = code.trim().toLowerCase();
         const types = [
             { key: 'flowchart', pattern: /flowchart|graph\s*[TDLR]?/ },
             { key: 'sequence', pattern: /sequencediagram/i },
@@ -455,7 +455,7 @@ window.ChartRenderer = {
     async call(text, containerId) {
         const match = text.match(/```mermaid\n?([\s\S]*?)```/) || text.match(/```\n?([\s\S]*?)```/);
         if (!match) return { success: false, error: '未找到Mermaid代码,请使用 ```mermaid 代码块 ``` 包裹图表代码' };
-        const code = match[1].trim();
+        let code = match[1].trim();
         const result = await this.render(code);
         if (containerId && result.success) {
             const container = document.getElementById(containerId);

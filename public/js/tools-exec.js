@@ -71,7 +71,7 @@
                     let toolResult = { error: `Unknown tool: ${func.name}` };
 
                     if (func.name === 'web_search') {
-                        const query = args.query;
+                        let query = args.query;
                         if (query) {
                             if (currentChatId === chatId) {
                                 const currentBubble = activeBubbleMap[chatId];
@@ -140,7 +140,7 @@
                                     toolResult = { result: parts.join('\n\n---\n\n'), _webFetchUrls: urls };
                                     if (currentChatId === chatId) {
                                         const currentBubble = activeBubbleMap[chatId];
-                                        const status = currentBubble?.querySelector('.search-status');
+                                        let status = currentBubble?.querySelector('.search-status');
                                         if (status) status.textContent = `✅ 抓取完成 (${urls.length}个网页)`;
                                     }
                                 }
@@ -494,7 +494,7 @@
                         toolResult = await engineApiHandler('agent_stop', args);
                     }
                      else if (func.name === 'engine_push') {
-                        const _pushMsg = args.msg || '';
+                        let _pushMsg = args.msg || '';
                         const _pushFile = args.file || '';
                         if (_pushFile) {
                             try {
@@ -686,7 +686,7 @@
                         const name = (args.name || '').replace(/[^a-zA-Z0-9._-]/g, '');
                         const path2 = (args.path || '').replace(/'/g, '');
                         const app2 = (args.app || '').replace(/['"\\]/g, '');
-                        const restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2';
+                        let restartCmd = WIN_POWERSHELL + ' -Command "Stop-Process -Name ' + name + ' -Force -ErrorAction SilentlyContinue; Start-Sleep 2';
                         if (app2) {
                             const _encodedApp2 = btoa(unescape(encodeURIComponent(app2)));
                             restartCmd += '; ' + String.fromCharCode(36) + 'n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\'' + _encodedApp2 + '\')); Start-Process \"shell:AppsFolder\\' + String.fromCharCode(36) + 'n\"';
@@ -900,7 +900,7 @@
                         }
                     }
                      else if (func.name === 'generate_image') {
-    const prompt = args.prompt;
+    let prompt = args.prompt;
     if (prompt) {
         if (currentChatId === chatId) {
             const currentBubble = activeBubbleMap[chatId];
@@ -995,7 +995,7 @@
                         ph.style.background = '#fee2e2';
                         ph.style.color = '#dc2626';
                     }
-                    const status = currentBubble.querySelector('.search-status');
+                    let status = currentBubble.querySelector('.search-status');
                     if (status) status.textContent = '❌ 图片生成失败';
                 }
             }
@@ -1175,7 +1175,7 @@
                                             ph.style.background = '#fee2e2';
                                             ph.style.color = '#dc2626';
                                         }
-                                        const status = currentBubble.querySelector('.search-status');
+                                        let status = currentBubble.querySelector('.search-status');
                                         if (status) status.textContent = '❌ 图生图失败';
                                     }
                                 }
@@ -1195,7 +1195,7 @@
 
                         // 如果仍然没有找到图片,尝试从聊天历史中查找(用户上传或AI生成的图片)
                         if (!currentFiles.length && chats[chatId]) {
-                            const msgs = chats[chatId].messages;
+                            let msgs = chats[chatId].messages;
                             for (let i = msgs.length - 1; i >= 0; i--) {
                                 if (msgs[i].role === 'user' && msgs[i].files && msgs[i].files.length > 0) {
                                     currentFiles = msgs[i].files.filter(f => f.isImage || f.type?.startsWith('image/'));
@@ -1350,7 +1350,7 @@
                         }
                         const _k2 = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
                         var _mmxKey2 = _k2; try { _mmxKey2 = await decrypt(_k2) || _k2; } catch(e) {}
-                        const _mmxUrl = SERVER_API_BASE + '/engine_api.php?action=mmx&resource=' + _mmxCmd + '&cmd=' + _mmxCmd + '&api_key=' + encodeURIComponent(_mmxKey2);
+                        let _mmxUrl = SERVER_API_BASE + '/engine_api.php?action=mmx&resource=' + _mmxCmd + '&cmd=' + _mmxCmd + '&api_key=' + encodeURIComponent(_mmxKey2);
                         if (args.message) _mmxUrl += '&message=' + encodeURIComponent(args.message);
                         if (args.system) _mmxUrl += '&system=' + encodeURIComponent(args.system);
                         if (args.prompt) _mmxUrl += '&prompt=' + encodeURIComponent(args.prompt);
@@ -1397,7 +1397,7 @@
                                     try { _mmxRes = JSON.parse(_mmxRes); } catch(e) {}
                                 }
                                 if (_mmxRes && typeof _mmxRes === 'object' && _mmxRes.content) {
-                                    const _thinking = '', _text = '';
+                                    let _thinking = '', _text = '';
                                     (_mmxRes.content || []).forEach(function(c) {
                                         if (c.type === 'thinking') _thinking += c.thinking || '';
                                         if (c.type === 'text') _text += c.text || '';

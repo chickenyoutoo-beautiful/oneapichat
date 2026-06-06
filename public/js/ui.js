@@ -373,7 +373,7 @@ window.scrollToBottom = () => {
 };
 
 window.toggleDarkMode = function (init = false) {
-    const html = document.documentElement;
+    let html = document.documentElement;
     const dark = html.classList.toggle('dark');
     if (!init) localStorage.setItem('dark', dark);
     const moon = getEl('moonPath');
@@ -621,7 +621,7 @@ function snapshotConfig() {
         'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem'];
     const snapshot = {};
     keys.forEach(key => {
-        const val = localStorage.getItem(key);
+        let val = localStorage.getItem(key);
         if (val !== null) snapshot[key] = val;
     });
     return snapshot;
