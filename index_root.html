@@ -721,25 +721,48 @@ function openCloudreve(e) {
     var username = localStorage.getItem('authUsername') || '';
     var email = localStorage.getItem('authUserEmail') || (username + '@naujtrats.xyz');
     var password = sessionStorage.getItem('_authPassword') || '';
-    // 密码在 localStorage 中没有存储，需要在登录时保存
-    // 如果密码为空，回退到直接打开 Cloudreve
+    // 密码为空 → 直接打开 cloudreve 主页
     if (!password) {
-        // 尝试从 sessionStorage 或 cookie 获取（安全考虑不存明文密码到 localStorage）
-        // 回退：通过 cloudreve_login.php 无 token 直接打开
         window.open('https://cloudreve.naujtrats.xyz', '_blank');
         return;
     }
-    // 主动同步
+    // ★ 弹窗拦截修复: 先同步打开一个 about:blank 新 tab (在 onClick 同步上下文, 不被拦截),
+    //   然后 async sync 完成后通过 ref 设置 location
+    var win = window.open('about:blank', 'cloudreve_login');
+    if (!win) {
+        // 弹窗真的被拦截了 (罕见) → 同步用 XMLHttpRequest 重试
+        try {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/oneapichat/api/cloudreve_sync.php', false);  // 同步
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(JSON.stringify({username: username, password: password, email: email}));
+            var d = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+            if (d && d.login_token) {
+                window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(d.login_token), '_blank');
+            } else {
+                window.open('https://cloudreve.naujtrats.xyz', '_blank');
+            }
+        } catch (_e) {
+            window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        }
+        return;
+    }
+    // 弹窗已开
+    win.document.write('<html><body style="background:#1a1f35;color:#94a3b8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif"><div>正在同步 Cloudreve 账号…</div></body></html>');
+    // async sync 完成后设置 URL
     syncCloudreve(username, password, email).then(function(d) {
         var token2 = localStorage.getItem('_cloudLoginToken');
         if (token2) {
             localStorage.removeItem('_cloudLoginToken');
-            window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2), '_blank');
+            try { win.location.href = 'https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2); }
+            catch (_e) { window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2), 'cloudreve_login'); }
         } else {
-            window.open('https://cloudreve.naujtrats.xyz', '_blank');
+            try { win.location.href = 'https://cloudreve.naujtrats.xyz'; }
+            catch (_e) { window.open('https://cloudreve.naujtrats.xyz', 'cloudreve_login'); }
         }
     }).catch(function() {
-        window.open('https://cloudreve.naujtrats.xyz', '_blank');
+        try { win.location.href = 'https://cloudreve.naujtrats.xyz'; }
+        catch (_e) { window.open('https://cloudreve.naujtrats.xyz', 'cloudreve_login'); }
     });
 }
 
