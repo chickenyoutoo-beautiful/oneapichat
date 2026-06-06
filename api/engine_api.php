@@ -20,6 +20,16 @@ function _engine_mmx_config_read(): array {
     $cfg = json_decode($raw, true);
     return is_array($cfg) ? $cfg : [];
 }
+// ★ 递归删除目录（用于清理 mmx 隔离 HOME）
+function _rmdir(string $dir): bool {
+    if (!is_dir($dir)) return false;
+    $items = array_diff(scandir($dir), ['.', '..']);
+    foreach ($items as $item) {
+        $path = $dir . '/' . $item;
+        is_dir($path) ? _rmdir($path) : @unlink($path);
+    }
+    return @rmdir($dir);
+}
 
 $action = $_GET['action'] ?? '';
 $engine_url = 'http://127.0.0.1:8766';
@@ -379,33 +389,44 @@ switch ($action) {
         }
         if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
         $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
+
+        // ★ 进程隔离: 创建唯一临时 HOME 目录, 避免并发 mmx 进程竞争 ~/.mmx/config.json
+        // mmx CLI 即使通过 --api-key 传参, 仍可能在 ~/.mmx/ 下读写 auth/state 文件
+        // 两个并发进程共享同一 config.json 会导致 token 损坏和进程中断
+        $isolatedHome = sys_get_temp_dir() . '/mmx_' . getmypid() . '_' . bin2hex(random_bytes(8));
+        if (!@mkdir($isolatedHome, 0700, true)) { $isolatedHome = null; }
+
         // 直接通过 --api-key 传参（key 已验证只有安全字符）
         $apiKeyFlag = '--api-key ' . $mmxKey;
         $regionFlag = '--region ' . $mmxRegion;
         $extraFlags = '--non-interactive --output json ' . $apiKeyFlag . ' ' . $regionFlag;
         if ($prompt) $extraFlags .= ' --prompt ' . escapeshellarg($prompt);
+        // 前缀: 设置隔离 HOME (如果创建成功)
+        $prefixCmd = $isolatedHome ? 'HOME=' . escapeshellarg($isolatedHome) . ' ' : '';
+
         if ($cmd === 'chat') {
             $system = $_GET['system'] ?? '';
             $message = $_GET['message'] ?? $prompt;
             if (!$message) { echo json_encode(['error' => 'chat 需要 message 或 prompt 参数']); exit; }
-            $fullCmd = "{$mmxBin} text chat --message " . escapeshellarg($message) . " --max-tokens 4096 {$extraFlags} 2>&1";
-            if ($system) $fullCmd = "{$mmxBin} text chat --message " . escapeshellarg($message) . " --system " . escapeshellarg($system) . " --max-tokens 4096 {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} text chat --message " . escapeshellarg($message) . " --max-tokens 4096 {$extraFlags} 2>&1";
+            if ($system) $fullCmd = "{$prefixCmd}{$mmxBin} text chat --message " . escapeshellarg($message) . " --system " . escapeshellarg($system) . " --max-tokens 4096 {$extraFlags} 2>&1";
         } elseif ($cmd === 'image') {
             $aspect = $_GET['aspect_ratio'] ?? '1:1';
             $n = intval($_GET['n'] ?? 1);
-            $fullCmd = "{$mmxBin} image generate --aspect-ratio {$aspect} --n {$n} {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} image generate --aspect-ratio {$aspect} --n {$n} {$extraFlags} 2>&1";
         } elseif ($cmd === 'video') {
-            $fullCmd = "{$mmxBin} video generate --no-wait --quiet {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} video generate --no-wait --quiet {$extraFlags} 2>&1";
         } elseif ($cmd === 'speech') {
             $voice = $_GET['voice'] ?? 'female-yujie';
             $text = $_GET['text'] ?? $prompt;
             if (!$text) { echo json_encode(['error' => 'speech 需要 text 或 prompt 参数']); exit; }
             $sharedDir = dirname(__DIR__) . '/uploads/shared/';
             if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
-            $outPath = $sharedDir . 'speech_' . substr(md5($text . time()), 0, 12) . '.mp3';
-            $fullCmd = "{$mmxBin} speech synthesize --text " . escapeshellarg($text) . " --voice " . escapeshellarg($voice) . " --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
+            // ★ 唯一文件名: uniqid('', true) → 微秒级唯一 + 额外熵
+            $outPath = $sharedDir . 'speech_' . substr(md5($text . uniqid('', true) . bin2hex(random_bytes(4))), 0, 16) . '.mp3';
+            $fullCmd = "{$prefixCmd}{$mmxBin} speech synthesize --text " . escapeshellarg($text) . " --voice " . escapeshellarg($voice) . " --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
         } elseif ($cmd === 'voices') {
-            $fullCmd = "{$mmxBin} speech voices {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} speech voices {$extraFlags} 2>&1";
         } elseif ($cmd === 'music') {
             $lyrics = $_GET['lyrics'] ?? '';
             $instrumental = $_GET['instrumental'] ?? '';
@@ -419,23 +440,29 @@ switch ($action) {
             if ($instrumental === 'true') $extra .= ' --instrumental';
             $sharedDir = dirname(__DIR__) . '/uploads/shared/';
             if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
-            $outPath = $sharedDir . 'music_' . substr(md5(time()), 0, 12) . '.mp3';
-            $fullCmd = "{$mmxBin} music generate {$extra} --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
+            // ★ 唯一文件名: uniqid + random_bytes 确保并发不碰撞
+            $outPath = $sharedDir . 'music_' . substr(md5(uniqid('', true) . bin2hex(random_bytes(4))), 0, 16) . '.mp3';
+            $fullCmd = "{$prefixCmd}{$mmxBin} music generate {$extra} --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
         } elseif ($cmd === 'vision') {
             $image = $_GET['image'] ?? '';
             if (!$image) { echo json_encode(['error' => 'vision 需要 image 参数']); exit; }
-            $fullCmd = "{$mmxBin} vision describe --image " . escapeshellarg($image) . " {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} vision describe --image " . escapeshellarg($image) . " {$extraFlags} 2>&1";
         } elseif ($cmd === 'quota') {
-            $fullCmd = "{$mmxBin} quota show {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} quota show {$extraFlags} 2>&1";
         } elseif ($cmd === 'search') {
             $q = $_GET['q'] ?? $prompt;
             if (!$q) { echo json_encode(['error' => 'search 需要 q 或 prompt 参数']); exit; }
             $limit = intval($_GET['limit'] ?? 5);
-            $fullCmd = "{$mmxBin} search query " . escapeshellarg($q) . " --limit {$limit} {$extraFlags} 2>&1";
+            $fullCmd = "{$prefixCmd}{$mmxBin} search query " . escapeshellarg($q) . " --limit {$limit} {$extraFlags} 2>&1";
         } else {
+            if ($isolatedHome) _rmdir($isolatedHome);
             echo json_encode(['error' => "未知命令: {$cmd}, 支持: chat/image/video/speech/voices/music/vision/search/quota"]); exit;
         }
         $output = shell_exec($fullCmd);
+
+        // 清理隔离 HOME 目录
+        if ($isolatedHome) _rmdir($isolatedHome);
+
         if ($output === null || trim($output) === '') {
             echo json_encode(['error' => 'mmx CLI 未响应']);
         } else {
@@ -667,8 +694,12 @@ switch ($action) {
         if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
         $escapedKey = escapeshellarg($mmxKey);
         $escapedRegion = escapeshellarg($mmxRegion);
-        $cmd = "{$mmxBin} search query {$escapedQuery} --limit {$limit} --api-key {$escapedKey} --region {$escapedRegion} 2>&1";
+        // ★ 进程隔离: 避免并发搜索竞争 ~/.mmx/config.json
+        $isolatedHome2 = sys_get_temp_dir() . '/mmx_' . getmypid() . '_' . bin2hex(random_bytes(8));
+        $prefixCmd2 = @mkdir($isolatedHome2, 0700, true) ? 'HOME=' . escapeshellarg($isolatedHome2) . ' ' : '';
+        $cmd = "{$prefixCmd2}{$mmxBin} search query {$escapedQuery} --limit {$limit} --api-key {$escapedKey} --region {$escapedRegion} 2>&1";
         $output = shell_exec($cmd);
+        if ($isolatedHome2 && is_dir($isolatedHome2)) _rmdir($isolatedHome2);
         if ($output === null || trim($output) === '') {
             echo json_encode(['error' => '搜索服务未响应']);
         } else {
