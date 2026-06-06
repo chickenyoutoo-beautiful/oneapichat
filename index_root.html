@@ -816,7 +816,7 @@ function toggleModalMode() {
     }
 }
 function syncCloudreve(username, password, email) {
-    return fetch('/oneapichat/cloudreve_sync.php', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password,email}) })
+    return fetch('/oneapichat/api/cloudreve_sync.php', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password,email}) })
         .then(function(r){ return r.json(); })
         .then(function(d){
             if (d.login_token) localStorage.setItem('_cloudLoginToken', d.login_token);
