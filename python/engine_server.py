@@ -93,6 +93,7 @@ from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _vi
     str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect)
 from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
+from engine.agent_memory import read_memory_json, write_memory_json
 
 
 app = FastAPI(title="OneAPIChat Engine")
@@ -3822,33 +3823,13 @@ threading.Thread(target=_cleanup_old_streams, daemon=True).start()
 MEMORY_DIR = ENGINE_DIR / "memory"
 MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
-def _get_memory_file(filename: str, user_id: str = "") -> Path:
-    """获取用户隔离的记忆文件路径"""
-    if user_id:
-        return MEMORY_DIR / f"user_{user_id}_{filename}"
-    return MEMORY_DIR / filename
 
-
+# ── Memory 持久化 (存储逻辑→engine.agent_memory) ──
 def _read_memory_json(filename: str, user_id: str = "") -> dict:
-    """读取记忆文件,返回 dict"""
-    fp = _get_memory_file(filename, user_id)
-    try:
-        return json.loads(fp.read_text(encoding="utf8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
+    return read_memory_json(MEMORY_DIR, filename, user_id)
 
 def _write_memory_json(filename: str, data: dict, user_id: str = "") -> bool:
-    """原子写入记忆文件"""
-    fp = _get_memory_file(filename, user_id)
-    tmp = fp.with_suffix('.tmp')
-    try:
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
-        tmp.replace(fp)
-        return True
-    except Exception as e:
-        print(f"[AgentMemory] 写入失败 {filename}: {e}")
-        return False
+    return write_memory_json(MEMORY_DIR, filename, data, user_id)
 
 
 # ── 人格 API ──────────────────────────────────────
