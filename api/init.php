@@ -110,12 +110,12 @@ function getEncryptionKey(): string {
 // ════════════════════════════════════════════════════
 // 登录速率限制 (防暴力破解)
 // ════════════════════════════════════════════════════
-define('RATE_LIMIT_FILE', APP_ROOT . '/.engine/rate_limits.json');
+define('RATE_LIMIT_FILE', APP_ROOT . '/users/rate_limits.json');
 define('RATE_LIMIT_MAX_IP', 5);       // 每IP 5次/15分钟
 define('RATE_LIMIT_MAX_USER', 10);    // 每用户 10次/15分钟
 define('RATE_LIMIT_WINDOW', 900);     // 15分钟窗口(秒)
 
-function checkLoginRateLimit(string $identifier, string $type = 'ip'): bool {
+function checkLoginRateLimit(string $identifier, string $type = 'ip'): array {
     $now = time();
     $window = RATE_LIMIT_WINDOW;
     $max = ($type === 'user') ? RATE_LIMIT_MAX_USER : RATE_LIMIT_MAX_IP;
