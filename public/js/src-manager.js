@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    var API = '/src';
+    var API = '/engine/src';
     var POLL_INTERVAL = 3000;
     var LOGS_INTERVAL = 2000;
 

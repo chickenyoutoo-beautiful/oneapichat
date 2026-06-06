@@ -2428,6 +2428,90 @@ async def video_edit_endpoint(request: Request):
     except Exception as e:
         return JSONResponse({"error": f"视频剪辑失败: {str(e)}"}, status_code=500)
 
+# ═══════════════════════════════════════════════════════════════
+# SRC (StarRailCopilot) REST API — 最小可用端点
+# 当 StarRailCopilot 未安装时返回降级状态，防止前端 404
+# ═══════════════════════════════════════════════════════════════
+
+SRC_INSTALLED = False
+SRC_DIR = "/home/naujtrats/StarRailCopilot"
+try:
+    if os.path.isdir(SRC_DIR):
+        SRC_INSTALLED = True
+except Exception:
+    pass
+
+
+@app.get("/engine/src/status")
+async def src_status(config_name: str = Query("src")):
+    if not SRC_INSTALLED:
+        return {
+            "ok": True, "status": "not_installed",
+            "message": "StarRailCopilot 未安装。请 clone 到 " + SRC_DIR,
+            "install_guide": "git clone https://github.com/LmeSzinc/StarRailCopilot.git " + SRC_DIR,
+            "config_name": config_name
+        }
+    return {"ok": True, "status": "unknown", "config_name": config_name}
+
+
+@app.get("/engine/src/ping")
+async def src_ping():
+    return {"ok": True, "installed": SRC_INSTALLED, "dir": SRC_DIR}
+
+
+@app.get("/engine/src/dashboard")
+async def src_dashboard(config_name: str = Query("src")):
+    if not SRC_INSTALLED:
+        return {
+            "ok": True,
+            "resources": {"stamina": 0, "jade": 0, "credit": 0, "fuel": 0},
+            "message": "SRC 未安装，显示占位数据"
+        }
+    return {"ok": True, "resources": {}, "message": "SRC 已安装但未运行"}
+
+
+@app.get("/engine/src/tasks")
+async def src_tasks(config_name: str = Query("src")):
+    if not SRC_INSTALLED:
+        return {"ok": True, "tasks": [], "message": "SRC 未安装"}
+    return {"ok": True, "tasks": [], "message": "SRC 已安装但无运行中任务"}
+
+
+@app.post("/engine/src/run")
+async def src_run(request: Request):
+    if not SRC_INSTALLED:
+        return {"ok": False, "error": "SRC 未安装，无法启动"}
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return {"ok": False, "error": "SRC 引擎未初始化"}
+
+
+@app.post("/engine/src/stop")
+async def src_stop(request: Request):
+    if not SRC_INSTALLED:
+        return {"ok": False, "error": "SRC 未安装"}
+    return {"ok": True, "message": "SRC 未在运行"}
+
+
+@app.get("/engine/src/config/{config_name}")
+async def src_get_config(config_name: str):
+    if not SRC_INSTALLED:
+        return {"ok": True, "data": {"_notice": "SRC 未安装，返回空配置"}, "config_name": config_name}
+    return {"ok": True, "data": {}, "config_name": config_name}
+
+
+@app.put("/engine/src/config/{config_name}")
+async def src_set_config(config_name: str, request: Request):
+    if not SRC_INSTALLED:
+        return {"ok": False, "error": "SRC 未安装，无法保存配置"}
+    return {"ok": False, "error": "SRC 引擎未初始化"}
+
+
+@app.get("/engine/src/logs")
+async def src_logs(config_name: str = Query("src"), limit: int = Query(50)):
+    if not SRC_INSTALLED:
+        return {"ok": True, "lines": ["[SRC] StarRailCopilot 未安装"], "message": "SRC 未安装"}
+    return {"ok": True, "lines": ["[SRC] 无日志"], "message": "SRC 已安装但无日志"}
+
 
 if __name__ == "__main__":
     port = int(os.getenv("ENGINE_PORT", "8766"))
