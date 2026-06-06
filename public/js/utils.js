@@ -396,4 +396,225 @@ window.fetchWithRetry = async function(url, options, maxRetries, retryDelay) {
     throw lastError;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// Diff 工具 — LCS 算法 + unified diff 生成
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    // LCS 表构建
+    function _lcsTable(a, b) {
+        var m = a.length, n = b.length;
+        var dp = new Array(m + 1);
+        for (var i = 0; i <= m; i++) { dp[i] = new Array(n + 1); for (var j = 0; j <= n; j++) dp[i][j] = 0; }
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                if (a[i-1] === b[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
+                else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+            }
+        }
+        return dp;
+    }
+
+    // 回溯生成 diff hunks
+    function _backtrack(dp, a, b, i, j) {
+        var hunks = [];
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+                hunks.unshift({type: 'equal', oldLine: a[i-1], newLine: b[j-1]});
+                i--; j--;
+            } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+                hunks.unshift({type: 'add', newLine: b[j-1]});
+                j--;
+            } else {
+                hunks.unshift({type: 'del', oldLine: a[i-1]});
+                i--;
+            }
+        }
+        return hunks;
+    }
+
+    /**
+     * 计算两个字符串的 diff
+     * @returns {Array<{type:'equal'|'add'|'del', oldLine?:string, newLine?:string}>}
+     */
+    window.computeDiff = function(oldStr, newStr) {
+        var oldLines = (oldStr || '').split('\n');
+        var newLines = (newStr || '').split('\n');
+        var dp = _lcsTable(oldLines, newLines);
+        return _backtrack(dp, oldLines, newLines, oldLines.length, newLines.length);
+    };
+
+    /**
+     * 生成 unified diff 文本
+     */
+    window.unifiedDiff = function(oldStr, newStr, filename) {
+        filename = filename || 'file';
+        var hunks = window.computeDiff(oldStr, newStr);
+        var result = ['--- a/' + filename, '+++ b/' + filename, '@@ -0,0 +0,0 @@'];
+        for (var i = 0; i < hunks.length; i++) {
+            var h = hunks[i];
+            if (h.type === 'equal') result.push(' ' + h.oldLine);
+            else if (h.type === 'add') result.push('+' + h.newLine);
+            else if (h.type === 'del') result.push('-' + h.oldLine);
+        }
+        return result.join('\n');
+    };
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// 代码编辑 — Diff 视图 + Apply/Revert 按钮
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 在气泡中展示 diff 视图（代码编辑预览）
+ * @param {string} filename - 文件路径
+ * @param {string} oldCode - 原始代码
+ * @param {string} newCode - 新代码
+ * @param {Element} targetEl - 要附加到的 DOM 元素
+ */
+window.showDiffView = function(filename, oldCode, newCode, targetEl) {
+    if (!targetEl) return;
+    var hunks = window.computeDiff(oldCode, newCode);
+    var addCount = 0, delCount = 0;
+    hunks.forEach(function(h) {
+        if (h.type === 'add') addCount++;
+        if (h.type === 'del') delCount++;
+    });
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'diff-view-wrapper';
+    wrapper.style.cssText = 'margin:8px 0;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;overflow:hidden;font-family:monospace;font-size:13px;';
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'background:var(--bg-secondary,#f9fafb);padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-color,#e5e7eb);';
+    header.innerHTML = '<span style="font-weight:600;color:var(--text-primary,#111);">📝 ' + (filename || '代码编辑') + '</span>' +
+        '<span style="font-size:12px;">' +
+        '<span style="color:#16a34a;margin-right:8px;">+' + addCount + '</span>' +
+        '<span style="color:#dc2626;">-' + delCount + '</span></span>';
+    wrapper.appendChild(header);
+
+    // Diff content
+    var content = document.createElement('div');
+    content.style.cssText = 'max-height:400px;overflow-y:auto;padding:4px 0;';
+    var linesHtml = '';
+    for (var i = 0; i < hunks.length; i++) {
+        var h = hunks[i];
+        var escaped = (h.oldLine || h.newLine || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (h.type === 'add') {
+            linesHtml += '<div style="background:#dcfce7;color:#166534;padding:1px 12px;white-space:pre-wrap;">+ ' + escaped + '</div>';
+        } else if (h.type === 'del') {
+            linesHtml += '<div style="background:#fee2e2;color:#991b1b;padding:1px 12px;white-space:pre-wrap;">- ' + escaped + '</div>';
+        } else {
+            linesHtml += '<div style="padding:1px 12px;white-space:pre-wrap;color:var(--text-secondary,#6b7280);">  ' + escaped + '</div>';
+        }
+    }
+    content.innerHTML = linesHtml;
+    wrapper.appendChild(content);
+
+    // Action buttons
+    var actions = document.createElement('div');
+    actions.style.cssText = 'padding:6px 12px;border-top:1px solid var(--border-color,#e5e7eb);display:flex;gap:8px;background:var(--bg-secondary,#f9fafb);';
+    var applyBtn = document.createElement('button');
+    applyBtn.textContent = '✅ Apply';
+    applyBtn.style.cssText = 'padding:4px 12px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:4px;cursor:pointer;font-size:12px;';
+    applyBtn.onclick = function() {
+        window.applyCodeEdit(filename, oldCode, newCode, applyBtn);
+    };
+    var revertBtn = document.createElement('button');
+    revertBtn.textContent = '↩ Revert';
+    revertBtn.style.cssText = 'padding:4px 12px;border:1px solid #dc2626;background:transparent;color:#dc2626;border-radius:4px;cursor:pointer;font-size:12px;';
+    revertBtn.onclick = function() {
+        wrapper.remove();
+    };
+    actions.appendChild(applyBtn);
+    actions.appendChild(revertBtn);
+    wrapper.appendChild(actions);
+
+    targetEl.appendChild(wrapper);
+    wrapper.scrollIntoView({behavior:'smooth',block:'nearest'});
+};
+
+/**
+ * 应用代码编辑 — 调用引擎 file_edit 端点
+ */
+window.applyCodeEdit = async function(filename, oldStr, newStr, btnEl) {
+    if (!filename) {
+        window.showToast?.('❌ 缺少文件路径', 'error');
+        return;
+    }
+    if (btnEl) { btnEl.textContent = '⏳ 应用...'; btnEl.disabled = true; }
+    try {
+        var resp = await fetch('/engine/file_edit?path=' + encodeURIComponent(filename), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({old_string: oldStr, new_string: newStr})
+        });
+        var result = await resp.json();
+        if (result.ok) {
+            window.showToast?.('✅ 已应用编辑到 ' + filename + ' (备份: ' + (result.backup || filename + '.bak') + ')', 'success', 4000);
+        } else {
+            window.showToast?.('❌ 编辑失败: ' + (result.error || '未知错误'), 'error', 5000);
+        }
+    } catch(e) {
+        window.showToast?.('❌ 请求失败: ' + e.message, 'error');
+    }
+    if (btnEl) { btnEl.textContent = '✅ Apply'; btnEl.disabled = false; }
+};
+
+/**
+ * 为代码块添加 Apply 按钮（postRender 后调用）
+ */
+window.addCodeBlockButtons = function(container) {
+    if (!container) return;
+    container.querySelectorAll('pre').forEach(function(pre) {
+        if (pre.querySelector('.code-apply-btn')) return; // 已添加
+        var code = pre.querySelector('code');
+        if (!code) return;
+        var className = code.className || '';
+        var langMatch = className.match(/language-(\w+)/);
+        var lang = langMatch ? langMatch[1] : '';
+        // 只在可编辑语言上显示按钮
+        var editableLangs = ['python','js','javascript','ts','typescript','html','css','json','php','sh','bash','yaml','yml','toml','xml','sql','go','rust','java','c','cpp','rb','lua','swift','kt','md','markdown'];
+        if (!lang || editableLangs.indexOf(lang) === -1) return;
+
+        var btn = document.createElement('button');
+        btn.className = 'code-apply-btn';
+        btn.textContent = '📋 Apply';
+        btn.title = '预览并应用代码编辑';
+        btn.style.cssText = 'position:absolute;top:4px;right:4px;padding:2px 8px;font-size:11px;background:rgba(59,130,246,0.9);color:#fff;border:none;border-radius:4px;cursor:pointer;z-index:10;opacity:0;transition:opacity 0.2s;';
+        pre.style.position = pre.style.position || 'relative';
+
+        btn.onmouseenter = function() { btn.style.opacity = '1'; };
+        btn.onmouseleave = function() { btn.style.opacity = '0'; };
+        pre.onmouseenter = function() { btn.style.opacity = '1'; };
+        pre.onmouseleave = function() { btn.style.opacity = '0'; };
+
+        btn.onclick = function() {
+            var codeText = code.textContent || '';
+            // 尝试从代码块前的注释中提取文件路径
+            var filename = '';
+            var prevEl = pre.previousElementSibling;
+            if (prevEl && prevEl.tagName === 'P') {
+                var fm = prevEl.textContent.match(/(?:文件|file|path)[：:]\s*(\S+)/i);
+                if (fm) filename = fm[1];
+            }
+            if (!filename) {
+                filename = prompt('输入文件路径（相对于 /var/www/html/oneapichat/）:', filename || '');
+                if (!filename) return;
+            }
+            // 获取原始文件内容→生成 diff
+            fetch('/engine/file_read?path=' + encodeURIComponent(filename))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var oldContent = data.content || '';
+                    window.showDiffView(filename, oldContent, codeText, pre.parentElement);
+                })
+                .catch(function() {
+                    window.showDiffView(filename, '', codeText, pre.parentElement);
+                });
+        };
+        pre.appendChild(btn);
+    });
+};
+
 

@@ -366,11 +366,13 @@ const MarkdownRenderer = {
     clearCache() { this.cache.clear(); }
 };
 
-// 后处理辅助:渲染完 HTML 后触发代码高亮 + Mermaid 图表
+// 后处理辅助:渲染完 HTML 后触发代码高亮 + Mermaid 图表 + Code Apply 按钮
 function _triggerPostRender(container) {
     if (!container || !MarkdownRenderer) return;
     setTimeout(function() {
         MarkdownRenderer.postRender(container);
+        // ★ 添加代码块 Apply 按钮 (diff viewer)
+        if (window.addCodeBlockButtons) window.addCodeBlockButtons(container);
     }, 0);
 }
 

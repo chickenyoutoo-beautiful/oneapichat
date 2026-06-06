@@ -33,6 +33,14 @@ window.parseCommand = function(text) {
     if (cmd === '/export') return { type: 'command', cmd: 'export_chat' };
     // 记忆
     if (cmd === '/remember') return { type: 'command', cmd: 'remember', content: rest };
+    // ★ 新增命令 (Phase 3b)
+    if (cmd === '/copy') return { type: 'command', cmd: 'copy' };
+    if (cmd === '/stop') return { type: 'command', cmd: 'stop_gen' };
+    if (cmd === '/diff') return { type: 'command', cmd: 'show_diff', args: rest };
+    if (cmd === '/doctor') return { type: 'command', cmd: 'doctor' };
+    if (cmd === '/context') return { type: 'command', cmd: 'show_context' };
+    if (cmd === '/agents') return { type: 'command', cmd: 'list_agents' };
+    if (cmd === '/color') return { type: 'command', cmd: 'set_color', theme: rest || 'auto' };
     return null;
 }
 
@@ -204,6 +212,122 @@ window.handleSlashCommand = function(cmd) {
                 }
             } catch(e) {}
             showToast('用法: /remember 键: 内容', 'info', 3000);
+        }
+    // ★ Phase 3b: 新增命令处理
+    } else if (cmd.cmd === 'copy') {
+        var cid2 = currentChatId;
+        if (!cid2 || !chats[cid2]) return;
+        var msgs2 = chats[cid2].messages;
+        var lastAI = '';
+        for (var i2 = msgs2.length - 1; i2 >= 0; i2--) {
+            if (msgs2[i2].role === 'assistant' && !msgs2[i2].partial) { lastAI = msgs2[i2].content || msgs2[i2].text || ''; break; }
+        }
+        if (lastAI) {
+            navigator.clipboard.writeText(lastAI).then(function() {
+                showToast('📋 已复制最后回复 (' + lastAI.length + ' 字符)', 'success', 2000);
+            }).catch(function() {
+                showToast('❌ 复制失败', 'error');
+            });
+        } else {
+            showToast('📋 暂无 AI 回复可复制', 'info');
+        }
+    } else if (cmd.cmd === 'stop_gen') {
+        // ★ 停止当前生成
+        if (window._activeAbortCtrl) {
+            try { window._activeAbortCtrl.abort(); } catch(e) {}
+            showToast('⏹️ 已中止生成', 'info', 2000);
+        } else {
+            showToast('⚠️ 当前没有进行中的生成', 'info', 2000);
+        }
+    } else if (cmd.cmd === 'show_diff') {
+        // ★ 显示 git diff
+        var diffCmd = 'cd /var/www/html/oneapichat && git diff --stat 2>&1';
+        if (cmd.args) diffCmd = 'cd /var/www/html/oneapichat && git diff ' + cmd.args.replace(/[^a-zA-Z0-9._\-\/\s]/g, '') + ' 2>&1';
+        try {
+            var diffResp = await fetch('/engine/exec', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cmd: diffCmd, timeout: 10})
+            });
+            var diffData = await diffResp.json();
+            var diffOutput = (diffData.result || diffData.stdout || diffData.error || '(无差异)');
+            appendMessage('system', '## 📊 Git Diff\n```diff\n' + diffOutput.substring(0, 4000) + '\n```');
+        } catch(e) {
+            appendMessage('system', '❌ 无法获取 diff: ' + e.message);
+        }
+    } else if (cmd.cmd === 'doctor') {
+        // ★ 系统诊断
+        showToast('🔍 运行诊断...', 'info', 3000);
+        appendMessage('system', '## 🩺 系统诊断\n');
+        var checks = [];
+        // 引擎健康
+        try {
+            var hResp = await fetch('/engine/health');
+            checks.push(hResp.ok ? '✅ 引擎服务正常' : '❌ 引擎服务异常 (' + hResp.status + ')');
+        } catch(e) { checks.push('❌ 引擎服务不可达: ' + e.message); }
+        // 会话状态
+        checks.push('📋 活跃对话: ' + Object.keys(chats).length + ' 个');
+        // localStorage 用量
+        var lsUsed = JSON.stringify(localStorage).length;
+        checks.push('💾 localStorage: ' + (lsUsed / 1024 / 1024).toFixed(1) + ' MB / 5 MB');
+        // 当前引擎模式
+        checks.push('🔄 可恢复流式: ' + (localStorage.getItem('__enableResumeStream') !== '0' ? '已启用' : '已禁用'));
+        // 代理状态
+        checks.push('🌐 代理: ' + (window.isProxyEnabled ? (window.isProxyEnabled() ? '已启用' : '已禁用') : '未知'));
+        checks.push('📡 在线状态: ' + (navigator.onLine ? '在线' : '离线'));
+        appendMessage('system', checks.join('\n'));
+    } else if (cmd.cmd === 'show_context') {
+        // ★ 上下文用量估算
+        var cid3 = currentChatId;
+        if (!cid3 || !chats[cid3]) { appendMessage('system', '❌ 无活跃对话'); return; }
+        var msgs3 = chats[cid3].messages;
+        var totalChars = 0, systemChars = 0, userChars = 0, assistantChars = 0;
+        msgs3.forEach(function(m) {
+            var len = (m.content || m.text || '').length + (m.reasoning || '').length;
+            totalChars += len;
+            if (m.role === 'system') systemChars += len;
+            else if (m.role === 'user') userChars += len;
+            else if (m.role === 'assistant') assistantChars += len;
+        });
+        var estTokens = Math.round(totalChars / 3.5); // 粗略估算: 3.5 字符 ≈ 1 token
+        appendMessage('system', '## 📐 上下文用量估算\n' +
+            '💬 总消息: ' + msgs3.length + ' 条\n' +
+            '📝 总字符: ' + totalChars.toLocaleString() + ' (~' + estTokens.toLocaleString() + ' tokens)\n' +
+            '  ├ system: ' + (systemChars/1024).toFixed(1) + ' KB\n' +
+            '  ├ user: ' + (userChars/1024).toFixed(1) + ' KB\n' +
+            '  └ assistant: ' + (assistantChars/1024).toFixed(1) + ' KB\n' +
+            '📊 估算占比: ' + Math.round(estTokens / 128000 * 100) + '% of 128K 上下文');
+    } else if (cmd.cmd === 'list_agents') {
+        // ★ 列出活跃子代理
+        var token3 = localStorage.getItem('authToken') || '';
+        try {
+            var agResp = await fetch('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + token3);
+            var agData = await agResp.json();
+            if (agData.agents && agData.agents.length > 0) {
+                var agList = agData.agents.map(function(a) {
+                    return '- `' + (a.name || a.id || '?') + '` [' + (a.status || '?') + '] ' + (a.task || '');
+                }).join('\n');
+                appendMessage('system', '## 🤖 活跃子代理\n' + agList);
+            } else {
+                appendMessage('system', '🤖 暂无活跃子代理');
+            }
+        } catch(e) { appendMessage('system', '❌ 查询失败: ' + e.message); }
+    } else if (cmd.cmd === 'set_color') {
+        // ★ 主题颜色切换
+        var theme = cmd.theme || 'auto';
+        var root = document.documentElement;
+        if (theme === 'dark') {
+            root.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+            showToast('🌙 深色模式', 'success', 2000);
+        } else if (theme === 'light') {
+            root.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+            showToast('☀️ 浅色模式', 'success', 2000);
+        } else {
+            root.classList.remove('dark');
+            localStorage.setItem('theme', 'auto');
+            showToast('🔄 自动模式（跟随系统）', 'success', 2000);
         }
     }
     })(); // end async wrapper
