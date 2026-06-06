@@ -488,7 +488,13 @@
                         }
                     }
                      else if (func.name === 'engine_agent_ask') {
-                        toolResult = await engineApiHandler('agent_ask', args);
+                        // ★ 传递网络代理配置
+                        var _askArgs = Object.assign({}, args);
+                        if (window.isProxyEnabled && window.isProxyEnabled() && window.getProxyUrl && window.getProxyUrl()) {
+                            _askArgs.proxy_url = window.getProxyUrl();
+                            _askArgs.proxy_enabled = '1';
+                        }
+                        toolResult = await engineApiHandler('agent_ask', _askArgs);
                     }
                      else if (func.name === 'engine_agent_stop') {
                         toolResult = await engineApiHandler('agent_stop', args);
@@ -863,6 +869,11 @@
                             try {
                                 var _wfCreated = [];
                                 var _wfErrors = [];
+                                // ★ 工作流也传递代理配置
+                                var _wfProxy = {};
+                                if (window.isProxyEnabled && window.isProxyEnabled() && window.getProxyUrl && window.getProxyUrl()) {
+                                    _wfProxy = { proxy_url: window.getProxyUrl(), proxy_enabled: '1' };
+                                }
                                 for (var _si = 0; _si < _wfSteps.length; _si++) {
                                     var _step = _wfSteps[_si];
                                     var _sName = _wfName + '_s' + (_si + 1);
@@ -873,7 +884,9 @@
                                         name: _sName,
                                         prompt: _sPrompt,
                                         role: _step.role || 'general',
-                                        model: localStorage.getItem('model') || 'deepseek-chat'
+                                        model: localStorage.getItem('model') || 'deepseek-chat',
+                                        proxy_url: _wfProxy.proxy_url || '',
+                                        proxy_enabled: _wfProxy.proxy_enabled || ''
                                     });
                                     if (_cr && _cr.error) {
                                         _wfErrors.push('步骤' + (_si+1) + '创建失败: ' + _cr.error);

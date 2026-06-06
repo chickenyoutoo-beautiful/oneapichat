@@ -86,6 +86,9 @@ window.ResumeStream = (function() {
             try {
                 var _msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
                 var token = localStorage.getItem('authToken')||'';
+                // ★ 传递代理配置到引擎，让子代理/可恢复流也走代理
+                var _proxyEnabled = (window.isProxyEnabled && window.isProxyEnabled()) || false;
+                var _proxyUrl = _proxyEnabled ? (window.getProxyUrl ? window.getProxyUrl() : '') : '';
                 var cr = await fetch(_base+'/oneapichat/api/engine_api.php?action=chat_create', {
                     method:'POST',
                     headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
@@ -93,7 +96,8 @@ window.ResumeStream = (function() {
                         messages:messages, model:config.model, api_key:config.apiKey||'',
                         base_url:config.baseUrl||'', chat_id:chatId, msg_id: _msgId,
                         temperature:config.temp||0.7, max_tokens:config.tokens||4096,
-                        tools:(config.tools&&config.tools.length)?config.tools:undefined
+                        tools:(config.tools&&config.tools.length)?config.tools:undefined,
+                        proxy_enabled: _proxyEnabled, proxy_url: _proxyUrl
                     }),
                     signal:AbortSignal.timeout(15000)
                 });

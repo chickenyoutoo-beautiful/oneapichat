@@ -331,17 +331,21 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     # ★ 根据角色选择工具集(最小权限原则)
     agent_role = agent.get("role", "general")
 
-    # ★ 应用子代理的代理配置
-    proxy_url = agent.get("proxy_url", "")
-    proxy_enabled = agent.get("proxy_enabled", "")
-    if proxy_enabled == '1' and proxy_url:
+    # ★ 应用子代理的代理配置（用 http_client 而非全局 env 避免并发竞争）
+    _agent_proxy_url = agent.get("proxy_url", "") or _PROXY_URL or ""
+    _agent_proxy_enabled = agent.get("proxy_enabled", "")
+    _agent_http_client = None
+    if _agent_proxy_enabled == '1' and _agent_proxy_url:
         # 公网地址映射为内网
-        if 'proxy.naujtrats.xyz:8888' in proxy_url:
-            proxy_url = 'http://192.168.195.213:10808'
-        elif 'proxy.naujtrats.xyz:8889' in proxy_url:
-            proxy_url = 'http://192.168.195.22:10808'
-        os.environ['HTTP_PROXY'] = proxy_url
-        os.environ['HTTPS_PROXY'] = proxy_url
+        if 'proxy.naujtrats.xyz:8888' in _agent_proxy_url:
+            _agent_proxy_url = 'http://192.168.195.213:10808'
+        elif 'proxy.naujtrats.xyz:8889' in _agent_proxy_url:
+            _agent_proxy_url = 'http://192.168.195.22:10808'
+        import httpx as _httpx
+        _agent_http_client = _httpx.Client(proxy=_agent_proxy_url)
+    elif _PROXY_URL:
+        import httpx as _httpx
+        _agent_http_client = _httpx.Client(proxy=_PROXY_URL)
         os.environ['ALL_PROXY'] = proxy_url
         print(f'[Agent {name}] 代理已启用(子代理配置): {proxy_url}')
     elif _PROXY_URL:
@@ -871,7 +875,8 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
 
         MAX_EXECUTION_SECONDS = 600  # 30分钟强制超时
         try:
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=120)
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=120,
+                            http_client=_agent_http_client)
             messages = [{"role": "user", "content": agent.get("prompt", "")}]
             max_rounds = max_agent_rounds
             result_parts = []
@@ -1569,8 +1574,16 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         return f"event: {event_type}\ndata: {data_str}\n\n"
 
     try:
+        # ★ 代理配置: 请求级优先
+        _httpc = None
+        _rp = request_data.get('proxy_url', '')
+        if request_data.get('proxy_enabled') and _rp:
+            import httpx; _httpc = httpx.Client(proxy=_rp)
+        elif _PROXY_URL:
+            import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
         client = OpenAI(api_key=request_data.get('api_key', ''),
-                        base_url=request_data.get('base_url', '').strip().rstrip('/') or None)
+                        base_url=request_data.get('base_url', '').strip().rstrip('/') or None,
+                        http_client=_httpc)
         model = request_data.get('model', 'deepseek-chat')
         messages = request_data.get('messages', [])
         tools = request_data.get('tools', None)
@@ -1778,9 +1791,19 @@ def _generate_resumable(request: dict, stream_id: str):
 
     try:
         print(f"[_generate_resumable] Starting stream {stream_id} with model={request.get('model','?')} base_url={request.get('base_url','?')[:50]}", flush=True)
+        # ★ 代理配置: 请求级优先 → 全局 env 回退
+        _http_client = None
+        _req_proxy = request.get('proxy_url', '')
+        if request.get('proxy_enabled') and _req_proxy:
+            import httpx
+            _http_client = httpx.Client(proxy=_req_proxy)
+        elif _PROXY_URL:
+            import httpx
+            _http_client = httpx.Client(proxy=_PROXY_URL)
         client = OpenAI(
             api_key=request.get('api_key', ''),
-            base_url=request.get('base_url', '').strip().rstrip('/') or None
+            base_url=request.get('base_url', '').strip().rstrip('/') or None,
+            http_client=_http_client
         )
         params = {
             'model': request.get('model', 'deepseek-chat'),
@@ -2141,9 +2164,17 @@ class ChatStream:
         """调用 LLM API，逐 token 广播并缓存"""
         from openai import OpenAI
         try:
+            # ★ 代理配置: 请求级优先
+            _httpc = None
+            _rp = self.request.get('proxy_url', '')
+            if self.request.get('proxy_enabled') and _rp:
+                import httpx; _httpc = httpx.Client(proxy=_rp)
+            elif _PROXY_URL:
+                import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
             client = OpenAI(
                 api_key=self.request.get('api_key', ''),
-                base_url=self.request.get('base_url', '').strip().rstrip('/') or None
+                base_url=self.request.get('base_url', '').strip().rstrip('/') or None,
+                http_client=_httpc
             )
             params = {
                 'model': self.request.get('model', 'deepseek-chat'),
