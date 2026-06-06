@@ -47,7 +47,7 @@ window.onProviderChange = async function() {
         deepseek: 'deepseek-chat', openai: 'gpt-4o', xai: 'grok-4-latest',
         antthropic: 'claude-sonnet-4-20250514', minimax: 'MiniMax-M3',
         gemini: 'gemini-2.0-flash', zhipu: 'glm-4-flash', qwen: 'qwen-turbo',
-        moonshot: 'moonshot-v1-8k', doubao: 'doubao-lite-32k',
+        moonshot: 'moonshot-v1-8k', doubao: 'doubao-lite-32k', mimo: 'mimo-v2-flash',
         openrouter: 'openai/gpt-4o', opencode: 'gpt-4o', llamacpp: ''
     };
     var sm = localStorage.getItem('model_' + provider) || '';

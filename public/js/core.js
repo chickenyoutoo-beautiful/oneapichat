@@ -191,6 +191,7 @@ var API_PROVIDERS = {
     qwen:      { label: '通义千问',       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', keyLS: 'apiKeyQwen',  baseKey: 'apiKeyQwen' },
     moonshot:  { label: '月之暗面 (Kimi)', baseUrl: 'https://api.moonshot.cn/v1',                    keyLS: 'apiKeyMoonshot', baseKey: 'apiKeyMoonshot' },
     doubao:    { label: '字节豆包',       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',        keyLS: 'apiKeyDoubao',   baseKey: 'apiKeyDoubao' },
+    mimo:      { label: '小米 MiMo',       baseUrl: 'https://api.xiaomimimo.com/v1',                  keyLS: 'apiKeyMiMo',     baseKey: 'apiKeyMiMo' },
     openrouter:{ label: 'OpenRouter',     baseUrl: 'https://openrouter.ai/api/v1',                  keyLS: 'apiKeyOpenRouter', baseKey: 'apiKeyOpenRouter' },
     opencode:  { label: 'OpenCode',       baseUrl: 'https://api.opencode.ai/v1',                      keyLS: 'apiKeyOpenCode',  baseKey: 'apiKeyOpenCode' },
     llamacpp:  { label: '本地模型 (llama.cpp)', baseUrl: 'https://localmodels.naujtrats.xyz/v1',   keyLS: 'apiKeyLlamaCpp',  baseKey: 'apiKeyLlamaCpp' },
