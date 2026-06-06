@@ -856,7 +856,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     var body = {
         model,
         messages: apiMessages,
-        stream: ((window.isProxyEnabled() && !modelLower.includes('minimax') && !_useAnthropicFormat) ? false : getChecked('streamToggle')),
+        stream: getChecked('streamToggle'),
         temperature: parseFloat(getVal('temperature')) || 0.7,
         max_tokens: requestedTokens
     };
@@ -1581,7 +1581,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // ★ 可恢复流式: 开关打开时走后端引擎
             // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
-            var useStream = _isImageModel ? false : (_useAnthropicFormat ? getChecked('streamToggle') : ((window.isProxyEnabled() && !modelLower.includes('minimax')) ? false : getChecked('streamToggle')));
+            var useStream = _isImageModel ? false : getChecked('streamToggle');
             // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
             // 用户可设置 __enableResumeStream='0' 显式禁用
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
