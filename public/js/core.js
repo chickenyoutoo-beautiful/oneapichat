@@ -435,12 +435,12 @@ var $ = window.$ || {
 
 
 // ★ 全局状态 — 多模块共享，必须在所有模块之前定义
-const currentChatId = null;
-const chats = JSON.parse(localStorage.getItem("chats") || "{}");
+let currentChatId = null;
+let chats = JSON.parse(localStorage.getItem("chats") || "{}");
 
 // ★ Agent 模式常量 — agent.js 依赖，必须在 core.js 中
 const AGENT_CHAT_ID = '_agent_main';
-const lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
+let lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
 
 // ★ 搜索按钮状态 (agent.js → 迁至 core.js 避免懒加载导致 ReferenceError)
 function getSearchButtonIcon(checked) {

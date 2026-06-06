@@ -6,7 +6,7 @@
 var _agentPollTimer = null;
 var _agentPanelRefreshTimer = null;
 const _agentChatPollTimer = null;
-const _selectedAgentName = null;
+let _selectedAgentName = null;
 const _lastAgentListJson = '';
 
 /**
