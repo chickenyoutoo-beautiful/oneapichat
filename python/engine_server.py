@@ -97,6 +97,7 @@ from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _vi
     _apply_subtitle_style, _apply_ffmpeg_filter, _apply_ffmpeg_transition, _apply_compose)
 from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
+from engine.crypto import load_encryption_key, get_aes_key, decrypt_xor
 from engine.agent_memory import read_memory_json, write_memory_json
 from engine.workflow import create_workflow, run_workflow, list_workflows, status_workflow, delete_workflow, get_roles as _wf_get_roles
 
@@ -1019,57 +1020,12 @@ def agent_status(name: str = Query(...), user_id: str = Query("")):
 import base64
 
 def _load_encryption_key() -> str:
-    """从 config.ini 加载加密密钥(与 PHP getEncryptionKey 一致)"""
-    import configparser, os
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
-    try:
-        cp = configparser.ConfigParser()
-        cp.read(config_path, encoding='utf-8')
-        key = cp.get('common', 'encryption_key', fallback=None)
-        if key:
-            return key
-    except Exception:
-        pass
-    return 'naujtrats-secret'  # 降级默认值
-
-ENCRYPTION_KEY = _load_encryption_key()
-
+    return load_encryption_key(PROJECT_ROOT)
 def _get_aes_key() -> bytes:
-    """PBKDF2 派生 AES-256 密钥(与前端 _getAesKey 一致)"""
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.primitives import hashes
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(), length=32,
-        salt=b'oneapichat-aes-v2', iterations=100000
-    )
-    return kdf.derive(ENCRYPTION_KEY.encode('utf-8'))
-
+    return get_aes_key(ENCRYPTION_KEY)
 def _decrypt_xor(encoded: str) -> str:
-    """AES-256-GCM 解密(与前端 decrypt 一致) + XOR 向后兼容"""
-    if not encoded:
-        return ""
-    try:
-        # v2: AES-256-GCM (新格式)
-        if encoded.startswith('v2:'):
-            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-            raw = base64.b64decode(encoded[3:])
-            if len(raw) < 28:
-                return None
-            iv = raw[:12]
-            tag = raw[-16:]
-            ciphertext = raw[12:-16]
-            aesgcm = AESGCM(_get_aes_key())
-            return aesgcm.decrypt(iv, ciphertext + tag, None).decode('utf-8')
-        # 旧版 XOR 解密 (向后兼容)
-        bin_bytes = base64.b64decode(encoded)
-        key_bytes = ENCRYPTION_KEY.encode('utf-8')
-        result = bytearray(len(bin_bytes))
-        for i in range(len(bin_bytes)):
-            result[i] = bin_bytes[i] ^ key_bytes[i % len(key_bytes)]
-        return result.decode('utf-8')
-    except Exception:
-        return None
-
+    _aes = _get_aes_key() if (encoded and encoded.startswith("v2:")) else None
+    return decrypt_xor(encoded, ENCRYPTION_KEY, _aes)
 def _get_main_chat_config(user_id: str) -> dict:
     """从主聊天配置读取 api_key / base_url / model
     自动 XOR 解密 apiKey,优先主聊配置,无值则返回空字符串。
