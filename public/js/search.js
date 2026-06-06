@@ -220,7 +220,9 @@ async function performWebFetch(urls) {
         try {
             var ctrl = new AbortController();
             var tid = setTimeout(function() { ctrl.abort(); }, TIMEOUT_MS);
-            var r = await fetch(
+            // ★ 同步网络代理
+            var _ffn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+            var r = await _ffn(
                 FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1',
                 { signal: ctrl.signal }
             );

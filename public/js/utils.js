@@ -358,10 +358,12 @@ window.fetchWithRetry = async function(url, options, maxRetries, retryDelay) {
     maxRetries = maxRetries || 3;
     retryDelay = retryDelay || 1000;
     var lastError;
+    // ★ 同步网络代理: 代理开启时使用 proxyFetch 路由
+    var _fetchFn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
 
     for (var attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            var response = await fetch(url, options);
+            var response = await _fetchFn(url, options);
 
             if (!response.ok) {
                 var status = response.status;
