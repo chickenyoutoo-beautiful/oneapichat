@@ -308,10 +308,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                     }
 
+                    // ★ 捕获 usage（一些API如Grok在常规chunk中返回usage，不只在最后）
+                    if (data.usage) usage = data.usage;
+
                     var delta = data.choices?.[0]?.delta;
-                    // 如果 delta 为空,跳过此条数据
+                    // 如果 delta 为空,跳过此条数据（但已捕获usage）
                     if (!delta) {
-                        console.warn('[流式解析] delta 为空,跳过');
                         continue;
                     }
 
