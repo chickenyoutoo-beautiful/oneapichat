@@ -91,6 +91,7 @@ from engine.event_frame import EventFlowBuilder, EventType, EventLog
 from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
 from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
     str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect)
+from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cron_job as _cron_stop
 
 
 app = FastAPI(title="OneAPIChat Engine")
@@ -1154,8 +1155,7 @@ def _get_agent_store_lock(user_id: str) -> threading.Lock:
             _agent_store_locks[user_id] = threading.Lock()
         return _agent_store_locks[user_id]
 
-# ==================== Cron 任务 ====================
-_cron_threads = {}
+# ==================== Cron 任务 (后台逻辑→engine.cron) ====================
 
 @app.get("/engine/cron/list")
 def cron_list(user_id: str = Query("")):
@@ -1165,103 +1165,26 @@ def cron_list(user_id: str = Query("")):
 @app.get("/engine/cron/create")
 def cron_create(
     name: str = Query(...),
-    interval: int = Query(...),  # 秒
-    action: str = Query(...),     # 要执行的 shell 命令
+    interval: int = Query(...),
+    action: str = Query(...),
     user_id: str = Query("")
 ):
     store = get_ns("cron", user_id)
     jobs = store.get()
     jobs[name] = {
-        "name": name,
-        "interval": interval,
-        "action": action,
-        "enabled": True,
-        "created": datetime.now().isoformat()
+        "name": name, "interval": interval, "action": action,
+        "enabled": True, "created": datetime.now().isoformat()
     }
     store.set(jobs)
-    _start_cron_job(name, user_id)
+    _cron_start(name, user_id, get_ns)
     return {"ok": True, "job": name}
 
 @app.get("/engine/cron/delete")
 def cron_delete(name: str = Query(...), user_id: str = Query("")):
-    _stop_cron_job(name, user_id)
+    _cron_stop(name, user_id, get_ns)
     store = get_ns("cron", user_id)
     store.delete(name)
     return {"ok": True}
-
-def _run_cron_job(name, interval, action, user_id):
-    """后台执行 cron 任务"""
-    key = f"{user_id}_{name}"
-    store = get_ns("cron", user_id)
-    while True:
-        job = store.get().get(name)
-        if not job or not job.get("enabled"):
-            break
-        try:
-            result = subprocess.run(
-                action, shell=True, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='replace'
-            )
-            log_entry = {
-                "time": datetime.now().isoformat(),
-                "exit_code": result.returncode,
-                "stdout": result.stdout[-500:] if result.stdout else "",
-                "stderr": result.stderr[-500:] if result.stderr else ""
-            }
-            # Cron完成后推送通知(优先 stdout,其次 stderr,兜底推送完成消息)
-            push_store = get_ns("heartbeat", user_id)
-            push_data = push_store.get()
-            pending = push_data.get("pending_messages", [])
-            if result.stdout.strip():
-                pending.append({"msg": f"[Cron] {name}: {result.stdout.strip()[-200:]}", "time": datetime.now().isoformat()})
-            elif result.stderr.strip():
-                pending.append({"msg": f"[Cron] {name} 出错: {result.stderr.strip()[-200:]}", "time": datetime.now().isoformat()})
-            else:
-                pending.append({"msg": f"[Cron] {name} 已完成 (exit: {result.returncode})", "time": datetime.now().isoformat()})
-            push_data["pending_messages"] = pending
-            push_store.set(push_data)
-            jobs = store.get()
-            if name in jobs:
-                jobs[name]["last_run"] = log_entry
-                jobs[name]["next_run"] = time.time() + interval
-                store.set(jobs)
-        except subprocess.TimeoutExpired:
-            jobs = store.get()
-            if name in jobs:
-                jobs[name]["last_run"] = {"time": datetime.now().isoformat(), "error": "timeout"}
-                store.set(jobs)
-        except Exception as e:
-            jobs = store.get()
-            if name in jobs:
-                jobs[name]["last_run"] = {"time": datetime.now().isoformat(), "error": str(e)}
-                store.set(jobs)
-
-        # 等待下一轮
-        for _ in range(interval):
-            time.sleep(1)
-            job = store.get().get(name)
-            if not job or not job.get("enabled"):
-                return
-
-def _start_cron_job(name, user_id=""):
-    store = get_ns("cron", user_id)
-    key = f"{user_id}_{name}"
-    job = store.get().get(name)
-    if not job:
-        return
-    if key in _cron_threads and _cron_threads[key].is_alive():
-        return
-    t = threading.Thread(target=_run_cron_job, args=(name, job["interval"], job["action"], user_id), daemon=True)
-    t.start()
-    _cron_threads[key] = t
-
-def _stop_cron_job(name, user_id=""):
-    store = get_ns("cron", user_id)
-    key = f"{user_id}_{name}"
-    jobs = store.get()
-    if name in jobs:
-        jobs[name]["enabled"] = False
-        store.set(jobs)
-    _cron_threads.pop(key, None)
 
 # ==================== Agent 角色系统 ====================
 # 每个角色有不同工具权限,实现最小权限原则
@@ -3316,7 +3239,7 @@ async def startup():
     jobs = cron_store.get()
     for name, job in jobs.items():
         if job.get("enabled"):
-            _start_cron_job(name, "")
+            _cron_start(name, "", get_ns)
             print(f"[引擎] Cron 已恢复(全局): {name}")
     # 恢复各用户的 cron
     for f in ENGINE_DIR.glob("user_*_cron.json"):
@@ -3325,7 +3248,7 @@ async def startup():
             user_jobs = json.loads(f.read_text(encoding="utf8"))
             for name, job in user_jobs.items():
                 if job.get("enabled"):
-                    _start_cron_job(name, uid)
+                    _cron_start(name, uid, get_ns)
                     print(f"[引擎] Cron 已恢复(用户{uid}): {name}")
         except Exception:
             pass
