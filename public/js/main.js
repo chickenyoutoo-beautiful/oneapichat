@@ -2123,6 +2123,13 @@ window.useAlternativeVisionModel = function() {
                                     if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages;
                                 }
                             }
+                            // ★ 如果生成了音频/音乐,确保存入消息对象（持久化 & 刷新不丢）
+                            if ((tc.function.name === 'mmx_speech' || tc.function.name === 'mmx_music') && pendingMsg._audioResults && pendingMsg._audioResults.length > 0) {
+                                var _aMsgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                if (_aMsgIdx !== -1) {
+                                    chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
+                                }
+                            }
                         }
                     }
                 }
@@ -2249,6 +2256,17 @@ window.useAlternativeVisionModel = function() {
                                 }, _idx * 50);
                             });
                         }
+                    }
+                    // ★ 渲染生成的音频/音乐（与图片一样放在气泡末尾，避免被工具调用覆盖）
+                    if (pendingMsg._audioResults && pendingMsg._audioResults.length > 0) {
+                        pendingMsg._audioResults.forEach(function(_ar) {
+                            var _audioWrap = document.createElement('div');
+                            _audioWrap.style.cssText = 'margin:8px 0;padding:8px;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;background:var(--bg-secondary,#f9fafb);';
+                            _audioWrap.innerHTML = '<div style="font-weight:600;margin-bottom:6px;font-size:13px;">' + _ar.label + '</div>' +
+                                '<audio controls style="width:100%;max-width:400px;"><source src="' + _ar.url + '" type="audio/mpeg"></audio>' +
+                                '<br><a href="' + _ar.url + '" target="_blank" download style="font-size:12px;">⬇️ 下载</a>';
+                            _bubble.appendChild(_audioWrap);
+                        });
                     }
                     // ★ 渲染 web_fetch 访问的链接列表
                     if (pendingMsg._webFetchUrls && pendingMsg._webFetchUrls.length > 0) {

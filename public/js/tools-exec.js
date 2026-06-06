@@ -1378,9 +1378,15 @@
                                     var _audioUrl = _mmxJson?.result?.url || '';
                                     if (_audioUrl) {
                                         toolResult = { result: '✅ ' + (_mmxCmd === 'speech' ? '语音' : '音乐') + '已生成: ' + _audioUrl };
-                                        // ★ 附加文件到当前对话,让用户直接看到播放器
-                                        if (typeof window.appendAudioToChat === 'function') {
-                                            window.appendAudioToChat(_mmxJson.result.url, (_mmxCmd === 'music' ? '🎵 生成的音乐' : '🔊 生成的语音'));
+                                        // ★ 存入 pendingMsg，在气泡末尾统一渲染（与图片一致）
+                                        // 不在此处调用 appendAudioToChat 避免被后续工具调用覆盖
+                                        if (pendingMsg) {
+                                            if (!pendingMsg._audioResults) pendingMsg._audioResults = [];
+                                            pendingMsg._audioResults.push({
+                                                url: _audioUrl,
+                                                label: _mmxCmd === 'music' ? '🎵 生成的音乐' : '🔊 生成的语音',
+                                                type: _mmxCmd
+                                            });
                                         }
                                     } else {
                                         toolResult = { result: _mmxJson.result || JSON.stringify(_mmxJson) };
