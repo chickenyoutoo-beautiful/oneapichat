@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-06**: 🌊 流式处理提取 — stream-handler.js (1,238行, 5函数)，main.js 4,351→3,116 (-28.4%!)
 - **2026-06-06**: 🧩 verifyToken 统一 — 4 实现→1 共享 `verifyAuthToken` (auth_helpers.php)，消除重复
 - **2026-06-06**: 🔄 fetchWithRetry 合并 — main.js + agent.js 重复 → utils.js 统一版本
 - **2026-06-06**: 🖥️ 服务器工具提取 — engine/server_tools.py (399行, 14端点)，engine_server.py 3,119→2,736 (-12.3%)
@@ -120,7 +121,8 @@
 | `js/core.js` | 309 | ★ 全局常量、数学公式保护、跨域Cookie、安全Fetch、DOM工具、加密、工具函数 |
 | `js/image-gen.js` | 490 | 图像生成（generateImage / generateImageI2I / OpenRouter GPT Image） |
 | `js/markdown.js` | 490 | 流式渲染（applyStreamRender）、MarkdownRenderer缓存、ChartRenderer/Mermaid |
-| `js/main.js` | 4,408 | 主应用逻辑（聊天、Agent、工具执行、UI、存储、配置） |
+| `js/main.js` | 3,116 | 主应用逻辑（聊天、Agent、工具执行） |
+| `js/stream-handler.js` | 1,238 | 流式/非流式响应处理 (Phase 10 拆分) |
 | `js/tools.js` | 1,502 | 工具定义、toolRegistry、工具分类和中文标签 |
 | `js/commands.js` | 210 | /斜杠命令解析与分派 (Phase 9 拆分) |
 | `js/resume-stream.js` | 158 | 可恢复流式续接模块 (Phase 9 拆分) |
