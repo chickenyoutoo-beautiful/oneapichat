@@ -1,5 +1,5 @@
 <?php
-function sendVerificationCode($toEmail, $code) {
+function sendVerificationCode(string $toEmail, string $code): bool {
     $from = 'es5fov1bioy58erv@163.com';
     $pwd  = getenv('SMTP_PASSWORD') ?: '';
     if (!$pwd) { error_log('[mailer] SMTP_PASSWORD env not set'); return false; }

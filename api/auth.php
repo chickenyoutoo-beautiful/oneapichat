@@ -48,7 +48,7 @@ $usersFile = $usersDir . 'users.json';
 $sessionsFile = $usersDir . 'sessions.json';
 
 // ---- 读取/写入辅助函数 ----
-function readJson($path) {
+function readJson(string $path): array {
     if (!file_exists($path)) return [];
     $raw = file_get_contents($path);
     if ($raw === false || trim($raw) === '') return [];
@@ -63,7 +63,7 @@ function readJson($path) {
     return $data;
 }
 
-function writeJson($path, $data) {
+function writeJson(string $path, array $data): bool {
     // ★ 原子写入: 先写临时文件,再 rename,防止并发写入导致文件损坏
     $tmpPath = $path . '.' . getmypid() . '.tmp';
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -105,20 +105,20 @@ function jsonSuccess($data = []) {
     exit;
 }
 
-function generateToken() {
+function generateToken(): string {
     return bin2hex(random_bytes(32));
 }
 
-function generateUserId() {
+function generateUserId(): string {
     return 'u_' . bin2hex(random_bytes(12));
 }
 
-function cleanUsername($name) {
+function cleanUsername(string $name): string {
     return preg_replace('/[^a-zA-Z0-9_\x{4e00}-\x{9fa5}]/u', '', trim($name));
 }
 
 // ---- 清理过期会话 ----
-function cleanExpiredSessions(&$sessions) {
+function cleanExpiredSessions(array &$sessions): void {
     $now = time();
     $expireTime = 30 * 24 * 3600; // 30 天
     foreach ($sessions as $token => $info) {

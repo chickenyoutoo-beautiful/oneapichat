@@ -29,7 +29,7 @@ $apiBase = 'http://127.0.0.1:5212/api/v4';
 $hostHeader = 'cloudreve.naujtrats.xyz';
 
 // ── 辅助函数 ──
-function cr_get($url, $token = '') {
+function cr_get(string $url, string $token = ''): ?array {
     global $hostHeader;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -45,7 +45,7 @@ function cr_get($url, $token = '') {
     return json_decode($body, true) ?: ['code' => -1, 'msg' => 'API unreachable'];
 }
 
-function cr_post($url, $data, $token = '') {
+function cr_post(string $url, $data, string $token = ''): array {
     global $hostHeader;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -64,7 +64,7 @@ function cr_post($url, $data, $token = '') {
     return json_decode($body, true) ?: ['code' => -1, 'msg' => 'API unreachable'];
 }
 
-function cr_put($url, $data, $token = '') {
+function cr_put(string $url, $data, string $token = ''): array {
     global $hostHeader;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -83,7 +83,7 @@ function cr_put($url, $data, $token = '') {
     return json_decode($body, true) ?: ['code' => -1, 'msg' => 'API unreachable'];
 }
 
-function cr_delete($url, $data, $token = '') {
+function cr_delete(string $url, $data, string $token = ''): array {
     global $hostHeader;
     $ch = curl_init($url);
     curl_setopt_array($ch, [

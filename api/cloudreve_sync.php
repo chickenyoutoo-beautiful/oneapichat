@@ -28,7 +28,7 @@ if (!$username || !$password) {
 }
 $email = $email ?: "{$username}@naujtrats.xyz";
 
-function cr_http($method, $path, $data = []) {
+function cr_http(string $method, string $path, array $data = []): ?array {
     $ch = curl_init("http://127.0.0.1:5212/api/v4" . $path);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,

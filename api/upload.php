@@ -53,7 +53,7 @@ if (!is_dir($uploadDir)) {
 }
 
 // ---- 路径安全辅助：禁止目录穿越 ----
-function safePath($baseDir, $filename) {
+function safePath(string $baseDir, string $filename): string {
     $realBase = realpath($baseDir);
     if ($realBase === false) return false;
     $fullPath = $realBase . '/' . basename($filename);

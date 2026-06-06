@@ -17,13 +17,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-function jsonReply($data, $code = 200) {
+function jsonReply(array $data, int $code = 200): void {
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-function getUserConfigFile($userId) {
+function getUserConfigFile(string $userId): string {
     return dirname(__DIR__) . '/users/' . preg_replace('/[^a-zA-Z0-9_-]/', '', $userId) . '_config.json';
 }
 

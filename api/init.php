@@ -67,7 +67,7 @@ function pyBgCmd($script, $args, $logPath) {
 // ════════════════════════════════════════════════════
 // CORS 白名单 (与 nginx map 保持一致)
 // ════════════════════════════════════════════════════
-function setCorsHeaders() {
+function setCorsHeaders(): void {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     $allowed = [
         'https://naujtrats.xyz',
@@ -91,7 +91,7 @@ function setCorsHeaders() {
 // ════════════════════════════════════════════════════
 // AES-256-GCM 加密密钥 (从 config.ini 读取，不在源码中硬编码)
 // ════════════════════════════════════════════════════
-function getEncryptionKey() {
+function getEncryptionKey(): string {
     static $key = null;
     if ($key !== null) return $key;
     $configPath = APP_ROOT . '/config.ini';
@@ -115,7 +115,7 @@ define('RATE_LIMIT_MAX_IP', 5);       // 每IP 5次/15分钟
 define('RATE_LIMIT_MAX_USER', 10);    // 每用户 10次/15分钟
 define('RATE_LIMIT_WINDOW', 900);     // 15分钟窗口(秒)
 
-function checkLoginRateLimit($identifier, $type = 'ip') {
+function checkLoginRateLimit(string $identifier, string $type = 'ip'): bool {
     $now = time();
     $window = RATE_LIMIT_WINDOW;
     $max = ($type === 'user') ? RATE_LIMIT_MAX_USER : RATE_LIMIT_MAX_IP;
