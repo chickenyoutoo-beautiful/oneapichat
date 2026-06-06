@@ -102,7 +102,7 @@ class BrowserExam:
                     body = body.replace(b'CXJSBridge', b'CXJSBridge_disabled')
                     route.fulfill(body=body, content_type='application/javascript; charset=utf-8')
                     return
-                except:
+                except Exception:
                     route.continue_()
                     return
 
@@ -126,7 +126,7 @@ class BrowserExam:
                             body = body.replace(head_tag, cx_bypass + head_tag, 1)
                         route.fulfill(body=body, content_type='text/html; charset=utf-8')
                         return
-                except:
+                except Exception:
                     route.continue_()
                     return
 
@@ -180,7 +180,7 @@ class BrowserExam:
                 try:
                     screenshot_path = f'/tmp/exam_{exam_id}_headless.png'
                     page.screenshot(path=screenshot_path)
-                except:
+                except Exception:
                     pass
 
                 browser.close()
@@ -207,7 +207,7 @@ class BrowserExam:
                         logger.info(f"CDP 可用: port={port}")
                         break
                 s.close()
-            except:
+            except Exception:
                 continue
 
         if not cdp_ws_url:
@@ -235,7 +235,7 @@ class BrowserExam:
                 result = self._run_entry_flow(page, exam_id)
                 try:
                     page.close()
-                except:
+                except Exception:
                     pass
                 return result
         except Exception as e:
@@ -245,7 +245,7 @@ class BrowserExam:
     def _run_entry_flow(self, page, exam_id):
         try:
             text = page.evaluate("() => document.body.innerText.slice(0, 500)")
-        except:
+        except Exception:
             return {"success": False, "stage": "page_error", "reason": "无法读取页面"}
         logger.info(f"页面内容: {text[:200]}...")
 
@@ -276,14 +276,14 @@ class BrowserExam:
                     if (ar) { ar.classList.add('checked'); ar.dispatchEvent(new Event('change', {bubbles:true})); }
                 }
             """)
-        except:
+        except Exception:
             pass
         page.wait_for_timeout(500)
 
         # 检查是否有 enter 函数
         try:
             has_enter = page.evaluate("() => typeof enter === 'function'")
-        except:
+        except Exception:
             has_enter = False
 
         if has_enter:
@@ -319,7 +319,7 @@ class BrowserExam:
                     page.wait_for_timeout(3000)
                 else:
                     page.wait_for_timeout(2000)
-            except:
+            except Exception:
                 page.wait_for_timeout(2000)
 
         # 再次检查 enter 是否可用（可能被点击事件触发）
@@ -329,7 +329,7 @@ class BrowserExam:
                 if has_enter:
                     page.evaluate("setTimeout(function() { enter(); }, 300)")
                     page.wait_for_timeout(5000)
-        except:
+        except Exception:
             pass
 
         # 提取 enc
@@ -342,7 +342,7 @@ class BrowserExam:
             enc_remain = page.evaluate("() => parseInt(document.getElementById('encRemainTime')?.value || '0')")
             test_user_id = page.evaluate("() => document.getElementById('testUserRelationId')?.value || ''")
             page_title = page.evaluate("() => document.querySelector('span.overHidden2')?.textContent || document.title || ''")
-        except:
+        except Exception:
             pass
 
         success = bool(enc)
@@ -355,7 +355,7 @@ class BrowserExam:
                 if '安全验证' in body_text:
                     return {"success": False, "stage": "enc_not_found",
                             "reason": "安全验证不通过", "captcha_required": True}
-            except:
+            except Exception:
                 pass
 
         return {

@@ -225,7 +225,7 @@ class TikuYanxi(Tiku):
                 'question':q_info['title'],
                 'token':self._token
             },
-            verify=False
+            verify=True
         )
         if res.status_code == 200:
             res_json = res.json()
@@ -287,9 +287,9 @@ class AI(Tiku):
             resp = _req.post(base_url.rstrip('/') + '/v1/chat/completions',
                 headers={'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json'},
                 json={'model': model, 'messages': [{'role': 'user', 'content': prompt}], 'temperature': 0.1, 'max_tokens': 128},
-                timeout=30, verify=False)
+                timeout=30, verify=True)
             if resp.status_code == 200:
                 return resp.json()['choices'][0]['message']['content'].strip()
-        except:
+        except Exception:
             pass
         return None

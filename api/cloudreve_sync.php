@@ -102,8 +102,9 @@ $rm3 = $r3['data']['msg'] ?? '';
 if ($rc3 === 40032) {
     $db = '/opt/cloudreve/data/cloudreve.db';
     if (file_exists($db)) {
-        $e = str_replace("'", "''", $email);
-        shell_exec("sqlite3 {$db} \"DELETE FROM users WHERE email='{$e}'\" 2>/dev/null");
+        $e_sql = str_replace("'", "''", $email);  // SQL 转义: 单引号→两个单引号
+        $db_esc = escapeshellarg($db);
+        shell_exec("sqlite3 {$db_esc} \"DELETE FROM users WHERE email='{$e_sql}'\" 2>/dev/null");
         $rr = cr_http('POST', '/user', ['email' => $email, 'password' => $password, 'nick' => $username]);
         if ($rr['http'] === 200 && ($rr['data']['code'] ?? -1) === 0) {
             $token = save_token($email, $password, $username);

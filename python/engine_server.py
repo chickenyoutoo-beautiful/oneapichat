@@ -41,7 +41,7 @@ def _load_proxy_config():
                     os.environ['ALL_PROXY'] = proxy_url
                     print(f'[Engine] 代理已启用: {proxy_url}')
                     return proxy_url
-            except:
+            except Exception:
                 pass
     except Exception as e:
         print(f'[Engine] 代理配置加载失败: {e}')
@@ -78,7 +78,7 @@ try:
     from fastapi.responses import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
-except:
+except Exception:
     print("[引擎] 需要安装 fastapi/uvicorn: pip install fastapi uvicorn --break-system-packages")
     sys.exit(1)
 
@@ -88,10 +88,17 @@ from engine.speculation import SpeculationEngine, SpeculationState
 from engine.retry import RetryEngine, RetryStatus
 from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind, get_global_registry
 from engine.event_frame import EventFlowBuilder, EventType, EventLog
+from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
+from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
+    str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect)
 
 
 app = FastAPI(title="OneAPIChat Engine")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=[
+    "https://naujtrats.xyz",
+    "https://www.naujtrats.xyz",
+    "https://localmodels.naujtrats.xyz",
+], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ENGINE_DIR = Path(PROJECT_ROOT) / ".engine"
 ENGINE_DIR.mkdir(parents=True, exist_ok=True)
@@ -109,82 +116,14 @@ event_log = EventLog()
 if exec_policy._rules_file and not exec_policy._rules_file.exists():
     exec_policy.save()
 
-# ==================== 存储 ====================
-class EngineStore:
-    """JSON文件存储(带文件锁防止并发写入冲突)"""
-    def __init__(self, path, user_id=""):
-        self.path = Path(path)
-        if user_id:
-            self.path = self.path.parent / f"user_{user_id}_{self.path.name}"
-        if not self.path.exists():
-            self.path.write_text('{}', encoding='utf8')
-
-    def get(self):
-        return json.loads(self.path.read_text(encoding='utf8'))
-
-    def set(self, data):
-        """带文件锁的原子写入,防止并发写冲突"""
-        tmp = self.path.with_suffix('.tmp')
-        import tempfile
-        fd, tmp_path = tempfile.mkstemp(dir=str(self.path.parent), suffix='.tmp')
-        try:
-            os.write(fd, json.dumps(data, ensure_ascii=False, indent=2).encode('utf8'))
-            os.close(fd)
-            # 原子替换
-            os.replace(tmp_path, str(self.path))
-        except:
-            os.close(fd)
-            try: os.unlink(tmp_path)
-            except: pass
-            raise
-
-    def update(self, key, value):
-        d = self.get()
-        d[key] = value
-        self.set(d)
-
-    def delete(self, key):
-        d = self.get()
-        d.pop(key, None)
-        self.set(d)
-
+# ==================== 存储实例 (EngineStore 由 engine.store 导入) ====================
 cron_store = EngineStore(ENGINE_DIR / "cron.json")
 agent_store = EngineStore(ENGINE_DIR / "agents.json")
 heartbeat_store = EngineStore(ENGINE_DIR / "heartbeat.json")
 
-# ── 字幕字体配置 ──
-SUBTITLE_FONTS = {
-    "noto-sans": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "noto-sans-bold": "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    "noto-serif": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-    "noto-serif-bold": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
-    "wqy-zenhei": "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-    "droid": "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-    "nimbus-sans": "/usr/share/fonts/X11/Type1/NimbusSans-Regular.pfb",
-    "nimbus-mono": "/usr/share/fonts/opentype/urw-base35/NimbusMonoPS-Regular.otf",
-}
-DEFAULT_FONT = SUBTITLE_FONTS.get("noto-sans", list(SUBTITLE_FONTS.values())[0])
+# SUBTITLE_FONTS / DEFAULT_FONT → engine.video_edit (imported above)
 
-def _generate_srt(subtitles, output_srt_path):
-    """
-    根据字幕数组生成 SRT 文件
-    subtitles: [{"start": 0.5, "end": 2.0, "text": "你好"}, ...]
-    返回: SRT 文件路径
-    """
-    with open(output_srt_path, 'w', encoding='utf-8') as f:
-        for i, sub in enumerate(subtitles, 1):
-            start = sub.get("start", 0)
-            end = sub.get("end", start + 3)
-            text = sub.get("text", "")
-            # 格式化为 SRT 时间戳: HH:MM:SS,mmm
-            def _fmt_ts(t):
-                h = int(t // 3600)
-                m = int((t % 3600) // 60)
-                s = int(t % 60)
-                ms = int((t % 1) * 1000)
-                return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-            f.write(f"{i}\n{_fmt_ts(start)} --> {_fmt_ts(end)}\n{text}\n\n")
-    return output_srt_path
+# _generate_srt → engine.video_edit.generate_srt (via _video_generate_srt import)
 
 
 def _apply_subtitle(input_path, output_path, params):
@@ -215,15 +154,15 @@ def _apply_subtitle(input_path, output_path, params):
     if is_timeline:
         # ── 精确时间轴模式: SRT + ffmpeg subtitles 滤镜 ──
         srt_path = tempfile.mktemp(suffix='.srt')
-        _generate_srt(timeline, srt_path)
+        _video_generate_srt(timeline, srt_path)
 
         # 构建 force_style 字符串
         font_name = "Noto Sans CJK SC"  # ffmpeg libass 识别的字体名
         styles = [
             f"FontName={font_name}",
             f"FontSize={fs}",
-            f"PrimaryColour=&H{_color_to_ass(tc)}",
-            f"OutlineColour=&H{_color_to_ass(stroke_color)}",
+            f"PrimaryColour=&H{color_to_ass(tc)}",
+            f"OutlineColour=&H{color_to_ass(stroke_color)}",
             f"Outline={stroke_width}",
             f"BorderStyle=1",  # 1=outline+shadow, 3=opaque box
             f"Alignment={_ypos_to_alignment(y_pos)}",
@@ -231,7 +170,7 @@ def _apply_subtitle(input_path, output_path, params):
         ]
         if bg_enabled:
             styles.append("BorderStyle=3")  # 不透明背景框
-            styles.append(f"BackColour=&H{_color_to_ass(bg_color)}")
+            styles.append(f"BackColour=&H{color_to_ass(bg_color)}")
         force_style = ",".join(styles)
 
         cmd = [
@@ -244,7 +183,7 @@ def _apply_subtitle(input_path, output_path, params):
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         try: os.unlink(srt_path)
-        except: pass
+        except Exception: pass
 
         if r.returncode != 0:
             err = r.stderr[-500:] if r.stderr else "unknown"
@@ -304,8 +243,8 @@ def _apply_subtitle(input_path, output_path, params):
         from moviepy import ColorClip
         bg_h = final_img.height + 24
         try:
-            bg = ColorClip(size=(clip.w, bg_h), color=_str_to_rgb(bg_color)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
-        except:
+            bg = ColorClip(size=(clip.w, bg_h), color=str_to_rgb(bg_color)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
+        except Exception:
             bg = ColorClip(size=(clip.w, bg_h), color=(0, 0, 0)).with_opacity(bg_opacity).with_position((0, clip.h - bg_h)).with_duration(clip.duration)
         layers.insert(1, bg)
 
@@ -313,7 +252,7 @@ def _apply_subtitle(input_path, output_path, params):
     final.write_videofile(output_path, codec="libx264", audio_codec="aac")
     clip.close(); sub_clip.close(); final.close()
     try: os.unlink(sub_path)
-    except: pass
+    except Exception: pass
     # 自动复制到 shared
     try:
         import shutil
@@ -325,38 +264,16 @@ def _apply_subtitle(input_path, output_path, params):
         os.chmod(dest, 0o644)
         url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
         return f"字幕完成: {url} (字体:{ft}, 大小:{fs})"
-    except:
+    except Exception:
         return f"字幕完成: {output_path} (字体:{ft}, 大小:{fs})"
 
 
-def _str_to_rgb(s):
-    """颜色字符串转 RGB 元组"""
-    color_map = {"black": (0,0,0), "white": (255,255,255), "red": (255,0,0),
-                 "green": (0,255,0), "blue": (0,0,255), "gray": (128,128,128)}
-    return color_map.get(s.lower().strip(), (0, 0, 0))
+# _str_to_rgb / _color_to_ass / _ypos_to_alignment → engine.video_edit (imported above)
 
-
-def _color_to_ass(color_name):
-    """颜色名转 ASS 格式 (BBGGRR 十六进制, 不含 alpha)"""
-    rgb = _str_to_rgb(color_name)
-    # ASS 格式: &HBBGGRR&
-    return f"{rgb[2]:02X}{rgb[1]:02X}{rgb[0]:02X}"
-
-
-def _ypos_to_alignment(y_pos):
-    """Y 位置转 ASS alignment 值 (1-9, 数字小键盘布局)"""
-    if isinstance(y_pos, str):
-        y_pos = y_pos.lower().strip()
-        if y_pos == "top": return 8    # 顶部居中
-        if y_pos == "middle": return 5  # 正中
-        return 2  # 底部居中 (默认)
-    try:
-        py = int(y_pos)
-        if py < 150: return 8   # 靠近顶部
-        if py > 400: return 2   # 靠近底部
-        return 5
-    except:
-        return 2
+def _ypos_to_alignment_compat(y_pos):
+    """兼容包装: Y 位置转 ASS alignment 值"""
+    return ypos_to_alignment(y_pos)
+_ypos_to_alignment = _ypos_to_alignment_compat  # 保持旧名称兼容
 
 def _apply_filter(input_path, output_path, params):
     """视频滤镜特效"""
@@ -562,7 +479,7 @@ def _apply_voice_to_video(video_path, audio_path, output_path, params):
         os.chmod(dest, 0o644)
         url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
         return f"配音完成: {url} (视频{vd:.1f}s, 配音{ad:.1f}s)"
-    except:
+    except Exception:
         return f"配音完成: {output_path} (视频{vd:.1f}s, 配音{ad:.1f}s)"
 
 
@@ -631,7 +548,7 @@ def _apply_compose(input_path, output_path, params):
     font_path = SUBTITLE_FONTS.get(default_font, DEFAULT_FONT)
     try:
         pil_font = ImageFont.truetype(font_path, default_fs)
-    except:
+    except Exception:
         pil_font = ImageFont.truetype(DEFAULT_FONT, default_fs)
     # ★ emoji 回退字体: Symbola 支持所有 Unicode emoji (Pillow 兼容)
     _emoji_font_path = "/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf"
@@ -639,7 +556,7 @@ def _apply_compose(input_path, output_path, params):
     if os.path.exists(_emoji_font_path):
         try:
             _emoji_font = ImageFont.truetype(_emoji_font_path, default_fs)
-        except:
+        except Exception:
             pass
 
     def _is_emoji(ch):
@@ -686,7 +603,7 @@ def _apply_compose(input_path, output_path, params):
         # 每句可用不同字号→需要新字体对象
         try:
             _font = ImageFont.truetype(font_path, seg_fs)
-        except:
+        except Exception:
             _font = pil_font
 
         lines = t.split('\n')
@@ -708,8 +625,8 @@ def _apply_compose(input_path, output_path, params):
             img = Image.new('RGBA', (iw, ih), (0,0,0,0))
             draw = ImageDraw.Draw(img)
             if seg_bg:
-                _rgba = _hex_to_rgba(seg_bg_color, seg_bg_opacity)
-                _draw_rounded_rect(draw, (0,0,iw,ih), seg_bg_r, _rgba)
+                _rgba = hex_to_rgba(seg_bg_color, seg_bg_opacity)
+                draw_rounded_rect(draw, (0,0,iw,ih), seg_bg_r, _rgba)
             _render_text_emoji(draw, (px, py//2-2), line, _font, seg_color, seg_sw, seg_sc)
             line_imgs.append(img)
             max_w = max(max_w, iw)
@@ -774,7 +691,7 @@ def _apply_compose(input_path, output_path, params):
             subprocess.run(["ffmpeg","-y","-i",audio_out,"-ss","0","-t",str(window_dur),
                            "-c:a","aac",trimmed], capture_output=True, timeout=15)
             try: os.unlink(audio_out)
-            except: pass
+            except Exception: pass
             audio_out = trimmed
         tts_segments.append((audio_out, float(start)))
 
@@ -833,7 +750,7 @@ def _apply_compose(input_path, output_path, params):
     has_audio = False
     try:
         has_audio = vid.audio is not None
-    except:
+    except Exception:
         pass
     
     audio_streams = []
@@ -876,7 +793,7 @@ def _apply_compose(input_path, output_path, params):
             # 渲染弹幕文字到定宽 PNG
             try:
                 _dmk_font = ImageFont.truetype(font_path, dfs)
-            except:
+            except Exception:
                 _dmk_font = pil_font
             # 计算文字渲染宽度
             _dmk_tw = 0
@@ -982,13 +899,13 @@ def _apply_compose(input_path, output_path, params):
     # Step 4: 清理 + 自动复制到 shared 目录 + 返回 URL
     for png,_,_,_,_ in subtitle_overlays:
         try: os.unlink(png)
-        except: pass
+        except Exception: pass
     for _dp in _dmk_pngs_to_clean:
         try: os.unlink(_dp)
-        except: pass
+        except Exception: pass
     for ap,_ in tts_segments:
         try: os.unlink(ap)
-        except: pass
+        except Exception: pass
 
     fn = 'push_' + hashlib.md5(output_path.encode()).hexdigest()[:8] + '.mp4'
     dest_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
@@ -1136,7 +1053,7 @@ def _apply_gif(input_path, output_path, params):
         shutil.copy2(output_path, dest)
         os.chmod(dest, 0o644)
         return f"GIF完成: https://naujtrats.xyz/oneapichat/uploads/shared/{fn}"
-    except:
+    except Exception:
         return f"GIF完成: {output_path}"
 
 def _apply_silent_cut(input_path, output_path, params):
@@ -1175,201 +1092,17 @@ def _apply_subtitle_style(input_path, output_path, params):
     return _apply_compose(input_path, output_path, compose_params)
 
 
-def _hex_to_rgba(hex_color, alpha):
-    """#RRGGBB 或 #RRGGBBAA → (R,G,B,A)"""
-    h = hex_color.lstrip('#')
-    if len(h) == 6:
-        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(alpha * 255))
-    elif len(h) == 8:
-        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16))
-    return (0, 0, 0, int(alpha * 255))
-
-
-def _draw_rounded_rect(draw, rect, radius, fill):
-    """画圆角矩形到 Pillow draw 对象"""
-    x1, y1, x2, y2 = rect
-    r = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
-    # 四个角扇形
-    draw.pieslice([x1, y1, x1 + r*2, y1 + r*2], 180, 270, fill=fill)
-    draw.pieslice([x2 - r*2, y1, x2, y1 + r*2], 270, 360, fill=fill)
-    draw.pieslice([x1, y2 - r*2, x1 + r*2, y2], 90, 180, fill=fill)
-    draw.pieslice([x2 - r*2, y2 - r*2, x2, y2], 0, 90, fill=fill)
-    # 填充矩形
-    draw.rectangle([x1 + r, y1, x2 - r, y1 + r], fill=fill)
-    draw.rectangle([x1 + r, y2 - r, x2 - r, y2], fill=fill)
-    draw.rectangle([x1, y1 + r, x1 + r, y2 - r], fill=fill)
-    draw.rectangle([x2 - r, y1 + r, x2, y2 - r], fill=fill)
+# _hex_to_rgba / _draw_rounded_rect → engine.video_edit (imported above)
     draw.rectangle([x1 + r, y1 + r, x2 - r, y2 - r], fill=fill)
 
+# -- 存储工厂函数 (包装 engine.store, 自动注入 ENGINE_DIR) --
 def get_ns(suffix: str, user_id: str = "") -> EngineStore:
     """获取用户隔离的 store 实例"""
-    return EngineStore(ENGINE_DIR / f"{suffix}.json", user_id=user_id)
+    return _store_get_ns(ENGINE_DIR, suffix, user_id)
 
-
-
-# ==================== ChatStore (SQLite 消息持久化) ====================
-
-class ChatStore:
-    """SQLite 消息存储，支持流式进度保存"""
-    def __init__(self, user_id: str = ""):
-        self.user_id = user_id
-        db_name = f"chat_{user_id}.db" if user_id else "chat.db"
-        self.db_path = ENGINE_DIR / db_name
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-        self._progress_cache = {}  # msg_id -> latest progress (in-memory)
-
-    def _conn(self):
-        return sqlite3.connect(str(self.db_path), timeout=30)
-
-    def _init_db(self):
-        conn = self._conn()
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id TEXT NOT NULL, msg_id TEXT UNIQUE NOT NULL,
-                role TEXT NOT NULL, content TEXT, reasoning TEXT,
-                tool_calls TEXT, model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chat_stream_progress (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                msg_id TEXT UNIQUE NOT NULL, chat_id TEXT NOT NULL, model TEXT,
-                full_text TEXT DEFAULT '', reasoning_text TEXT DEFAULT '',
-                tool_calls TEXT DEFAULT '[]', usage TEXT, finished INTEGER DEFAULT 0,
-                error TEXT DEFAULT '', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS active_tasks (
-                task_id TEXT PRIMARY KEY, stream_id TEXT UNIQUE NOT NULL,
-                chat_id TEXT NOT NULL, msg_id TEXT NOT NULL,
-                user_id TEXT NOT NULL, model TEXT DEFAULT '',
-                status TEXT DEFAULT 'running',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                request_data TEXT DEFAULT '')
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_chat ON chat_messages(chat_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_progress_msg ON chat_stream_progress(msg_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_active_tasks_user ON active_tasks(user_id, status)")
-        conn.commit()
-        conn.close()
-
-    def init_progress(self, msg_id: str, chat_id: str, model: str):
-        try:
-            conn = self._conn()
-            conn.execute("""
-                INSERT OR REPLACE INTO chat_stream_progress (msg_id, chat_id, model, finished, updated_at)
-                VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
-            """, (msg_id, chat_id, model))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[ChatStore] init error: {e}")
-
-    def write_chunk(self, msg_id: str, chunk_type: str, chunk_text: str):
-        if msg_id not in self._progress_cache:
-            self._progress_cache[msg_id] = {'full_text': '', 'reasoning_text': ''}
-        cache = self._progress_cache[msg_id]
-        if chunk_type == 'content':
-            cache['full_text'] += chunk_text
-        elif chunk_type == 'reasoning':
-            cache['reasoning_text'] += chunk_text
-        # 每 20 个字符写一次 DB
-        if len(cache['full_text']) % 20 < len(chunk_text) or chunk_type == 'reasoning':
-            self._flush(msg_id, cache['full_text'], cache['reasoning_text'])
-
-    def _flush(self, msg_id: str, full_text: str, reasoning_text: str):
-        try:
-            conn = self._conn()
-            conn.execute("""
-                UPDATE chat_stream_progress SET full_text=?, reasoning_text=?, updated_at=CURRENT_TIMESTAMP
-                WHERE msg_id=?
-            """, (full_text, reasoning_text, msg_id))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[ChatStore] flush error: {e}")
-
-    def finish_stream(self, msg_id: str, full_text: str, reasoning_text: str,
-                      tool_calls: list, usage: dict, error: str = ""):
-        try:
-            conn = self._conn()
-            conn.execute("""
-                UPDATE chat_stream_progress SET
-                    full_text=?, reasoning_text=?,
-                    tool_calls=?, usage=?, finished=1, error=?, updated_at=CURRENT_TIMESTAMP
-                WHERE msg_id=?
-            """, (full_text, reasoning_text, json.dumps(tool_calls, ensure_ascii=False),
-                  json.dumps(usage or {}, ensure_ascii=False), error, msg_id))
-            conn.commit()
-            conn.close()
-            self._progress_cache.pop(msg_id, None)
-        except Exception as e:
-            print(f"[ChatStore] finish error: {e}")
-
-    def get_progress(self, msg_id: str) -> dict:
-        try:
-            conn = self._conn()
-            row = conn.execute("""
-                SELECT full_text, reasoning_text, tool_calls, usage, finished, error
-                FROM chat_stream_progress WHERE msg_id=?
-            """, (msg_id,)).fetchone()
-            conn.close()
-            if row:
-                return {'full_text': row[0] or '', 'reasoning_text': row[1] or '',
-                        'tool_calls': json.loads(row[2] or '[]'), 'usage': json.loads(row[3] or '{}'),
-                        'finished': bool(row[4]), 'error': row[5] or ''}
-            return {}
-        except:
-            return {}
-
-    def register_task(self, task_id: str, stream_id: str, chat_id: str,
-                      msg_id: str, user_id: str, model: str, request_data: dict):
-        try:
-            conn = self._conn()
-            conn.execute("""
-                INSERT OR REPLACE INTO active_tasks
-                (task_id, stream_id, chat_id, msg_id, user_id, model, status, request_data)
-                VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
-            """, (task_id, stream_id, chat_id, msg_id, user_id, model,
-                  json.dumps(request_data, ensure_ascii=False)))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[ChatStore] register_task error: {e}")
-
-    def complete_task(self, task_id: str, status: str = 'completed'):
-        try:
-            conn = self._conn()
-            conn.execute("""
-                UPDATE active_tasks SET status=?, updated_at=CURRENT_TIMESTAMP
-                WHERE task_id=?
-            """, (status, task_id))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[ChatStore] complete_task error: {e}")
-
-    def get_active_tasks(self, user_id: str) -> list:
-        try:
-            conn = self._conn()
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
-                SELECT task_id, stream_id, chat_id, msg_id, model, status, created_at
-                FROM active_tasks WHERE user_id=? AND status='running'
-                ORDER BY created_at DESC
-            """, (user_id,)).fetchall()
-            conn.close()
-            return [dict(r) for r in rows]
-        except Exception as e:
-            print(f"[ChatStore] get_active_tasks error: {e}")
-            return []
-_chat_stores = {}
 def get_chat_store(user_id: str = "") -> ChatStore:
-    if user_id not in _chat_stores:
-        _chat_stores[user_id] = ChatStore(user_id)
-    return _chat_stores[user_id]
+    """获取用户隔离的 ChatStore 单例"""
+    return _store_get_chat_store(ENGINE_DIR, user_id)
 
 # ==================== 心跳 ====================
 @app.get("/engine/health")
@@ -1783,7 +1516,7 @@ def _cleanup_old_agents(agents: dict) -> int:
             continue
         try:
             created = datetime.fromisoformat(created_str)
-        except:
+        except Exception:
             continue
         status = agent.get("status", "")
         age = now - created
@@ -1937,7 +1670,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         decrypted = _decrypt_xor(stored)
                         if decrypted:
                             search_api_key = decrypted
-                except:
+                except Exception:
                     pass
 
                 # DuckDuckGo 不需要 API Key,直接转发
@@ -1995,7 +1728,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                             content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
                             lines.append(f"- [{title}]({url})\n  {content}")
                         return f"搜索结果 (provider: tavily, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
-                    except:
+                    except Exception:
                         return None
 
                 # MiniMax CLI 搜索回退
@@ -2386,7 +2119,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 _d = _r.json()
                 if _d.get("ok") or _d.get("result"):
                     return json.dumps(_d.get("result", _d), ensure_ascii=False)
-        except:
+        except Exception:
             pass
         return f"[警告: 当前环境不支持 {tool_name} 工具] 跳过此操作,请用 web_search/web_fetch 替代"
 
@@ -2553,13 +2286,49 @@ def agent_status(name: str = Query(...), user_id: str = Query("")):
 # ==================== 主聊配置读取(所有 agent 同步主聊)====================
 import base64
 
-ENCRYPTION_KEY = 'naujtrats-secret'
+def _load_encryption_key() -> str:
+    """从 config.ini 加载加密密钥(与 PHP getEncryptionKey 一致)"""
+    import configparser, os
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
+    try:
+        cp = configparser.ConfigParser()
+        cp.read(config_path, encoding='utf-8')
+        key = cp.get('common', 'encryption_key', fallback=None)
+        if key:
+            return key
+    except Exception:
+        pass
+    return 'naujtrats-secret'  # 降级默认值
+
+ENCRYPTION_KEY = _load_encryption_key()
+
+def _get_aes_key() -> bytes:
+    """PBKDF2 派生 AES-256 密钥(与前端 _getAesKey 一致)"""
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives import hashes
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(), length=32,
+        salt=b'oneapichat-aes-v2', iterations=100000
+    )
+    return kdf.derive(ENCRYPTION_KEY.encode('utf-8'))
 
 def _decrypt_xor(encoded: str) -> str:
-    """XOR 解密(复刻前端 decrypt 函数)"""
+    """AES-256-GCM 解密(与前端 decrypt 一致) + XOR 向后兼容"""
     if not encoded:
         return ""
     try:
+        # v2: AES-256-GCM (新格式)
+        if encoded.startswith('v2:'):
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            raw = base64.b64decode(encoded[3:])
+            if len(raw) < 28:
+                return None
+            iv = raw[:12]
+            tag = raw[-16:]
+            ciphertext = raw[12:-16]
+            aesgcm = AESGCM(_get_aes_key())
+            return aesgcm.decrypt(iv, ciphertext + tag, None).decode('utf-8')
+        # 旧版 XOR 解密 (向后兼容)
         bin_bytes = base64.b64decode(encoded)
         key_bytes = ENCRYPTION_KEY.encode('utf-8')
         result = bytearray(len(bin_bytes))
@@ -2656,15 +2425,17 @@ async def engine_python(request: Request):
         return {"ok": False, "error": str(e), "exit_code": -1}
     finally:
         try: os.unlink(tf.name)
-        except: pass
+        except Exception: pass
 
 @app.get("/engine/file/read")
 def engine_file_read(
     path: str = Query(...),
     max_lines: int = Query(200),
+    start_line: int = Query(0),
+    end_line: int = Query(0),
     user_id: str = Query("")
 ):
-    """读取服务器上的文件内容"""
+    """读取服务器上的文件内容（支持行范围）"""
     try:
         p = Path(path).resolve()
         if not p.exists():
@@ -2679,11 +2450,18 @@ def engine_file_read(
         content = p.read_text(encoding='utf8', errors='replace')
         lines = content.split('\n')
         total = len(lines)
-        shown = lines[:max_lines]
+        # 行范围
+        s = max(0, start_line - 1) if start_line > 0 else 0
+        e = min(total, end_line) if end_line > 0 else min(total, s + max_lines)
+        if start_line > 0 and end_line == 0:
+            e = min(total, s + max_lines)
+        shown = lines[s:e]
         text = '\n'.join(shown)
-        if total > max_lines:
-            text += f'\n\n... (共 {total} 行,仅显示前 {max_lines} 行)'
-        return {"ok": True, "content": text, "total_lines": total, "size": p.stat().st_size}
+        if s > 0:
+            text = f'... (从第 {start_line} 行开始)\n' + text
+        if e < total:
+            text += f'\n... (到第 {e} 行为止,共 {total} 行)'
+        return {"ok": True, "content": text, "total_lines": total, "shown_range": f"{s+1}-{e}", "size": p.stat().st_size}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -2825,6 +2603,119 @@ def engine_file_search(pattern: str = Query(...), path: str = Query(PROJECT_ROOT
         return {"error": str(e)}
 
 
+@app.get("/engine/file_grep")
+def engine_file_grep(pattern: str = Query(...), path: str = Query(PROJECT_ROOT),
+                     context_lines: int = Query(2), max_results: int = Query(20),
+                     ignore_case: bool = Query(True), file_pattern: str = Query("")):
+    """在文件中搜索匹配内容，返回匹配行及上下文（类似 grep -C）"""
+    import os as _os, re, fnmatch
+    try:
+        results = []
+        flags = re.IGNORECASE if ignore_case else 0
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error:
+            regex = re.compile(re.escape(pattern), flags)
+
+        # 确定搜索范围
+        if _os.path.isfile(path):
+            files = [path]
+        elif _os.path.isdir(path):
+            files = []
+            for root, dirs, filenames in _os.walk(path):
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.git')]
+                for f in filenames:
+                    if file_pattern and not fnmatch.fnmatch(f, file_pattern):
+                        continue
+                    files.append(_os.path.join(root, f))
+                    if len(files) > 100:
+                        break
+                if len(files) > 100:
+                    break
+        else:
+            return {"error": "路径不存在"}
+
+        for fpath in files[:50]:
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                    lines = fh.readlines()
+            except Exception:
+                continue
+            file_matches = []
+            for i, line in enumerate(lines):
+                if regex.search(line):
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    ctx = []
+                    for j in range(start, end):
+                        prefix = ">" if j == i else " "
+                        ctx.append(f"{prefix}{j+1:4d}| {lines[j].rstrip()}")
+                    file_matches.append("\n".join(ctx))
+                    if len(file_matches) >= max_results:
+                        break
+            if file_matches:
+                results.append({"file": fpath, "matches": file_matches})
+                if len(results) >= max_results:
+                    break
+        return {"ok": True, "results": results, "total_matches": sum(len(r["matches"]) for r in results)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/engine/file_edit")
+async def engine_file_edit(request: Request, path: str = Query(...), replace_all: bool = Query(False)):
+    """精确编辑文件：查找并替换指定字符串"""
+    import os as _os
+    try:
+        body = await request.json()
+        old_string = body.get("old_string", "")
+        new_string = body.get("new_string", "")
+
+        if not old_string and old_string != "":
+            return {"error": "old_string is required"}
+
+        # 安全检查
+        path = _os.path.realpath(path)
+        allowed_roots = [PROJECT_ROOT, str(TEMP_DIR), "/var/www/html/oneapichat"]
+        allowed = any(path.startswith(_os.path.realpath(r)) for r in allowed_roots)
+        if not allowed:
+            return {"error": "路径不在允许范围内"}
+
+        if not _os.path.exists(path):
+            return {"error": "文件不存在"}
+
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        if replace_all:
+            count = content.count(old_string)
+            if count == 0:
+                return {"error": f"未找到匹配内容", "old_string_preview": old_string[:80]}
+            new_content = content.replace(old_string, new_string)
+        else:
+            count = content.count(old_string)
+            if count == 0:
+                return {"error": f"未找到匹配内容（共搜索 {len(content)} 字符）", "old_string_preview": old_string[:80]}
+            if count > 1:
+                return {"error": f"old_string 出现 {count} 次，不唯一。请用更长的上下文使其唯一，或设置 replace_all=true"}
+            new_content = content.replace(old_string, new_string, 1)
+
+        # 备份
+        backup_path = path + ".bak"
+        try:
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception:
+            pass
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+        return {"ok": True, "replaced": count, "path": path, "backup": backup_path if _os.path.exists(backup_path) else None}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/engine/file_op")
 def engine_file_op(action: str = Query(...), src: str = Query(...), dst: str = Query("")):
     """文件操作"""
@@ -2921,7 +2812,7 @@ def workflow_create(
     workflows = wf_store.get()
     try:
         parsed_steps = json.loads(steps)
-    except:
+    except Exception:
         return {"error": "steps 必须为有效 JSON 数组"}
     if not isinstance(parsed_steps, list) or len(parsed_steps) == 0:
         return {"error": "steps 必须为非空数组"}
@@ -3436,7 +3327,7 @@ async def startup():
                 if job.get("enabled"):
                     _start_cron_job(name, uid)
                     print(f"[引擎] Cron 已恢复(用户{uid}): {name}")
-        except:
+        except Exception:
             pass
 
     # ★ 修复引擎重启后遗留的 "running" 状态子代理
@@ -3453,7 +3344,7 @@ async def startup():
                     print(f"[引擎] 修复stuck代理: {f.stem}/{name} (running→failed)")
             if changed:
                 f.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
-        except:
+        except Exception:
             pass
 
     # ★ 启动定期清理任务(每5分钟检查stuck代理)
@@ -3491,13 +3382,13 @@ async def startup():
                                             del data[name]
                                             changed = True
                                             print(f"[引擎] 自动删除过期代理: {f.stem}/{name}")
-                                except:
+                                except Exception:
                                     pass
                         if changed:
                             f.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 pass
 
     t = threading.Thread(target=_periodic_cleanup, name="periodic_cleanup", daemon=True)
@@ -3605,10 +3496,10 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             if chunk.usage:
                 try:
                     usage = chunk.usage.model_dump()
-                except:
+                except Exception:
                     try:
                         usage = json.loads(chunk.usage.model_dump_json())
-                    except:
+                    except Exception:
                         usage = dict(chunk.usage)
 
         # 流结束
@@ -3640,7 +3531,7 @@ async def chat_stream(request: Request, user_id: str = Query("")):
     """
     try:
         body = await request.json()
-    except:
+    except Exception:
         return {"error": "invalid JSON body"}
 
     chat_id = body.get('chat_id') or ''
@@ -3804,7 +3695,7 @@ def _generate_resumable(request: dict, stream_id: str):
                     _emit('tool_call', d)
             if hasattr(chunk, 'usage') and chunk.usage:
                 try: usage = chunk.usage.model_dump()
-                except: pass
+                except Exception: pass
 
         done_data = {'full_text': full, 'reasoning_text': reasoning,
                      'tool_calls': tool_calls, 'usage': usage}
@@ -3813,7 +3704,7 @@ def _generate_resumable(request: dict, stream_id: str):
         buf.done()
         _complete_task_from_stream(stream_id, 'completed')
         try: q.put(None)
-        except: pass
+        except Exception: pass
 
     except Exception as e:
         _emit('error', {'error': str(e)})
@@ -3821,14 +3712,14 @@ def _generate_resumable(request: dict, stream_id: str):
         buf.done()
         _complete_task_from_stream(stream_id, 'failed')
         try: q.put(None)
-        except: pass
+        except Exception: pass
 
 
 @app.post("/engine/chat/create")
 async def chat_create(request: Request, user_id: str = Query("")):
     """创建可恢复流 — 接收消息，返回 stream_id，后台线程调 OpenAI"""
     try: body = await request.json()
-    except: return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    except Exception: return JSONResponse({"error": "invalid JSON"}, status_code=400)
     if not body.get('api_key'):
         return JSONResponse({"error": "api_key required"}, status_code=400)
 
@@ -3843,7 +3734,7 @@ async def chat_create(request: Request, user_id: str = Query("")):
             v = _resumable[k]
             if not v.get('finished') and now - v.get('created', 0) > _RESUMABLE_TTL:
                 try: v['queue'].put_nowait(None)
-                except: pass
+                except Exception: pass
                 del _resumable[k]
 
     threading.Thread(target=_generate_resumable, args=(body, sid), daemon=True).start()
@@ -4171,7 +4062,7 @@ class ChatStream:
                     try:
                         u = chunk.usage.model_dump()
                         self.chunks.append({'type': 'usage', 'data': u})
-                    except:
+                    except Exception:
                         pass
 
             self.finished = True

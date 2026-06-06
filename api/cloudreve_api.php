@@ -12,25 +12,14 @@ header('Access-Control-Allow-Methods: GET, POST');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
-// ── 认证 ──
-function cr_verifyToken($token) {
-    $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    $expireTime = 30 * 24 * 3600;
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > $expireTime) unset($sessions[$t]);
-    }
-    $info = $sessions[$token] ?? null;
-    return $info ? ($info['user_id'] ?? null) : null;
-}
+require_once __DIR__ . '/init.php';
+// ── 认证 (使用共享 verifyAuthToken) ──
+require_once __DIR__ . '/auth_helpers.php';
 
 $action = $_GET['action'] ?? '';
 $token = $_GET['auth_token'] ?? '';
 $token = preg_replace('/[^a-f0-9]/', '', $token);
-$userId = cr_verifyToken($token) ?: '';
+$userId = verifyAuthToken($token) ?: '';
 if (!$userId && $action !== 'ping' && $action !== 'login') {
     echo json_encode(['code' => 401, 'msg' => '请先登录', 'error' => '未认证']);
     exit;
@@ -118,7 +107,7 @@ function cr_delete($url, $data, $token = '') {
 function cr_getCachedToken($email) {
     $cacheFile = '/tmp/cloudreve_token_' . md5($email) . '.json';
     if (file_exists($cacheFile)) {
-        $cache = @json_decode(@file_get_contents($cacheFile), true);
+        $cache = json_read_file($cacheFile);
         if ($cache && ($cache['expires'] ?? 0) > time() + 60) {
             return $cache['token'] ?? '';
         }
@@ -144,7 +133,7 @@ function cr_getAccessToken($uid) {
     usort($tmpFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
     $bestFile = $tmpFiles[0];
     
-    $data = @json_decode(@file_get_contents($bestFile), true);
+    $data = json_read_file($bestFile);
     if (!$data) return '';
     
     $email = $data['email'] ?? '';
@@ -321,7 +310,7 @@ switch ($action) {
             break;
         }
         // Cloudreve v4 搜索端点
-        $resp = cr_get("$apiBase/file/search/keywords/" . urlencode($keyword), $token);
+        $resp = cr_get("$apiBase/file/search?keyword=" . urlencode($keyword), $token);
         if (($resp['code'] ?? -1) === 0) {
             $files = $resp['data'] ?? [];
             $formatted = [];

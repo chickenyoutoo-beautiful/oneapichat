@@ -34,7 +34,7 @@ def init_session(isVideo: bool = False, isAudio: bool = False):
     # Video/Audio sessions get fresh instances each time
     if isVideo or isAudio:
         _session = requests.session()
-        _session.verify = False
+        _session.verify = True
         _session.mount('http://', HTTPAdapter(max_retries=3))
         _session.mount('https://', HTTPAdapter(max_retries=3))
         _session.headers = gc.VIDEO_HEADERS if isVideo else gc.AUDIO_HEADERS
@@ -43,7 +43,7 @@ def init_session(isVideo: bool = False, isAudio: bool = False):
     # Default session: cache for reuse (keeps auth cookies)
     if _cached_session is None:
         _cached_session = requests.session()
-        _cached_session.verify = False
+        _cached_session.verify = True
         _cached_session.mount('http://', HTTPAdapter(max_retries=3))
         _cached_session.mount('https://', HTTPAdapter(max_retries=3))
         _cached_session.headers = gc.HEADERS
@@ -70,7 +70,7 @@ class Chaoxing:
 
     def login(self):
         _session = requests.session()
-        _session.verify = False
+        _session.verify = True
         _url = "https://passport2.chaoxing.com/fanyalogin"
         _data = {"fid": "-1",
                     "uname": self.cipher.encrypt(self.account.username),
@@ -342,7 +342,7 @@ class Chaoxing:
             _url,
             headers=headers,
             cookies=cookies,
-            verify=False,
+            verify=True,
             params = {
                 "api": "1",
                 "workId": _job['jobid'].replace("work-",""),

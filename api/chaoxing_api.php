@@ -18,22 +18,7 @@ set_exception_handler(function (Throwable $e) {
     exit;
 });
 
-// ---- 用户认证辅助（从 chat.php 复用）----
-function verifyAuthToken($token) {
-    $sessionsFile = APP_ROOT . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    $expireTime = 30 * 24 * 3600;
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > $expireTime) {
-            unset($sessions[$t]);
-        }
-    }
-    $info = $sessions[$token] ?? null;
-    return $info ? ($info['user_id'] ?? null) : null;
-}
+require_once __DIR__ . '/auth_helpers.php';
 
 /**
  * 获取用户级 config.ini 路径
@@ -68,7 +53,9 @@ function readTaskState($userId) {
     if (!file_exists($path)) {
         return ['started_at' => 0, 'starter_tab_id' => '', 'progress_percent' => 0];
     }
-    $data = @json_decode(@file_get_contents($path), true);
+    $raw = file_get_contents($path);
+    if ($raw === false) { return ['started_at' => 0, 'starter_tab_id' => '', 'progress_percent' => 0]; }
+    $data = json_decode($raw, true);
     if (!is_array($data)) {
         return ['started_at' => 0, 'starter_tab_id' => '', 'progress_percent' => 0];
     }

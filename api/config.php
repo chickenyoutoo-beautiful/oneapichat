@@ -7,22 +7,8 @@
  * POST ?action=save&auth_token=xxx  - 保存用户配置（需 auth_token）
  */
 
-// 动态 CORS（允许 credentials）
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if ($origin) {
-    $originHost = parse_url($origin, PHP_URL_HOST);
-    $serverHost = $_SERVER['HTTP_HOST'] ?? '';
-    if ($originHost && $originHost === $serverHost) {
-        header('Access-Control-Allow-Origin: ' . $origin);
-        header('Access-Control-Allow-Credentials: true');
-    } else {
-        header('Access-Control-Allow-Origin: *');
-    }
-} else {
-    header('Access-Control-Allow-Origin: *');
-}
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Auth-Token');
+require_once __DIR__ . '/init.php';
+setCorsHeaders();
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -33,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 function verifyToken($token) {
     $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
     if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
+    $sessions = json_read_file($sessionsFile);
     if (!is_array($sessions)) return null;
     $now = time();
     foreach ($sessions as $t => $info) {

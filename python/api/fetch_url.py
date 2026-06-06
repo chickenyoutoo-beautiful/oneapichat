@@ -42,7 +42,7 @@ def main():
     for username, password in ACCOUNTS:
         try:
             session = requests.Session()
-            session.verify = False
+            session.verify = True
             session.headers.update({
                 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.6778.135 Mobile Safari/537.36',
             })
@@ -77,7 +77,7 @@ def main():
                     if '学号' in resp2.text or '答题时长' in resp2.text:
                         print(resp2.text)
                         return
-        except:
+        except Exception:
             continue
 
     sys.exit(1)

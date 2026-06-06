@@ -15,22 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// ---- 用户认证辅助（从 chat.php 复制）----
-function verifyAuthToken($token) {
-    $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    $expireTime = 30 * 24 * 3600;
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > $expireTime) {
-            unset($sessions[$t]);
-        }
-    }
-    $info = $sessions[$token] ?? null;
-    return $info ? ($info['user_id'] ?? null) : null;
-}
+require_once __DIR__ . '/auth_helpers.php';
 
 // ---- 获取认证用户信息 ----
 $authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';

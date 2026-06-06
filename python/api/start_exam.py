@@ -45,7 +45,7 @@ def main():
     try:
         tiku = tiku.get_tiku_from_config()
         tiku.init_tiku()
-    except:
+    except Exception:
         pass
 
     exam = ChaoxingExam(acc, tiku=tiku, session=s)
@@ -64,7 +64,7 @@ def main():
             while True:
                 idx = len(questions)
                 questions.append(exam.fetch(idx))
-        except:
+        except Exception:
             pass
 
         # 4. 格式化为 JSON

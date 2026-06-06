@@ -118,6 +118,8 @@ body {
 
 /* 气泡内容变化过渡(防止图表渲染时突然撑大) */
 .markdown-body { transition: min-height 0.15s ease; }
+.markdown-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; cursor: pointer; }
+.markdown-body img:hover { opacity: 0.9; }
 .mermaid svg { max-width: 100%; height: auto; display: block; }
 
 /* KaTeX 稳定性:防止数学公式渲染时抖动 */
@@ -1375,6 +1377,21 @@ select option { background: white; color: #1f2937; }
     background: rgba(59, 130, 246, 0.2); border-color: var(--primary-hover); color: var(--primary-hover);
 }
 .drop-overlay-input.show { opacity: 1; visibility: visible; }
+.drop-overlay-inner {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    max-width: 90%; overflow: hidden;
+}
+.drop-overlay-svg {
+    width: 36px; height: 36px; flex-shrink: 0;
+}
+.drop-overlay-text {
+    font-size: 0.9rem; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.drop-overlay-sub {
+    font-size: 0.7rem; opacity: 0.6;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ===== 输入框 ===== */
 #userInput {
@@ -3063,13 +3080,17 @@ html:not(.dark) #userInput {
 }
 /* ★ 临时权限指示灯 — ask_agent 单次授权呼吸绿光 */
 .agent-split-btn .agent-dot.temp-grant {
-    background: #22c55e;
+    display: inline-block;
+    background: #22c55e !important;
     box-shadow: 0 0 6px rgba(34,197,94,0.6);
-    animation: agentDotBreathe 2s ease-in-out infinite;
+    animation: agentDotBreathe 2.5s ease-in-out infinite;
 }
 @keyframes agentDotBreathe {
-    0%, 100% { box-shadow: 0 0 4px rgba(34,197,94,0.3); transform: scale(1); }
-    50%      { box-shadow: 0 0 14px rgba(34,197,94,0.6), 0 0 24px rgba(34,197,94,0.2); transform: scale(1.4); }
+    0%, 100% { box-shadow: 0 0 4px rgba(34,197,94,0.4); transform: scale(1); }
+    50%      { box-shadow: 0 0 10px rgba(34,197,94,0.7), 0 0 16px rgba(34,197,94,0.25); transform: scale(1.15); }
+}
+.dark .agent-split-btn .agent-dot.temp-grant {
+    background: #22c55e !important;
 }
 .agent-banner {
     display: none;

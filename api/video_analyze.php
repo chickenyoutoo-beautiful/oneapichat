@@ -1,12 +1,14 @@
 <?php
 /**
  * video_analyze.php - 视频分析后端API (v2 修复版)
- * 
+ *
  * 接收用户上传的视频(base64或URL),使用ffmpeg提取关键帧,
  * 然后通过视觉AI分析每一帧,汇总结果返回文本描述。
- * 
+ *
  * 兼容 MiniMax VLM API (直连) 和 MCP 代理模式。
  */
+
+require_once __DIR__ . '/init.php';
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -62,7 +64,7 @@ try {
         curl_setopt($ch, CURLOPT_FILE, $fp);
         curl_setopt($ch, CURLOPT_TIMEOUT, 120);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
         curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
@@ -115,7 +117,7 @@ try {
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT => 90,
                 CURLOPT_CONNECTTIMEOUT => 15,
-                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYPEER => true,
             ]);
             curl_multi_add_handle($mh, $ch);
             $handles[$i] = $ch;
@@ -187,7 +189,7 @@ function loadVisionConfig() {
     // 1. 从 chat_data/config_*.json 读取
     $configFiles = glob(dirname(__DIR__) . '/chat_data/config_*.json');
     foreach ($configFiles as $cf) {
-        $cfg = @json_decode(@file_get_contents($cf), true);
+        $cfg = json_read_file($cf);
         if ($cfg && isset($cfg['visionApiUrl'])) {
             $config['api_url'] = $cfg['visionApiUrl'];
             $config['api_key'] = decryptXor($cfg['visionApiKey'] ?? '');
@@ -210,14 +212,28 @@ function loadVisionConfig() {
 }
 
 /**
- * 解密 XOR 加密的 API key (与前端 decrypt 函数一致)
- * key = 'naujtrats-secret'
+ * 解密 AES-256-GCM 加密的 API key (与前端 decrypt 函数一致)
+ * 格式: v2:base64(iv[12] + ciphertext + tag[16])
+ * 向后兼容 XOR 旧格式
  */
 function decryptXor($encoded) {
     if (empty($encoded)) return '';
+    // v2: AES-256-GCM (新格式)
+    if (strpos($encoded, 'v2:') === 0) {
+        $raw = base64_decode(substr($encoded, 3));
+        if ($raw === false || strlen($raw) < 28) return $encoded; // 12(iv)+16(tag) min
+        $iv = substr($raw, 0, 12);
+        $tag = substr($raw, -16);
+        $ciphertext = substr($raw, 12, -16);
+        // PBKDF2 派生密钥 (与前端 _getAesKey 一致)
+        $aesKey = hash_pbkdf2('sha256', getEncryptionKey(), 'oneapichat-aes-v2', 100000, 32, true);
+        $result = openssl_decrypt($ciphertext, 'aes-256-gcm', $aesKey, OPENSSL_RAW_DATA, $iv, $tag);
+        return ($result !== false) ? $result : $encoded;
+    }
+    // 旧版 XOR 解密 (向后兼容)
     $bin = base64_decode($encoded);
     if ($bin === false || strlen($bin) === 0) return $encoded;
-    $key = 'naujtrats-secret';
+    $key = getEncryptionKey();
     $keyLen = strlen($key);
     $result = '';
     for ($i = 0; $i < strlen($bin); $i++) {
@@ -397,7 +413,7 @@ function analyzeFrameDirect($frameBase64, $prompt, $url, $apiKey, $model, $index
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 60,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -443,7 +459,7 @@ function analyzeFrameMcp($frameBase64, $prompt, $url, $index) {
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 30,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);

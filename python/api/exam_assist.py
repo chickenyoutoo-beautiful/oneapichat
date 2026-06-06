@@ -78,7 +78,7 @@ def cmd_list(args):
             for e in exams:
                 e['course_title'] = course['title']
             all_exams.extend(exams)
-        except:
+        except Exception:
             pass
     print(f'\n{"ID":<8} {"课程":<22} {"考试名称":<25} {"状态":<6} 时间')
     print('-' * 100)
@@ -126,7 +126,7 @@ def cmd_start(args):
                     exam_info['class_id'] = course['clazzId']
                     exam_info['cpi'] = course['cpi']
                     break
-        except:
+        except Exception:
             pass
         if exam_info: break
     
@@ -142,7 +142,7 @@ def cmd_start(args):
         tiku = tiku.get_tiku_from_config()
         tiku.init_tiku()
         print(f'📚 题库: {tiku.name if tiku and hasattr(tiku,"name") else "已配置"}')
-    except:
+    except Exception:
         pass
     
     # 打开 Playwright 浏览器
@@ -182,7 +182,7 @@ def cmd_start(args):
             for c in cookies:
                 try:
                     context.add_cookies([c])
-                except: pass
+                except Exception: pass
         else:
             # 从 session 注入
             for cookie in s.cookies:
@@ -192,7 +192,7 @@ def cmd_start(args):
                         'domain': cookie.domain or '.chaoxing.com',
                         'path': cookie.path or '/',
                     }])
-                except: pass
+                except Exception: pass
         
         # 打开考试页
         url = (f"https://mooc1-api.chaoxing.com/exam-ans/exam/phone/task-exam"
@@ -250,7 +250,7 @@ def cmd_start(args):
                     questions = []
                     try:
                         questions = api_exam.fetch_all()
-                    except:
+                    except Exception:
                         pass
                     if not questions:
                         try:
@@ -258,7 +258,7 @@ def cmd_start(args):
                             while True:
                                 idx = len(questions)
                                 questions.append(api_exam.fetch(idx))
-                        except:
+                        except Exception:
                             pass
                     
                     print(f'📄 共 {len(questions)} 道题')

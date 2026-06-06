@@ -24,7 +24,7 @@ def main():
     try:
         tiku = tiku.get_tiku_from_config()
         tiku.init_tiku()
-    except:
+    except Exception:
         pass
 
     if tiku.DISABLE:

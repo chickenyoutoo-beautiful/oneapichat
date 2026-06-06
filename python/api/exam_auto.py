@@ -26,7 +26,7 @@ def _get_tiku():
         t = t.get_tiku_from_config()
         if t: t.init_tiku()
         return t
-    except:
+    except Exception:
         return None
 # 移除题目文本中的转义字符
 def remove_escape_chars(text: str) -> str:

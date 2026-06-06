@@ -563,21 +563,47 @@ if (_dd) document.documentElement.classList.add('dark');
 
         function $(id) { return document.getElementById(id); }
         
-        // 解密函数（与聊天项目一致，apiKey在localStorage里是加密存储的）
+        // AES-256-GCM 解密 (与聊天项目一致) + XOR 向后兼容
         var _encKey = 'naujtrats-secret';
-        function _decrypt(encoded) {
+        var __chaoxingAesKey = null;
+        async function _getAesKey() {
+            if (__chaoxingAesKey) return __chaoxingAesKey;
+            var enc = new TextEncoder();
+            var km = await crypto.subtle.importKey('raw', enc.encode(_encKey), 'PBKDF2', false, ['deriveKey']);
+            __chaoxingAesKey = await crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt: enc.encode('oneapichat-aes-v2'), iterations: 100000, hash: 'SHA-256' },
+                km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+            );
+            return __chaoxingAesKey;
+        }
+        async function _decrypt(encoded) {
             if (!encoded) return '';
+            // v2: AES-256-GCM
+            if (encoded.indexOf('v2:') === 0) {
+                try {
+                    var aesKey = await _getAesKey();
+                    var raw = encoded.slice(3);
+                    var bin = atob(raw);
+                    var bytes = new Uint8Array(bin.length);
+                    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    var iv = bytes.slice(0, 12);
+                    var ct = bytes.slice(12);
+                    var decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, aesKey, ct);
+                    return new TextDecoder().decode(decrypted);
+                } catch(e) { return encoded; }
+            }
+            // 旧版 XOR 解密 (向后兼容)
             try {
-                var bin = atob(encoded), bytes = new Uint8Array(bin.length);
-                for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                var key = new TextEncoder().encode(_encKey);
-                var res = new Uint8Array(bytes.length);
-                for (var i = 0; i < bytes.length; i++) res[i] = bytes[i] ^ key[i % key.length];
+                var binX = atob(encoded), bytesX = new Uint8Array(binX.length);
+                for (var j = 0; j < binX.length; j++) bytesX[j] = binX.charCodeAt(j);
+                var xorKey = new TextEncoder().encode(_encKey);
+                var res = new Uint8Array(bytesX.length);
+                for (var k = 0; k < bytesX.length; k++) res[k] = bytesX[k] ^ xorKey[k % xorKey.length];
                 return new TextDecoder().decode(res);
             } catch(e) { return encoded; }
         }
 
-        function _getApiKey() { return _decrypt(localStorage.getItem('apiKey')); }
+        async function _getApiKey() { return await _decrypt(localStorage.getItem('apiKey')); }
         function _getBaseUrl() { return localStorage.getItem('baseUrl') || 'https://api.deepseek.com'; }
         // ★ 获取 auth_token（兼容 deviceId fallback）
         // ★ 获取 auth_token（兼容 deviceId fallback），为空时弹 Toast 提示
@@ -1575,7 +1601,7 @@ function setStatus(text, cls) {
                     return '<option value="' + m + '">' + m + '</option>';
                 }).join('');
             }
-            var key = _getApiKey();
+            var key = await _getApiKey();
             var baseUrl = _getBaseUrl();
             if (!key || !baseUrl) { showToast('已加载缓存列表（共' + (cached.length || 0) + '个）', 'info'); return; }
             sel.innerHTML = sel.innerHTML || '<option>加载中...</option>';
@@ -1603,7 +1629,7 @@ function setStatus(text, cls) {
 
 
         async function syncAIKey() {
-            var key = _getApiKey();
+            var key = await _getApiKey();
             var url = _getBaseUrl();
             if (key) {
                 $('tikuAIKey').value = key;
@@ -1626,7 +1652,7 @@ function setStatus(text, cls) {
                 $('tikuTrue').value = d.true_list || '正确,对,√,是';
                 $('tikuFalse').value = d.false_list || '错误,错,×,否,不对,不正确';
                 $('tikuAIUrl').value = d.ai_base_url || _getBaseUrl();
-                $('tikuAIKey').value = d.ai_key || _getApiKey() || '';
+                $('tikuAIKey').value = d.ai_key || await _getApiKey() || '';
                 // 从聊天系统拉取模型列表
                 try {
                     var models = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
@@ -1675,7 +1701,7 @@ function setStatus(text, cls) {
                 $('brushAutoNext').checked = d.auto_next !== false;
                 $('brushMode').value = d.brush_mode || 'all';
                 $('chapterOrder').value = d.chapter_order || 'sequential';
-                var key = _getApiKey();
+                var key = await _getApiKey();
                 var syncStatus = $('syncStatus');
                 if (key) {
                     if (syncStatus) { syncStatus.textContent = 'API已同步'; syncStatus.style.color = '#22c55e'; }
@@ -1709,8 +1735,8 @@ function setStatus(text, cls) {
         }
 
 
-        function syncBrushConfig() {
-            var key = _getApiKey();
+        async function syncBrushConfig() {
+            var key = await _getApiKey();
             var url = _getBaseUrl();
             if (key) {
                 $('tikuAIKey').value = key;

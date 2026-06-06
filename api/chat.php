@@ -10,9 +10,10 @@
  * 2. 向后兼容 (device_id) - 旧版无登录模式
  */
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Auth-Token');
+require_once __DIR__ . '/init.php';
+setCorsHeaders();
+
+// json_read_file() 由 init.php 提供
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -20,24 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// ---- 用户认证辅助 ----
-function verifyAuthToken($token) {
-    $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    $expireTime = 30 * 24 * 3600;
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > $expireTime) {
-            unset($sessions[$t]);
-        }
-    }
-    $info = $sessions[$token] ?? null;
-    return $info ? ($info['user_id'] ?? null) : null;
-}
+require_once __DIR__ . '/auth_helpers.php';
 
-$dataDir = dirname(__DIR__) . '/chat_data/';
+$dataDir = ONECHAT_ROOT . '/chat_data/';
 if (!is_dir($dataDir)) {
     if (!@mkdir($dataDir, 0755, true)) {
         http_response_code(500);
@@ -79,7 +65,7 @@ if (!empty($authToken)) {
     if ($userId) {
         $uf = dirname(__DIR__) . '/users/users.json';
         if (file_exists($uf)) {
-            $ud = @json_decode(@file_get_contents($uf), true);
+            $ud = json_read_file($uf);
             if (is_array($ud) && isset($ud[$userId])) {
                 $ud[$userId]['last_active'] = date('c');
                 @file_put_contents($uf, json_encode($ud, JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -232,7 +218,7 @@ switch ($method) {
                 $chatIdFromFile = substr($basename, strlen($namespace) + 1);
                 // ★ all.json 包含完整聊天映射，优先级最高
                 if ($chatIdFromFile === 'all') {
-                    $allContent = @json_decode(@file_get_contents($file), true);
+                    $allContent = json_read_file($file);
                     if ($allContent && isset($allContent['chats'])) {
                         foreach ($allContent['chats'] as $cid => $cdata) {
                             if (isset($cdata['messages'])) {
@@ -243,7 +229,7 @@ switch ($method) {
                     continue;
                 }
                 // 单个聊天文件（也包含完整 messages）
-                $content = @json_decode(@file_get_contents($file), true);
+                $content = json_read_file($file);
                 if ($content && isset($content['messages'])) {
                     $chats[$chatIdFromFile] = $content;
                 }
@@ -267,7 +253,7 @@ switch ($method) {
         // ★ 也从 all.json 中移除 + 清除备份
         $allFile = $dataDir . $namespace . '_all.json';
         if (file_exists($allFile)) {
-            $allData = @json_decode(@file_get_contents($allFile), true);
+            $allData = json_read_file($allFile);
             if ($allData && isset($allData['chats'][$chatId])) {
                 unset($allData['chats'][$chatId]);
                 $allData['updated_at'] = date('c');

@@ -4,6 +4,27 @@
 
 ## 最近变更
 
+- **2026-06-06**: ✅ 存储层模块化 — 提取 `python/engine/store.py` (EngineStore+ChatStore)，engine_server.py 4917→4719行
+- **2026-06-06**: 🧪 单元测试 — `python/tests/test_store.py` (14 tests)，覆盖 EngineStore/ChatStore 核心功能
+- **2026-06-06**: 🔒 SSL证书验证 — 移除全部 6 处 `verify=False`，启用 HTTPS 证书验证防 MITM
+- **2026-06-06**: 🚫 禁轮询子代理 — delegate_task结果/tool描述/系统提示词 三处同步禁止 engine_agent_status 轮询
+- **2026-06-06**: 🔧 临时授权对话隔离 — _hasTempForThisChat 范围检查，跨对话不污染
+- **2026-06-06**: 🎵 工具结果内联 — mmx_speech/music/browser_screenshot 结果嵌入回复气泡尾部
+- **2026-06-06**: 🔧 临时授权修复 — _effectiveAgent 统一临时授权工具范围 + WIN_TOOLS 仅完整 Agent 可用
+- **2026-06-06**: 🧹 工具定义归位 — main.js 中 10 个工具常量迁入 tools.js (244行)，main.js 减至 5,611 行
+- **2026-06-06**: 🗑️ 清理冗余 — 删除 4 个 .bak 备份文件 + 1 个重复 engine_api.php
+- **2026-06-06**: 📋 流程面板 — plan_update 工具 + Flow Panel UI 完整实现
+- **2026-06-06**: ⚡ 懒加载/代码分割 — 三级加载(Tier 0 defer 507KB + Tier 1 idle 175KB + Tier 2 on-demand 277KB)，首屏阻塞 -40%
+- **2026-06-06**: 🛡️ 速率限制 — Nginx limit_req (auth 5/min + API 10/s) + PHP checkLoginRateLimit (IP+用户双维度)
+- **2026-06-06**: 🔒 安全升级 — XOR→AES-256-GCM 加密 + CORS 白名单 + 密钥外部化到 config.ini
+- **2026-06-06**: Phase 7 拆分 — 抽取 ui/utils (1,031行)，🔥 main.js 减至 5,611 行 (-72%)
+- **2026-06-06**: Phase 5 拆分 — 抽取 storage.js (704行)
+- **2026-06-06**: Phase 4 拆分 — 抽取 init/agent-notify (1,662行)
+- **2026-06-06**: Phase 3 拆分 — 抽取 config/dialogs/cloudreve/rag/chaoxing 5 个模块 (2,856行)
+- **2026-06-06**: Phase 2 拆分 — 抽取 `js/agent.js` (2,669行)，三模式/审批门/计划流/Session 全迁出
+- **2026-06-06**: image-gen.js 补全 — analyzeImage + compressImage 迁入，image-gen.js 达 834 行
+- **2026-06-06**: Phase 1 拆分 — 抽取 `js/image-gen.js` (834行) + `js/markdown.js` (490行)
+- **2026-06-06**: Phase 0 拆分 — 抽取 `js/core.js` (309行)，全局常量/DOM/加密/Cookie 模块化
 - **2026-06-03**: 无感断点续传 — StreamBuffer 磁盘持久化 + msg_id/offset 续接（刷新不丢 chunks）
 - **2026-06-03**: 全面审计修复文件重构后的路径断裂问题
 - **2026-06-03**: SSE 事件总线实现跨浏览器实时同步 + 任务持久化 + 队列对齐
@@ -39,7 +60,8 @@
 ├── public/           # 前端静态资源
 │   ├── index.html    # 主聊天 SPA 入口
 │   ├── chaoxing.html # 超星刷课/考试面板
-│   ├── js/main.js    # 核心 JS（~20K 行，所有聊天/Agent/UI 逻辑）
+│   ├── js/core.js    # ★ 核心运行时 — 全局常量、DOM工具、加密、Cookie (Phase 0)
+│   ├── js/main.js    # 主应用逻辑（~5,600 行，聊天/Agent/UI/工具执行）
 │   ├── js/models.js  # 模型定义
 │   ├── css/style.css # 主样式表
 │   └── lib/lib/      # 第三方库（KaTeX、marked、mermaid、xlsx 等）
@@ -85,7 +107,16 @@
 | `api/memory_api.php` | 跨会话记忆系统 |
 | `api/cloudreve_api.php` | Cloudreve 云盘桥接 |
 
-## 核心 JS 模块（main.js）
+## 核心 JS 模块
+
+| 文件 | 行数 | 内容 |
+|---|---|---|
+| `js/core.js` | 309 | ★ 全局常量、数学公式保护、跨域Cookie、安全Fetch、DOM工具、加密、工具函数 |
+| `js/image-gen.js` | 490 | 图像生成（generateImage / generateImageI2I / OpenRouter GPT Image） |
+| `js/markdown.js` | 490 | 流式渲染（applyStreamRender）、MarkdownRenderer缓存、ChartRenderer/Mermaid |
+| `js/main.js` | 5,611 | 主应用逻辑（聊天、Agent、工具执行、UI、存储、配置） |
+| `js/tools.js` | 1,502 | 工具定义、toolRegistry、工具分类和中文标签 |
+| `js/models.js` | ~300 | 模型配置适配 |
 
 - **聊天流**: `sendMessage()` → `attemptRequestWithFreshAbort()` → SSE/非流式处理
 - **ResumeStream**: 可恢复流模块 — 刷新后从引擎续接（`ResumeStream.create/resume/resumeByStreamId`）

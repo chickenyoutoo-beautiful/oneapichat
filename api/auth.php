@@ -52,7 +52,7 @@ function readJson($path) {
     if (!file_exists($path)) return [];
     $raw = @file_get_contents($path);
     if ($raw === false || trim($raw) === '') return [];
-    $data = @json_decode($raw, true);
+    $data = json_decode($raw, true);
     if (!is_array($data)) {
         // ★ 文件损坏时保留备份并返回空数组,下次写入会覆盖
         $backup = $path . '.corrupted.' . date('Ymd_His');
@@ -242,6 +242,15 @@ switch ($method) {
             // jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
+            // 速率限制(注册)
+            require_once __DIR__ . '/init.php';
+            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $rl = checkLoginRateLimit($ip, 'ip');
+            if (!$rl['allowed']) {
+                http_response_code(429);
+                jsonError(429, "请求过于频繁，请 {$rl['retry_after']} 秒后重试");
+                exit;
+            }
 
             if (strlen($username) < 2 || strlen($username) > 20) {
                 jsonError(400, '用户名长度需在 2-20 个字符');
@@ -310,6 +319,18 @@ switch ($method) {
             $login = trim($input['username'] ?? '');
             $password = trim($input['password'] ?? '');
             $username = cleanUsername($login);
+
+            // 速率限制(登录) — IP + 用户双维度
+            require_once __DIR__ . '/init.php';
+            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $rlIp = checkLoginRateLimit($ip, 'ip');
+            $rlUser = checkLoginRateLimit($username ?: $login, 'user');
+            if (!$rlIp['allowed'] || !$rlUser['allowed']) {
+                $retry = max($rlIp['retry_after'] ?? 0, $rlUser['retry_after'] ?? 0);
+                http_response_code(429);
+                jsonError(429, "登录尝试过多，请 {$retry} 秒后重试");
+                exit;
+            }
 
             if (empty($login) || empty($password)) {
                 jsonError(400, '请输入用户名/邮箱和密码');

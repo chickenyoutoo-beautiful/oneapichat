@@ -1,26 +1,24 @@
 <?php
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST');
-header('Access-Control-Allow-Headers: Content-Type');
+require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
+setCorsHeaders();
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
-// ---- 本地认证辅助 ----
-function _engine_verifyAuthToken($token) {
-    $sessionsFile = dirname(__DIR__) . '/users/sessions.json';
-    if (!file_exists($sessionsFile)) return null;
-    $sessions = @json_decode(@file_get_contents($sessionsFile), true);
-    if (!is_array($sessions)) return null;
-    $now = time();
-    $expireTime = 30 * 24 * 3600;
-    foreach ($sessions as $t => $info) {
-        if (($now - ($info['created_at'] ?? 0)) > $expireTime) {
-            unset($sessions[$t]);
-        }
-    }
-    $info = $sessions[$token] ?? null;
-    return $info ? ($info['user_id'] ?? null) : null;
+// ── 引擎请求辅助 (替代 @file_get_contents 抑制) ──
+function _engine_get(string $path, string $fallback = '{}'): string {
+    $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]);
+    $resp = file_get_contents($path, false, $ctx);
+    return ($resp !== false) ? $resp : $fallback;
+}
+function _engine_mmx_config_read(): array {
+    $path = dirname(__DIR__) . '/config/.mmx_config.json';
+    if (!file_exists($path)) return [];
+    $raw = file_get_contents($path);
+    if ($raw === false) return [];
+    $cfg = json_decode($raw, true);
+    return is_array($cfg) ? $cfg : [];
 }
 
 $action = $_GET['action'] ?? '';
@@ -76,7 +74,7 @@ if (!empty($authHeader) && preg_match('/^[a-f0-9]{32,}$/', $authHeader)) {
 }
 $userId = '';
 if (!empty($authToken)) {
-    $uid = _engine_verifyAuthToken($authToken);
+    $uid = verifyAuthToken($authToken);
     if ($uid !== null) {
         $userId = $uid;
     }
@@ -85,8 +83,20 @@ $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
 
 switch ($action) {
     case 'health':
-        $resp = @file_get_contents($engine_url . '/engine/health');
+        $resp = _engine_get($engine_url . '/engine/health');
         echo $resp ?: json_encode(['status' => 'error', 'message' => 'unreachable']);
+        break;
+
+    case 'get_encryption_key':
+        // 返回 AES 加密密钥 (需认证，与 config.ini 一致)
+        $auth = $_GET['auth'] ?? '';
+        if (!$auth || !verifyAuthToken($auth)) {
+            http_response_code(401);
+            echo json_encode(['error' => 'unauthorized']);
+            exit;
+        }
+        require_once __DIR__ . '/init.php';
+        echo json_encode(['encryption_key' => getEncryptionKey()]);
         break;
 
     case 'chat_stream':
@@ -141,7 +151,7 @@ switch ($action) {
         break;
 
     case 'heartbeat':
-        $resp = @file_get_contents($engine_url . '/engine/heartbeat?' . $userParam);
+        $resp = _engine_get($engine_url . '/engine/heartbeat?' . $userParam);
         echo $resp ?: json_encode(['ok' => false, 'responses' => []]);
         break;
 
@@ -162,12 +172,12 @@ switch ($action) {
 
     case 'notifications':
         // 返回用户未读的 cron/agent 通知
-        $resp = @file_get_contents($engine_url . '/engine/notifications?' . $userParam);
+        $resp = _engine_get($engine_url . '/engine/notifications?' . $userParam);
         echo $resp ?: json_encode(['ok' => true, 'notifications' => [], 'cron_results' => [], 'agent_results' => []]);
         break;
 
     case 'cron_list':
-        echo @file_get_contents($engine_url . '/engine/cron/list?' . $userParam) ?: '{}';
+        echo _engine_get($engine_url . '/engine/cron/list?' . $userParam) ?: '{}';
         break;
 
     case 'cron_create':
@@ -176,13 +186,13 @@ switch ($action) {
         $action_cmd = $_GET['action_cmd'] ?? '';
         if (!$name || !$action_cmd) { echo json_encode(['error' => '缺少参数']); exit; }
         $url = $engine_url . '/engine/cron/create?name=' . urlencode($name) . '&interval=' . $interval . '&action=' . urlencode($action_cmd) . $userParam;
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'cron_delete':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/cron/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/cron/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_list':
@@ -200,7 +210,7 @@ switch ($action) {
         if ($api_key) $url .= '&api_key=' . urlencode($api_key);
         if ($base_url) $url .= '&base_url=' . urlencode($base_url);
         $url .= $userParam;
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_run':
@@ -211,25 +221,25 @@ switch ($action) {
         $url = $engine_url . '/engine/agent/run?name=' . urlencode($name) . $userParam;
         if ($message) $url .= '&message=' . urlencode($message);
         if ($from_ask) $url .= '&from_ask=' . urlencode($from_ask);
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_status':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/agent/status?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/agent/status?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_stop':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/agent/stop?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/agent/stop?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_delete':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/agent/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/agent/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'agent_notifications':
@@ -257,40 +267,40 @@ switch ($action) {
         $name = $_GET['name'] ?? '';
         $steps = $_GET['steps'] ?? '';
         if (!$name || !$steps) { echo json_encode(['error' => '缺少参数']); exit; }
-        echo @file_get_contents($engine_url . '/engine/workflow/create?name=' . urlencode($name) . '&steps=' . urlencode($steps) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/workflow/create?name=' . urlencode($name) . '&steps=' . urlencode($steps) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'workflow_run':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/workflow/run?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/workflow/run?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'workflow_list':
-        echo @file_get_contents($engine_url . '/engine/workflow/list?' . $userParam) ?: '{}';
+        echo _engine_get($engine_url . '/engine/workflow/list?' . $userParam) ?: '{}';
         break;
 
     case 'workflow_status':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/workflow/status?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/workflow/status?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'workflow_delete':
         $name = $_GET['name'] ?? '';
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        echo @file_get_contents($engine_url . '/engine/workflow/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/workflow/delete?name=' . urlencode($name) . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'workflow_roles':
-        echo @file_get_contents($engine_url . '/engine/workflow/roles?' . $userParam) ?: json_encode(['roles' => []]);
+        echo _engine_get($engine_url . '/engine/workflow/roles?' . $userParam) ?: json_encode(['roles' => []]);
         break;
 
     case 'push':
         $msg = $_GET['msg'] ?? '';
         if (!$msg) { echo json_encode(['error' => '缺少msg']); exit; }
         $url = $engine_url . '/engine/heartbeat/push?msg=' . urlencode($msg) . $userParam;
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
 
@@ -300,7 +310,7 @@ switch ($action) {
         $cwd = $_GET['cwd'] ?? '';
         if (!$cmd) { echo json_encode(['error' => '缺少cmd']); exit; }
         $url = $engine_url . '/engine/exec?cmd=' . urlencode($cmd) . '&timeout=' . $timeout . '&cwd=' . urlencode($cwd);
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'python':
@@ -323,9 +333,13 @@ switch ($action) {
     case 'file_read':
         $path = $_GET['path'] ?? '';
         $max_lines = intval($_GET['max_lines'] ?? 200);
+        $start_line = intval($_GET['start_line'] ?? 0);
+        $end_line = intval($_GET['end_line'] ?? 0);
         if (!$path) { echo json_encode(['error' => '缺少path']); exit; }
         $url = $engine_url . '/engine/file/read?path=' . urlencode($path) . '&max_lines=' . $max_lines;
-        echo @file_get_contents($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        if ($start_line > 0) $url .= '&start_line=' . $start_line;
+        if ($end_line > 0) $url .= '&end_line=' . $end_line;
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'file_write':
@@ -347,7 +361,7 @@ switch ($action) {
         break;
 
     case 'sys_info':
-        echo @file_get_contents($engine_url . '/engine/sys/info?') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/sys/info?') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'mmx':
@@ -360,7 +374,7 @@ switch ($action) {
         $mmxKey = $_GET['api_key'] ?? '';
         $mmxRegion = $_GET['region'] ?? 'cn';
         if (!$mmxKey) {
-            $cfg = @json_decode(@file_get_contents(dirname(__DIR__) . '/config/.mmx_config.json'), true);
+            $cfg = _engine_mmx_config_read();
             if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
         }
         if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
@@ -441,94 +455,139 @@ switch ($action) {
         break;
 
     default:
-        echo json_encode(['error' => 'unknown action']);
+        http_response_code(400);
+        echo json_encode(['error' => 'unknown action', 'supported_actions' => [
+            'health', 'chat_stream', 'chat_create', 'heartbeat', 'events_broadcast',
+            'notifications', 'cron_list', 'cron_create', 'cron_delete',
+            'agent_list', 'agent_create', 'agent_run', 'agent_status', 'agent_stop', 'agent_delete',
+            'agent_notifications', 'agent_notifications_mark',
+            'agent_persona_load', 'agent_persona_save', 'agent_memory_load', 'agent_memory_save', 'agent_memory_delete',
+            'agent_identity_load', 'agent_identity_save', 'agent_heartbeat', 'agent_heartbeat_status',
+            'workflow_create', 'workflow_run', 'workflow_list', 'workflow_status', 'workflow_delete', 'workflow_roles',
+            'push', 'exec', 'python', 'sys_info', 'mmx', 'push_file', 'minimax_search',
+            'file_read', 'file_write', 'file_search', 'file_grep', 'file_edit', 'file_op',
+            'browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot', 'browser_js',
+            'ps', 'disk', 'docker', 'db_query', 'network'
+        ]]);
+        break;
 
     case 'ps':
-        echo @file_get_contents($engine_url . '/engine/ps?' . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/ps?' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'disk':
-        echo @file_get_contents($engine_url . '/engine/disk?' . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/disk?' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'docker':
         $docker_action = $_GET['docker_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ps';
-        echo @file_get_contents($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'db_query':
         $sql = $_GET['sql'] ?? '';
         if (!$sql) { echo json_encode(['error' => '缺少sql']); exit; }
-        echo @file_get_contents($engine_url . '/engine/db_query?sql=' . urlencode($sql) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/db_query?sql=' . urlencode($sql) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'network':
         $target = $_GET['target'] ?? $_GET['host'] ?? $_GET['address'] ?? $_GET['url'] ?? '';
         $action_n = $_GET['net_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ping';
         $timeout_n = intval($_GET['timeout'] ?? 10);
         if (!$target) { echo json_encode(['error' => '缺少target']); exit; }
-        echo @file_get_contents($engine_url . '/engine/network?target=' . urlencode($target) . '&action=' . urlencode($action_n) . '&timeout=' . $timeout_n . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/network?target=' . urlencode($target) . '&action=' . urlencode($action_n) . '&timeout=' . $timeout_n . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_search':
         $pattern = $_GET['pattern'] ?? '';
         $path_fs = $_GET['path'] ?? (defined('PROJECT_ROOT') ? PROJECT_ROOT : '/var/www');
         if (!$pattern) { echo json_encode(['error' => '缺少pattern']); exit; }
-        echo @file_get_contents($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        break;
+    case 'file_grep':
+        $pattern = $_GET['pattern'] ?? '';
+        $path_fs = $_GET['path'] ?? (defined('PROJECT_ROOT') ? PROJECT_ROOT : '/var/www');
+        $context_lines = intval($_GET['context_lines'] ?? 2);
+        $file_pattern = $_GET['file_pattern'] ?? '';
+        $max_results = intval($_GET['max_results'] ?? 20);
+        $ignore_case = ($_GET['ignore_case'] ?? 'true') === 'true';
+        if (!$pattern) { echo json_encode(['error' => '缺少pattern']); exit; }
+        $url = $engine_url . '/engine/file_grep?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&context_lines=' . $context_lines . '&max_results=' . $max_results . '&ignore_case=' . ($ignore_case ? '1' : '0');
+        if ($file_pattern) $url .= '&file_pattern=' . urlencode($file_pattern);
+        echo _engine_get($url . $userParam) ?: json_encode(['error' => 'unreachable']);
+        break;
+    case 'file_edit':
+        $path = $_GET['path'] ?? '';
+        $replace_all = ($_GET['replace_all'] ?? 'false') === 'true';
+        // ★ old_string/new_string 从 POST body 读取，不在 URL 参数中
+        $postBody = json_decode(file_get_contents('php://input'), true) ?: [];
+        $old_string = $postBody['old_string'] ?? '';
+        $new_string = $postBody['new_string'] ?? '';
+        if (!$path || !$old_string) { echo json_encode(['error' => '缺少参数(path/old_string/new_string)']); exit; }
+        $url = $engine_url . '/engine/file_edit?path=' . urlencode($path) . '&replace_all=' . ($replace_all ? '1' : '0');
+        $body = json_encode(['old_string' => $old_string, 'new_string' => $new_string]);
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
+        curl_close($ch);
         break;
     case 'file_op':
         $action_f = $_GET['file_action'] ?? $_GET['file_op_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? $_GET['action'] ?? '';
         $src = $_GET['src'] ?? $_GET['source'] ?? $_GET['path'] ?? '';
         $dst = $_GET['dst'] ?? $_GET['dest'] ?? $_GET['destination'] ?? '';
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
-        echo @file_get_contents($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
 
     // ==================== Agent 记忆/人格/身份/心跳 系统 ====================
     case 'agent_persona_load':
-        echo @file_get_contents($engine_url . '/engine/agent/persona/load?' . $userParam) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/persona/load?' . $userParam) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_persona_save':
         $json = file_get_contents('php://input');
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/agent/persona/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/persona/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_memory_load':
         $query = isset($_GET['query']) ? '&query=' . urlencode($_GET['query']) : '';
-        echo @file_get_contents($engine_url . '/engine/agent/memory/load?' . $userParam . $query) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/memory/load?' . $userParam . $query) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_memory_save':
         $json = file_get_contents('php://input');
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/agent/memory/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/memory/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_memory_delete':
         $key = $_GET['key'] ?? '';
         if (!$key) { echo json_encode(['error' => '缺少key']); exit; }
-        echo @file_get_contents($engine_url . '/engine/agent/memory/delete?key=' . urlencode($key) . $userParam) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/memory/delete?key=' . urlencode($key) . $userParam) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_identity_load':
-        echo @file_get_contents($engine_url . '/engine/agent/identity/load?' . $userParam) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/identity/load?' . $userParam) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_identity_save':
         $json = file_get_contents('php://input');
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/agent/identity/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/identity/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_heartbeat':
         $json = file_get_contents('php://input');
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/agent/heartbeat?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/heartbeat?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
         break;
 
     case 'agent_heartbeat_status':
-        echo @file_get_contents($engine_url . '/engine/agent/heartbeat/status?' . $userParam) ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/heartbeat/status?' . $userParam) ?: json_encode(['ok' => false]);
         break;
 
     // ==================== 浏览器工具 ====================
@@ -540,11 +599,11 @@ switch ($action) {
         $postData = json_encode(['url' => $browserUrl]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/browser/navigate', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/navigate', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_screenshot':
-        echo @file_get_contents($engine_url . '/engine/browser/screenshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/screenshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_click':
@@ -555,7 +614,7 @@ switch ($action) {
         $postData = json_encode(['selector' => $browserSel]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/browser/click', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/click', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_type':
@@ -567,15 +626,15 @@ switch ($action) {
         $postData = json_encode(['selector' => $browserSel, 'text' => $browserText]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/browser/type', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/type', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_get_content':
-        echo @file_get_contents($engine_url . '/engine/browser/content') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/content') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_get_snapshot':
-        echo @file_get_contents($engine_url . '/engine/browser/snapshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/snapshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_js':
@@ -586,7 +645,7 @@ switch ($action) {
         $postData = json_encode(['code' => $code]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo @file_get_contents($engine_url . '/engine/browser/js', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/js', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     // ★ engine_push 文件复制到 uploads
@@ -602,7 +661,7 @@ switch ($action) {
         $mmxKey = $_GET['api_key'] ?? '';
         $mmxRegion = $_GET['region'] ?? 'cn';
         if (!$mmxKey) {
-            $cfg = @json_decode(@file_get_contents(dirname(__DIR__) . '/config/.mmx_config.json'), true);
+            $cfg = _engine_mmx_config_read();
             if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
         }
         if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }

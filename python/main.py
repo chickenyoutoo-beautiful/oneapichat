@@ -260,7 +260,7 @@ if __name__ == '__main__':
                                         'cpi': e['cpi'],
                                         'enc_task': e.get('enc_task', 0),
                                     })
-                        except: pass
+                        except Exception: pass
                 else:
                     # 无选择：遍历所有课程
                     for course in all_course:
@@ -275,7 +275,7 @@ if __name__ == '__main__':
                                         'cpi': e['cpi'],
                                         'enc_task': e.get('enc_task', 0),
                                     })
-                        except: pass
+                        except Exception: pass
 
                 # 逐场执行考试
                 for exam_info in _exam_tasks:

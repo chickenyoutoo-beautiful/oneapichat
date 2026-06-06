@@ -1,7 +1,8 @@
 <?php
 function sendVerificationCode($toEmail, $code) {
     $from = 'es5fov1bioy58erv@163.com';
-    $pwd  = 'EKjbhaFd2AZH4Wtp';
+    $pwd  = getenv('SMTP_PASSWORD') ?: '';
+    if (!$pwd) { error_log('[mailer] SMTP_PASSWORD env not set'); return false; }
 
     $s = @fsockopen('ssl://smtp.163.com', 465, $e, $m, 10);
     if (!$s) return false;
@@ -51,7 +52,8 @@ BODY;
 
 function sendResetMail($toEmail, $resetLink) {
     $from = 'es5fov1bioy58erv@163.com';
-    $pwd  = 'EKjbhaFd2AZH4Wtp';
+    $pwd  = getenv('SMTP_PASSWORD') ?: '';
+    if (!$pwd) { error_log('[mailer] SMTP_PASSWORD env not set'); return false; }
 
     $s = @fsockopen('ssl://smtp.163.com', 465, $e, $m, 10);
     if (!$s) return false;

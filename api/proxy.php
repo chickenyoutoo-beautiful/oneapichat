@@ -138,9 +138,32 @@ $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 $error = curl_error($ch);
 curl_close($ch);
 
+// ★ 代理失败时降级直连（代理服务器可能临时不可用）
+if ($error && $proxyUrl) {
+    error_log("[proxy.php] 代理失败({$proxyUrl}): {$error} — 降级直连");
+    $ch2 = curl_init($targetUrl);
+    curl_setopt($ch2, CURLOPT_CUSTOMREQUEST, $method);
+    if ($body !== null) {
+        $bodyStr = is_array($body) ? json_encode($body) : (string)$body;
+        curl_setopt($ch2, CURLOPT_POSTFIELDS, $bodyStr);
+    }
+    if (!empty($curlHeaders)) {
+        curl_setopt($ch2, CURLOPT_HTTPHEADER, $curlHeaders);
+    }
+    curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch2, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch2, CURLOPT_TIMEOUT, 0);
+    curl_setopt($ch2, CURLOPT_CONNECTTIMEOUT, 15);
+    $response = curl_exec($ch2);
+    $httpCode = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+    $contentType = curl_getinfo($ch2, CURLINFO_CONTENT_TYPE);
+    $error = curl_error($ch2);
+    curl_close($ch2);
+}
+
 if ($error) {
     http_response_code(502);
-    echo json_encode(['error' => 'Proxy error: ' . $error]);
+    echo json_encode(['error' => 'Request failed: ' . $error]);
     exit;
 }
 
