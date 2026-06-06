@@ -2389,42 +2389,7 @@ const SUB_AGENT_COOLDOWN_MS = 10000;
 
 // ==================== Session 管理 (Feature 5) ====================
 
-/**
- * 增强的 fetch 包装: 自动重试 + 指数退避
- * @param {string} url - 请求URL
- * @param {object} options - fetch 选项
- * @param {number} maxRetries - 最大重试次数(默认3)
- * @returns {Promise<Response>}
- */
-function fetchWithRetry(url, options, maxRetries) {
-    maxRetries = maxRetries || 3;
-    return new Promise(function(resolve, reject) {
-        var attempt = 0;
-        var timeoutMs = (options && options.timeout) || 300000;
-        function tryFetch() {
-            attempt++;
-            var ctrl = new AbortController();
-            var timeoutId = setTimeout(function() { ctrl.abort(); }, timeoutMs);
-            var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
-            delete opts.timeout;
-
-            fetch(url, opts).then(function(resp) {
-                clearTimeout(timeoutId);
-                resolve(resp);
-            }).catch(function(err) {
-                clearTimeout(timeoutId);
-                if (attempt >= maxRetries || err.name === 'AbortError') {
-                    reject(err);
-                    return;
-                }
-                var delay = Math.pow(2, attempt) * 500;
-                console.log('[fetchWithRetry] 重试', attempt, '/', maxRetries, '延迟', delay + 'ms:', err.message);
-                setTimeout(tryFetch, delay);
-            });
-        }
-        tryFetch();
-    });
-}
+// ★ fetchWithRetry → utils.js
 
 /**
  * 清理确认对话框 (替代原生 confirm)

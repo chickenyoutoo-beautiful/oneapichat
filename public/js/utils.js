@@ -353,4 +353,47 @@ function cleanupOldChats(keep = 10) {
     saveChatsDebounced();
 }
 
+// ★ fetchWithRetry — 带重试的 fetch (HTTP 529 指数退避)
+window.fetchWithRetry = async function(url, options, maxRetries, retryDelay) {
+    maxRetries = maxRetries || 3;
+    retryDelay = retryDelay || 1000;
+    var lastError;
+
+    for (var attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            var response = await fetch(url, options);
+
+            if (!response.ok) {
+                var status = response.status;
+                var statusText = response.statusText;
+
+                if (status === 529) {
+                    console.warn('[fetchWithRetry] HTTP 529 (attempt ' + attempt + '/' + maxRetries + ')');
+                    if (attempt < maxRetries) {
+                        var delay = retryDelay * Math.pow(2, attempt - 1);
+                        await new Promise(function(resolve) { setTimeout(resolve, delay); });
+                        continue;
+                    } else {
+                        throw new Error('服务过载,请稍后重试 (HTTP 529)');
+                    }
+                }
+                throw new Error('HTTP ' + status + ': ' + statusText);
+            }
+            return response;
+        } catch (error) {
+            lastError = error;
+            if (error.message.indexOf('529') !== -1 || error.message.indexOf('过载') !== -1) {
+                if (attempt === maxRetries) {
+                    throw new Error('请求失败,重试 ' + maxRetries + ' 次后仍然失败: ' + error.message);
+                }
+                var delay2 = retryDelay * Math.pow(2, attempt - 1);
+                await new Promise(function(resolve) { setTimeout(resolve, delay2); });
+                continue;
+            }
+            throw error;
+        }
+    }
+    throw lastError;
+};
+
 

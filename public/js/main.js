@@ -71,65 +71,8 @@ let lastInnerHeight = window.innerHeight;
 let lastInnerWidth = window.innerWidth;
 let configPanelInteracting = false; // 标记是否正在与配置面板交互
 
-// 使用 visualViewport API 检测键盘弹出(支持平板和手机)
+// ★ fetchWithRetry → utils.js
 
-// 带重试的 fetch 函数
-async function fetchWithRetry(url, options, maxRetries = 3, retryDelay = 1000) {
-    let lastError;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            const response = await fetch(url, options);
-
-            // 检查响应状态
-            if (!response.ok) {
-                // 永远不要尝试读取响应体,因为可能已经被 streamResponse 读取
-                // 根据 MiniMax API 文档,直接使用状态码信息
-                const status = response.status;
-                const statusText = response.statusText;
-
-                // 特殊处理 529 错误(服务过载)
-                if (status === 529) {
-                    console.warn(`HTTP 529 服务过载 (尝试 ${attempt}/${maxRetries})`);
-
-                    if (attempt < maxRetries) {
-                        // 计算退避延迟(指数退避)
-                        const delay = retryDelay * Math.pow(2, attempt - 1);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        continue;
-                    } else {
-                        throw new Error(`服务过载,请稍后重试 (HTTP 529)`);
-                    }
-                }
-
-                // 其他错误直接抛出
-                throw new Error(`HTTP ${status}: ${statusText}`);
-            }
-
-            return response;
-
-        } catch (error) {
-            lastError = error;
-
-            // 特殊处理 529 错误的重试
-            if (error.message.includes('529') || error.message.includes('过载')) {
-                if (attempt === maxRetries) {
-                    throw new Error(`请求失败,重试 ${maxRetries} 次后仍然失败: ${error.message}`);
-                }
-
-                // 计算退避延迟
-                const delay = retryDelay * Math.pow(2, attempt - 1);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                continue;
-            }
-
-            // 非 529 错误直接抛出
-            throw error;
-        }
-    }
-
-    throw lastError;
-}
 function setupKeyboardDetection() {
     // 优先使用 visualViewport API
     if (window.visualViewport) {
