@@ -29,6 +29,7 @@ window.ResumeStream = (function() {
         if (isResume) { showToast('🔄 续接流式...', 'info'); }
 
         var buf='', full='', reasoning='', tcList=[], usage=null, done=false;
+        var _decoder = new TextDecoder();  // ★ 复用解码器，避免 UTF-8 多字节字符跨 chunk 损坏
 
         var timer = setInterval(function(){
             try { localStorage.setItem('_rs_ts', Date.now()); } catch(e) {}
@@ -42,7 +43,7 @@ window.ResumeStream = (function() {
             var rr;
             try { rr = await reader.read(); } catch(e) { break; }
             done = rr.done;
-            if (rr.value) buf += new TextDecoder().decode(rr.value, {stream:true});
+            if (rr.value) buf += _decoder.decode(rr.value, {stream:true});
             var lines = buf.split('\n'); buf = lines.pop()||'';
             var ev = '';
             for (var i=0; i<lines.length; i++) {
@@ -64,7 +65,9 @@ window.ResumeStream = (function() {
                     } else if (_dt === 'tool_call' || d.function) {
                         tcList.push(d.function?d:d);
                     } else if (_dt === 'done' || d.full_text !== undefined) {
-                        full=d.full_text||full; reasoning=d.reasoning_text||reasoning;
+                        // ★ 优先用已累积的 full（可能比引擎 full_text 更完整）
+                        if (d.full_text && d.full_text.length > full.length) full = d.full_text;
+                        if (d.reasoning_text && d.reasoning_text.length > reasoning.length) reasoning = d.reasoning_text;
                         if (d.tool_calls) tcList=d.tool_calls;
                         if (d.usage) usage=d.usage;
                         done=true;

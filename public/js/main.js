@@ -1629,7 +1629,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
                     usage = _rsResult.usage;
                     toolCalls = _rsResult.toolCalls || [];
-                    if (_rsResult.reasoningText && !pendingMsg.reasoning) pendingMsg.reasoning = _rsResult.reasoningText;
+                    if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
                     // ★ 图像模型: 进度条清除
                     try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
                     clearTimeout(timeoutIdVal);
@@ -1682,7 +1682,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     var _aResult = await _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble);
                     usage = _aResult.usage;
                     toolCalls = _aResult.toolCalls || [];
-                    if (_aResult.reasoningText && !pendingMsg.reasoning) pendingMsg.reasoning = _aResult.reasoningText;
+                    if (_aResult.reasoningText) pendingMsg.reasoning = _aResult.reasoningText;
                 } catch(_aErr) {
                     throw _aErr;
                 }
@@ -1711,7 +1711,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         sessionUsage.totalCost += pt * 0.5 + ct * 2;
                     }
                     // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
-                    if (result.reasoningText && !pendingMsg.reasoning) {
+                    if (result.reasoningText) {
                         pendingMsg.reasoning = result.reasoningText;
                     }
                 } catch (streamErr) {
