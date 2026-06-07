@@ -668,6 +668,7 @@ window.createNewChat = function () {
 
 window.loadChat = async function (id) {
     if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
+    try {
     // ★ 会话切换：先保存旧会话队列
     var _oldChatId = currentChatId;
     if (_oldChatId && _oldChatId !== id && window._messageQueue && !window._agentModeSwitching) {
@@ -819,6 +820,7 @@ window.loadChat = async function (id) {
         showWelcome();
     } else {
         displayMsgs.forEach((m, i) => {
+            try {
             // ★ 修复: 清理已保存的 [object Object] 残留
             if (typeof m.content === 'string') {
                 if (m.content === '[object Object]') {
@@ -879,6 +881,9 @@ window.loadChat = async function (id) {
                     _renderWebFetchUrls(_bubble, m._webFetchUrls);
                 }
             }
+            } catch(e) {
+                console.warn('[loadChat] 跳过损坏消息', i, m?.role, e.message);
+            }
         });
     }
 
@@ -910,6 +915,10 @@ window.loadChat = async function (id) {
 
     // 加载完成后自动滚动(loadChat 模式不受距离限制)
     autoScrollToBottom('loadChat');
+    } catch(e) {
+        console.error('[loadChat] 加载聊天失败:', id, e.message);
+        showWelcome();
+    }
 };
 
 function updateHeaderTitle() {
