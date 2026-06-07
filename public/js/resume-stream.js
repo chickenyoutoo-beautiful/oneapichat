@@ -264,6 +264,7 @@ window.ResumeStream = (function() {
                 }
                 // ★ 流未完成 — 保持 partial 状态,丢弃临时气泡
                 console.warn('[RS resume] 流未正常完成,保持partial');
+                var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
                 if (fi !== -1) msgs.splice(fi, 1);
                 if (_isCurrentChat) loadChat(chatId);
                 return false;
