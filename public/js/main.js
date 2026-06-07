@@ -273,14 +273,19 @@ window._chainMode = localStorage.getItem('chainMode') === '1';
 window.toggleChainMode = function() {
     window._chainMode = !window._chainMode;
     localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
+    // 同步旧按钮（若存在）
     var btn = document.getElementById('chainModeBtn');
     if (btn) btn.classList.toggle('active', window._chainMode);
-    // 不弹 toast — 按钮自身状态已足够表明
+    // 同步配置面板开关
+    var _toggle = document.getElementById('chainModeToggle');
+    if (_toggle) _toggle.checked = window._chainMode;
 };
-// 初始化链式按钮状态
+// 初始化链式状态
 setTimeout(function() {
     var _cb = document.getElementById('chainModeBtn');
     if (_cb && window._chainMode) _cb.classList.add('active');
+    var _toggle = document.getElementById('chainModeToggle');
+    if (_toggle) _toggle.checked = window._chainMode;
 }, 500);
 
 window.stopGeneration = function () {
