@@ -511,7 +511,7 @@ function _showAgentToast(type, message, source) {
     if (!_container) {
         _container = document.createElement('div');
         _container.id = 'agent-toast-container';
-        _container.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:9999;display:flex;flex-direction:column-reverse;gap:6px;pointer-events:none;';
+        _container.style.cssText = 'position:fixed;top:70px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
         document.body.appendChild(_container);
     }
     var _toast = document.createElement('div');
