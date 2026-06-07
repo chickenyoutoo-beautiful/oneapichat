@@ -2031,7 +2031,7 @@ window.useAlternativeVisionModel = function() {
                     // ★ 用户停止检测: 每次工具调用前检查
                     if (userAbortMap[chatId]) {
                         console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
-                        if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted');
+                        if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId);
                         body.messages.push({
                             role: 'tool',
                             tool_call_id: tc.id || '',
@@ -2040,7 +2040,7 @@ window.useAlternativeVisionModel = function() {
                         continue;
                     }
 
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running');
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId);
 
                     // ★ 传递工具调用的 abort 信号,让 fetch 也能被中断
                     var _toolAbortCtrl = new AbortController();
@@ -2057,7 +2057,7 @@ window.useAlternativeVisionModel = function() {
                     
                     // 清理控制器
                     delete window.__toolAbortControllers[_toolAbortKey];
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success');
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId);
                     // ★ 记录统计
                     if (tc.function && tc.function.name) toolCallStats.record(tc.function.name, !!toolResult.error, toolResult.error || '');
                     // ★ 收集 web_fetch 访问的 URL
@@ -2135,8 +2135,8 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ 工具执行循环结束,隐藏状态浮条
-                if (typeof showToolStatus === 'function') showToolStatus(null, null, null);
+                // ★ 工具执行循环结束,隐藏状态浮条（指定 chatId 避免误关其他会话的状态）
+                if (typeof showToolStatus === 'function') showToolStatus(null, null, null, chatId);
                 // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
                 if (_allWebFetchUrls.length > 0) {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;

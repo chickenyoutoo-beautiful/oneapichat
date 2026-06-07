@@ -96,9 +96,11 @@ window.showImageProcessingHint = function(chatId, files) {
 };
 
 // ==================== 工具调用状态行 (独立, 完成后3秒淡出) ====================
-window.showToolStatus = function(toolName, argPreview, status) {
-    if (!currentChatId) return;
-    var bubble = activeBubbleMap[currentChatId];
+window.showToolStatus = function(toolName, argPreview, status, chatId) {
+    // ★ 使用传入的 chatId 而非全局 currentChatId，避免跨会话工具状态泄露
+    var _cid = chatId || currentChatId;
+    if (!_cid) return;
+    var bubble = activeBubbleMap[_cid];
     if (!bubble) return;
 
     var tcContainer = bubble.querySelector('.tool-call-lines');
