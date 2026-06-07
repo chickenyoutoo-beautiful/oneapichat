@@ -1991,9 +1991,17 @@ async def chat_stream_get(stream_id: str):
 
     async def gen():
         yield f"event: start\ndata: {json.dumps({'stream_id': stream_id})}\n\n"
-        # 先回放所有已缓存 chunk
         idx = 0
         cached = list(s['chunks'])
+        # ★ 流已完成:只发done事件跳过chunk回放(刷新后秒级恢复)
+        if s.get('finished'):
+            # 从缓存中找到done事件直接下发
+            for c in reversed(cached):
+                if 'event: done' in c or '"full_text"' in c:
+                    yield c
+                    break
+            return
+        # 先回放所有已缓存 chunk
         for c in cached:
             yield c
             idx += 1
