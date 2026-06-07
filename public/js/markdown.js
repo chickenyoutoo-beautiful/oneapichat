@@ -79,6 +79,16 @@ function _flushStreamRender_batched(chatId, st) {
     if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
         mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
+        // ★ 流式实时代码高亮（每 500ms 或新代码块时触发）
+        if (typeof hljs !== 'undefined') {
+            var _nowTS = Date.now();
+            if (!st._lastHighlightTs || _nowTS - st._lastHighlightTs > 500) {
+                st._lastHighlightTs = _nowTS;
+                mb.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(function(block) {
+                    try { hljs.highlightElement(block); } catch(e) {}
+                });
+            }
+        }
         // ★ 隐藏流式渲染中加载失败的图片(模型可能在文本中引用过期的CDN URL)
         mb.querySelectorAll('img').forEach(function(_img) {
             if (!_img._hasOnerror) {
