@@ -1361,24 +1361,26 @@ select option { background: white; color: #1f2937; }
 .input-wrapper {
     position: relative;
     background: transparent;
-    border-radius: 9999px;
+    border-radius: 22px;
     overflow: visible;
 }
-/* 输入框圆角「药丸」：亮色白色，暗色深灰 */
+/* 输入框圆角：单行时近药丸，多行时倒角柔和不过度侵入文字区 */
 .input-wrapper > div:first-child {
     background: #ffffff !important;
     border-color: #d1d5db !important;
+    border-radius: 22px !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
 }
 .dark .input-wrapper > div:first-child {
     background: #1e293b !important;
     border-color: #334155 !important;
+    border-radius: 22px !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
 }
 .drop-overlay-input {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(37, 99, 235, 0.15); backdrop-filter: blur(3px);
-    border: 3px dashed var(--primary); border-radius: 9999px;
+    border: 3px dashed var(--primary); border-radius: 22px;
     display: flex; align-items: center; justify-content: center;
     font-size: 1rem; color: var(--primary); font-weight: 600; pointer-events: none;
     z-index: 30; opacity: 0; visibility: hidden; transition: opacity 0.2s;
