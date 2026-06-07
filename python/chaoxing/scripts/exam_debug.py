@@ -15,7 +15,7 @@ import configparser
 cfg = configparser.ConfigParser()
 cfg.read('/tmp/AutomaticCB/config_u_87ee22f333e5173a71c46dd3.ini', encoding='utf8')
 
-from api.base import Chaoxing, Account, init_session
+from chaoxing.base import Chaoxing, Account, init_session
 acc = Account(cfg.get('common','username'), cfg.get('common','password'))
 api = Chaoxing(account=acc)
 lr = api.login()

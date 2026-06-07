@@ -8,19 +8,19 @@ import sys
 import os
 import argparse
 
-# 确保 api 模块可导入
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 确保 chaoxing 模块可导入
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.base import Chaoxing, Account, init_session
+from chaoxing.base import Chaoxing, Account, init_session
 # Tiku imported lazily in cmd_list
-from api.logger import logger
+from chaoxing.logger import logger
 import logging
 logging.disable(logging.CRITICAL)  # Suppress debug logs for API mode
 
 
 def cmd_list(args):
     """列出指定用户的考试"""
-    from api.exam_auto import ChaoxingExam
+    from chaoxing.exam_auto import ChaoxingExam
 
     # 读取用户配置
     config_path = f"/tmp/AutomaticCB/config_{args.user_id}.ini"
@@ -39,7 +39,7 @@ def cmd_list(args):
         return
 
     account = Account(username, password)
-    from api.exam_auto import _get_tiku
+    from chaoxing.exam_auto import _get_tiku
     tiku = _get_tiku()
 
     try:
@@ -50,7 +50,7 @@ def cmd_list(args):
             return
 
         courses = api.get_course_list()
-        from api.base import init_session
+        from chaoxing.base import init_session
         exam_runner = ChaoxingExam(account, tiku=tiku, session=init_session())
         all_exams = []
 

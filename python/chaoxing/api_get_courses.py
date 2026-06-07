@@ -4,9 +4,9 @@ import json, sys, os, argparse, tempfile
 
 # 不切换目录，保持 PHP cd 到的 /tmp/AutomaticCB/ 作为工作目录
 # (/tmp/AutomaticCB/ 有 config.ini 和 cookies.txt 等运行时文件)
-script_dir = os.path.dirname(os.path.abspath(__file__))  # /var/www/html/oneapichat/
+script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # /var/www/html/oneapichat/python/
 os.environ["COLUMNS"] = "120"
-# 确保 api 模块可导入（/var/www/html/oneapichat/api/ 和 /tmp/AutomaticCB/ 都加入路径）
+# 确保 chaoxing 模块可导入（python/ + /tmp/AutomaticCB/ 都加入路径）
 sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'AutomaticCB'))
 sys.path.insert(0, script_dir)
 
@@ -14,7 +14,7 @@ import logging
 logging.disable(logging.CRITICAL)
 
 from configparser import ConfigParser
-from api.base import Chaoxing, Account
+from chaoxing.base import Chaoxing, Account
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--user-id', default='')

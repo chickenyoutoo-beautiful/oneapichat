@@ -18,7 +18,7 @@ def main():
     _lr.remove()
     _lr.add(lambda _: None)
 
-    from api.answer import Tiku
+    from chaoxing.answer import Tiku
 
     tiku = Tiku()
     try:

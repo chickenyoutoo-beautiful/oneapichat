@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os.path
 import pickle
-from api.config import GlobalConst as gc
+from chaoxing.config import GlobalConst as gc
 
 
 def save_cookies(_session):

@@ -388,7 +388,7 @@ class BrowserExam:
             }
 
         # 浏览器已完成 captcha 并拿到 enc，现在用 API 模式答题
-        from api.exam_auto import ChaoxingExam
+        from chaoxing.exam_auto import ChaoxingExam
         api_exam = ChaoxingExam(self.account, tiku=self.tiku)
         api_exam.exam_id = exam_id
         api_exam.course_id = course_id

@@ -1,5 +1,5 @@
 import time
-from api.config import GlobalConst as gc
+from chaoxing.config import GlobalConst as gc
 
 def sec2time(sec: int):
     h = int(sec / 3600)

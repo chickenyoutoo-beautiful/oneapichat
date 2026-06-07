@@ -28,7 +28,7 @@ def get_active_session():
         print("No configs found")
         return None
     
-    from api.base import Chaoxing, Account, init_session
+    from chaoxing.base import Chaoxing, Account, init_session
     cfg = configparser.ConfigParser()
     cfg.read(configs[0], encoding='utf8')
     

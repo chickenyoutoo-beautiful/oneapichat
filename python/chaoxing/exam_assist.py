@@ -23,9 +23,9 @@ _lr.add(lambda _: None)
 
 # 按需导入
 def _get_api():
-    from api.base import Chaoxing, Account, init_session
-    from api.answer import Tiku
-    from api.exam_auto import ChaoxingExam
+    from chaoxing.base import Chaoxing, Account, init_session
+    from chaoxing.answer import Tiku
+    from chaoxing.exam_auto import ChaoxingExam
     return Chaoxing, Account, init_session, Tiku, ChaoxingExam
 
 CFG_PATH = os.path.join(API_DIR, 'config.ini')
@@ -68,7 +68,7 @@ def cmd_list(args):
         print(f'登录失败: {lr.get("msg","")}')
         return
     s = init_session()
-    from api.exam_auto import ChaoxingExam
+    from chaoxing.exam_auto import ChaoxingExam
     exam = ChaoxingExam(acc, session=s)
     courses = api.get_course_list()
     all_exams = []

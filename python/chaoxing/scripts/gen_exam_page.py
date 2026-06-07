@@ -5,7 +5,7 @@ sys.path.insert(0, '/var/www/html/oneapichat')
 
 cfg = configparser.ConfigParser()
 cfg.read('/tmp/AutomaticCB/config_u_87ee22f333e5173a71c46dd3.ini', encoding='utf8')
-from api.base import Account, Chaoxing, init_session
+from chaoxing.base import Account, Chaoxing, init_session
 acc = Account(cfg.get('common','username'), cfg.get('common','password'))
 api = Chaoxing(account=acc)
 lr = api.login()

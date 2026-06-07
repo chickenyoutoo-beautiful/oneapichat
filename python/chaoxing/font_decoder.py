@@ -1,5 +1,5 @@
 from bs4 import BeautifulSoup
-import api.cxsecret_font as cxfont
+import chaoxing.cxsecret_font as cxfont
 import re
 
 

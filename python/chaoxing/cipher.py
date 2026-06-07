@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import base64
 import pyaes
-from api.config import GlobalConst as gc
+from chaoxing.config import GlobalConst as gc
 
 
 def pkcs7_unpadding(string):

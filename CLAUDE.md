@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-08**: 📦 超星/考试模块整理 — `python/api/` + 根目录 `scripts/` + 散落 `.py` → 统一归入 `python/chaoxing/`
 - **2026-06-06**: 🌊 流式处理提取 — stream-handler.js (1,238行, 5函数)，main.js 4,351→3,116 (-28.4%!)
 - **2026-06-06**: 🧩 verifyToken 统一 — 4 实现→1 共享 `verifyAuthToken` (auth_helpers.php)，消除重复
 - **2026-06-06**: 🔄 fetchWithRetry 合并 — main.js + agent.js 重复 → utils.js 统一版本
@@ -74,8 +75,10 @@
 │   └── lib/lib/      # 第三方库（KaTeX、marked、mermaid、xlsx 等）
 ├── python/           # Python 后端
 │   ├── engine_server.py # ★ 核心引擎（FastAPI, Agent, 流式, SSE, 视频, 浏览器）
-│   ├── main.py       # 超星自动化主入口
-│   ├── api/          # 超星 API 模块（登录、答题、考试、字体解密等）
+│   ├── chaoxing/     # ★ 超星/考试模块（刷课、答题、考试、字体解密）
+│   │   ├── main.py   # 超星自动化主入口
+│   │   ├── scripts/  # 考试浏览器自动化脚本
+│   │   └── learning_records.db  # 学习记录
 │   └── engine/       # 引擎模块（浏览器、事件、策略、重试）
 ├── users/            # 用户数据（users.json, sessions.json, 配置, 记忆）
 ├── chat_data/        # 聊天历史 JSON 文件
@@ -84,8 +87,7 @@
 ├── deploy/           # 部署脚本、Docker、Nginx 配置
 ├── docs/             # 文档（README, CHANGELOG, LICENSE）
 ├── config/           # 配置文件（.mmx_config.json）
-├── workspace/        # Agent 工作目录
-└── scripts/          # 考试浏览器自动化脚本
+└── workspace/        # Agent 工作目录
 ```
 
 ## 服务端口与路由
@@ -177,14 +179,14 @@
 | `chat_data/user_*_*.json` | 聊天历史 | JSON（per-user + per-chat） |
 | `.engine/chat_*.db` | 流式进度 + 活跃任务 | SQLite |
 | `.engine/memory/` | Agent 记忆/人格 | JSON |
-| `python/api/learning_records.db` | 超星课程进度 | SQLite |
+| `python/chaoxing/learning_records.db` | 超星课程进度 | SQLite |
 | `uploads/` | 用户文件 | 文件系统 |
 
 ## 已知问题与注意事项
 
 1. `public/` 下 `lib/`、`resource/`、`src/` 多一层嵌套（`lib/lib/` 等），项目根有符号链接指向内层
 2. `index_root.html` 为独立入口（已从 git 恢复），通过根符号链接访问
-3. `python/api/search_question.py` → 根 `api/search_question.py` 通过符号链接访问
+3. `python/chaoxing/search_question.py` → 根 `api/search_question.py` 通过符号链接访问
 4. 密钥硬编码：AES 密钥 `naujtrats-secret` 在 `api/init.php` 和 `main.js` 中
 5. 会话 Cookie 域 `.naujtrats.xyz` 用于跨子域共享
 6. `keepalive: false` 用于配置保存 fetch（因 body 可能超 64KB）

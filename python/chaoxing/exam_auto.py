@@ -16,8 +16,8 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
 
-from api.base import init_session
-from api.answer import Tiku as _Tiku
+from chaoxing.base import init_session
+from chaoxing.answer import Tiku as _Tiku
 
 def _get_tiku():
     """获取 Tiku 实例（兼容独立函数调用）"""
@@ -177,7 +177,7 @@ class ChaoxingExam:
     def _build_session(self):
         """复用已登录 session（调用方须先通过 Chaoxing.login() 登录）"""
         if self.session is None:
-            from api.base import init_session as _init
+            from chaoxing.base import init_session as _init
             self.session = _init()
         return self.session
 

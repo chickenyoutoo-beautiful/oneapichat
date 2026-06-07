@@ -29,7 +29,7 @@ def main():
     username = cfg.get('common', 'username', fallback='')
     password = cfg.get('common', 'password', fallback='')
 
-    from api.base import Chaoxing, Account, init_session
+    from chaoxing.base import Chaoxing, Account, init_session
     if username and password:
         acc = Account(username, password)
         api = Chaoxing(account=acc)

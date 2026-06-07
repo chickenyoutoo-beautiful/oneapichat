@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """超星考试全透明代理 - 带自动重新登录"""
 import http.server, socketserver, requests, re, sys, os, threading, logging
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from api.base import init_session, Account, Chaoxing
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+from chaoxing.base import init_session, Account, Chaoxing
 import configparser
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(name)s | %(levelname)s | %(message)s')

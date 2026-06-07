@@ -2,8 +2,8 @@
 import re
 import json
 from bs4 import BeautifulSoup
-from api.logger import logger
-from api.font_decoder import FontDecoder
+from chaoxing.logger import logger
+from chaoxing.font_decoder import FontDecoder
 
 def decode_course_list(_text):
     logger.trace("开始解码课程列表...")

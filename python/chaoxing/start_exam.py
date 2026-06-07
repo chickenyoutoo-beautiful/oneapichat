@@ -28,9 +28,9 @@ def main():
     username = cfg.get('common', 'username', fallback='')
     password = cfg.get('common', 'password', fallback='')
 
-    from api.base import Chaoxing, Account, init_session
-    from api.exam_auto import ChaoxingExam, ExamAccessDenied, ExamIsCommitted, ExamNotStart
-    from api.answer import Tiku
+    from chaoxing.base import Chaoxing, Account, init_session
+    from chaoxing.exam_auto import ChaoxingExam, ExamAccessDenied, ExamIsCommitted, ExamNotStart
+    from chaoxing.answer import Tiku
 
     # 登录
     acc = Account(username, password)

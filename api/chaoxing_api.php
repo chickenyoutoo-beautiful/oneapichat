@@ -173,7 +173,7 @@ switch ($action) {
         if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
             $json = file_get_contents($cache_file);
         } else {
-            $cmd = pyCmd('python/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
+            $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
             exec($cmd, $output, $exit_code);
             $json = '';
             foreach (array_reverse($output) as $line) {
@@ -203,7 +203,7 @@ switch ($action) {
                 $phone = $ini_phone['common']['username'] ?? '';
             }
             $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-            $db_json = shell_exec(pyCmd('python/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
+            $db_json = shell_exec(pyCmd('python/chaoxing/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
             if ($db_json) {
                 $db_data = json_decode($db_json, true);
                 if ($db_data && isset($db_data['courses'])) {
@@ -284,7 +284,7 @@ switch ($action) {
         clearTaskState($userId);
 
         // 重置 DB 中被选课程的 in_progress 状态（允许重新刷）
-        $reset_cmd = pyCmd('python/db_course_status.py', '--user-id ' . escapeshellarg($userId) . ' --reset-start ' . escapeshellarg($course_ids) . ' 2>/dev/null');
+        $reset_cmd = pyCmd('python/chaoxing/db_course_status.py', '--user-id ' . escapeshellarg($userId) . ' --reset-start ' . escapeshellarg($course_ids) . ' 2>/dev/null');
         exec($reset_cmd);
 
         // 写入 course_list 到用户级 config
@@ -296,7 +296,7 @@ switch ($action) {
         file_put_contents($log_path, '');
 
         // 启动 Python 进程，传入用户级 config
-        $cmd = pyBgCmd('python/main.py', '-c' . escapeshellarg($config_path), $log_path);
+        $cmd = pyBgCmd('python/chaoxing/main.py', '-c' . escapeshellarg($config_path), $log_path);
         $pid = trim(shell_exec($cmd));
         file_put_contents($pid_file, $pid);
 
@@ -577,7 +577,7 @@ switch ($action) {
             $phone = $ini_phone['common']['username'] ?? '';
         }
         $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-        $db_json = shell_exec(pyCmd('python/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
+        $db_json = shell_exec(pyCmd('python/chaoxing/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
 
         echo json_encode(['success' => true]);
         break;
@@ -617,7 +617,7 @@ switch ($action) {
             exit;
         }
 
-        $cmd = pyCmd('python/exam_api.py', 'list --user-id ' . escapeshellarg($userId) . ' 2>&1');
+        $cmd = pyCmd('python/chaoxing/exam_api.py', 'list --user-id ' . escapeshellarg($userId) . ' 2>&1');
         exec($cmd, $out, $code);
         $json = implode('', $out);
         // 找 JSON 行
@@ -705,7 +705,7 @@ switch ($action) {
             $exam_json_arg = ' --exam-json ' . escapeshellarg($exam_json_path);
         }
 
-        $cmd = pyBgCmd('python/main.py', '-c' . escapeshellarg($config_path) . ' --exam' . $exam_json_arg, $log_path);
+        $cmd = pyBgCmd('python/chaoxing/main.py', '-c' . escapeshellarg($config_path) . ' --exam' . $exam_json_arg, $log_path);
         $pid = trim(shell_exec($cmd));
         $pid_file = examPidPath($userId);
         file_put_contents($pid_file, $pid);
@@ -729,7 +729,7 @@ switch ($action) {
         $cache_file = userCoursesCachePath($userId);
         @unlink($cache_file);
 
-        $cmd = pyCmd('python/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
+        $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
         exec($cmd, $out, $code);
         $json_line = '';
         foreach (array_reverse($out) as $line) {
@@ -795,7 +795,7 @@ switch ($action) {
             $phone = $ini_phone['common']['username'] ?? '';
         }
         $phone_arg = $phone ? '--phone ' . escapeshellarg($phone) : '';
-        $db_json = shell_exec(pyCmd('python/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
+        $db_json = shell_exec(pyCmd('python/chaoxing/db_course_status.py', '--user-id ' . escapeshellarg($userId) . " $phone_arg 2>/dev/null"));
         if ($db_json) {
             $db_data = json_decode($db_json, true);
             if ($db_data && isset($db_data['courses'])) {

@@ -3,12 +3,12 @@ import argparse
 import configparser
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
-from api.logger import logger
-from api.base import Chaoxing, Account
-from api.exceptions import LoginError, FormatError, JSONDecodeError,MaxRollBackError
-from api.answer import Tiku
-from api.tracker import LearningTracker
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from chaoxing.logger import logger
+from chaoxing.base import Chaoxing, Account
+from chaoxing.exceptions import LoginError, FormatError, JSONDecodeError,MaxRollBackError
+from chaoxing.answer import Tiku
+from chaoxing.tracker import LearningTracker
 from urllib3 import disable_warnings,exceptions
 import os
 import json
@@ -229,7 +229,7 @@ if __name__ == '__main__':
         # ── 考试模式 ──────────────────────────────────
         if cli_args.exam:
             try:
-                from api.exam_auto import ChaoxingExam
+                from chaoxing.exam_auto import ChaoxingExam
                 exam_runner = ChaoxingExam(account, tiku=tiku)
                 auto_submit = not cli_args.exam_no_submit
 
@@ -306,7 +306,7 @@ if __name__ == '__main__':
                         if need_browser or cli_args.exam_browser:
                             try:
                                 logger.info(f"  启动浏览器考试...")
-                                from api.exam_browser import BrowserExam
+                                from chaoxing.exam_browser import BrowserExam
                                 b_exam = BrowserExam(account, tiku=tiku)
                                 b_result = b_exam.run(
                                     course_id=exam_info['course_id'],

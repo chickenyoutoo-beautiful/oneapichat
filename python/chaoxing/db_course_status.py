@@ -2,9 +2,12 @@
 """查询 learning_records.db 中所有课程的 status / completed_videos / completed_works / total_videos / total_works"""
 import sqlite3, json, sys, os, argparse, tempfile
 
-# 读取与 api/tracker.py 相同的 learning_records.db
+# 确保 chaoxing 模块可导入
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 读取与 tracker.py 相同的 learning_records.db
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-db_path = os.path.join(SCRIPT_DIR, 'api', 'learning_records.db')
+db_path = os.path.join(SCRIPT_DIR, 'learning_records.db')
 # fallback: 旧版路径（/tmp/AutomaticCB/api/learning_records.db）
 if not os.path.exists(db_path):
     alt = os.path.join(tempfile.gettempdir(), 'AutomaticCB', 'api', 'learning_records.db')

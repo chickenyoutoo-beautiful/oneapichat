@@ -37,7 +37,7 @@ def main():
             ACCOUNTS.append((u, p))
 
     import requests
-    from api.cipher import AESCipher
+    from chaoxing.cipher import AESCipher
 
     for username, password in ACCOUNTS:
         try:

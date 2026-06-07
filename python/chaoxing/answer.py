@@ -2,7 +2,7 @@ import configparser
 import requests
 from pathlib import Path
 import json
-from api.logger import logger
+from chaoxing.logger import logger
 import random
 from urllib3 import disable_warnings,exceptions
 import os, sys

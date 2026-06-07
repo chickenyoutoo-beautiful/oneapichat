@@ -6,18 +6,18 @@ import requests
 from hashlib import md5
 from requests.adapters import HTTPAdapter
 
-from api.cipher import AESCipher
-from api.logger import logger
-from api.cookies import save_cookies, use_cookies
-from api.process import show_progress
-from api.config import GlobalConst as gc
-from api.decode import (decode_course_list,
+from chaoxing.cipher import AESCipher
+from chaoxing.logger import logger
+from chaoxing.cookies import save_cookies, use_cookies
+from chaoxing.process import show_progress
+from chaoxing.config import GlobalConst as gc
+from chaoxing.decode import (decode_course_list,
                         decode_course_point,
                         decode_course_card,
                         decode_course_folder,
                         decode_questions_info
                         )
-from api.answer import *
+from chaoxing.answer import *
 
 def get_timestamp():
     return str(int(time.time() * 1000))

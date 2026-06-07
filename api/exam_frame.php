@@ -85,7 +85,7 @@ if ($action === 'fetch' && $proxy_url) {
 }
 
 // 尝试服务端启动考试
-$pyScript = dirname(__DIR__) . '/python/api/start_exam.py';
+$pyScript = dirname(__DIR__) . '/python/chaoxing/start_exam.py';
 $cmd = 'cd ' . escapeshellarg(sys_get_temp_dir() . '/AutomaticCB')
     . ' && PYTHONPATH=' . escapeshellarg(dirname(__DIR__))
     . ' python3 ' . escapeshellarg($pyScript)
@@ -155,7 +155,7 @@ body{font-family:sans-serif;background:#f8fafc;color:#1e293b;padding:16px;paddin
 }
 
 function fetchUrl($url) {
-    $pyScript = dirname(__DIR__) . '/python/api/fetch_url.py';
+    $pyScript = dirname(__DIR__) . '/python/chaoxing/fetch_url.py';
     $cmd = 'cd ' . escapeshellarg(sys_get_temp_dir() . '/AutomaticCB')
         . ' && PYTHONPATH=' . escapeshellarg(dirname(__DIR__))
         . ' python3 ' . escapeshellarg($pyScript)
