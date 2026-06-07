@@ -268,6 +268,21 @@ function stopGenerationForChat(chatId) {
     }
 }
 
+// ★ 链式输出模式: 工具调用后保留旧消息,新内容追加为新气泡
+window._chainMode = localStorage.getItem('chainMode') === '1';
+window.toggleChainMode = function() {
+    window._chainMode = !window._chainMode;
+    localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
+    var btn = document.getElementById('chainModeBtn');
+    if (btn) btn.classList.toggle('active', window._chainMode);
+    showToast(window._chainMode ? '🔗 链式输出: 开 (工具调用后保留历史)' : '📝 链式输出: 关 (覆盖模式)', 'info', 2000);
+};
+// 初始化链式按钮状态
+setTimeout(function() {
+    var _cb = document.getElementById('chainModeBtn');
+    if (_cb && window._chainMode) _cb.classList.add('active');
+}, 500);
+
 window.stopGeneration = function () {
     if (currentChatId) {
         stopGenerationForChat(currentChatId);
@@ -2205,6 +2220,31 @@ window.useAlternativeVisionModel = function() {
                         // 不 return,继续 attemptRequestWithFreshAbort
                     }
                     }
+                }
+
+                // ★ 链式输出: 工具调用后保留旧消息,新内容作为新气泡追加
+                if (window._chainMode && pendingMsg && (pendingMsg.content || pendingMsg.reasoning)) {
+                    // 1. 最终化当前消息
+                    delete pendingMsg.partial;
+                    pendingMsg.time = Date.now() - startTime;
+                    pendingMsg.usage = usage;
+                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+                    // 2. 创建新 pendingMsg 作为下一个气泡
+                    var _newPending = { role: 'assistant', content: '', reasoning: '', partial: true, _chainNext: true };
+                    chats[chatId].messages.push(_newPending);
+                    pendingMsg = _newPending;
+                    // 3. 渲染新气泡
+                    if (currentChatId === chatId) {
+                        appendMessage('assistant', '', null, '', null, null, false, null, null, true);
+                        var _rows = $.chatMessagesContainer.querySelectorAll('.message-row.assistant');
+                        var _lastRow = _rows[_rows.length - 1];
+                        if (_lastRow) {
+                            var _newBubble = _lastRow.querySelector('.bubble.assistant');
+                            if (_newBubble) activeBubbleMap[chatId] = _newBubble;
+                        }
+                    }
+                    saveChats();
                 }
 
                 // ★ 重置前先杀死旧的 AbortController

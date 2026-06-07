@@ -1356,14 +1356,17 @@ select option { background: white; color: #1f2937; }
 /* ===== 输入框包装与拖拽层 ===== */
 .input-wrapper {
     position: relative;
-    background: white;
+    background: var(--bg, #fff);
     border-radius: 9999px;
-    border: 1px solid #e5e7eb;
     overflow: visible;
 }
-.dark .input-wrapper {
-    background: #1f2937;
-    border-color: #374151;
+.input-wrapper > div:first-child {
+    background: var(--bg-secondary, #f9fafb) !important;
+    border-color: var(--border-color, #e5e7eb) !important;
+}
+.dark .input-wrapper > div:first-child {
+    background: #1e293b !important;
+    border-color: #334155 !important;
 }
 .drop-overlay-input {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -4602,6 +4605,20 @@ html:not(.dark) #userInput {
     padding: 4px 14px;
 }
 .dark .tool-call-error { background: #450a0a; color: #fca5a5; border-color: #991b1b; }
+
+/* ── 链式输出按钮 ── */
+.chain-mode-btn {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 4px 8px; border-radius: 12px; border: 1px solid #e5e7eb;
+    background: #fff; color: #6b7280; cursor: pointer;
+    font-size: 11px; font-weight: 600; transition: all 0.2s;
+    height: 28px; white-space: nowrap;
+}
+.chain-mode-btn:hover { border-color: #6366f1; color: #6366f1; background: #eef2ff; }
+.chain-mode-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+.dark .chain-mode-btn { background: #1e293b; border-color: #374151; color: #9ca3af; }
+.dark .chain-mode-btn:hover { border-color: #818cf8; color: #a5b4fc; background: #1e1b4b; }
+.dark .chain-mode-btn.active { background: #4f46e5; color: #fff; border-color: #6366f1; }
 
 /* ── 历史工具调用展示（dialogs.js 渲染的 tool-calls-history）── */
 .tool-calls-history { background: #f0f4ff; }
