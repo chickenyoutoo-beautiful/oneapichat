@@ -168,6 +168,18 @@ function buildApiMessages(chatId) {
     // 只检查当前消息是否包含图片,避免历史图片触发视觉模型
     var currentHasImage = pendingFiles.length > 0 && pendingFiles.some(f => f.isImage || f.type?.startsWith('image/')) || !!window.__currentMessageHasImages;
 
+    // ★ 判断当前模型是否支持视觉（用于注入生成图片到上下文）
+    function _isVisionModel() {
+        if (_curModelName.indexOf('minimax') !== -1) return true;
+        if (_curModelName.indexOf('gpt-4o') !== -1 || _curModelName.indexOf('gpt-5') !== -1) return true;
+        if (_curModelName.indexOf('gemini') !== -1) return true;
+        if (_curModelName.indexOf('claude') !== -1) return true;
+        if (_curModelName.indexOf('vision') !== -1 || _curModelName.indexOf('vl') !== -1) return true;
+        if (_curModelName.indexOf('grok') !== -1) return true;
+        if (_curModelName.indexOf('deepseek-v4') !== -1) return true;  // DS V4 支持 vision
+        return false;
+    }
+
     // ★ 模型配置:根据模型类型决定 system 消息处理方式
     // MiniMax/部分模型不支持多条 system 消息,需要合并为一条
     var _needMergeSystem = false;
@@ -287,6 +299,29 @@ function buildApiMessages(chatId) {
                 _assistantMsg.tool_calls = msg.tool_calls;
             }
             if (msg.reasoning_content) _assistantMsg.reasoning_content = msg.reasoning_content;
+            // ★ 将生成的图片注入到消息中，让视觉模型能看到自己之前的生成结果
+            // 这样模型可以对已生成图片进行修改、评价，无需用户重新上传
+            var _genImgs = msg.generatedImages || (msg.generatedImage ? [msg.generatedImage] : []);
+            if (_genImgs.length > 0 && _isVisionModel()) {
+                var _imgParts = [];
+                // 最多附带3张最近的图片，避免上下文爆炸
+                var _recentImgs = _genImgs.slice(-3);
+                for (var _gi = 0; _gi < _recentImgs.length; _gi++) {
+                    var _imgUrl = _recentImgs[_gi];
+                    // 跳过 base64 data URL（太长）
+                    if (_imgUrl && !_imgUrl.startsWith('data:')) {
+                        // 补全相对路径为绝对 URL
+                        if (_imgUrl.startsWith('/')) _imgUrl = window.location.origin + _imgUrl;
+                        _imgParts.push({ type: 'image_url', image_url: { url: _imgUrl } });
+                    }
+                }
+                if (_imgParts.length > 0) {
+                    _assistantMsg.content = [
+                        { type: 'text', text: '[本消息附带了 ' + _imgParts.length + ' 张生成的图片，见下方]' },
+                        { type: 'text', text: cleanObjectObject(msg.content) || '(empty)' }
+                    ].concat(_imgParts);
+                }
+            }
             apiMessagesUnfiltered.push(_assistantMsg);
         } else if (msg.role === 'tool') {
             // ★ 保留 tool 结果 — 否则模型不知道工具执行结果，会重复调用或虚构调用
