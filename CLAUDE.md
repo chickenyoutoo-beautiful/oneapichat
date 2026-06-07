@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-08**: 🔧 刷课模块修复 — `learning_records.db` 目录权限 + `server_tools.py` 缺失 import + 路径修复
 - **2026-06-08**: 📦 超星/考试模块整理 — `python/api/` + 根目录 `scripts/` + 散落 `.py` → 统一归入 `python/chaoxing/`
 - **2026-06-06**: 🌊 流式处理提取 — stream-handler.js (1,238行, 5函数)，main.js 4,351→3,116 (-28.4%!)
 - **2026-06-06**: 🧩 verifyToken 统一 — 4 实现→1 共享 `verifyAuthToken` (auth_helpers.php)，消除重复
