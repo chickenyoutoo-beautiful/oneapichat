@@ -128,20 +128,20 @@ window.ResumeStream = (function() {
             if (!sid) {
                 try { sid = localStorage.getItem('_rs_sid')||''; } catch(e) {}
             }
-            if (!sid || sid.indexOf('pending_')===0) return false;
+            if (!sid || sid.indexOf('pending_')===0) { console.warn('[RS resume] No valid sid:', sid); return false; }
 
             var scid = localStorage.getItem('_rs_cid')||'';
             if (scid && scid !== 'pending' && scid !== chatId) chatId = scid;
 
             var ts = parseInt(localStorage.getItem('_rs_ts')||'0');
-            // ★ TTL 放宽到 60min（引擎 _resumable 也是 30min，但 StreamBuffer 磁盘持久化更长）
-            if (Date.now() - ts > 3600000) return false;
+            if (Date.now() - ts > 3600000) { console.warn('[RS resume] TTL expired for sid:', sid); return false; }
 
-            if (_active[chatId]) return false;
+            if (_active[chatId]) { console.log('[RS resume] Already active for chat:', chatId); return false; }
+            console.log('[RS resume] Starting resume: chatId=' + chatId + ' sid=' + sid);
             _active[chatId] = true;
             var _isCurrentChat = (currentChatId === chatId);
             try {
-                if (!chats[chatId]) return false;
+                if (!chats[chatId]) { console.warn('[RS resume] Chat not found:', chatId); return false; }
                 var msgs = chats[chatId].messages;
                 var pm = msgs.find(function(m){return m.partial;});
                 if (!pm) {
@@ -158,6 +158,7 @@ window.ResumeStream = (function() {
                     await new Promise(function(r) { setTimeout(r, 150); });
                 }
                 var result = await _readSSE(sid, chatId, pm, true);
+                console.log('[RS resume] _readSSE returned:', result ? ('fullText=' + (result.fullText||'').substring(0,80) + ' toolCalls=' + (result.toolCalls||[]).length) : 'NULL');
                 // ★ 先结束 typing 状态，清掉流式渲染残留
                 isTypingMap[chatId] = false;
                 // ★ 稍等一下让 RAF 退出

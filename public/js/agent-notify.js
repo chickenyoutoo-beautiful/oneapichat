@@ -396,14 +396,17 @@ window._recoverActiveTasks = async function() {
                 try { localStorage.setItem('_rs_ts', Date.now()); } catch(e) {}
                 // Try resuming the stream
                 try {
+                    console.log('[recoverTasks] Attempting resume: chatId=' + task.chat_id + ' sid=' + task.stream_id + ' msgId=' + task.msg_id);
                     var resumed = await ResumeStream.resume(task.chat_id, task.stream_id, task.msg_id);
                     if (resumed) {
                         console.log('[recoverTasks] Resumed stream', task.stream_id);
-                        window._backendRecovered = true;  // ★ 阻止旧 _autoRecover 路径重复处理
-                        window._pendingRecovery = null;   // ★ 清除旧路径的 recovery 数据
+                        window._backendRecovered = true;
+                        window._pendingRecovery = null;
+                    } else {
+                        console.warn('[recoverTasks] Resume returned false for sid=' + task.stream_id);
                     }
                 } catch(_rte) {
-                    console.warn('[recoverTasks] resume failed:', _rte.message);
+                    console.warn('[recoverTasks] resume error:', _rte.message, _rte.stack);
                 }
             }
         }
