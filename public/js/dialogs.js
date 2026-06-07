@@ -397,9 +397,9 @@ function compressChatsForStorage(chatsObj) {
         slim[id] = JSON.parse(JSON.stringify(chat));
         if (slim[id].messages) {
             slim[id].messages = slim[id].messages.map(function(msg) {
-                // 截断超长消息内容
-                if (msg.content && msg.content.length > 10000) {
-                    msg.content = msg.content.slice(0, 10000) + '...(内容已截断)';
+                // ★ 截断超长消息内容（1MB 上限，基本不会触发）
+                if (msg.content && msg.content.length > 1000000) {
+                    msg.content = msg.content.slice(0, 1000000) + '\n\n...(内容过长已截断)';
                 }
                 // ★ 截断 web_fetch URL 列表 (最多保留10条)
                 if (msg._webFetchUrls && msg._webFetchUrls.length > 10) {
