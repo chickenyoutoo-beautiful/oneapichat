@@ -126,7 +126,8 @@ window.ResumeStream = (function() {
             }
         }
         try { cleanupStreamState(chatId); } catch(e) {}
-        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList};
+        // ★ 标记是否正常完成(收到done事件) — 未完成的内容不应持久化
+        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:done};
     }
 
     return {

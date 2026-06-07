@@ -304,7 +304,9 @@ details.reasoning-details summary {
     gap: 6px;
     user-select: none;
     font-size: 0.9rem;
+    color: #374151;
 }
+.dark details.reasoning-details summary { color: #d1d5db; }
 details.reasoning-details summary::before {
     content: "▸";
     font-size: 0.9rem;
@@ -317,6 +319,9 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     padding: 4px 8px;
     border-left: 2px solid #9a8cc0;
     font-style: italic;
+    color: #4b5563;
+}
+.dark .reasoning-content { border-left-color: #6366f1; color: #9ca3af; }
     white-space: pre-wrap;
     font-size: 0.85rem;
     background: rgba(200, 215, 240, 0.2);
@@ -3981,6 +3986,7 @@ html:not(.dark) #userInput {
     font-size: 10px;
     flex-shrink: 0;
 }
+.dark .tool-call-card-icon { background: #312e81; }
 .tool-call-card-chevron {
     margin-left: auto;
     transition: transform 0.2s;

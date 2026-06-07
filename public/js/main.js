@@ -1645,13 +1645,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
 
             // ★ 可恢复流式: 开关打开时走后端引擎
-            // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
             var useStream = _isImageModel ? false : getChecked('streamToggle');
             // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
             // 用户可设置 __enableResumeStream='0' 显式禁用
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
-            var _isContinuation = (toolCallCount > 0);
+            // ★ 工具调用续接也走 RS（每轮独立 stream_id，不会嵌套）
+            // 限制 8 轮以上回退直连，避免过多引擎线程
+            var _isContinuation = (toolCallCount > 8);
             var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
                 // ★ 先持久化用户消息到服务器，防止刷新丢失
@@ -1664,23 +1665,29 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     chatId, pendingMsg
                 );
                 if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
-                    // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
-                    usage = _rsResult.usage;
-                    toolCalls = _rsResult.toolCalls || [];
-                    if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
-                    // ★ 图像模型: 进度条清除
-                    try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
-                    clearTimeout(timeoutIdVal);
-                    // ★ 设置 _rsDone 标记跳过 HTTP 直连路径，但继续工具调用处理
-                    var _rsDone = true;
-                    // ★ 完成 partial 标记并保存(RS 路径跳过 HTTP 块,需在此处持久化)
-                    delete pendingMsg.partial;
-                    pendingMsg.time = Date.now() - startTime;
-                    pendingMsg.usage = usage;
-                    saveChats(true);  // ★ 强制服务器保存+广播到其他设备
-                    // ★ 多端同步: 广播 RS 完成到其他设备
-                    if (typeof window._broadcastChatUpdate === 'function') {
-                        window._broadcastChatUpdate(chatId);
+                    // ★ 检查流是否正常完成(收到done事件) — 未完成的内容不持久化
+                    if (!_rsResult.completed) {
+                        console.warn('[RS] 流未正常完成(中断/刷新), 回退到 HTTP 直连');
+                        // 不设置 _rsDone, 流会走 HTTP 直连降级
+                    } else {
+                        // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
+                        usage = _rsResult.usage;
+                        toolCalls = _rsResult.toolCalls || [];
+                        if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
+                        // ★ 图像模型: 进度条清除
+                        try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
+                        clearTimeout(timeoutIdVal);
+                        // ★ 设置 _rsDone 标记跳过 HTTP 直连路径，但继续工具调用处理
+                        var _rsDone = true;
+                        // ★ 完成 partial 标记并保存(RS 路径跳过 HTTP 块,需在此处持久化)
+                        delete pendingMsg.partial;
+                        pendingMsg.time = Date.now() - startTime;
+                        pendingMsg.usage = usage;
+                        saveChats(true);  // ★ 强制服务器保存+广播到其他设备
+                        // ★ 多端同步: 广播 RS 完成到其他设备
+                        if (typeof window._broadcastChatUpdate === 'function') {
+                            window._broadcastChatUpdate(chatId);
+                        }
                     }
                 } else {
                     // 引擎流失败：回退普通 HTTP 直连流
