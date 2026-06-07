@@ -275,7 +275,7 @@ window.toggleChainMode = function() {
     localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
     var btn = document.getElementById('chainModeBtn');
     if (btn) btn.classList.toggle('active', window._chainMode);
-    showToast(window._chainMode ? '🔗 链式输出: 开 (工具调用后保留历史)' : '📝 链式输出: 关 (覆盖模式)', 'info', 2000);
+    // 不弹 toast — 按钮自身状态已足够表明
 };
 // 初始化链式按钮状态
 setTimeout(function() {

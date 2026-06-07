@@ -423,18 +423,21 @@ window.checkAgentNotifications = function() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data || data.error) return;
+            // ★ cron 结果仅错误时通知（成功的例行任务不打扰用户）
             if (data.cron_results && Array.isArray(data.cron_results)) {
                 data.cron_results.forEach(function(r) {
-                    var _status = r.error ? 'error' : 'success';
-                    var _fullMsg = '[' + (r.name || 'Cron') + '] ' + (r.result || r.error || '完成');
-                    window.showAgentNotification(_status, _fullMsg);
+                    if (r.error) {
+                        window.showAgentNotification('error', '[' + (r.name || 'Cron') + '] ' + r.error);
+                    }
+                    // 成功的不弹 toast，静默记录
                 });
             }
+            // ★ pending 消息静默合并到 agent 消息区，不弹 toast
             if (data.pending && Array.isArray(data.pending)) {
                 data.pending.forEach(function(m) {
                     var msg = m.msg || m.text || '';
                     if (msg) {
-                        window.showAgentNotification('info', msg.substring(0, 200));
+                        window.appendAgentSystemMessage(msg, m.source || 'system');
                     }
                 });
             }
@@ -508,7 +511,7 @@ function _showAgentToast(type, message, source) {
     if (!_container) {
         _container = document.createElement('div');
         _container.id = 'agent-toast-container';
-        _container.style.cssText = 'position:fixed;top:70px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+        _container.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:9999;display:flex;flex-direction:column-reverse;gap:6px;pointer-events:none;';
         document.body.appendChild(_container);
     }
     var _toast = document.createElement('div');
@@ -532,7 +535,7 @@ function _showAgentToast(type, message, source) {
     _toast.style.transition = 'all 0.3s cubic-bezier(0.16,1,0.3,1)';
     requestAnimationFrame(function() { _toast.style.opacity = '1'; _toast.style.transform = 'translateX(0)'; });
     // 自动消失
-    var _dur = type === 'error' ? 8000 : 5000;
+    var _dur = type === 'error' ? 5000 : 3000;
     setTimeout(function() {
         _toast.style.opacity = '0';
         _toast.style.transform = 'translateX(40px)';

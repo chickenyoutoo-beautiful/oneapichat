@@ -4641,6 +4641,29 @@ html:not(.dark) #userInput {
 .dark .diff-view-wrapper [style*="background:#dcfce7"] { background: #064e3b !important; color: #6ee7b7 !important; }
 .dark .diff-view-wrapper [style*="background:#fee2e2"] { background: #450a0a !important; color: #fca5a5 !important; }
 
+/* ── Toast 通知容器（底部居中，轻量不遮挡）── */
+.toast-container {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 99999; display: flex; flex-direction: column-reverse; gap: 6px;
+    pointer-events: none; max-width: 90vw;
+}
+.toast {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px; border-radius: 10px; font-size: 13px;
+    background: rgba(30,41,59,0.94); color: #e2e8f0;
+    backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08);
+    pointer-events: auto; transition: all 0.25s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+.toast-icon { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.toast-info .toast-icon { background: #3b82f6; color: #fff; }
+.toast-success .toast-icon { background: #22c55e; color: #fff; }
+.toast-error .toast-icon { background: #ef4444; color: #fff; }
+.toast-warning .toast-icon { background: #f59e0b; color: #000; }
+.toast-message { flex: 1; line-height: 1.4; }
+.toast-close { flex-shrink: 0; background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1; }
+.dark .toast { background: rgba(15,23,42,0.94); }
+
 /* ── 输入区域和流程面板防溢出 ── */
 .flow-panel { z-index: 5; position: relative; }
 .chat-messages-container { padding-bottom: 8px; }
