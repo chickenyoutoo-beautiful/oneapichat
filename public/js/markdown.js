@@ -78,25 +78,28 @@ function _flushStreamRender_batched(chatId, st) {
     var prevH = mb.offsetHeight;
     if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
-        // ★ 渲染 + 高亮在分离 DOM 上完成，一次性写入避免闪烁
+        // ★ 渲染 + 高亮: hljs.highlight() 字符串 API 不受 detached DOM 影响
         var _html = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
-        // ★ 链式输出：如果之前有保存的 HTML（含分隔线），前置拼接
+        // ★ 链式输出：前置拼接已保存的 HTML（含分隔线）
         var _chainMsg = chats[chatId] && chats[chatId].messages.find(function(m) { return m.partial && m._chainSavedHtml; });
         if (_chainMsg && _chainMsg._chainSavedHtml) {
             _html = _chainMsg._chainSavedHtml + _html;
-            // 重置渲染位置，确保新内容从分隔线后开始渲染
             if (st.lastRenderLen > 0 && _chainMsg._chainSegment > (st._chainRenderedSegment || 0)) {
                 st._chainRenderedSegment = _chainMsg._chainSegment;
                 st.lastRenderLen = 0;
             }
         }
+        // ★ 代码高亮: 替换 <pre><code class="language-xxx"> 内容
         if (typeof hljs !== 'undefined') {
-            var _detached = document.createElement('div');
-            _detached.innerHTML = _html;
-            _detached.querySelectorAll('pre code:not([class*="mermaid"])').forEach(function(block) {
-                try { hljs.highlightElement(block); } catch(e) {}
+            _html = _html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/gi, function(_, lang, code) {
+                var _decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+                try {
+                    var _result = hljs.highlight(_decoded, { language: lang, ignoreIllegals: true });
+                    return '<pre><code class="hljs language-' + lang + '">' + _result.value + '</code></pre>';
+                } catch(e) {
+                    return '<pre><code class="hljs language-' + lang + '">' + code + '</code></pre>';
+                }
             });
-            _html = _detached.innerHTML;
         }
         mb.innerHTML = _html;
         // ★ 隐藏流式渲染中加载失败的图片(模型可能在文本中引用过期的CDN URL)

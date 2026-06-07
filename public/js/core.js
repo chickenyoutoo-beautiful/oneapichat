@@ -124,14 +124,17 @@ function _renderMarkdownWithMath(text) {
     tempHtml = tempHtml.replace(/<a /g, '<a target="_blank" rel="noopener" ');
     // 还原 <pre> 块
     tempHtml = tempHtml.replace(/%%PRE(\d+)%%/g, function(_, i) { return _preBlocks[parseInt(i)]; });
-    // ★ 内联代码高亮（确保即使 hljs 未加载也能看到基础着色，加载后进行完整高亮）
+    // ★ 代码高亮: hljs.highlight() 字符串 API, 稳定不受 DOM 状态影响
     if (typeof hljs !== 'undefined') {
-        var _tmp = document.createElement('div');
-        _tmp.innerHTML = tempHtml;
-        _tmp.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(function(b) {
-            try { hljs.highlightElement(b); } catch(e) {}
+        tempHtml = tempHtml.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/gi, function(_, lang, code) {
+            var _decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+            try {
+                var _result = hljs.highlight(_decoded, { language: lang, ignoreIllegals: true });
+                return '<pre><code class="hljs language-' + lang + '">' + _result.value + '</code></pre>';
+            } catch(e) {
+                return '<pre><code class="hljs language-' + lang + '">' + code + '</code></pre>';
+            }
         });
-        tempHtml = _tmp.innerHTML;
     }
     return tempHtml;
 }
