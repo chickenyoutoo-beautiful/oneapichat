@@ -562,7 +562,7 @@ function setupEventListeners() {
                     return;
                 }
                 e.preventDefault();
-                if (isTypingMap[currentChatId]) {
+                if (isTypingMap[currentChatId] || (window._messageQueue && window._messageQueue.length > 0)) {
                     window.pushToMsgQueue();
                     return;
                 }

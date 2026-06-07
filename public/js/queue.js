@@ -56,6 +56,15 @@ window._clearPersistedQueue = function() {
     try { localStorage.removeItem(window._getQueueKey()); } catch(e) {}
 };
 
+/** 智能发送：如果队列非空，走队列；否则直接发送 */
+window._smartSend = function() {
+    if (window._messageQueue && window._messageQueue.length > 0) {
+        window.pushToMsgQueue();
+    } else {
+        window.sendMessage();
+    }
+};
+
 /** 推入消息到队列 (不打断当前生成) */
 window.pushToMsgQueue = function() {
     var input = $.userInput;
