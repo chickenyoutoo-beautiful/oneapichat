@@ -332,7 +332,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     agent_role = agent.get("role", "general")
 
     # ★ 应用子代理的代理配置（用 http_client 而非全局 env 避免并发竞争）
-    _agent_proxy_url = agent.get("proxy_url", "") or _PROXY_URL or ""
+    _agent_proxy_url = agent.get("proxy_url", "")
     _agent_proxy_enabled = agent.get("proxy_enabled", "")
     _agent_http_client = None
     if _agent_proxy_enabled == '1' and _agent_proxy_url:
@@ -346,12 +346,6 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     elif _PROXY_URL:
         import httpx as _httpx
         _agent_http_client = _httpx.Client(proxy=_PROXY_URL)
-        os.environ['ALL_PROXY'] = proxy_url
-        print(f'[Agent {name}] 代理已启用(子代理配置): {proxy_url}')
-    elif _PROXY_URL:
-        # 回退到全局代理配置
-        os.environ['HTTP_PROXY'] = _PROXY_URL
-        os.environ['HTTPS_PROXY'] = _PROXY_URL
         os.environ['ALL_PROXY'] = _PROXY_URL
         print(f'[Agent {name}] 代理已启用(全局配置): {_PROXY_URL}')
     else:
