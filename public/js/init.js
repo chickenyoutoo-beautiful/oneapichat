@@ -868,8 +868,8 @@ function initializeApp() {
             localStorage.setItem('chats', JSON.stringify(chats));
         } catch(e) {}
 
-        loadInitialData();
-        initRAGPanel();
+        try { loadInitialData(); } catch(e) { console.error('[Init] loadInitialData 失败:', e.message); }
+        try { initRAGPanel(); } catch(e) {}
 
         // ★ 自动续生: 优先从引擎恢复活跃流, 回退到 _savedPartial 再生
         try {
