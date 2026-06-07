@@ -366,18 +366,40 @@ async function typeTitle(chatId, finalTitle, index = 0) {
     }
 }
 
-function saveChats() {
-    // ★ 立即保存到服务器(不延迟,异步不阻塞)
-    saveChatsToServer();
-
+function saveChats(forceServer) {
     // ★ 立即保存到 localStorage (图片等关键数据不能等 idle callback)
     slimSaveChats();
 
-    // ★ 跨浏览器同步（低频率，仅 saveChats 触发）
-    if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
-        window._broadcastChatUpdate(currentChatId);
+    // ★ 先存服务器，完成后再广播（确保其他设备能拉到最新数据）
+    var _promise = saveChatsToServer(forceServer);
+    if (_promise && typeof _promise.then === 'function') {
+        _promise.then(function() {
+            if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(currentChatId);
+            }
+        }).catch(function() {
+            // 即使服务器保存失败也要广播（本地数据已保存）
+            if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(currentChatId);
+            }
+        });
+    } else {
+        // 节流返回 false 时直接广播
+        if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
+            window._broadcastChatUpdate(currentChatId);
+        }
     }
 }
+
+// ★ 强制保存到服务器并广播(用于多端同步关键节点)
+window._saveAndBroadcast = function(chatId) {
+    slimSaveChats();
+    saveChatsToServer(true).then(function() {
+        if (chatId && typeof window._broadcastChatUpdate === 'function') {
+            window._broadcastChatUpdate(chatId);
+        }
+    }).catch(function() {});
+};
 
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
 function compressChatsForStorage(chatsObj) {

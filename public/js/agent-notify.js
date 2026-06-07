@@ -160,6 +160,63 @@ window.connectSSEChannel = function() {
         } catch(_sce) {}
     });
 
+    // ★ 多端同步: 从服务器拉取最新聊天数据并合并到本地
+    async function _syncChatFromServer(chatId, retryDelay) {
+        try {
+            var token = localStorage.getItem('authToken') || '';
+            if (!token || !chatId) return false;
+            // ★ 服务端聊天数据统一存储在 all 文件中,需拉取全部再提取
+            var url = window.location.origin + '/oneapichat/api/chat.php?chat_id=all&auth_token=' + encodeURIComponent(token);
+            var resp = await fetch(url);
+            if (!resp.ok) return false;
+            var data = await resp.json();
+            var serverChats = (data && data.chats) ? data.chats : {};
+            var serverChat = serverChats[chatId];
+            if (!serverChat || !serverChat.messages) {
+                // ★ 服务器还没数据(可能保存未完成),延迟后重试一次
+                if (!retryDelay) {
+                    console.log('[SSE] _syncChatFromServer: chat not found on server, retrying in 1.5s');
+                    await new Promise(function(r) { setTimeout(r, 1500); });
+                    return _syncChatFromServer(chatId, true);
+                }
+                return false;
+            }
+
+            if (!window.chats) window.chats = {};
+            if (!window.chats[chatId]) {
+                window.chats[chatId] = JSON.parse(JSON.stringify(serverChat));
+            } else {
+                // ★ 合并: 用服务器数据替换消息数组,保留本地partial消息
+                var serverMsgs = serverChat.messages || [];
+                var localMsgs = window.chats[chatId].messages || [];
+                window.chats[chatId].messages = serverMsgs;
+                window.chats[chatId].title = serverChat.title || window.chats[chatId].title;
+                window.chats[chatId].updated_at = serverChat.updated_at || window.chats[chatId].updated_at;
+                // 保留本地 partial 消息（正在流式生成中,服务器尚未有）
+                for (var li = 0; li < localMsgs.length; li++) {
+                    if (localMsgs[li].partial && localMsgs[li].role === 'assistant') {
+                        var found = false;
+                        for (var si = serverMsgs.length - 1; si >= 0; si--) {
+                            if (serverMsgs[si].role === 'assistant' && !serverMsgs[si].partial &&
+                                serverMsgs[si].content && localMsgs[li].content &&
+                                serverMsgs[si].content.indexOf(localMsgs[li].content.substring(0, 50)) === 0) {
+                                found = true; break;
+                            }
+                        }
+                        if (!found && localMsgs[li]._recovered !== false) {
+                            window.chats[chatId].messages.push(localMsgs[li]);
+                        }
+                    }
+                }
+            }
+            console.log('[SSE] _syncChatFromServer OK: chatId=' + chatId + ' msgs=' + window.chats[chatId].messages.length);
+            return true;
+        } catch(e) {
+            console.warn('[SSE] _syncChatFromServer failed:', e.message);
+            return false;
+        }
+    }
+
     _sseChannel.addEventListener('config:changed', function(e) {
         try {
             var ev = JSON.parse(e.data);
@@ -173,14 +230,14 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            // ★ 其他浏览器/设备的流完成了 — 刷新对应聊天
-            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
-                console.log('[SSE] Stream done in other tab, reloading current chat');
-                loadChat(currentChatId);
-            } else if (ev.chat_id && ev.chat_id !== currentChatId) {
-                // 其他聊天完成了 — 更新侧边栏
+            console.log('[SSE] Stream done from another device, syncing chat:', ev.chat_id);
+            // ★ 先从服务器拉取最新数据，再渲染
+            _syncChatFromServer(ev.chat_id || currentChatId).then(function(ok) {
+                if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+                    loadChat(currentChatId);
+                }
                 updateChatList();
-            }
+            });
         } catch(_sce) {}
     });
 
@@ -188,13 +245,16 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            console.log('[SSE] Chat updated from another browser:', ev.chat_id);
-            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
-                // ★ 当前聊天被其他设备更新了 — 重新加载消息
-                loadChat(currentChatId);
-            }
-            // 总是更新侧边栏
-            updateChatList();
+            console.log('[SSE] Chat updated from another device:', ev.chat_id);
+            // ★ 先从服务器拉取最新数据，再渲染
+            var cid = ev.chat_id || currentChatId;
+            _syncChatFromServer(cid).then(function(ok) {
+                if (cid === currentChatId && !isTypingMap[currentChatId]) {
+                    console.log('[SSE] Reloading current chat after server sync');
+                    loadChat(currentChatId);
+                }
+                updateChatList();
+            });
         } catch(_sce) {}
     });
 
@@ -204,13 +264,13 @@ window.connectSSEChannel = function() {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
             console.log('[SSE] New message from another device, chat:', ev.chat_id);
-            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
-                // 当前聊天有新消息 — 自动加载
-                loadChat(currentChatId);
-            } else if (ev.chat_id && ev.chat_id !== currentChatId) {
-                // 其他聊天有新消息 — 更新侧边栏
+            var cid = ev.chat_id || currentChatId;
+            _syncChatFromServer(cid).then(function(ok) {
+                if (cid === currentChatId && !isTypingMap[currentChatId]) {
+                    loadChat(currentChatId);
+                }
                 updateChatList();
-            }
+            });
         } catch(_sce) {}
     });
 
@@ -275,10 +335,15 @@ window._broadcastEvent = function(eventType, data) {
         if (!data) data = {};
         data.source = window._sseSourceId;
         var payload = JSON.stringify({ event_type: eventType, data: data });
-        navigator.sendBeacon(
-            '/oneapichat/api/engine_api.php?action=events_broadcast&auth_token=' + encodeURIComponent(token) + '&user_id=' + encodeURIComponent(uid),
-            new Blob([payload], { type: 'application/json' })
-        );
+        // ★ 使用 fetch+keepalive 替代 sendBeacon（Blob Content-Type 兼容性更好）
+        fetch('/oneapichat/api/engine_api.php?action=events_broadcast&auth_token=' + encodeURIComponent(token) + '&user_id=' + encodeURIComponent(uid), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload,
+            keepalive: true
+        }).catch(function(e) {
+            console.warn('[SSE] broadcast failed:', e.message);
+        });
     } catch(e) {}
 };
 

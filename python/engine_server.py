@@ -2072,8 +2072,14 @@ async def user_events_stream(user_id: str = Query(""), agent_mode: str = Query("
         return JSONResponse({"error": "user_id required"}, status_code=400)
 
     # ★ 多端同步: 存储客户端上报的 agent 模式
+    # ★ 关键: 'off' 不能覆盖另一个设备上报的活跃模式(agent/plan/yolo)
     if agent_mode:
-        _user_agent_modes[user_id] = {'mode': agent_mode, 'ts': time.time()}
+        _existing = _user_agent_modes.get(user_id, {})
+        _existing_mode = _existing.get('mode', '')
+        _existing_ts = _existing.get('ts', 0)
+        # 允许更新条件: 1) 新模式非off 2) 无现有模式 3) 现有模式已过期(>30s无心跳视为过期)
+        if agent_mode != 'off' or not _existing_mode or _existing_mode == 'off' or (time.time() - _existing_ts > 30):
+            _user_agent_modes[user_id] = {'mode': agent_mode, 'ts': time.time()}
     current_mode = _user_agent_modes.get(user_id, {}).get('mode', '')
 
     q = asyncio.Queue()

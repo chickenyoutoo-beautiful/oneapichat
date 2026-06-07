@@ -1656,7 +1656,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     delete pendingMsg.partial;
                     pendingMsg.time = Date.now() - startTime;
                     pendingMsg.usage = usage;
-                    saveChats();
+                    saveChats(true);  // ★ 强制服务器保存+广播到其他设备
                     // ★ 多端同步: 广播 RS 完成到其他设备
                     if (typeof window._broadcastChatUpdate === 'function') {
                         window._broadcastChatUpdate(chatId);
@@ -2313,11 +2313,7 @@ window.useAlternativeVisionModel = function() {
             if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
-            saveChats();  // 立即保存,不用 debounce
-            // ★ 多端同步: 广播消息完成到其他设备
-            if (typeof window._broadcastChatUpdate === 'function') {
-                window._broadcastChatUpdate(chatId);
-            }
+            saveChats(true);  // ★ 强制服务器保存+广播到其他设备
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
                 var _bubble = activeBubbleMap[chatId];
@@ -2412,11 +2408,7 @@ window.useAlternativeVisionModel = function() {
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 1000);
             }
             // ★ 保存聊天到 localStorage (确保图片等数据持久化,工具路径和直接路径都需要)
-            saveChats();
-            // ★ 多端同步: 广播工具调用完成后消息更新到其他设备
-            if (typeof window._broadcastChatUpdate === 'function') {
-                window._broadcastChatUpdate(chatId);
-            }
+            saveChats(true);  // ★ 强制服务器保存+广播到其他设备
             var defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
             if (!skipUserAdd && chats[chatId].title === defaultTitle) {
                 autoGenerateTitle(chatId);

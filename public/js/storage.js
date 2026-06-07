@@ -63,12 +63,12 @@ function beaconSaveConfig() {
     } catch(e) {}
 }
 
-async function saveChatsToServer() {
+async function saveChatsToServer(force) {
     try {
         var now = Date.now();
         // ★ 有待删除的聊天时，跳过频率限制（必须立即同步）
         var _hasPendingDeletes = Object.keys(_deletedChatIds).length > 0;
-        if (!_hasPendingDeletes && now - _lastServerBackup < SERVER_BACKUP_INTERVAL) return false;
+        if (!force && !_hasPendingDeletes && now - _lastServerBackup < SERVER_BACKUP_INTERVAL) return false;
         _lastServerBackup = now;
 
         var token = localStorage.getItem('authToken');
