@@ -276,6 +276,7 @@ function buildApiMessages(chatId) {
         return val === undefined || val === null ? '' : String(val);
     }
 
+    if (!chats[chatId] || !chats[chatId].messages) return [];  // ★ 防御：chat 未初始化时返回空
     var msgs = chats[chatId].messages;
     for (let i = 0; i < msgs.length; i++) {
         var msg = msgs[i];
