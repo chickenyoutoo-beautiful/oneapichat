@@ -568,7 +568,9 @@ window.applyCodeEdit = async function(filename, oldStr, newStr, btnEl) {
  */
 window.addCodeBlockButtons = function(container) {
     if (!container) return;
-    container.querySelectorAll('pre').forEach(function(pre) {
+    var _pres = container.querySelectorAll('pre');
+    if (_pres.length > 100) return;  // 安全防护，超大页面跳过
+    _pres.forEach(function(pre) {
         if (pre.querySelector('.code-apply-btn')) return; // 已添加
         var code = pre.querySelector('code');
         if (!code) return;

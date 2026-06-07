@@ -313,12 +313,9 @@ const MarkdownRenderer = {
      * 后处理:代码高亮 + Mermaid + 图片优化
      */
     postRender(container) {
-        // 代码高亮
-        this.highlightCode(container);
-        // Mermaid 图表(异步,不阻塞)
-        this.renderMermaid(container);
-        // 图片优化(懒加载)
-        this.optimizeImages(container);
+        try { this.highlightCode(container); } catch(e) {}
+        try { this.renderMermaid(container); } catch(e) {}
+        try { this.optimizeImages(container); } catch(e) {}
     },
 
     /** 渲染 Mermaid 图表(支持流式实时渲染) */
@@ -360,11 +357,10 @@ const MarkdownRenderer = {
      */
     highlightCode(container) {
         if (typeof hljs === 'undefined') return;
-        var _warn = console.warn; console.warn = function() {};
-        container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(block => {
-            try { hljs.highlightElement(block); } catch (e) {}
-        });
-        console.warn = _warn;
+        var _blocks = container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])');
+        for (var _i = 0; _i < _blocks.length && _i < 30; _i++) {
+            try { hljs.highlightElement(_blocks[_i]); } catch (e) {}
+        }
     },
 
     /** 图片优化:懒加载 + 异步解码 */
@@ -390,9 +386,11 @@ const MarkdownRenderer = {
 function _triggerPostRender(container) {
     if (!container || !MarkdownRenderer) return;
     setTimeout(function() {
-        MarkdownRenderer.postRender(container);
-        // ★ 添加代码块 Apply 按钮 (diff viewer)
-        if (window.addCodeBlockButtons) window.addCodeBlockButtons(container);
+        try {
+            MarkdownRenderer.postRender(container);
+            // ★ 添加代码块 Apply 按钮 (diff viewer)
+            if (window.addCodeBlockButtons) window.addCodeBlockButtons(container);
+        } catch(e) { /* 静默失败 */ }
     }, 0);
 }
 
