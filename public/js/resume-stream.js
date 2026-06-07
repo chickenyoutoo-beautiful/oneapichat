@@ -150,31 +150,35 @@ window.ResumeStream = (function() {
                     if (sp && sp.reasoning) pm.reasoning = sp.reasoning;
                     msgs.push(pm);
                 }
-                // ★ 渲染气泡到界面（让流式内容有渲染目标）并激活 typing 状态
-                isTypingMap[chatId] = true;  // ★ 必须在 loadChat 前设置（loadChat 依赖此标记设置 activeBubbleMap）
+                // ★ 渲染气泡 + 激活流式渲染
+                isTypingMap[chatId] = true;
                 if (currentChatId === chatId) {
                     loadChat(chatId);
-                    // 等待 DOM 更新完成
                     await new Promise(function(r) { setTimeout(r, 100); });
                 }
                 var result = await _readSSE(sid, chatId, pm, true);
+                // ★ 无论成功/失败，先清除 typing 状态再更新 UI
+                isTypingMap[chatId] = false;
                 if (result && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
                     if (currentChatId === chatId) loadChat(chatId);
-                    isTypingMap[chatId] = false;  // ★ loadChat 后再清除（loadChat 依赖此标记）
                     saveChats();
                     return true;
                 }
-                // 续接失败：清理临时消息
+                // 续接失败：清理临时消息 → 刷新 UI
                 var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
                 if (fi !== -1) msgs.splice(fi, 1);
+                if (currentChatId === chatId) loadChat(chatId);
                 return false;
-            } catch(e) { return false; }
-            finally {
+            } catch(e) {
                 isTypingMap[chatId] = false;
+                if (currentChatId === chatId) loadChat(chatId);
+                return false;
+            }
+            finally {
                 delete _active[chatId];
             }
         }
