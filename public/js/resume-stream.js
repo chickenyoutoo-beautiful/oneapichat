@@ -177,9 +177,9 @@ window.ResumeStream = (function() {
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
+                    console.log('[RS resume] SUCCESS — msgs count:', msgs.length, 'last 3 roles:', msgs.slice(-3).map(function(m){return m.role + (m.partial?'(partial)':'')}).join(', '));
                     slimSaveChats();
                     saveChats();
-                    // ★ 最后 loadChat 完整重渲染（pm.partial 已删除，loadChat 不会过滤它）
                     if (_isCurrentChat) loadChat(chatId);
                     return true;
                 }
