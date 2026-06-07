@@ -312,7 +312,8 @@ function buildApiMessages(chatId) {
             apiMessagesUnfiltered.push({
                 role: 'tool',
                 tool_call_id: msg.tool_call_id || '',
-                content: (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || ''))
+                content: (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '')),
+                _srcIndex: i  // ★ 记录源数组索引，方便清理孤 tool 消息时从源头删除
             });
         } else if (msg.temporary) {
             // ★ 模型适配: 部分模型不支持过多 system 消息,将临时消息合并到最近的非 system 消息
@@ -384,15 +385,25 @@ function buildApiMessages(chatId) {
     // 第四遍: 标记孤立 tool 消息（无对应 assistant tool_call）
     // 发生在链式模式 delete pendingMsg.tool_calls 后旧轮次 tool 结果残留
     var _removedToolMsgCount = 0;
+    var _orphanSrcIndices = [];  // ★ 记录源数组中需删除的索引
     for (var _tfi3 = 0; _tfi3 < apiMessagesUnfiltered.length; _tfi3++) {
         var _tmsg3 = apiMessagesUnfiltered[_tfi3];
         if (_tmsg3.role === 'tool' && _tmsg3.tool_call_id) {
             if (!_assistantTcIds[_tmsg3.tool_call_id]) {
                 _tmsg3._removeOrphan = true;
+                if (_tmsg3._srcIndex !== undefined) _orphanSrcIndices.push(_tmsg3._srcIndex);
                 _removedToolMsgCount++;
                 console.warn('[buildApiMessages] 移除孤立 tool 消息(无对应 tool_calls):', _tmsg3.tool_call_id);
             }
         }
+    }
+    // ★ 从源 chats 数组中永久删除孤 tool 消息，避免每次 buildApiMessages 重复清理
+    if (_orphanSrcIndices.length > 0) {
+        _orphanSrcIndices.sort(function(a, b) { return b - a; });  // 降序，从后往前删不扰索引
+        for (var _oi = 0; _oi < _orphanSrcIndices.length; _oi++) {
+            msgs.splice(_orphanSrcIndices[_oi], 1);
+        }
+        console.log('[buildApiMessages] 从聊天历史永久删除 ' + _orphanSrcIndices.length + ' 条孤 tool 消息');
     }
     if (_removedTcCount > 0 || _removedToolMsgCount > 0) {
         console.log('[buildApiMessages] 双向配对清理: ' + _removedTcCount + ' 个孤 tool_call + ' + _removedToolMsgCount + ' 个孤 tool 消息');
