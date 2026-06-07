@@ -395,7 +395,7 @@ function _renderWebFetchUrls(bubble, urls) {
     bubble.appendChild(container);
 }
 
-function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false) {
+function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false, msgIndex = -1) {
 // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
     var safeStr = (val) => {
         if (val === null || val === undefined) return '';
@@ -710,9 +710,19 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             // ★ 生成中隐藏操作按钮，避免和思考动画重叠
             if (partial) { /* 不渲染操作按钮 */ }
             else {
-            // ★ 判断是否是最后一条 assistant 消息
-            var _allAsst = (chats[currentChatId]?.messages || []).filter(m => m.role === 'assistant' && !m.partial);
-            var _isLastAsst = _allAsst.length > 0 && _allAsst[_allAsst.length - 1] === chats[currentChatId]?.messages.find(m => m.role === 'assistant' && m.content === text);
+            // ★ 判断是否是最后一条 assistant 消息 (基于位置,不用content字符串匹配)
+            var _msgsArr = chats[currentChatId]?.messages || [];
+            var _isLastAsst = false;
+            if (msgIndex >= 0 && _msgsArr[msgIndex] && _msgsArr[msgIndex].role === 'assistant') {
+                // 检查此消息之后是否还有其他 assistant 消息(排除partial)
+                var _hasAsstAfter = false;
+                for (var _ai = msgIndex + 1; _ai < _msgsArr.length; _ai++) {
+                    if (_msgsArr[_ai].role === 'assistant' && !_msgsArr[_ai].partial) {
+                        _hasAsstAfter = true; break;
+                    }
+                }
+                _isLastAsst = !_hasAsstAfter;
+            }
 
             if (_isLastAsst) {
                 // ★ 最后一条: 重新生成按钮

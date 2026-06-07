@@ -843,6 +843,8 @@ window.loadChat = async function (id) {
     } else {
         displayMsgs.forEach((m, i) => {
             try {
+            // ★ 原始消息索引(用于判断是否最后一条assistant)
+            var _origIdx = chats[id].messages.indexOf(m);
             // ★ 修复: 清理已保存的 [object Object] 残留
             if (typeof m.content === 'string') {
                 if (m.content === '[object Object]') {
@@ -863,7 +865,7 @@ window.loadChat = async function (id) {
                 m.content = '';
             }
             if (m.role === 'user') {
-                appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1);
+                appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx);
             } else {
                 // ★ 修复: 对带工具调用的消息,在文本前追加工具调用可视化说明
                 var toolDisplayHtml = '';
@@ -897,7 +899,7 @@ window.loadChat = async function (id) {
                 if (toolDisplayHtml) {
                     displayText = toolDisplayHtml + displayText;
                 }
-                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial);
+                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial, _origIdx);
                 // ★ 恢复时也渲染 web_fetch 链接列表
                 if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
                     _renderWebFetchUrls(_bubble, m._webFetchUrls);
