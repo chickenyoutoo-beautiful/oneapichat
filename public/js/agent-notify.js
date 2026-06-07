@@ -399,6 +399,8 @@ window._recoverActiveTasks = async function() {
                     var resumed = await ResumeStream.resume(task.chat_id, task.stream_id, task.msg_id);
                     if (resumed) {
                         console.log('[recoverTasks] Resumed stream', task.stream_id);
+                        window._backendRecovered = true;  // ★ 阻止旧 _autoRecover 路径重复处理
+                        window._pendingRecovery = null;   // ★ 清除旧路径的 recovery 数据
                     }
                 } catch(_rte) {
                     console.warn('[recoverTasks] resume failed:', _rte.message);
