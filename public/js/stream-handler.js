@@ -211,11 +211,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     try {
                         var jd = JSON.parse(ljson);
                         var dd = jd.choices?.[0]?.delta || jd.choices?.[0]?.message;
-                        // content为空但reasoning有内容时,使用reasoning作为显示内容
+                        // ★ 严格区分 content 和 reasoning，不互相污染
                         if (dd && dd.content && String(dd.content).trim()) {
                             fullText += dd.content;
-                        } else if (dd && dd.reasoning_content && String(dd.reasoning_content).trim()) {
-                            fullText += String(dd.reasoning_content);
                         }
                         if (dd && dd.reasoning_content && String(dd.reasoning_content).trim()) reasoningText += String(dd.reasoning_content);
                         if (dd && dd.reasoning_details) {

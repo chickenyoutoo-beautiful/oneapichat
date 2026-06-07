@@ -53,22 +53,27 @@ window.ResumeStream = (function() {
                 var js = ln.substring(6); if (!js) continue;
                 try {
                     var d = JSON.parse(js);
-                    if (ev==='content' || (d.delta && !d.full_text && !d.error)) {
+                    // ★ 严格按 ev 类型分发，防止 reasoning delta 被 fallback 当作 content
+                    if (ev === 'content') {
                         var dl = d.delta||'';
                         if (dl) { full+=dl; pendingMsg.content=full; applyStreamRender(chatId, full); }
-                    } else if (ev==='reasoning') {
+                    } else if (ev === 'reasoning') {
                         var rd = d.delta||'';
                         if (rd) { reasoning+=rd; pendingMsg.reasoning=reasoning; }
-                    } else if (ev==='tool_call'||d.function) {
+                    } else if (ev === 'tool_call' || d.function) {
                         tcList.push(d.function?d:d);
-                    } else if (ev==='done'||d.full_text!==undefined) {
+                    } else if (ev === 'done' || d.full_text !== undefined) {
                         full=d.full_text||full; reasoning=d.reasoning_text||reasoning;
                         if (d.tool_calls) tcList=d.tool_calls;
                         if (d.usage) usage=d.usage;
                         done=true;
-                    } else if (ev==='error'||d.error) {
+                    } else if (ev === 'error' || d.error) {
                         console.warn('[RS] stream error:', d.error);
                         done=true;
+                    } else if (d.delta && !d.full_text) {
+                        // ★ 无 ev 或未知 ev 时的兜底：当作 content 处理
+                        var dl2 = d.delta||'';
+                        if (dl2) { full+=dl2; pendingMsg.content=full; applyStreamRender(chatId, full); }
                     }
                     ev='';
                 } catch(e) {}
