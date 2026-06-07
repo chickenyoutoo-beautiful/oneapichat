@@ -401,12 +401,12 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     position: relative;
 }
 
-/* 确保主区域不透明 */
+/* 确保主区域不透明 — 与 body 背景一致 */
 header, #chatBox {
-    background: var(--bg, #ffffff);
+    background: transparent;
 }
 .dark header, .dark #chatBox {
-    background: var(--bg, #111827);
+    background: transparent;
 }
 
 /* ===== 发送/停止按钮 ===== */
@@ -644,9 +644,9 @@ header, #chatBox {
     max-width: 720px;
     margin: 10px auto 12px;
     border-radius: 16px;
-    background: rgba(255,255,255,0.92);
-    border: 1px solid rgba(0,0,0,0.05);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03), 0 4px 20px rgba(0,0,0,0.04);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 20px rgba(0,0,0,0.06);
     overflow: hidden;
     transition: opacity 0.25s cubic-bezier(0.16,1,0.3,1),
                 transform 0.4s cubic-bezier(0.34,1.56,0.64,1),
@@ -663,8 +663,8 @@ header, #chatBox {
 }
 .flow-panel.hidden { display: none !important; }
 .dark .flow-panel {
-    background: rgba(23,28,42,0.93);
-    border-color: rgba(255,255,255,0.04);
+    background: #1e293b;
+    border-color: #334155;
     box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 20px rgba(0,0,0,0.25);
 }
 
@@ -1354,19 +1354,26 @@ select option { background: white; color: #1f2937; }
 .dark .header-menu-btn:hover { background: #374151; }
 
 /* ===== 输入框包装与拖拽层 ===== */
+.input-area {
+    background: transparent !important;
+    z-index: 10;
+}
 .input-wrapper {
     position: relative;
-    background: var(--bg, #fff);
+    background: transparent;
     border-radius: 9999px;
     overflow: visible;
 }
+/* 输入框圆角「药丸」：亮色白色，暗色深灰 */
 .input-wrapper > div:first-child {
-    background: var(--bg-secondary, #f9fafb) !important;
-    border-color: var(--border-color, #e5e7eb) !important;
+    background: #ffffff !important;
+    border-color: #d1d5db !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
 }
 .dark .input-wrapper > div:first-child {
     background: #1e293b !important;
     border-color: #334155 !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
 }
 .drop-overlay-input {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -3096,26 +3103,27 @@ html:not(.dark) #userInput {
     background: #22c55e !important;
 }
 .agent-banner {
-    display: none;
-    padding: 6px 16px;
-    margin: 4px auto 0;
+    padding: 5px 14px;
+    margin: 6px auto 0;
     border-radius: 9999px;
     font-size: 11px;
     position: relative;
     z-index: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     max-width: 400px;
     width: fit-content;
+    backdrop-filter: blur(6px);
+    transition: opacity 0.3s ease;
 }
 .agent-banner.banner-plan {
-    background: #eff6ff;
+    background: rgba(219,234,254,0.85);
     border: 1px solid #bfdbfe;
     color: #1d4ed8;
 }
 .agent-banner.banner-agent {
-    background: #f0fdf4;
+    background: rgba(220,252,231,0.85);
     border: 1px solid #bbf7d0;
     color: #166534;
 }
@@ -4632,7 +4640,6 @@ html:not(.dark) #userInput {
 .dark .diff-view-wrapper [style*="background:#fee2e2"] { background: #450a0a !important; color: #fca5a5 !important; }
 
 /* ── 输入区域和流程面板防溢出 ── */
-.input-area { z-index: 10; background: var(--bg, #fff); }
 .flow-panel { z-index: 5; position: relative; }
 .chat-messages-container { padding-bottom: 8px; }
 
