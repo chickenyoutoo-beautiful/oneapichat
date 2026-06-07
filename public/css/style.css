@@ -320,13 +320,10 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     border-left: 2px solid #9a8cc0;
     font-style: italic;
     color: #4b5563;
-}
-.dark .reasoning-content { border-left-color: #6366f1; color: #9ca3af; }
     white-space: pre-wrap;
     font-size: 0.85rem;
     background: rgba(200, 215, 240, 0.2);
     border-radius: 6px;
-    color: #2c3e6b;
     max-height: 999999px;
     opacity: 1;
     overflow: visible;
@@ -334,8 +331,8 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
 }
 .dark .reasoning-content {
     background: rgba(50, 60, 90, 0.3);
-    border-left-color: #b39ddb;
-    color: #cfd9f0;
+    border-left-color: #6366f1;
+    color: #9ca3af;
 }
 
 /* 代理/非流式模式下的思考块增强样式 */
