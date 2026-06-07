@@ -1227,11 +1227,13 @@ function updateAgentUI() {
         var labelTexts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
         agentLabel.innerHTML = _svgIcons[mode] + ' ' + (labelTexts[mode] || 'Agent');
     }
-    // 输入框上方模式提示
+    // 输入框上方模式提示（5秒后自动消失）
     var banner = getEl('agentBanner');
     if (banner) {
         if (mode === 'off') {
             banner.classList.add('hidden');
+            // 清除自动消失定时器
+            if (window.__bannerTimer) { clearTimeout(window.__bannerTimer); window.__bannerTimer = null; }
         } else {
             banner.classList.remove('hidden');
             var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
@@ -1239,6 +1241,13 @@ function updateAgentUI() {
             banner.className = 'agent-banner ' + (bannerClasses[mode] || '');
             banner.innerHTML = '<span class="agent-banner-icon">' + _svgIcons[mode] + '</span>' +
                 '<span class="agent-banner-text">' + (tips[mode] || '') + '</span>';
+            // ★ 5秒后自动消失
+            if (window.__bannerTimer) clearTimeout(window.__bannerTimer);
+            window.__bannerTimer = setTimeout(function() {
+                var _b = getEl('agentBanner');
+                if (_b && !_b.matches(':hover')) _b.classList.add('hidden');
+                window.__bannerTimer = null;
+            }, 5000);
         }
     }
     // 更新 Agent 面板中的模式标识
