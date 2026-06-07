@@ -143,6 +143,13 @@ window.ResumeStream = (function() {
             try {
                 if (!chats[chatId]) { console.warn('[RS resume] Chat not found:', chatId); return false; }
                 var msgs = chats[chatId].messages;
+                // ★ 先渲染气泡+设typing（loadChat会清partial，必须pm创建之前调用）
+                isTypingMap[chatId] = true;
+                if (_isCurrentChat) {
+                    loadChat(chatId);
+                    await new Promise(function(r) { setTimeout(r, 100); });
+                }
+                // ★ loadChat 之后再创建 partial 消息（避免被 line 728 的 filter 清理）
                 var pm = msgs.find(function(m){return m.partial;});
                 if (!pm) {
                     pm = {role:'assistant',content:'',reasoning:'',partial:true,_recovered:true};
@@ -151,31 +158,29 @@ window.ResumeStream = (function() {
                     if (sp && sp.reasoning) pm.reasoning = sp.reasoning;
                     msgs.push(pm);
                 }
-                // ★ 渲染气泡 + 激活流式渲染
-                isTypingMap[chatId] = true;
-                if (_isCurrentChat) {
-                    loadChat(chatId);
-                    await new Promise(function(r) { setTimeout(r, 150); });
+                // ★ 手动追加 assistant 气泡到 DOM 作为流式渲染目标
+                if (_isCurrentChat && typeof appendMessage === 'function') {
+                    var _bub = appendMessage('assistant', pm.content || '', null, pm.reasoning || '', null, null, true);
+                    if (_bub) {
+                        _bub.classList.add('typing');
+                        activeBubbleMap[chatId] = _bub;
+                    }
                 }
                 var result = await _readSSE(sid, chatId, pm, true);
                 console.log('[RS resume] _readSSE returned:', result ? ('fullText=' + (result.fullText||'').substring(0,80) + ' toolCalls=' + (result.toolCalls||[]).length) : 'NULL');
-                // ★ 先结束 typing 状态，清掉流式渲染残留
                 isTypingMap[chatId] = false;
-                // ★ 稍等一下让 RAF 退出
                 await new Promise(function(r) { setTimeout(r, 50); });
                 if (result && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
-                    // ★ 先存盘确保数据不丢
                     slimSaveChats();
                     saveChats();
-                    // ★ 最后刷新 UI（此时 isTypingMap=false，按钮切回发送键）
+                    // ★ 最后 loadChat 完整重渲染（pm.partial 已删除，loadChat 不会过滤它）
                     if (_isCurrentChat) loadChat(chatId);
                     return true;
                 }
-                // 续接失败：清理 → 刷新
                 var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
                 if (fi !== -1) msgs.splice(fi, 1);
                 if (_isCurrentChat) loadChat(chatId);
