@@ -179,14 +179,25 @@ async function compressContextIfNeeded(chatId) {
             return;
         }
 
-        // 构建摘要
+        // 构建摘要（★ 保留工具调用信息，防止压缩后模型产生幻觉）
         let conv = ''
         for (var si = 0; si < toSummarize.length; si++) {
             var m = toSummarize[si];
             if (m.role === 'user') {
                 conv += '用户: ' + (m.text || m.content || '').substring(0, 2000) + '\n';
+            } else if (m.role === 'tool') {
+                // ★ 保留工具执行结果的关键信息
+                var _tContent = (typeof m.content === 'string' ? m.content : JSON.stringify(m.content || ''));
+                conv += '[工具结果] ' + _tContent.substring(0, 500) + '\n';
             } else {
-                conv += '助手: ' + (m.content || '').substring(0, 2000) + '\n';
+                var _assistantText = (m.content || '').substring(0, 2000);
+                // ★ 保留工具调用信息
+                if (m.tool_calls && m.tool_calls.length > 0) {
+                    _assistantText += '\n[调用了以下工具: ' + m.tool_calls.map(function(tc) {
+                        return tc.function ? tc.function.name : '?';
+                    }).join(', ') + ']';
+                }
+                conv += '助手: ' + _assistantText + '\n';
             }
         }
 
@@ -764,9 +775,11 @@ window.loadChat = async function (id) {
         _injectAgentMemoryIntoSystem(id);
     }
 
-    // ★ 过滤显示:system 消息和内部消息不显示给用户
+    // ★ 过滤显示:system 消息、内部消息和工具结果不显示给用户
     var displayMsgs = chats[id].messages.filter(function(m) {
         if (m._internal) return false;
+        if (m._toolResult) return false;  // ★ 工具结果不渲染到UI
+        if (m.role === 'tool') return false;  // ★ 角色为 tool 的消息不渲染
         return m.role !== 'system';
     });
     if (!displayMsgs.length) {

@@ -281,7 +281,20 @@ function buildApiMessages(chatId) {
             apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(msg.text, files) });
             window._forceVisionFormat = prev;
         } else if (msg.role === 'assistant' && !msg.partial) {
-            apiMessagesUnfiltered.push({ role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' });
+            var _assistantMsg = { role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' };
+            // ★ 保留 tool_calls 历史 — 否则模型会忘记之前调用过工具，产生幻觉
+            if (msg.tool_calls && msg.tool_calls.length > 0) {
+                _assistantMsg.tool_calls = msg.tool_calls;
+            }
+            if (msg.reasoning_content) _assistantMsg.reasoning_content = msg.reasoning_content;
+            apiMessagesUnfiltered.push(_assistantMsg);
+        } else if (msg.role === 'tool') {
+            // ★ 保留 tool 结果 — 否则模型不知道工具执行结果，会重复调用或虚构调用
+            apiMessagesUnfiltered.push({
+                role: 'tool',
+                tool_call_id: msg.tool_call_id || '',
+                content: (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || ''))
+            });
         } else if (msg.temporary) {
             // ★ 模型适配: 部分模型不支持过多 system 消息,将临时消息合并到最近的非 system 消息
             // MiniMax/QwQ 等:系统消息支持有限

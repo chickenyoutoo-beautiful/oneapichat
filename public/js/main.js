@@ -2083,6 +2083,13 @@ window.useAlternativeVisionModel = function() {
                         tool_call_id: tc.id || '',
                         content: contentStr
                     });
+                    // ★ 持久化工具结果到 chat 历史 — 下轮 sendMessage 需要这些上下文
+                    chats[chatId].messages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id || '',
+                        content: contentStr,
+                        _toolResult: true  // 标记为工具结果，UI 渲染时跳过
+                    });
 
                     // 更新UI
                     if (currentChatId === chatId) {
@@ -2140,6 +2147,10 @@ window.useAlternativeVisionModel = function() {
                 // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
                 if (_allWebFetchUrls.length > 0) {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
+                }
+                // ★ 持久化 tool_calls 到 chat 历史 — 防止下轮 sendMessage 丢失工具上下文导致幻觉
+                if (validToolCalls && validToolCalls.length > 0) {
+                    pendingMsg.tool_calls = validToolCalls;
                 }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
