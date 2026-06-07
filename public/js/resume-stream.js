@@ -70,7 +70,27 @@ window.ResumeStream = (function() {
                         }
                     } else if (_dt === 'reasoning') {
                         var rd = d.delta||'';
-                        if (rd) { reasoning+=rd; pendingMsg.reasoning=reasoning; }
+                        if (rd) {
+                            reasoning+=rd;
+                            pendingMsg.reasoning=reasoning;
+                            // ★ 实时创建/更新思考块 DOM（匹配 HTTP 直连路径的行为）
+                            if (currentChatId === chatId) {
+                                var _bub2 = activeBubbleMap[chatId];
+                                if (_bub2) {
+                                    var _det = _bub2.querySelector('details.reasoning-details');
+                                    if (!_det) {
+                                        _det = document.createElement('details');
+                                        _det.className = 'reasoning-details';
+                                        _det.open = true;
+                                        _det.innerHTML = '<summary>思考过程</summary><div class="reasoning-content"></div>';
+                                        var _mb2 = _bub2.querySelector('.markdown-body');
+                                        if (_mb2) _bub2.insertBefore(_det, _mb2);
+                                    }
+                                    var _rc = _det.querySelector('.reasoning-content');
+                                    if (_rc) _rc.textContent = reasoning;
+                                }
+                            }
+                        }
                     } else if (_dt === 'tool_call' || d.function) {
                         tcList.push(d.function?d:d);
                     } else if (_dt === 'done' || d.full_text !== undefined) {
