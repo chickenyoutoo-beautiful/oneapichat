@@ -2529,6 +2529,7 @@ window.useAlternativeVisionModel = function() {
                     } else if (_retryAction === 'fix_tool_args') {
                         // ★ 修复破损的工具调用 JSON，而非删掉全部工具
                         var _fixed = false;
+                        var _discardedIds = {}; // ★ 记录被丢弃的 tool_call_id，精确删除对应 tool 结果
                         for (var _tmi = 0; _tmi < body.messages.length; _tmi++) {
                             var _tmsg = body.messages[_tmi];
                             if (_tmsg.role === 'assistant' && _tmsg.tool_calls) {
@@ -2550,11 +2551,12 @@ window.useAlternativeVisionModel = function() {
                                                 _fixed = true;
                                                 console.log('[fix_tool_args] 修复 tool_call arguments:', _tcall.function.name);
                                             } catch(e2) {
-                                                // 无法修复 → 删除这个 tool_call
+                                                // 无法修复 → 删除这个 tool_call，记录 id
+                                                if (_tcall.id) _discardedIds[_tcall.id] = true;
                                                 _tmsg.tool_calls.splice(_tcj, 1);
                                                 _tcj--;
                                                 _fixed = true;
-                                                console.log('[fix_tool_args] 丢弃破损 tool_call:', _tcall.function.name);
+                                                console.log('[fix_tool_args] 丢弃破损 tool_call:', _tcall.function.name, _tcall.id || '');
                                             }
                                         }
                                     }
@@ -2608,10 +2610,15 @@ window.useAlternativeVisionModel = function() {
                         }
                         // 删除标记的消息
                         body.messages = body.messages.filter(function(m) { return !m._remove; });
-                        // ★ 清理孤立的 tool 消息（OpenAI 格式）
-                        if (_fixed) {
+                        // ★ 只清理对应被丢弃 tool_call 的 tool 结果（保留其他成功的结果）
+                        var _hasDiscarded = Object.keys(_discardedIds).length > 0;
+                        if (_hasDiscarded) {
                             body.messages = body.messages.filter(function(m) {
-                                return m.role !== 'tool';
+                                if (m.role === 'tool' && _discardedIds[m.tool_call_id]) {
+                                    console.log('[fix_tool_args] 清理对应 tool 结果:', m.tool_call_id);
+                                    return false;
+                                }
+                                return true;
                             });
                         }
                         showToast('⚠️ 工具调用参数异常，已自动修复后重试...', 'warning', 8000);
