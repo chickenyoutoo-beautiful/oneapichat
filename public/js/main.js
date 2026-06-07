@@ -2222,29 +2222,32 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ 链式输出: 工具调用后保留旧消息,新内容作为新气泡追加
+                // ★ 链式输出: 保留旧内容, 新内容追加到同一气泡(竖线分隔)
                 if (window._chainMode && pendingMsg && (pendingMsg.content || pendingMsg.reasoning)) {
-                    // 1. 最终化当前消息
-                    delete pendingMsg.partial;
-                    pendingMsg.time = Date.now() - startTime;
-                    pendingMsg.usage = usage;
-                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-                    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
-                    // 2. 创建新 pendingMsg 作为下一个气泡
-                    var _newPending = { role: 'assistant', content: '', reasoning: '', partial: true, _chainNext: true };
-                    chats[chatId].messages.push(_newPending);
-                    pendingMsg = _newPending;
-                    // 3. 渲染新气泡
+                    // 1. 保存当前气泡的 HTML + 插入分隔线
                     if (currentChatId === chatId) {
-                        appendMessage('assistant', '', null, '', null, null, false, null, null, true);
-                        var _rows = $.chatMessagesContainer.querySelectorAll('.message-row.assistant');
-                        var _lastRow = _rows[_rows.length - 1];
-                        if (_lastRow) {
-                            var _newBubble = _lastRow.querySelector('.bubble.assistant');
-                            if (_newBubble) activeBubbleMap[chatId] = _newBubble;
+                        var _bub = activeBubbleMap[chatId];
+                        if (_bub) {
+                            var _md = _bub.querySelector('.markdown-body');
+                            if (_md) {
+                                // 在现有内容后追加分隔线
+                                var _sep = document.createElement('div');
+                                _sep.className = 'chain-separator';
+                                _md.appendChild(_sep);
+                                // 保存累积的 HTML（包括分隔线），下次流式渲染时从这之后追加
+                                if (!pendingMsg._chainSavedHtml) pendingMsg._chainSavedHtml = '';
+                                pendingMsg._chainSavedHtml = _md.innerHTML;
+                            }
                         }
                     }
-                    saveChats();
+                    // 2. 保存本轮内容到持久化字段，清空准备下一轮
+                    if (!pendingMsg._chainContents) pendingMsg._chainContents = [];
+                    pendingMsg._chainContents.push(pendingMsg.content || '');
+                    pendingMsg.content = '';
+                    pendingMsg.reasoning = '';
+                    pendingMsg._chainSegment = (pendingMsg._chainSegment || 0) + 1;
+                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                 }
 
                 // ★ 重置前先杀死旧的 AbortController

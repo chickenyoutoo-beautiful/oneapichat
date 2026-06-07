@@ -4661,6 +4661,14 @@ html:not(.dark) #userInput {
 .dark .diff-view-wrapper [style*="background:#dcfce7"] { background: #064e3b !important; color: #6ee7b7 !important; }
 .dark .diff-view-wrapper [style*="background:#fee2e2"] { background: #450a0a !important; color: #fca5a5 !important; }
 
+/* ── 链式输出分隔线 ── */
+.chain-separator {
+    position: relative; margin: 12px 0 12px 8px; padding-left: 20px;
+    border-left: 2px solid #6366f1; opacity: 0.6;
+    min-height: 4px;
+}
+.dark .chain-separator { border-left-color: #818cf8; }
+
 /* ── Toast 通知容器（底部居中，轻量不遮挡）── */
 .toast-container {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
