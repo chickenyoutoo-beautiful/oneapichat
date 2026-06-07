@@ -139,6 +139,7 @@ window.ResumeStream = (function() {
 
             if (_active[chatId]) return false;
             _active[chatId] = true;
+            var _isCurrentChat = (currentChatId === chatId);
             try {
                 if (!chats[chatId]) return false;
                 var msgs = chats[chatId].messages;
@@ -152,30 +153,36 @@ window.ResumeStream = (function() {
                 }
                 // ★ 渲染气泡 + 激活流式渲染
                 isTypingMap[chatId] = true;
-                if (currentChatId === chatId) {
+                if (_isCurrentChat) {
                     loadChat(chatId);
-                    await new Promise(function(r) { setTimeout(r, 100); });
+                    await new Promise(function(r) { setTimeout(r, 150); });
                 }
                 var result = await _readSSE(sid, chatId, pm, true);
-                // ★ 无论成功/失败，先清除 typing 状态再更新 UI
+                // ★ 先结束 typing 状态，清掉流式渲染残留
                 isTypingMap[chatId] = false;
+                // ★ 稍等一下让 RAF 退出
+                await new Promise(function(r) { setTimeout(r, 50); });
                 if (result && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
-                    if (currentChatId === chatId) loadChat(chatId);
+                    // ★ 先存盘确保数据不丢
+                    slimSaveChats();
                     saveChats();
+                    // ★ 最后刷新 UI（此时 isTypingMap=false，按钮切回发送键）
+                    if (_isCurrentChat) loadChat(chatId);
                     return true;
                 }
-                // 续接失败：清理临时消息 → 刷新 UI
+                // 续接失败：清理 → 刷新
                 var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
                 if (fi !== -1) msgs.splice(fi, 1);
-                if (currentChatId === chatId) loadChat(chatId);
+                if (_isCurrentChat) loadChat(chatId);
                 return false;
             } catch(e) {
+                console.warn('[RS resume] error:', e.message);
                 isTypingMap[chatId] = false;
-                if (currentChatId === chatId) loadChat(chatId);
+                if (_isCurrentChat) loadChat(chatId);
                 return false;
             }
             finally {
