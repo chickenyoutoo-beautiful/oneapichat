@@ -1256,7 +1256,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // ★ Agent 模式: 如果本轮创建了子代理,禁止模型继续说话
-    var _hasCreatedSubAgent = false;
+    window._hasCreatedSubAgent = false;  // ★ 全局可写（tools-exec.js 中赋值），此处重置
 
     // ★ Agent 模式: 思考深度处理 - 使用模型配置判断是否支持 reasoning_effort
     if (_effectiveAgent) {
@@ -2052,11 +2052,14 @@ window.useAlternativeVisionModel = function() {
                     if (userAbortMap[chatId]) {
                         console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
                         if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId);
-                        body.messages.push({
+                        var _abortMsg = {
                             role: 'tool',
                             tool_call_id: tc.id || '',
                             content: '[用户已中断操作]'
-                        });
+                        };
+                        body.messages.push(_abortMsg);
+                        // ★ 同时持久化到 chat 历史，防止下次发送时出现孤 tool_call 导致 400
+                        chats[chatId].messages.push(Object.assign({}, _abortMsg, { _toolResult: true }));
                         continue;
                     }
 
@@ -2175,7 +2178,7 @@ window.useAlternativeVisionModel = function() {
                 }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
-                if (_hasCreatedSubAgent) {
+                if (window._hasCreatedSubAgent) {
                     if (!validToolCalls || !Array.isArray(validToolCalls)) {
                         console.log('[Agent] 已创建子代理,跳过等待逻辑');
                     } else {
@@ -2956,17 +2959,34 @@ window.useAlternativeVisionModel = function() {
         }
         if (currentChatId === chatId) loadChat(chatId);
         // ★ 计划面板兜底：回复结束时，将仍为 running 的任务标记为 failed
+        // ★ 但若仍有活跃子代理在运行，跳过兜底（子代理完成后会自动更新计划状态）
         if (window._agentPlan && window._agentPlan.tasks && window._agentPlan.status === 'running') {
-            var _hasStuck = false;
-            window._agentPlan.tasks.forEach(function(pt) {
-                if (pt.status === 'running') { pt.status = 'failed'; pt.note = '回复中断，任务未完成'; _hasStuck = true; }
-                if (pt.status === 'pending') { pt.status = 'skipped'; _hasStuck = true; }
-            });
-            if (_hasStuck) {
-                window.renderPlanTasks(window._agentPlan.tasks);
-                window._agentPlan.status = 'completed';
-                console.log('[FlowPanel] 兜底: 标记 ' + window._agentPlan.tasks.filter(function(t){return t.status==='failed'||t.status==='skipped'}).length + ' 个卡住的任务');
-                setTimeout(function() { window.dismissFlowPanel(); }, 3000);
+            var _hasActiveSubAgents = false;
+            if (window._tasks && typeof window._tasks === 'object') {
+                for (var __tk in window._tasks) {
+                    var __t = window._tasks[__tk];
+                    if (__t && __t.agents) {
+                        for (var __ak in __t.agents) {
+                            if (__t.agents[__ak].status === 'running') { _hasActiveSubAgents = true; break; }
+                        }
+                    }
+                    if (_hasActiveSubAgents) break;
+                }
+            }
+            if (_hasActiveSubAgents) {
+                console.log('[FlowPanel] 跳过兜底: 仍有活跃子代理运行中，计划面板保持显示');
+            } else {
+                var _hasStuck = false;
+                window._agentPlan.tasks.forEach(function(pt) {
+                    if (pt.status === 'running') { pt.status = 'failed'; pt.note = '回复中断，任务未完成'; _hasStuck = true; }
+                    if (pt.status === 'pending') { pt.status = 'skipped'; _hasStuck = true; }
+                });
+                if (_hasStuck) {
+                    window.renderPlanTasks(window._agentPlan.tasks);
+                    window._agentPlan.status = 'completed';
+                    console.log('[FlowPanel] 兜底: 标记 ' + window._agentPlan.tasks.filter(function(t){return t.status==='failed'||t.status==='skipped'}).length + ' 个卡住的任务');
+                    setTimeout(function() { window.dismissFlowPanel(); }, 3000);
+                }
             }
         }
         // ★ AI 自主记忆: 对话结束后自动提取重要信息
