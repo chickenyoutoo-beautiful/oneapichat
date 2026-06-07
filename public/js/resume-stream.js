@@ -149,7 +149,9 @@ window.ResumeStream = (function() {
                     loadChat(chatId);
                     await new Promise(function(r) { setTimeout(r, 100); });
                 }
-                // ★ loadChat 之后再创建 partial 消息（避免被 line 728 的 filter 清理）
+                // ★ loadChat 替换了 chats[id].messages 数组，必须重新获取 msgs 引用
+                msgs = chats[chatId].messages;
+                // ★ 创建 partial 消息（loadChat 已清理旧 partial，现在安全）
                 var pm = msgs.find(function(m){return m.partial;});
                 if (!pm) {
                     pm = {role:'assistant',content:'',reasoning:'',partial:true,_recovered:true};
