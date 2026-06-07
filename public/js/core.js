@@ -124,22 +124,6 @@ function _renderMarkdownWithMath(text) {
     tempHtml = tempHtml.replace(/<a /g, '<a target="_blank" rel="noopener" ');
     // 还原 <pre> 块
     tempHtml = tempHtml.replace(/%%PRE(\d+)%%/g, function(_, i) { return _preBlocks[parseInt(i)]; });
-    // ★ 代码高亮（安全包裹，失败时静默回退）
-    try {
-        if (typeof hljs !== 'undefined' && tempHtml.indexOf('<pre><code class="language-') !== -1) {
-            var _hlCount = 0;
-            tempHtml = tempHtml.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/gi, function(_, lang, code) {
-                if (_hlCount++ > 50) return _;  // 最多高亮50个代码块
-                var _decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-                try {
-                    var _result = hljs.highlight(_decoded, { language: lang, ignoreIllegals: true });
-                    return '<pre><code class="hljs language-' + lang + '">' + _result.value + '</code></pre>';
-                } catch(e) {
-                    return '<pre><code class="hljs language-' + lang + '">' + code + '</code></pre>';
-                }
-            });
-        }
-    } catch(e) { /* 高亮失败不影响页面 */ }
     return tempHtml;
 }
 

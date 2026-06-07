@@ -89,23 +89,16 @@ function _flushStreamRender_batched(chatId, st) {
                 st.lastRenderLen = 0;
             }
         }
-        // ★ 代码高亮: 安全包裹, 失败静默回退
-        try {
-            if (typeof hljs !== 'undefined' && _html.indexOf('<pre><code class="language-') !== -1) {
-                var _hlc = 0;
-                _html = _html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/gi, function(_, lang, code) {
-                    if (_hlc++ > 50) return _;
-                    var _decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-                    try {
-                        var _result = hljs.highlight(_decoded, { language: lang, ignoreIllegals: true });
-                        return '<pre><code class="hljs language-' + lang + '">' + _result.value + '</code></pre>';
-                    } catch(e) {
-                        return '<pre><code class="hljs language-' + lang + '">' + code + '</code></pre>';
-                    }
-                });
-            }
-        } catch(e) { /* 高亮失败不影响渲染 */ }
         mb.innerHTML = _html;
+        // ★ 代码高亮（DOM方式，只处理新增的未高亮块）
+        if (typeof hljs !== 'undefined') {
+            try {
+                var _blocks = mb.querySelectorAll('pre code[class*="language-"]:not(.hljs)');
+                for (var _bi = 0; _bi < _blocks.length && _bi < 20; _bi++) {
+                    try { hljs.highlightElement(_blocks[_bi]); } catch(e) {}
+                }
+            } catch(e) { /* 高亮失败不影响渲染 */ }
+        }
         // ★ 隐藏流式渲染中加载失败的图片(模型可能在文本中引用过期的CDN URL)
         mb.querySelectorAll('img').forEach(function(_img) {
             if (!_img._hasOnerror) {
