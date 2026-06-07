@@ -54,21 +54,21 @@ window.ResumeStream = (function() {
                 var js = ln.substring(6); if (!js) continue;
                 try {
                     var d = JSON.parse(js);
-                    // ★ 引擎 SSE 事件类型在 JSON 的 type 字段内（event: 行永远是 chunk）
-                    var _dt = d.type || '';
-                    if (_dt === 'content') {
+                    // ★ 引擎有2种SSE格式：_generate_resumable用event行(_ev)，_stream_openai_to_sse用JSON的type字段
+                    var _evType = ev || (d.type || '');
+                    if (_evType === 'content') {
                         var dl = d.delta||'';
                         if (dl) {
                             full+=dl;
                             pendingMsg.content=full;
-                            // ★ 实时剔除 <think> 块用于显示（完整内容保留在 full 供最终提取）
+                            // ★ 实时剔除 <think> 块用于显示
                             var _display = full;
                             if (full.indexOf('<think>') !== -1) {
                                 _display = full.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
                             }
                             applyStreamRender(chatId, _display);
                         }
-                    } else if (_dt === 'reasoning') {
+                    } else if (_evType === 'reasoning') {
                         var rd = d.delta||'';
                         if (rd) {
                             reasoning+=rd;
@@ -91,16 +91,16 @@ window.ResumeStream = (function() {
                                 }
                             }
                         }
-                    } else if (_dt === 'tool_call' || d.function) {
+                    } else if (_evType === 'tool_call' || d.function) {
                         tcList.push(d.function?d:d);
-                    } else if (_dt === 'done' || d.full_text !== undefined) {
+                    } else if (_evType === 'done' || d.full_text !== undefined) {
                         // ★ 优先用已累积的 full（可能比引擎 full_text 更完整）
                         if (d.full_text && d.full_text.length > full.length) full = d.full_text;
                         if (d.reasoning_text && d.reasoning_text.length > reasoning.length) reasoning = d.reasoning_text;
                         if (d.tool_calls) tcList=d.tool_calls;
                         if (d.usage) usage=d.usage;
                         done=true;
-                    } else if (_dt === 'error' || d.error) {
+                    } else if (_evType === 'error' || d.error) {
                         console.warn('[RS] stream error:', d.error);
                         done=true;
                     } else if (d.delta && !d.full_text) {
