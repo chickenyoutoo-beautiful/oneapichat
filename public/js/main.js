@@ -1569,6 +1569,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
             // ★ 发送前验证所有消息 content 字段
             if (body.messages) {
+                window.___assignedTcIds = {}; // ★ 每次请求重置 ID 分配追踪
                 for (var _viFix = 0; _viFix < body.messages.length; _viFix++) {
                     var _mFix = body.messages[_viFix];
                     if (!_mFix.content && _mFix.content !== 0) {
@@ -1577,12 +1578,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                     if (_mFix.role === 'tool' && !_mFix.tool_call_id) {
                         // ★ 向前查找匹配的 tool_calls ID（不能用随机 fake ID）
+                        // ★ 追踪已分配的 ID，防止多个孤儿 tool 消息共用同一 ID 导致 400
+                        if (!window.___assignedTcIds) window.___assignedTcIds = {};
                         for (var _tli2 = _viFix - 1; _tli2 >= 0; _tli2--) {
                             var _prevM = body.messages[_tli2];
                             if (_prevM.role === 'assistant' && _prevM.tool_calls) {
                                 for (var _ttj = _prevM.tool_calls.length - 1; _ttj >= 0; _ttj--) {
-                                    if (_prevM.tool_calls[_ttj].id) {
-                                        _mFix.tool_call_id = _prevM.tool_calls[_ttj].id;
+                                    var _candId = _prevM.tool_calls[_ttj].id;
+                                    if (_candId && !window.___assignedTcIds[_candId]) {
+                                        _mFix.tool_call_id = _candId;
+                                        window.___assignedTcIds[_candId] = true;
                                         console.warn('[FIX] tool_call_id 自动匹配:', _mFix.tool_call_id);
                                         break;
                                     }
@@ -2526,8 +2531,8 @@ window.useAlternativeVisionModel = function() {
                     // system prompt 过长 → 截断 system prompt 重试
                     _shouldRetry = true;
                     _retryAction = 'trim_system';
-                } else if (_errMsg.includes('invalid function arguments json string') || _errMsg.includes('tool result') && _errMsg.includes('not found')) {
-                    // ★ 单个工具调用的 JSON 破损 → 修复或丢弃该工具调用（不删全部 tools）
+                } else if (_errMsg.includes('invalid function arguments json string') || _errMsg.includes('tool result') && _errMsg.includes('not found') || _errMsg.includes('tool_calls') && _errMsg.includes('must be followed by tool messages')) {
+                    // ★ 工具调用受损 → 修复或丢弃该工具调用（不删全部 tools）
                     _shouldRetry = true;
                     _retryAction = 'fix_tool_args';
                 } else if (_errMsg.includes('tool') && (_errMsg.includes('not support') || _errMsg.includes('disabled') || _errMsg.includes('No endpoints found'))) {
@@ -2686,7 +2691,46 @@ window.useAlternativeVisionModel = function() {
                                 return true;
                             });
                         }
-                        showToast('⚠️ 工具调用参数异常，已自动修复后重试...', 'warning', 8000);
+                        // ★ 同时清理孤立的 tool_calls（有有效 JSON 参数但缺少对应 tool 结果）
+                        var _orphanToolIds = {};
+                        for (var _oj = 0; _oj < body.messages.length; _oj++) {
+                            if (body.messages[_oj].role === 'tool' && body.messages[_oj].tool_call_id) {
+                                _orphanToolIds[body.messages[_oj].tool_call_id] = true;
+                            }
+                        }
+                        var _removedOrphans = 0;
+                        for (var _ok = 0; _ok < body.messages.length; _ok++) {
+                            if (body.messages[_ok].role === 'assistant' && body.messages[_ok].tool_calls) {
+                                var _beforeCount = body.messages[_ok].tool_calls.length;
+                                body.messages[_ok].tool_calls = body.messages[_ok].tool_calls.filter(function(tc) {
+                                    return tc.id && _orphanToolIds[tc.id];
+                                });
+                                _removedOrphans += _beforeCount - body.messages[_ok].tool_calls.length;
+                                if (body.messages[_ok].tool_calls.length === 0) {
+                                    delete body.messages[_ok].tool_calls;
+                                }
+                            }
+                        }
+                        if (_removedOrphans > 0) {
+                            _fixed = true;
+                            console.log('[fix_tool_args] 清理 ' + _removedOrphans + ' 个孤立 tool_calls（无对应 tool 消息）');
+                        }
+                        // ★ 同时清理孤立 tool 消息：收集剩余有效的 tool_call_id
+                        var _validTcIds = {};
+                        for (var _vk = 0; _vk < body.messages.length; _vk++) {
+                            if (body.messages[_vk].role === 'assistant' && body.messages[_vk].tool_calls) {
+                                body.messages[_vk].tool_calls.forEach(function(tc) { if (tc.id) _validTcIds[tc.id] = true; });
+                            }
+                        }
+                        body.messages = body.messages.filter(function(m) {
+                            if (m.role === 'tool' && m.tool_call_id && !_validTcIds[m.tool_call_id]) {
+                                console.log('[fix_tool_args] 清理孤立 tool 结果:', m.tool_call_id);
+                                _fixed = true;
+                                return false;
+                            }
+                            return true;
+                        });
+                        showToast('⚠️ 工具调用异常，已自动修复后重试...', 'warning', 8000);
                     } else if (_retryAction === 'remove_tools') {
                         delete body.tools;
                         delete body.tool_choice;

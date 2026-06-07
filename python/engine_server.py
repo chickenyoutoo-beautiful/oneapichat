@@ -978,15 +978,18 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             finally:
                 _lock.release()
         # ★ 通知引擎:此代理已完成,需要主代理处理
+        # ★ 从 store 重新读取最新状态(不能用 agents 变量, _run 只写 store 不写 agents)
+        _latest = store.get()
+        _latest_agent = _latest.get(name, agents.get(name, {}))
         notify_store = get_ns("agent_notifications", user_id)
         notifs = notify_store.get()
         if not isinstance(notifs, list):
             notifs = []
         notifs.append({
             "agent": name,
-            "status": agents[name]["status"],
-            "result": agents[name].get("result", ""),
-            "error": agents[name].get("error", ""),
+            "status": _latest_agent.get("status", "unknown"),
+            "result": _latest_agent.get("result", ""),
+            "error": _latest_agent.get("error", ""),
             "time": datetime.now().isoformat(),
             "processed": False
         })
@@ -997,8 +1000,8 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         # Broadcast agent status change via SSE
         _broadcast_to_user(user_id, 'agent:status', {
             'agent': name,
-            'status': agents[name].get('status', 'unknown'),
-            'result_preview': (agents[name].get('result', '') or '')[:200],
+            'status': _latest_agent.get('status', 'unknown'),
+            'result_preview': (_latest_agent.get('result', '') or '')[:200],
             'time': notifs[-1]['time']
         })
 
