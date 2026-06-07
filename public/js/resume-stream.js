@@ -149,7 +149,15 @@ window.ResumeStream = (function() {
                     if (sp && sp.reasoning) pm.reasoning = sp.reasoning;
                     msgs.push(pm);
                 }
+                // ★ 渲染气泡到界面（让流式内容有渲染目标）并激活 typing 状态
+                if (currentChatId === chatId) {
+                    loadChat(chatId);
+                    // 等待 DOM 更新完成
+                    await new Promise(function(r) { setTimeout(r, 100); });
+                }
+                isTypingMap[chatId] = true;  // ★ 启用流式渲染
                 var result = await _readSSE(sid, chatId, pm, true);
+                isTypingMap[chatId] = false;  // ★ 流结束，清除状态
                 if (result && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
@@ -164,7 +172,10 @@ window.ResumeStream = (function() {
                 if (fi !== -1) msgs.splice(fi, 1);
                 return false;
             } catch(e) { return false; }
-            finally { delete _active[chatId]; }
+            finally {
+                isTypingMap[chatId] = false;
+                delete _active[chatId];
+            }
         }
     };
 })();

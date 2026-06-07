@@ -1616,6 +1616,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var _isContinuation = (toolCallCount > 0);
             var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
+                // ★ 先持久化用户消息到服务器，防止刷新丢失
+                saveChats();
                 // ★ 通过引擎后端创建可恢复流，刷新/断线后无感续接
                 var _rsResult = await ResumeStream.create(
                     body.messages,
