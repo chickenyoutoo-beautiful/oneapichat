@@ -447,6 +447,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     searchAbortControllerMap[chatId] = abortSearch;
 
     isTypingMap[chatId] = true;
+    // ★ 多端同步: 广播流开始到其他设备(非RS路径,引擎侧也会广播)
+    if (typeof window._broadcastEvent === 'function') {
+        window._broadcastEvent('chat:stream_started', { chat_id: chatId, ts: Date.now() });
+    }
     if ($.sendBtn) $.sendBtn.classList.add('hidden');
     if ($.stopBtn) $.stopBtn.classList.add('visible');
     // ★ AI开始生成:更新队列栏状态
@@ -488,6 +492,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
         // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
+        // ★ 多端同步: 广播用户消息已添加到其他设备
+        if (typeof window._broadcastChatUpdate === 'function') {
+            window._broadcastChatUpdate(chatId);
+        }
         if (chats[chatId].title === '新对话') {
             chats[chatId].title = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
         }
@@ -501,6 +509,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         }) : [];
         chats[chatId].messages.push({ role: 'user', text: text, files: _qFiles });
         slimSaveChats();
+        // ★ 多端同步: 广播队列消息已添加到其他设备
+        if (typeof window._broadcastChatUpdate === 'function') {
+            window._broadcastChatUpdate(chatId);
+        }
         if (chats[chatId].title === '新对话') {
             chats[chatId].title = text ? text.slice(0, 10) : (_qFiles.length ? '文件消息' : '新对话');
         }
@@ -1640,6 +1652,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     clearTimeout(timeoutIdVal);
                     // ★ 设置 _rsDone 标记跳过 HTTP 直连路径，但继续工具调用处理
                     var _rsDone = true;
+                    // ★ 完成 partial 标记并保存(RS 路径跳过 HTTP 块,需在此处持久化)
+                    delete pendingMsg.partial;
+                    pendingMsg.time = Date.now() - startTime;
+                    pendingMsg.usage = usage;
+                    saveChats();
+                    // ★ 多端同步: 广播 RS 完成到其他设备
+                    if (typeof window._broadcastChatUpdate === 'function') {
+                        window._broadcastChatUpdate(chatId);
+                    }
                 } else {
                     // 引擎流失败：回退普通 HTTP 直连流
                     console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
@@ -2293,6 +2314,10 @@ window.useAlternativeVisionModel = function() {
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
             saveChats();  // 立即保存,不用 debounce
+            // ★ 多端同步: 广播消息完成到其他设备
+            if (typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(chatId);
+            }
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
                 var _bubble = activeBubbleMap[chatId];
@@ -2388,6 +2413,10 @@ window.useAlternativeVisionModel = function() {
             }
             // ★ 保存聊天到 localStorage (确保图片等数据持久化,工具路径和直接路径都需要)
             saveChats();
+            // ★ 多端同步: 广播工具调用完成后消息更新到其他设备
+            if (typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(chatId);
+            }
             var defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
             if (!skipUserAdd && chats[chatId].title === defaultTitle) {
                 autoGenerateTitle(chatId);

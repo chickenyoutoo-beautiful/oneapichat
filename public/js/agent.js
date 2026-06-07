@@ -139,6 +139,11 @@ function setAgentMode(mode) {
     }
     // 模式切换不弹 toast(已有横幅和绿点提示)
     if (typeof renderToolPanel === 'function') renderToolPanel();
+
+    // ★ 多端同步: 广播 agent 模式变更到其他浏览器/设备
+    if (typeof window._broadcastEvent === 'function') {
+        window._broadcastEvent('agent:mode_changed', { mode: mode, ts: Date.now() });
+    }
 }
 
 /** 循环切换模式: off → plan → agent → yolo → off */

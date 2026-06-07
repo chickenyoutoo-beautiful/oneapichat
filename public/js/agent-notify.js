@@ -138,11 +138,26 @@ window.connectSSEChannel = function() {
     var uid = localStorage.getItem('authUserId') || '';
     if (!uid) return;
     if (_sseChannel) { try { _sseChannel.close(); } catch(e) {} }
-    var url = window.location.origin + '/engine/events?user_id=' + encodeURIComponent(uid);
+    // ★ 多端同步: 上报当前 agent 模式,让引擎同步给其他设备
+    var currentMode = (typeof getAgentMode === 'function') ? getAgentMode() : 'off';
+    var url = window.location.origin + '/engine/events?user_id=' + encodeURIComponent(uid) + '&agent_mode=' + encodeURIComponent(currentMode);
     _sseChannel = new EventSource(url);
 
     _sseChannel.addEventListener('connected', function(e) {
         console.log('[SSE] Channel connected');
+        // ★ 多端同步: 检查引擎返回的 agent_mode(来自其他设备)
+        try {
+            var evData = JSON.parse(e.data);
+            if (evData.agent_mode && evData.agent_mode !== 'off' && evData.agent_mode !== currentMode) {
+                var prevMode = localStorage.getItem('agentMode') || 'off';
+                if (evData.agent_mode !== prevMode) {
+                    console.log('[SSE] Syncing agent mode from another device:', evData.agent_mode);
+                    localStorage.setItem('agentMode', evData.agent_mode);
+                    if (typeof updateAgentUI === 'function') updateAgentUI();
+                    if (typeof renderToolPanel === 'function') renderToolPanel();
+                }
+            }
+        } catch(_sce) {}
     });
 
     _sseChannel.addEventListener('config:changed', function(e) {
@@ -157,8 +172,14 @@ window.connectSSEChannel = function() {
     _sseChannel.addEventListener('chat:stream_done', function(e) {
         try {
             var ev = JSON.parse(e.data);
+            if (ev.source === window._sseSourceId) return;
+            // ★ 其他浏览器/设备的流完成了 — 刷新对应聊天
             if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+                console.log('[SSE] Stream done in other tab, reloading current chat');
                 loadChat(currentChatId);
+            } else if (ev.chat_id && ev.chat_id !== currentChatId) {
+                // 其他聊天完成了 — 更新侧边栏
+                updateChatList();
             }
         } catch(_sce) {}
     });
@@ -167,9 +188,59 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            if (currentChatId !== ev.chat_id && !isTypingMap[currentChatId]) {
-                // Another browser updated a different chat - refresh sidebar title
+            console.log('[SSE] Chat updated from another browser:', ev.chat_id);
+            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+                // ★ 当前聊天被其他设备更新了 — 重新加载消息
+                loadChat(currentChatId);
+            }
+            // 总是更新侧边栏
+            updateChatList();
+        } catch(_sce) {}
+    });
+
+    // ★ 多端同步: 其他设备发送了新消息
+    _sseChannel.addEventListener('chat:message_added', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            if (ev.source === window._sseSourceId) return;
+            console.log('[SSE] New message from another device, chat:', ev.chat_id);
+            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+                // 当前聊天有新消息 — 自动加载
+                loadChat(currentChatId);
+            } else if (ev.chat_id && ev.chat_id !== currentChatId) {
+                // 其他聊天有新消息 — 更新侧边栏
                 updateChatList();
+            }
+        } catch(_sce) {}
+    });
+
+    // ★ 多端同步: Agent 模式在其他设备上变更了
+    _sseChannel.addEventListener('agent:mode_changed', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            if (ev.source === window._sseSourceId) return;
+            var newMode = ev.mode || 'off';
+            console.log('[SSE] Agent mode changed from another device:', newMode);
+            var prevMode = localStorage.getItem('agentMode') || 'off';
+            if (newMode !== prevMode) {
+                localStorage.setItem('agentMode', newMode);
+                if (typeof updateAgentUI === 'function') updateAgentUI();
+                // 同步工具面板
+                if (typeof renderToolPanel === 'function') renderToolPanel();
+                showToast('🤖 Agent 模式已在其他设备切换为: ' + newMode, 'info', 3000);
+            }
+        } catch(_sce) {}
+    });
+
+    // ★ 多端同步: 其他设备开始了流式生成
+    _sseChannel.addEventListener('chat:stream_started', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            if (ev.source === window._sseSourceId) return;
+            console.log('[SSE] Stream started in another device, chat:', ev.chat_id);
+            // 如果打开的正是这个聊天,显示一个提示
+            if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+                showToast('📡 其他设备正在此聊天中生成回复...', 'info', 3000);
             }
         } catch(_sce) {}
     });
@@ -213,7 +284,7 @@ window._broadcastEvent = function(eventType, data) {
 
 window._broadcastChatUpdate = function(chatId) {
     var now = Date.now();
-    if (now - _lastChatSyncBroadcast < 2000) return;
+    if (now - _lastChatSyncBroadcast < 500) return;  // ★ 500ms throttle for real-time sync
     _lastChatSyncBroadcast = now;
     window._broadcastEvent('chat:updated', { chat_id: chatId, ts: now });
 };

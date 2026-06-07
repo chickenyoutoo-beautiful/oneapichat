@@ -1899,6 +1899,13 @@ async def chat_create(request: Request, user_id: str = Query("")):
         except Exception as e:
             print(f"[chat_create] task register error: {e}")
 
+    # ★ 多端同步: 广播流开始事件到其他浏览器/设备
+    if user_id and chat_id:
+        _broadcast_to_user(user_id, 'chat:stream_started', {
+            'chat_id': chat_id, 'stream_id': sid,
+            'model': model, 'ts': time.time()
+        })
+
     return {"stream_id": sid, "task_id": task_id, "msg_id": msg_id}
 
 
@@ -2041,6 +2048,7 @@ async def active_tasks(user_id: str = Query("")):
 
 _user_event_queues: dict = {}  # {user_id: [asyncio.Queue, ...]}
 _user_event_queues_lock = threading.Lock()
+_user_agent_modes: dict = {}  # ★ 多端同步: 存储每个用户的 agent 模式状态
 
 
 def _broadcast_to_user(user_id: str, event_type: str, data: dict):
@@ -2058,10 +2066,15 @@ def _broadcast_to_user(user_id: str, event_type: str, data: dict):
 
 
 @app.get("/engine/events")
-async def user_events_stream(user_id: str = Query("")):
+async def user_events_stream(user_id: str = Query(""), agent_mode: str = Query("")):
     """用户级持久 SSE 通道。浏览器连接后接收实时事件推送"""
     if not user_id:
         return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    # ★ 多端同步: 存储客户端上报的 agent 模式
+    if agent_mode:
+        _user_agent_modes[user_id] = {'mode': agent_mode, 'ts': time.time()}
+    current_mode = _user_agent_modes.get(user_id, {}).get('mode', '')
 
     q = asyncio.Queue()
     with _user_event_queues_lock:
@@ -2069,7 +2082,7 @@ async def user_events_stream(user_id: str = Query("")):
 
     async def event_gen():
         try:
-            yield f"event: connected\ndata: {json.dumps({'user_id': user_id, 'ts': time.time()})}\n\n"
+            yield f"event: connected\ndata: {json.dumps({'user_id': user_id, 'ts': time.time(), 'agent_mode': current_mode})}\n\n"
             while True:
                 try:
                     payload = await asyncio.wait_for(q.get(), timeout=30)
@@ -2099,6 +2112,9 @@ async def events_broadcast(request: Request, user_id: str = Query("")):
     data = body.get("data", {})
     if not event_type or not user_id:
         return JSONResponse({"ok": False, "error": "event_type and user_id required"}, status_code=400)
+    # ★ 多端同步: 存储 agent 模式变更到服务端
+    if event_type == 'agent:mode_changed' and data.get('mode'):
+        _user_agent_modes[user_id] = {'mode': data['mode'], 'ts': data.get('ts', time.time())}
     _broadcast_to_user(user_id, event_type, data)
     return {"ok": True}
 
