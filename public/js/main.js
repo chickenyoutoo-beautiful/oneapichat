@@ -1524,6 +1524,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     async function attemptRequestWithFreshAbort(attempt, abortCtrl, timeoutIdVal) {
         try {
+            // ★ 清理空 tool_calls:[] — DeepSeek API 拒绝 empty array (每次重试都检查)
+            if (body.messages) {
+                for (var _etci2 = 0; _etci2 < body.messages.length; _etci2++) {
+                    var _em3 = body.messages[_etci2];
+                    if (_em3.role === 'assistant' && _em3.tool_calls !== undefined && _em3.tool_calls !== null) {
+                        if (!Array.isArray(_em3.tool_calls) || _em3.tool_calls.length === 0) {
+                            delete _em3.tool_calls;
+                        }
+                    }
+                }
+            }
             // ★ 终极防护: 每次发送前检查 no-tool 列表,确保不发送 tools
             var _curSendModel = getVal('modelSelect') || '';
             var _curSendLower = _curSendModel.toLowerCase();
@@ -1622,6 +1633,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
             // ★ 删除标记为 _remove 的消息
             body.messages = body.messages.filter(function(m) { return !m._remove; });
+
+            // ★ 清理空 tool_calls:[] — DeepSeek API 严格拒绝 empty array
+            for (var _etci = 0; _etci < body.messages.length; _etci++) {
+                var _em2 = body.messages[_etci];
+                if (_em2.role === 'assistant' && _em2.tool_calls !== undefined && _em2.tool_calls !== null) {
+                    if (!Array.isArray(_em2.tool_calls) || _em2.tool_calls.length === 0) {
+                        delete _em2.tool_calls;
+                    }
+                }
+            }
 
             // ★ 可恢复流式: 开关打开时走后端引擎
             // ★ 但工具调用的递归延续强制走直连，避免多层后端流式嵌套
