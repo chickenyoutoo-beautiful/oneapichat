@@ -2530,9 +2530,9 @@ window.useAlternativeVisionModel = function() {
                     _shouldRetry = true;
                     _retryAction = 'remove_tools';
                 } else if (_errMsg.includes('Content Exists Risk') || _errMsg.includes('content filter') || _errMsg.includes('safety')) {
-                    // 内容安全过滤 — 重试无意义，直接报错
-                    _shouldRetry = false;
-                    console.warn('[400-Safety] 内容被安全过滤，不重试:', _errMsg.substring(0, 100));
+                    // 内容安全过滤 — 重试无意义，尝试精简消息体
+                    _shouldRetry = true;
+                    _retryAction = 'safety_filter';
                 } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error') {
                     // 通用参数错误 → 尝试清理 body 重试
                     _shouldRetry = true;
@@ -2724,6 +2724,23 @@ window.useAlternativeVisionModel = function() {
                                 console.warn('[Search-Fallback] 搜索回退失败:', _se.message);
                             }
                         }
+                    } else if (_retryAction === 'safety_filter') {
+                        // 内容安全过滤 → 精简 system prompt + 移除多余工具描述
+                        for (var _sfi = 0; _sfi < body.messages.length; _sfi++) {
+                            if (body.messages[_sfi].role === 'system') {
+                                var _sc = body.messages[_sfi].content || '';
+                                // 保留核心指令，去掉长工具列表和示例
+                                _sc = _sc.replace(/##\s*(可用工具|工具列表|Tools)[\s\S]*?(?=##|$)/gi, '');
+                                _sc = _sc.replace(/##\s*(工作空间|文件路径|项目)[\s\S]*?(?=##|$)/gi, '');
+                                _sc = _sc.substring(0, 3000);
+                                body.messages[_sfi].content = _sc + '\n\n[系统提示已精简]';
+                            }
+                        }
+                        // 减少工具到 50 个
+                        if (body.tools && body.tools.length > 50) {
+                            body.tools = body.tools.slice(0, 50);
+                        }
+                        showToast('⚠️ 内容安全过滤, 已精简上下文后重试...', 'warning', 6000);
                     } else if (_retryAction === 'clean_params') {
                         // 清理可能有问题的参数
                         delete body.top_p;

@@ -4669,10 +4669,10 @@ html:not(.dark) #userInput {
 }
 .dark .chain-separator { border-left-color: #818cf8; }
 
-/* ── Toast 通知容器（底部居中，轻量不遮挡）── */
+/* ── Toast 通知容器（右上角）── */
 .toast-container {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    z-index: 99999; display: flex; flex-direction: column-reverse; gap: 6px;
+    position: fixed; top: 70px; right: 16px;
+    z-index: 99999; display: flex; flex-direction: column; gap: 6px;
     pointer-events: none; max-width: 90vw;
 }
 .toast {
