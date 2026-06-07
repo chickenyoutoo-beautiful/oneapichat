@@ -81,6 +81,18 @@ window.ResumeStream = (function() {
             }
         }
         clearInterval(timer);
+        // ★ 清理 <think> 标签：提取思考内容到 reasoning，从正文移除
+        if (full) {
+            var _thinkMatch = full.match(/<think>([\s\S]*?)<\/think>/g);
+            if (_thinkMatch) {
+                var _thinkText = '';
+                for (var _ti = 0; _ti < _thinkMatch.length; _ti++) {
+                    _thinkText += _thinkMatch[_ti].replace(/<\/?think>/g, '');
+                }
+                full = full.replace(/<think>[\s\S]*?<\/think>/g, '');
+                if (_thinkText.trim() && !reasoning) reasoning = _thinkText.trim();
+            }
+        }
         try { cleanupStreamState(chatId); } catch(e) {}
         return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList};
     }
