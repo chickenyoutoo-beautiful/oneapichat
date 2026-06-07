@@ -109,15 +109,30 @@ function _renderMarkdownWithMath(text) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
     var protected = _protectMath(text);
     var html = marked.parse(protected);
-    // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify）
+    // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify, 跳过 <pre> 内部）
     let tempHtml = _restoreMath(html);
+    // 用占位符保护 <pre> 块, 避免正则破坏代码高亮的 class 属性
+    var _preBlocks = [];
+    tempHtml = tempHtml.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, function(m) {
+        _preBlocks.push(m);
+        return '%%PRE' + (_preBlocks.length - 1) + '%%';
+    });
     tempHtml = tempHtml.replace(/(?<!["'=])(https?:\/\/[^\s<>"']+)(?!["'])/gi, function(url) {
-        // 清理尾部标点
         var cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
         return '<a href="' + cleanUrl + '" target="_blank" rel="noopener">' + cleanUrl + '</a>';
     });
-    // ★ 所有已经存在的链接打开新标签页
     tempHtml = tempHtml.replace(/<a /g, '<a target="_blank" rel="noopener" ');
+    // 还原 <pre> 块
+    tempHtml = tempHtml.replace(/%%PRE(\d+)%%/g, function(_, i) { return _preBlocks[parseInt(i)]; });
+    // ★ 内联代码高亮（确保即使 hljs 未加载也能看到基础着色，加载后进行完整高亮）
+    if (typeof hljs !== 'undefined') {
+        var _tmp = document.createElement('div');
+        _tmp.innerHTML = tempHtml;
+        _tmp.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])').forEach(function(b) {
+            try { hljs.highlightElement(b); } catch(e) {}
+        });
+        tempHtml = _tmp.innerHTML;
+    }
     return tempHtml;
 }
 
