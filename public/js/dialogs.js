@@ -617,6 +617,39 @@ window.deleteChat = async function (e, id) {
 };
 
 window.createNewChat = function () {
+    // ★ Agent 模式 /new: 归档旧 _agent_main 为子代理会话
+    if (currentChatId === '_agent_main' && chats['_agent_main'] && chats['_agent_main'].messages.length > 1) {
+        var _archiveId = '_agent_old_' + Date.now();
+        var _oldTitle = chats['_agent_main'].title || 'Agent 会话';
+        // 提取对话摘要作为标题
+        var _firstUser = chats['_agent_main'].messages.find(function(m) { return m.role === 'user'; });
+        if (_firstUser) {
+            _oldTitle = (_firstUser.text || _firstUser.content || 'Agent').substring(0, 30);
+        }
+        chats[_archiveId] = JSON.parse(JSON.stringify(chats['_agent_main']));
+        chats[_archiveId].title = '📦 ' + _oldTitle;
+        chats[_archiveId]._archivedAgent = true;
+        // 清理旧 agent_main
+        delete chats['_agent_main'];
+        showToast('📦 旧 Agent 会话已归档: ' + _oldTitle, 'info', 3000);
+    }
+    // ★ Agent 模式: 创建新 _agent_main
+    if (getAgentMode() !== 'off') {
+        var _uid2 = localStorage.getItem('authUserId') || '';
+        var _sysPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
+        chats['_agent_main'] = {
+            title: 'Agent 会话',
+            userId: _uid2,
+            updated_at: Date.now(),
+            messages: [{ role: 'system', content: _sysPrompt }]
+        };
+        saveChats();
+        loadChat('_agent_main');
+        renderChatHistory();
+        updateHeaderTitle();
+        return;
+    }
+    // ★ 普通模式 /new
     var id = 'chat_' + Date.now();
     var uid = localStorage.getItem('authUserId') || '';
     chats[id] = {

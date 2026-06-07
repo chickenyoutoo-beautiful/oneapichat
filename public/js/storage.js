@@ -84,16 +84,7 @@ async function saveChatsToServer() {
         for (var _cid in chats) {
             // ★ 跳过已标记删除的聊天（防止复活）
             if (_deletedChatIds[_cid]) continue;
-            if (_cid === AGENT_CHAT_ID || _cid === '_agent_main') {
-                // Agent 主聊:只同步轻量数据(system prompt),不同步消息内容
-                mergedChats[_cid] = {
-                    title: 'Agent',
-                    userId: chats[_cid].userId || '',
-                    updated_at: chats[_cid].updated_at || Date.now(),
-                    messages: chats[_cid].messages ? [{ role: 'system', content: chats[_cid].messages[0]?.content || '' }] : []
-                };
-                continue;
-            }
+            // ★ 完整同步所有聊天（含 Agent 会话及归档的子代理会话）
             mergedChats[_cid] = JSON.parse(JSON.stringify(chats[_cid]));
             _localCount++;
         }

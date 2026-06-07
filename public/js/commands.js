@@ -40,6 +40,7 @@ window.parseCommand = function(text) {
     if (cmd === '/doctor') return { type: 'command', cmd: 'doctor' };
     if (cmd === '/context') return { type: 'command', cmd: 'show_context' };
     if (cmd === '/agents') return { type: 'command', cmd: 'list_agents' };
+    if (cmd === '/agent') return { type: 'command', cmd: 'switch_agent_chat', agentName: rest };
     if (cmd === '/color') return { type: 'command', cmd: 'set_color', theme: rest || 'auto' };
     return null;
 }
@@ -312,6 +313,50 @@ window.handleSlashCommand = function(cmd) {
                 appendMessage('system', '🤖 暂无活跃子代理');
             }
         } catch(e) { appendMessage('system', '❌ 查询失败: ' + e.message); }
+    } else if (cmd.cmd === 'switch_agent_chat') {
+        // ★ 切换到指定子代理的会话
+        var _agentName = cmd.agentName || '';
+        if (!_agentName) {
+            appendMessage('system', '用法: /agent <子代理名称>\n\n例如: /agent agent_1');
+            return;
+        }
+        var _agToken = localStorage.getItem('authToken') || '';
+        try {
+            var _agResp = await fetch('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + _agToken);
+            var _agData = await _agResp.json();
+            var _agent = _agData[_agentName] || _agData.agents?.find(function(a) { return a.name === _agentName; });
+            if (!_agent) {
+                appendMessage('system', '❌ 子代理 `' + _agentName + '` 不存在或已删除');
+                return;
+            }
+            // 创建/加载子代理的聊天会话
+            var _agChatId = '_agent_sub_' + _agentName;
+            if (!chats[_agChatId]) {
+                var _agSysPrompt = '你正在查看子代理 `' + _agentName + '` 的会话。\n角色: ' + (_agent.role || 'general') + '\n状态: ' + (_agent.status || 'unknown');
+                chats[_agChatId] = {
+                    title: '🤖 ' + _agentName,
+                    userId: localStorage.getItem('authUserId') || '',
+                    updated_at: Date.now(),
+                    messages: [{ role: 'system', content: _agSysPrompt }]
+                };
+                // 从 localStorage 或 agent result 加载历史消息
+                var _agKey = 'agent_chat_' + _agentName;
+                var _agMsgs = JSON.parse(localStorage.getItem(_agKey) || '[]');
+                if (_agMsgs.length > 0) {
+                    chats[_agChatId].messages = chats[_agChatId].messages.concat(_agMsgs);
+                }
+                if (_agent.result && !_agMsgs.some(function(m) { return m.content === _agent.result; })) {
+                    chats[_agChatId].messages.push({ role: 'assistant', content: _agent.result, time: Date.now() });
+                }
+                saveChats();
+            }
+            loadChat(_agChatId);
+            renderChatHistory();
+            updateHeaderTitle();
+            showToast('🤖 已切换到子代理: ' + _agentName, 'success', 3000);
+        } catch(e) {
+            appendMessage('system', '❌ 切换失败: ' + e.message);
+        }
     } else if (cmd.cmd === 'set_color') {
         // ★ 主题颜色切换
         var theme = cmd.theme || 'auto';
