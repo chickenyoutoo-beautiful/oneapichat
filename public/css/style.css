@@ -4603,6 +4603,25 @@ html:not(.dark) #userInput {
 }
 .dark .tool-call-error { background: #450a0a; color: #fca5a5; border-color: #991b1b; }
 
+/* ── 历史工具调用展示（dialogs.js 渲染的 tool-calls-history）── */
+.tool-calls-history { background: #f0f4ff; }
+.dark .tool-calls-history { background: #1e293b; border-left-color: #818cf8 !important; }
+.dark .tool-call-item { color: #cbd5e1; }
+
+/* ── Diff 视图暗色适配 ── */
+.diff-view-wrapper { background: var(--card, #fff); }
+.dark .diff-view-wrapper { background: #1e293b; border-color: #374151; }
+.dark .diff-view-wrapper [style*="background:#dcfce7"] { background: #064e3b !important; color: #6ee7b7 !important; }
+.dark .diff-view-wrapper [style*="background:#fee2e2"] { background: #450a0a !important; color: #fca5a5 !important; }
+
+/* ── 输入区域和流程面板防溢出 ── */
+.input-area { z-index: 10; background: var(--bg, #fff); }
+.flow-panel { z-index: 5; position: relative; }
+.chat-messages-container { padding-bottom: 8px; }
+
+/* ── 音频播放器暗色适配 ── */
+.dark audio { filter: invert(0.85); }
+
 @keyframes tc-pop { 0%{transform:scale(0.88)} 35%{transform:scale(1.06)} 65%{transform:scale(0.97)} 100%{transform:scale(1)} }
 @keyframes tc-shake { 0%{transform:translateX(0)} 18%{transform:translateX(-6px)} 36%{transform:translateX(5px)} 54%{transform:translateX(-3px)} 72%{transform:translateX(2px)} 100%{transform:translateX(0)} }
 @keyframes tc-glow-g { 0%{box-shadow:0 0 0 0 rgba(34,197,94,0.4),inset 0 0 0 0 rgba(34,197,94,0.1)} 40%{box-shadow:0 0 0 3px rgba(34,197,94,0.15),inset 0 0 0 1px rgba(34,197,94,0.05)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0),inset 0 0 0 0 rgba(34,197,94,0)} }

@@ -337,6 +337,38 @@ function buildApiMessages(chatId) {
         apiMessagesUnfiltered._useVisionModel = true;
     }
 
+    // ★ 验证 tool_calls 配对: 确保每个 tool_call 都有对应的 tool 结果
+    // 防止 API 400: "tool_calls must be followed by tool messages"
+    var _toolResultIds = {};
+    for (var _tfi = 0; _tfi < apiMessagesUnfiltered.length; _tfi++) {
+        if (apiMessagesUnfiltered[_tfi].role === 'tool' && apiMessagesUnfiltered[_tfi].tool_call_id) {
+            _toolResultIds[apiMessagesUnfiltered[_tfi].tool_call_id] = true;
+        }
+    }
+    for (var _tfi2 = 0; _tfi2 < apiMessagesUnfiltered.length; _tfi2++) {
+        var _tmsg2 = apiMessagesUnfiltered[_tfi2];
+        if (_tmsg2.role === 'assistant' && _tmsg2.tool_calls && _tmsg2.tool_calls.length > 0) {
+            var _validCalls = [];
+            for (var _tci = 0; _tci < _tmsg2.tool_calls.length; _tci++) {
+                var _tcId = _tmsg2.tool_calls[_tci].id;
+                if (_tcId && _toolResultIds[_tcId]) {
+                    _validCalls.push(_tmsg2.tool_calls[_tci]);
+                } else {
+                    console.warn('[buildApiMessages] 移除孤立 tool_call:', _tcId, _tmsg2.tool_calls[_tci].function?.name);
+                }
+            }
+            if (_validCalls.length > 0) {
+                _tmsg2.tool_calls = _validCalls;
+            } else {
+                delete _tmsg2.tool_calls;
+            }
+        }
+        // ★ 移除孤立 tool 结果(没有对应 tool_call)
+        if (_tmsg2.role === 'tool' && _tmsg2.tool_call_id && !_toolResultIds[_tmsg2.tool_call_id]) {
+            // 不可能发生(刚收集过),但做安全处理
+        }
+    }
+
     // ★ 最终安全过滤: 确保所有消息的 content 格式正确
     var filtered = {};
     var apiMessages = [];
