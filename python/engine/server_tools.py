@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from fastapi import Query, Request
 
@@ -209,7 +210,7 @@ def register_server_tools(app):
         """执行数据库查询"""
         import sqlite3
         try:
-            db_path = str(Path(PROJECT_ROOT) / "python" / "api" / "learning_records.db")
+            db_path = str(Path(PROJECT_ROOT) / "chaoxing" / "learning_records.db")
             conn = sqlite3.connect(db_path)
             c = conn.cursor()
             c.execute(sql)
