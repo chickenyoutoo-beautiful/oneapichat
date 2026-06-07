@@ -1724,7 +1724,19 @@ function requestToolApproval(toolName, args) {
 
         // 弹窗动画: 先出场再交互
         requestAnimationFrame(function() { overlay.classList.add('active'); });
-        overlay.addEventListener('click', function(e) { if (e.target === overlay) { _cleanup(); overlay.remove(); resolve(false); } });
+        // ★ 点击遮罩层忽略 — 必须通过明确点击「批准」或「拒绝」按钮来做出决定
+        // 防止误触背景导致意外拒绝
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                // 轻微抖动提示,不关闭弹窗
+                var modal = overlay.querySelector('.approval-modal-v2');
+                if (modal) {
+                    modal.style.animation = 'none';
+                    void modal.offsetWidth;
+                    modal.style.animation = 'approval-shake 0.3s ease';
+                }
+            }
+        });
 
 
         // 按钮事件
@@ -2326,10 +2338,12 @@ window._updateFlowProgress = function(tasks) {
 /** 关闭流程面板 */
 window.dismissFlowPanel = function() {
     var panel = getEl('flowPanel');
-    if (!panel) return;
+    if (!panel) { window._agentPlan = null; return; }
 
-    // 标记计划状态
-    if (window._agentPlan && window._agentPlan.status === 'running') {
+    // 如果已完成/已关闭则直接清理不留痕迹
+    if (window._agentPlan && window._agentPlan.status !== 'running') {
+        // 已终态 — 直接隐藏不清除状态标记
+    } else if (window._agentPlan && window._agentPlan.status === 'running') {
         window._agentPlan.status = 'dismissed';
     }
 

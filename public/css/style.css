@@ -4701,6 +4701,7 @@ html:not(.dark) #userInput {
 
 @keyframes tc-pop { 0%{transform:scale(0.88)} 35%{transform:scale(1.06)} 65%{transform:scale(0.97)} 100%{transform:scale(1)} }
 @keyframes tc-shake { 0%{transform:translateX(0)} 18%{transform:translateX(-6px)} 36%{transform:translateX(5px)} 54%{transform:translateX(-3px)} 72%{transform:translateX(2px)} 100%{transform:translateX(0)} }
+@keyframes approval-shake { 0%{transform:translateX(0)} 25%{transform:translateX(-5px)} 50%{transform:translateX(5px)} 75%{transform:translateX(-3px)} 100%{transform:translateX(0)} }
 @keyframes tc-glow-g { 0%{box-shadow:0 0 0 0 rgba(34,197,94,0.4),inset 0 0 0 0 rgba(34,197,94,0.1)} 40%{box-shadow:0 0 0 3px rgba(34,197,94,0.15),inset 0 0 0 1px rgba(34,197,94,0.05)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0),inset 0 0 0 0 rgba(34,197,94,0)} }
 @keyframes tc-glow-r { 0%{box-shadow:0 0 0 0 rgba(239,68,68,0.4),inset 0 0 0 0 rgba(239,68,68,0.1)} 40%{box-shadow:0 0 0 3px rgba(239,68,68,0.15),inset 0 0 0 1px rgba(239,68,68,0.05)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0),inset 0 0 0 0 rgba(239,68,68,0)} }
 

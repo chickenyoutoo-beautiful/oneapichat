@@ -3024,6 +3024,11 @@ window.useAlternativeVisionModel = function() {
                 }
             }
         }
+        // ★ 已完成/已关闭计划面板的最终清理
+        if (window._agentPlan && window._agentPlan.status === 'completed') {
+            console.log('[FlowPanel] 响应结束,清理已完成计划面板');
+            window.dismissFlowPanel();
+        }
         // ★ AI 自主记忆: 对话结束后自动提取重要信息
         if (!window.__autoMemoryPending) {
             window.__autoMemoryPending = true;
