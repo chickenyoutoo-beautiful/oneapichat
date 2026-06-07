@@ -2529,6 +2529,10 @@ window.useAlternativeVisionModel = function() {
                     // 模型完全不支持工具 → 移除全部 tools
                     _shouldRetry = true;
                     _retryAction = 'remove_tools';
+                } else if (_errMsg.includes('Content Exists Risk') || _errMsg.includes('content filter') || _errMsg.includes('safety')) {
+                    // 内容安全过滤 — 重试无意义，直接报错
+                    _shouldRetry = false;
+                    console.warn('[400-Safety] 内容被安全过滤，不重试:', _errMsg.substring(0, 100));
                 } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error') {
                     // 通用参数错误 → 尝试清理 body 重试
                     _shouldRetry = true;
