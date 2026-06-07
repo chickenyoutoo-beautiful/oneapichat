@@ -758,6 +758,7 @@ function initializeApp() {
     else { document.addEventListener('DOMContentLoaded', init); }
 
     async function init() {
+        try {
         cacheDOMElements();
         injectStyles();
         // ★ 恢复 ask_agent 临时授权状态(刷新不丢失指示灯)
@@ -1062,6 +1063,10 @@ function initializeApp() {
                 e.preventDefault();
             }
         }, true);
+        } catch(e) {
+            console.error('[Init] 初始化崩溃:', e.message, e.stack);
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;"><div style="text-align:center;padding:40px;"><h2>⚠️ 加载失败</h2><p style="color:#666;">请尝试清除该账号的聊天记录</p><button onclick="localStorage.clear();location.reload();" style="margin:10px;padding:8px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;">清除本地数据</button></div></div>';
+        }
     }
 }
 
