@@ -22,7 +22,20 @@ window.ResumeStream = (function() {
         var resp;
         try { resp = await fetch(url); } catch(e) { return null; }
         if (!resp.ok) { return null; }
-        if ((resp.headers.get('content-type')||'').includes('json')) { return null; }
+
+        // ★ 已完成流返回JSON(非SSE) — 直接解析,避免TCP分片导致done事件丢失
+        var _ct = resp.headers.get('content-type')||'';
+        if (_ct.includes('json')) {
+            try {
+                var _jd = await resp.json();
+                if (_jd && (_jd.full_text || (_jd.tool_calls && _jd.tool_calls.length > 0))) {
+                    console.log('[RS] JSON快路径恢复, full_text长度:', (_jd.full_text||'').length);
+                    return {fullText: _jd.full_text||'', reasoningText: _jd.reasoning_text||'',
+                            usage: _jd.usage||null, toolCalls: _jd.tool_calls||[], completed: true};
+                }
+            } catch(e) { console.warn('[RS] JSON parse error:', e.message); }
+            return null;
+        }
 
         var reader;
         try { reader = resp.body.getReader(); } catch(e) { return null; }

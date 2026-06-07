@@ -1984,24 +1984,30 @@ async def chat_stream_offset(
 
 @app.get("/engine/chat/stream/{stream_id}")
 async def chat_stream_get(stream_id: str):
-    """消费 SSE 流 — 先发所有缓存 chunk（断点续传核心），再等新数据"""
+    """消费 SSE 流 — 已完成流返回JSON，活跃流回放chunks+实时推送"""
     s = _resumable.get(stream_id)
     if not s:
         return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
+
+    # ★ 流已完成:直接返回JSON(避免SSE的TCP分片导致done事件丢失)
+    if s.get('finished'):
+        cached = list(s['chunks'])
+        for c in reversed(cached):
+            if 'event: done' in c or '"full_text"' in c:
+                try:
+                    _parts = c.split('\ndata: ', 1)
+                    if len(_parts) > 1:
+                        _data = json.loads(_parts[1].strip())
+                        return JSONResponse(_data)
+                except Exception:
+                    pass
+                break
+        return JSONResponse({"full_text": "", "tool_calls": [], "finished": True})
 
     async def gen():
         yield f"event: start\ndata: {json.dumps({'stream_id': stream_id})}\n\n"
         idx = 0
         cached = list(s['chunks'])
-        # ★ 流已完成:只发done事件跳过chunk回放(刷新后秒级恢复)
-        if s.get('finished'):
-            # 从缓存中找到done事件直接下发
-            for c in reversed(cached):
-                if 'event: done' in c or '"full_text"' in c:
-                    yield c
-                    break
-            return
-        # 先回放所有已缓存 chunk
         for c in cached:
             yield c
             idx += 1
@@ -2018,7 +2024,7 @@ async def chat_stream_get(stream_id: str):
                 await asyncio.sleep(0.001)
             if s.get('finished'):
                 break
-            await asyncio.sleep(0.05)  # 50ms 轮询新 chunk
+            await asyncio.sleep(0.05)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
