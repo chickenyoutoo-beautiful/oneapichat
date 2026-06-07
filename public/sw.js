@@ -1,5 +1,5 @@
-// Service Worker v30
-const CACHE_NAME = 'naujtrats-v30';
+// Service Worker v31
+const CACHE_NAME = 'naujtrats-v31';
 
 self.addEventListener('install', e => {
   self.skipWaiting();

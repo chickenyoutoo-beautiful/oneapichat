@@ -58,7 +58,16 @@ window.ResumeStream = (function() {
                     var _dt = d.type || '';
                     if (_dt === 'content') {
                         var dl = d.delta||'';
-                        if (dl) { full+=dl; pendingMsg.content=full; applyStreamRender(chatId, full); }
+                        if (dl) {
+                            full+=dl;
+                            pendingMsg.content=full;
+                            // ★ 实时剔除 <think> 块用于显示（完整内容保留在 full 供最终提取）
+                            var _display = full;
+                            if (full.indexOf('<think>') !== -1) {
+                                _display = full.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+                            }
+                            applyStreamRender(chatId, _display);
+                        }
                     } else if (_dt === 'reasoning') {
                         var rd = d.delta||'';
                         if (rd) { reasoning+=rd; pendingMsg.reasoning=reasoning; }
