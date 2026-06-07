@@ -1645,13 +1645,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
 
             // ★ 可恢复流式: 开关打开时走后端引擎
-            // ★ 工具调用的递归延续强制走直连，避免多层后端流式嵌套
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
             var useStream = _isImageModel ? false : getChecked('streamToggle');
             // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
             // 用户可设置 __enableResumeStream='0' 显式禁用
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
-            var _isContinuation = (toolCallCount > 0);
+            // ★ 工具续接也走RS: 每轮独立stream_id不嵌套,前8轮走RS超8轮退直连
+            var _isContinuation = (toolCallCount > 8);
             var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
                 // ★ 先持久化用户消息到服务器，防止刷新丢失

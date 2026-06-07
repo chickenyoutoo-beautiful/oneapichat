@@ -28,7 +28,7 @@ window.ResumeStream = (function() {
         try { reader = resp.body.getReader(); } catch(e) { return null; }
         if (isResume) { showToast('🔄 续接流式...', 'info'); }
 
-        var buf='', full='', reasoning='', tcList=[], usage=null, done=false;
+        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false;
         var _decoder = new TextDecoder();  // ★ 复用解码器，避免 UTF-8 多字节字符跨 chunk 损坏
 
         var timer = setInterval(function(){
@@ -100,6 +100,7 @@ window.ResumeStream = (function() {
                         if (d.tool_calls) tcList=d.tool_calls;
                         if (d.usage) usage=d.usage;
                         done=true;
+                        streamCompleted=true;  // ★ 真正收到done事件才算完成
                     } else if (_evType === 'error' || d.error) {
                         console.warn('[RS] stream error:', d.error);
                         done=true;
@@ -126,8 +127,8 @@ window.ResumeStream = (function() {
             }
         }
         try { cleanupStreamState(chatId); } catch(e) {}
-        // ★ 标记是否正常完成(收到done事件) — 未完成的内容不应持久化
-        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:done};
+        // ★ 标记是否正常完成(收到done事件) — 未完成/错误的内容不应持久化
+        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:streamCompleted};
     }
 
     return {
@@ -217,7 +218,7 @@ window.ResumeStream = (function() {
                 console.log('[RS resume] _readSSE returned:', result ? ('fullText=' + (result.fullText||'').substring(0,80) + ' toolCalls=' + (result.toolCalls||[]).length) : 'NULL');
                 isTypingMap[chatId] = false;
                 await new Promise(function(r) { setTimeout(r, 50); });
-                if (result && (result.fullText || result.toolCalls.length > 0)) {
+                if (result && result.completed && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
@@ -228,7 +229,8 @@ window.ResumeStream = (function() {
                     if (_isCurrentChat) loadChat(chatId);
                     return true;
                 }
-                var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
+                // ★ 流未完成 — 保持 partial 状态,丢弃临时气泡
+                console.warn('[RS resume] 流未正常完成,保持partial');
                 if (fi !== -1) msgs.splice(fi, 1);
                 if (_isCurrentChat) loadChat(chatId);
                 return false;
