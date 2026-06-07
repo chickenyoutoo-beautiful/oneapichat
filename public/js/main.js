@@ -2224,27 +2224,32 @@ window.useAlternativeVisionModel = function() {
 
                 // ★ 链式输出: 保留旧内容, 新内容追加到同一气泡(竖线分隔)
                 if (window._chainMode && pendingMsg && (pendingMsg.content || pendingMsg.reasoning)) {
-                    // 1. 保存当前气泡的 HTML + 插入分隔线
+                    // 1. 最终化当前渲染 → 插入分隔线 → 保存完整 HTML
                     if (currentChatId === chatId) {
                         var _bub = activeBubbleMap[chatId];
                         if (_bub) {
                             var _md = _bub.querySelector('.markdown-body');
                             if (_md) {
-                                // 在现有内容后追加分隔线
+                                // ★ 强制最终渲染当前内容（确保完整 HTML 被保存）
+                                if (pendingMsg.content) {
+                                    _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
+                                }
+                                // 追加链式分隔线
                                 var _sep = document.createElement('div');
                                 _sep.className = 'chain-separator';
                                 _md.appendChild(_sep);
-                                // 保存累积的 HTML（包括分隔线），下次流式渲染时从这之后追加
-                                if (!pendingMsg._chainSavedHtml) pendingMsg._chainSavedHtml = '';
+                                // 保存累积 HTML（旧内容 + 分隔线），后续流式渲染前置拼接
                                 pendingMsg._chainSavedHtml = _md.innerHTML;
                             }
                         }
                     }
-                    // 2. 保存本轮内容到持久化字段，清空准备下一轮
+                    // 2. 保存本轮内容，清空准备下一轮
                     if (!pendingMsg._chainContents) pendingMsg._chainContents = [];
                     pendingMsg._chainContents.push(pendingMsg.content || '');
                     pendingMsg.content = '';
                     pendingMsg.reasoning = '';
+                    // ★ 清除旧 tool_calls — 新轮次不应继承上一轮的 tool_calls
+                    delete pendingMsg.tool_calls;
                     pendingMsg._chainSegment = (pendingMsg._chainSegment || 0) + 1;
                     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                     if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
