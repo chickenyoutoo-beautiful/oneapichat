@@ -1585,6 +1585,11 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
                         http_client=_httpc)
         model = request_data.get('model', 'deepseek-chat')
         messages = request_data.get('messages', [])
+        # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
+                if not m['tool_calls'] or len(m['tool_calls']) == 0:
+                    del m['tool_calls']
         tools = request_data.get('tools', None)
         stream_params = {'model': model, 'messages': messages, 'stream': True}
         if tools:
@@ -1804,9 +1809,15 @@ def _generate_resumable(request: dict, stream_id: str):
             base_url=request.get('base_url', '').strip().rstrip('/') or None,
             http_client=_http_client
         )
+        messages = request.get('messages', [])
+        # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
+                if not m['tool_calls'] or len(m['tool_calls']) == 0:
+                    del m['tool_calls']
         params = {
             'model': request.get('model', 'deepseek-chat'),
-            'messages': request.get('messages', []),
+            'messages': messages,
             'stream': True,
             'temperature': request.get('temperature', 0.7),
             'max_tokens': request.get('max_tokens', 4096),

@@ -410,6 +410,14 @@ function buildApiMessages(chatId) {
         console.log('[buildApiMessages] 双向配对清理: ' + _removedTcCount + ' 个孤 tool_call + ' + _removedToolMsgCount + ' 个孤 tool 消息');
     }
 
+    // ★ 清理空 tool_calls:[] — 部分 API (DeepSeek) 拒绝 empty array
+    for (var _efi = 0; _efi < apiMessagesUnfiltered.length; _efi++) {
+        var _em = apiMessagesUnfiltered[_efi];
+        if (_em.role === 'assistant' && _em.tool_calls && _em.tool_calls.length === 0) {
+            delete _em.tool_calls;
+        }
+    }
+
     // ★ 最终安全过滤: 确保所有消息的 content 格式正确
     var filtered = {};
     var apiMessages = [];
