@@ -150,20 +150,20 @@ window.ResumeStream = (function() {
                     msgs.push(pm);
                 }
                 // ★ 渲染气泡到界面（让流式内容有渲染目标）并激活 typing 状态
+                isTypingMap[chatId] = true;  // ★ 必须在 loadChat 前设置（loadChat 依赖此标记设置 activeBubbleMap）
                 if (currentChatId === chatId) {
                     loadChat(chatId);
                     // 等待 DOM 更新完成
                     await new Promise(function(r) { setTimeout(r, 100); });
                 }
-                isTypingMap[chatId] = true;  // ★ 启用流式渲染
                 var result = await _readSSE(sid, chatId, pm, true);
-                isTypingMap[chatId] = false;  // ★ 流结束，清除状态
                 if (result && (result.fullText || result.toolCalls.length > 0)) {
                     delete pm.partial;
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
                     if (currentChatId === chatId) loadChat(chatId);
+                    isTypingMap[chatId] = false;  // ★ loadChat 后再清除（loadChat 依赖此标记）
                     saveChats();
                     return true;
                 }
