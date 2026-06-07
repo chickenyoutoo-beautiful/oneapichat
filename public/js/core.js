@@ -109,21 +109,12 @@ function _renderMarkdownWithMath(text) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
     var protected = _protectMath(text);
     var html = marked.parse(protected);
-    // ★ 自动将纯文本 URL 转为可点击链接（marked v15 不自动 linkify, 跳过 <pre> 内部）
     let tempHtml = _restoreMath(html);
-    // 用占位符保护 <pre> 块, 避免 URL 正则破坏代码块
-    var _preBlocks = [];
-    tempHtml = tempHtml.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, function(m) {
-        if (_preBlocks.length < 100) { _preBlocks.push(m); return '%%PRE' + (_preBlocks.length - 1) + '%%'; }
-        return m;
-    });
     tempHtml = tempHtml.replace(/(?<!["'=])(https?:\/\/[^\s<>"']+)(?!["'])/gi, function(url) {
         var cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
         return '<a href="' + cleanUrl + '" target="_blank" rel="noopener">' + cleanUrl + '</a>';
     });
     tempHtml = tempHtml.replace(/<a /g, '<a target="_blank" rel="noopener" ');
-    // 还原 <pre> 块
-    tempHtml = tempHtml.replace(/%%PRE(\d+)%%/g, function(_, i) { return _preBlocks[parseInt(i)]; });
     return tempHtml;
 }
 
