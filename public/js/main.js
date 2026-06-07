@@ -2571,9 +2571,18 @@ window.useAlternativeVisionModel = function() {
                     _shouldRetry = true;
                     _retryAction = 'remove_tools';
                 } else if (_errMsg.includes('Content Exists Risk') || _errMsg.includes('content filter') || _errMsg.includes('safety')) {
-                    // 内容安全过滤 — 重试无意义，尝试精简消息体
-                    _shouldRetry = true;
-                    _retryAction = 'safety_filter';
+                    // 内容安全过滤 — 尝试精简消息体
+                    // ★ 如果已经精简过(system+tools已移除),不再重试 — 用户输入本身触发
+                    var _noSys = !body.messages.some(function(m){return m.role==='system';});
+                    var _noTools = !body.tools || body.tools.length === 0;
+                    if (_noSys && _noTools && body.messages.length <= 6) {
+                        // 已是最简形式,问题在用户输入本身
+                        _shouldRetry = false;
+                        showToast('⚠️ 内容安全过滤: 消息内容被接口拒绝,请修改提问方式后重试', 'error', 8000);
+                    } else {
+                        _shouldRetry = true;
+                        _retryAction = 'safety_filter';
+                    }
                 } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error') {
                     // 通用参数错误 → 尝试清理 body 重试
                     _shouldRetry = true;
@@ -2805,48 +2814,36 @@ window.useAlternativeVisionModel = function() {
                             }
                         }
                     } else if (_retryAction === 'safety_filter') {
-                        // 内容安全过滤 → 精简 system prompt + 移除多余工具描述 + 清理孤立tool_calls
-                        for (var _sfi = 0; _sfi < body.messages.length; _sfi++) {
-                            if (body.messages[_sfi].role === 'system') {
-                                var _sc = body.messages[_sfi].content || '';
-                                _sc = _sc.replace(/##\s*(可用工具|工具列表|Tools)[\s\S]*?(?=##|$)/gi, '');
-                                _sc = _sc.replace(/##\s*(工作空间|文件路径|项目)[\s\S]*?(?=##|$)/gi, '');
-                                _sc = _sc.substring(0, 3000);
-                                body.messages[_sfi].content = _sc + '\n\n[系统提示已精简]';
-                            }
-                        }
-                        // 减少工具到 50 个
-                        if (body.tools && body.tools.length > 50) {
-                            body.tools = body.tools.slice(0, 50);
-                        }
-                        // ★ 双向清理孤立的 tool_calls ↔ tool 结果配对
-                        var _sfToolIds = {};
-                        for (var _sfj = 0; _sfj < body.messages.length; _sfj++) {
-                            if (body.messages[_sfj].role === 'tool' && body.messages[_sfj].tool_call_id) {
-                                _sfToolIds[body.messages[_sfj].tool_call_id] = true;
-                            }
-                        }
-                        var _sfAssistTcIds = {};
-                        for (var _sfk = 0; _sfk < body.messages.length; _sfk++) {
-                            if (body.messages[_sfk].role === 'assistant' && body.messages[_sfk].tool_calls) {
-                                body.messages[_sfk].tool_calls = body.messages[_sfk].tool_calls.filter(function(tc) {
-                                    if (tc.id && _sfToolIds[tc.id]) { _sfAssistTcIds[tc.id] = true; return true; }
-                                    return false;
-                                });
-                                if (body.messages[_sfk].tool_calls.length === 0) {
-                                    delete body.messages[_sfk].tool_calls;
-                                }
-                            }
-                        }
-                        // ★ 反向清理: 移除无对应 assistant tool_calls 的孤 tool 消息
+                        // ★ DeepSeek Content Exists Risk: 激进精简策略
+                        // 已知触发因素: 长篇system prompt,大量工具描述,多轮tool_call历史
+                        // 策略: 移除system prompt → 裁剪对话历史 → 清除工具消息 → 仅保留最后几轮纯文本对话
+                        var _sfStripped = 0;
+                        // 1. 完全移除 system 消息（包含工具描述等触发内容）
+                        body.messages = body.messages.filter(function(m) { return m.role !== 'system'; });
+                        // 2. 移除所有 tool_calls 和 tool 消息（DeepSeek 过敏历史工具交互）
                         body.messages = body.messages.filter(function(m) {
-                            if (m.role === 'tool' && m.tool_call_id && !_sfAssistTcIds[m.tool_call_id]) {
-                                console.log('[safety_filter] 清理孤立 tool 消息:', m.tool_call_id);
-                                return false;
+                            if (m.role === 'tool') { _sfStripped++; return false; }
+                            if (m.role === 'assistant' && m.tool_calls) {
+                                // 移除 tool_calls 但保留文本内容（如果有）
+                                delete m.tool_calls;
+                                if (!m.content || (typeof m.content === 'string' && m.content.trim() === '')) {
+                                    _sfStripped++; return false;
+                                }
                             }
                             return true;
                         });
-                        showToast('⚠️ 内容安全过滤, 已精简上下文后重试...', 'warning', 6000);
+                        // 3. 裁剪到最近 6 条消息（保持对话连贯性）
+                        if (body.messages.length > 6) {
+                            _sfStripped += body.messages.length - 6;
+                            body.messages = body.messages.slice(-6);
+                        }
+                        // 4. 移除 tools 参数（减少触发可能性）
+                        delete body.tools;
+                        delete body.tool_choice;
+                        // 5. 缩减 max_tokens 避免输出过长触发风险
+                        if (body.max_tokens && body.max_tokens > 4096) body.max_tokens = 4096;
+                        console.log('[safety_filter] 激进精简完成, 移除 ' + _sfStripped + ' 条消息, 剩余 ' + body.messages.length + ' 条');
+                        showToast('⚠️ 内容安全过滤, 已精简上下文(' + body.messages.length + '条消息)后重试...', 'warning', 6000);
                     } else if (_retryAction === 'clean_params') {
                         // 清理可能有问题的参数
                         delete body.top_p;
