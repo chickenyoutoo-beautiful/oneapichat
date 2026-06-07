@@ -868,7 +868,7 @@ window.loadChat = async function (id) {
                 // ★ 修复: 对带工具调用的消息,在文本前追加工具调用可视化说明
                 var toolDisplayHtml = '';
                 if (m.tool_calls && m.tool_calls.length > 0) {
-                    toolDisplayHtml = '<div class="tool-calls-history" style="font-size:12px;padding:8px 10px;margin-bottom:8px;background:#f0f4ff;border-radius:8px;border-left:3px solid #6366f1;">';
+                    toolDisplayHtml = '<div class="tool-calls-history">';
                     m.tool_calls.forEach(function(tc) {
                         var toolIcon = '🔧';
                         if (tc.function && tc.function.name) {
@@ -878,7 +878,7 @@ window.loadChat = async function (id) {
                             else if (tc.function.name.indexOf('agent') !== -1) toolIcon = '🤖';
                             else if (tc.function.name.indexOf('cron') !== -1) toolIcon = '⏰';
                             else if (tc.function.name.indexOf('server_') !== -1) toolIcon = '🖥️';
-                            toolDisplayHtml += '<div class="tool-call-item" style="padding:2px 0;">' + toolIcon + ' ' + escapeHtml(tc.function.name) + '</div>';
+                            toolDisplayHtml += '<div class="tool-call-item">' + toolIcon + ' ' + escapeHtml(tc.function.name) + '</div>';
                         }
                     });
                     // 如果有工具结果,显示简短结果
@@ -887,7 +887,7 @@ window.loadChat = async function (id) {
                             var resultText = typeof tr === 'string' ? tr : (tr.content || tr.result || '');
                             if (resultText && resultText.length > 120) resultText = resultText.slice(0, 120) + '...';
                             if (resultText && toolDisplayHtml) {
-                                toolDisplayHtml += '<div class="tool-result-item" style="padding:1px 0 1px 16px;color:#666;font-size:11px;">→ ' + escapeHtml(resultText).replace(/\n/g, '<br>') + '</div>';
+                                toolDisplayHtml += '<div class="tool-result-item">→ ' + escapeHtml(resultText).replace(/\n/g, '<br>') + '</div>';
                             }
                         });
                     }

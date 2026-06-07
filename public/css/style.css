@@ -4654,9 +4654,20 @@ html:not(.dark) #userInput {
 .dark .chain-mode-btn.active { background: #4f46e5; color: #fff; border-color: #6366f1; }
 
 /* ── 历史工具调用展示（dialogs.js 渲染的 tool-calls-history）── */
-.tool-calls-history { background: #f0f4ff; }
-.dark .tool-calls-history { background: #1e293b; border-left-color: #818cf8 !important; }
+.tool-calls-history {
+    font-size: 12px; padding: 8px 10px; margin-bottom: 8px;
+    background: #f0f4ff; border-radius: 8px;
+    border-left: 3px solid #6366f1; color: #374151;
+}
+.dark .tool-calls-history {
+    background: #1e293b; border-left-color: #818cf8; color: #cbd5e1;
+}
+.tool-call-item { padding: 2px 0; color: #374151; }
 .dark .tool-call-item { color: #cbd5e1; }
+.tool-result-item {
+    padding: 1px 0 1px 16px; color: #6b7280; font-size: 11px; word-break: break-all;
+}
+.dark .tool-result-item { color: #9ca3af; }
 
 /* ── Diff 视图暗色适配 ── */
 .diff-view-wrapper { background: var(--card, #fff); }
