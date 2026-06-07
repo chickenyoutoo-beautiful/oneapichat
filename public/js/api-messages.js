@@ -299,28 +299,12 @@ function buildApiMessages(chatId) {
                 _assistantMsg.tool_calls = msg.tool_calls;
             }
             if (msg.reasoning_content) _assistantMsg.reasoning_content = msg.reasoning_content;
-            // ★ 将生成的图片注入到消息中，让视觉模型能看到自己之前的生成结果
-            // 这样模型可以对已生成图片进行修改、评价，无需用户重新上传
+            // ★ 将生成的图片 URL 以文本形式注入到 assistant 消息中
+            // （视觉模型可通过这些 URL 了解之前生成了什么，配合 system 指令可以调用 analyze_image 查看）
             var _genImgs = msg.generatedImages || (msg.generatedImage ? [msg.generatedImage] : []);
-            if (_genImgs.length > 0 && _isVisionModel()) {
-                var _imgParts = [];
-                // 最多附带3张最近的图片，避免上下文爆炸
-                var _recentImgs = _genImgs.slice(-3);
-                for (var _gi = 0; _gi < _recentImgs.length; _gi++) {
-                    var _imgUrl = _recentImgs[_gi];
-                    // 跳过 base64 data URL（太长）
-                    if (_imgUrl && !_imgUrl.startsWith('data:')) {
-                        // 补全相对路径为绝对 URL
-                        if (_imgUrl.startsWith('/')) _imgUrl = window.location.origin + _imgUrl;
-                        _imgParts.push({ type: 'image_url', image_url: { url: _imgUrl } });
-                    }
-                }
-                if (_imgParts.length > 0) {
-                    _assistantMsg.content = [
-                        { type: 'text', text: '[本消息附带了 ' + _imgParts.length + ' 张生成的图片，见下方]' },
-                        { type: 'text', text: cleanObjectObject(msg.content) || '(empty)' }
-                    ].concat(_imgParts);
-                }
+            if (_genImgs.length > 0) {
+                var _imgList = _genImgs.slice(-3).map(function(u) { return '- ' + u; }).join('\n');
+                _assistantMsg.content += '\n\n[已生成图片]\n' + _imgList;
             }
             apiMessagesUnfiltered.push(_assistantMsg);
         } else if (msg.role === 'tool') {
