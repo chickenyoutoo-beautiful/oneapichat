@@ -2534,7 +2534,7 @@ window.useAlternativeVisionModel = function() {
                     // system prompt 过长 → 截断 system prompt 重试
                     _shouldRetry = true;
                     _retryAction = 'trim_system';
-                } else if (_errMsg.includes('invalid function arguments json string') || _errMsg.includes('tool result') && _errMsg.includes('not found') || _errMsg.includes('tool_calls') && _errMsg.includes('must be followed by tool messages')) {
+                } else if (_errMsg.includes('invalid function arguments json string') || _errMsg.includes('tool result') && _errMsg.includes('not found') || _errMsg.includes('tool_calls') && _errMsg.includes('must be followed by tool messages') || _errMsg.includes('tool') && _errMsg.includes('must be a response to') && _errMsg.includes('tool_calls')) {
                     // ★ 工具调用受损 → 修复或丢弃该工具调用（不删全部 tools）
                     _shouldRetry = true;
                     _retryAction = 'fix_tool_args';
@@ -2791,23 +2791,33 @@ window.useAlternativeVisionModel = function() {
                         if (body.tools && body.tools.length > 50) {
                             body.tools = body.tools.slice(0, 50);
                         }
-                        // ★ 清理孤立的 tool_calls/tool 结果配对（同 fix_tool_args）
+                        // ★ 双向清理孤立的 tool_calls ↔ tool 结果配对
                         var _sfToolIds = {};
                         for (var _sfj = 0; _sfj < body.messages.length; _sfj++) {
                             if (body.messages[_sfj].role === 'tool' && body.messages[_sfj].tool_call_id) {
                                 _sfToolIds[body.messages[_sfj].tool_call_id] = true;
                             }
                         }
+                        var _sfAssistTcIds = {};
                         for (var _sfk = 0; _sfk < body.messages.length; _sfk++) {
                             if (body.messages[_sfk].role === 'assistant' && body.messages[_sfk].tool_calls) {
                                 body.messages[_sfk].tool_calls = body.messages[_sfk].tool_calls.filter(function(tc) {
-                                    return tc.id && _sfToolIds[tc.id];
+                                    if (tc.id && _sfToolIds[tc.id]) { _sfAssistTcIds[tc.id] = true; return true; }
+                                    return false;
                                 });
                                 if (body.messages[_sfk].tool_calls.length === 0) {
                                     delete body.messages[_sfk].tool_calls;
                                 }
                             }
                         }
+                        // ★ 反向清理: 移除无对应 assistant tool_calls 的孤 tool 消息
+                        body.messages = body.messages.filter(function(m) {
+                            if (m.role === 'tool' && m.tool_call_id && !_sfAssistTcIds[m.tool_call_id]) {
+                                console.log('[safety_filter] 清理孤立 tool 消息:', m.tool_call_id);
+                                return false;
+                            }
+                            return true;
+                        });
                         showToast('⚠️ 内容安全过滤, 已精简上下文后重试...', 'warning', 6000);
                     } else if (_retryAction === 'clean_params') {
                         // 清理可能有问题的参数
