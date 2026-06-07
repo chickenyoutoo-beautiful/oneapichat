@@ -2725,11 +2725,10 @@ window.useAlternativeVisionModel = function() {
                             }
                         }
                     } else if (_retryAction === 'safety_filter') {
-                        // 内容安全过滤 → 精简 system prompt + 移除多余工具描述
+                        // 内容安全过滤 → 精简 system prompt + 移除多余工具描述 + 清理孤立tool_calls
                         for (var _sfi = 0; _sfi < body.messages.length; _sfi++) {
                             if (body.messages[_sfi].role === 'system') {
                                 var _sc = body.messages[_sfi].content || '';
-                                // 保留核心指令，去掉长工具列表和示例
                                 _sc = _sc.replace(/##\s*(可用工具|工具列表|Tools)[\s\S]*?(?=##|$)/gi, '');
                                 _sc = _sc.replace(/##\s*(工作空间|文件路径|项目)[\s\S]*?(?=##|$)/gi, '');
                                 _sc = _sc.substring(0, 3000);
@@ -2739,6 +2738,23 @@ window.useAlternativeVisionModel = function() {
                         // 减少工具到 50 个
                         if (body.tools && body.tools.length > 50) {
                             body.tools = body.tools.slice(0, 50);
+                        }
+                        // ★ 清理孤立的 tool_calls/tool 结果配对（同 fix_tool_args）
+                        var _sfToolIds = {};
+                        for (var _sfj = 0; _sfj < body.messages.length; _sfj++) {
+                            if (body.messages[_sfj].role === 'tool' && body.messages[_sfj].tool_call_id) {
+                                _sfToolIds[body.messages[_sfj].tool_call_id] = true;
+                            }
+                        }
+                        for (var _sfk = 0; _sfk < body.messages.length; _sfk++) {
+                            if (body.messages[_sfk].role === 'assistant' && body.messages[_sfk].tool_calls) {
+                                body.messages[_sfk].tool_calls = body.messages[_sfk].tool_calls.filter(function(tc) {
+                                    return tc.id && _sfToolIds[tc.id];
+                                });
+                                if (body.messages[_sfk].tool_calls.length === 0) {
+                                    delete body.messages[_sfk].tool_calls;
+                                }
+                            }
                         }
                         showToast('⚠️ 内容安全过滤, 已精简上下文后重试...', 'warning', 6000);
                     } else if (_retryAction === 'clean_params') {
