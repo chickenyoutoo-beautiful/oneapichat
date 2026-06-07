@@ -337,15 +337,23 @@ function buildApiMessages(chatId) {
         apiMessagesUnfiltered._useVisionModel = true;
     }
 
-    // ★ 最终安全过滤: 移除任何 content 为空/null/undefined/非字符串 的消息
+    // ★ 最终安全过滤: 确保所有消息的 content 格式正确
     var filtered = {};
     var apiMessages = [];
     for (var _fi = 0; _fi < apiMessagesUnfiltered.length; _fi++) {
         var _m = apiMessagesUnfiltered[_fi];
         if (!_m || !_m.role) { console.log('[buildApiMessages] 跳过无效消息', _fi, _m); continue; }
         if (_m.content === undefined || _m.content === null) { console.log('[buildApiMessages] 跳过空content', _fi, _m.role); continue; }
-        // content 可能是字符串或数组 (多模态)
+        // content 可能是字符串或数组 (多模态 — 仅 user 消息支持数组)
         if (typeof _m.content === 'string' && _m.content.length === 0) { console.log('[buildApiMessages] 跳过空字符串', _fi, _m.role); continue; }
+        // ★ 非 user 消息的 content 必须是字符串，强制转换避免 API 400 错误
+        if (_m.role !== 'user' && typeof _m.content !== 'string') {
+            if (Array.isArray(_m.content)) {
+                _m.content = _m.content.map(function(p) { return p.text || p.content || JSON.stringify(p); }).filter(Boolean).join(' ');
+            } else {
+                _m.content = String(_m.content || '');
+            }
+        }
         apiMessages.push(_m);
     }
     return apiMessages;

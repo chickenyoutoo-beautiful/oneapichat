@@ -2149,8 +2149,9 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
                 }
                 // ★ 持久化 tool_calls 到 chat 历史 — 防止下轮 sendMessage 丢失工具上下文导致幻觉
-                if (validToolCalls && validToolCalls.length > 0) {
-                    pendingMsg.tool_calls = validToolCalls;
+                // 使用 normalizedToolCalls(已确保 arguments 是字符串)而非 validToolCalls
+                if (normalizedToolCalls && normalizedToolCalls.length > 0) {
+                    pendingMsg.tool_calls = normalizedToolCalls;
                 }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
