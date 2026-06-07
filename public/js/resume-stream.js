@@ -114,6 +114,39 @@ window.ResumeStream = (function() {
             }
         }
         clearInterval(timer);
+        // ★ 刷新缓冲区:流结束后处理buf中残留的SSE数据(跨chunk拆分)
+        if (buf && buf.trim()) {
+            var _remLines = buf.split('\n');
+            var _remEv = '';
+            for (var _rli = 0; _rli < _remLines.length; _rli++) {
+                var _rln = _remLines[_rli].trim();
+                if (!_rln) continue;
+                if (_rln.startsWith('event: ')) { _remEv = _rln.substring(7); continue; }
+                if (!_rln.startsWith('data: ')) continue;
+                var _rjs = _rln.substring(6); if (!_rjs) continue;
+                try {
+                    var _rd = JSON.parse(_rjs);
+                    var _revType = _remEv || (_rd.type || '');
+                    if (_revType === 'done' || _rd.full_text !== undefined) {
+                        if (_rd.full_text && _rd.full_text.length > full.length) full = _rd.full_text;
+                        if (_rd.reasoning_text && _rd.reasoning_text.length > reasoning.length) reasoning = _rd.reasoning_text;
+                        if (_rd.tool_calls) tcList = _rd.tool_calls;
+                        if (_rd.usage) usage = _rd.usage;
+                        streamCompleted = true;
+                        console.log('[RS] 缓冲区中捕获延迟done事件');
+                    } else if (_revType === 'content') {
+                        var _rdl = _rd.delta || '';
+                        if (_rdl) full += _rdl;
+                    } else if (_revType === 'reasoning') {
+                        var _rdr = _rd.delta || '';
+                        if (_rdr) reasoning += _rdr;
+                    } else if (_revType === 'tool_call' || _rd.function) {
+                        tcList.push(_rd.function ? _rd : _rd);
+                    }
+                    _remEv = '';
+                } catch(e) {}
+            }
+        }
         // ★ 清理 <think> 标签：提取思考内容到 reasoning，从正文移除
         if (full) {
             var _thinkMatch = full.match(/<think>([\s\S]*?)<\/think>/g);
