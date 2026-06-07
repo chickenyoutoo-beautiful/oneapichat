@@ -1948,21 +1948,17 @@ async def chat_stream_offset(
                         s = _v
                         break
         if s and not s.get('finished'):
-            q = s['queue']
-            loop = asyncio.get_event_loop()
-            while True:
-                try:
-                    c = await loop.run_in_executor(None, lambda: q.get(timeout=30))
-                    if c is None:
-                        break
-                    yield c
+            # ★ 多消费者广播：用索引轮询 s['chunks']（避免 q.get() 瓜分 chunk）
+            _live_idx = len(s['chunks'])  # 从缓存之后开始
+            while not s.get('finished'):
+                _cur_len = len(s['chunks'])
+                while _live_idx < _cur_len:
+                    yield s['chunks'][_live_idx]
+                    _live_idx += 1
                     await asyncio.sleep(0.001)
-                except queue.Empty:
-                    if s.get('finished'):
-                        break
-                    yield f"event: heartbeat\ndata: {json.dumps({'hb': True})}\n\n"
-                except Exception:
+                if s.get('finished'):
                     break
+                await asyncio.sleep(0.05)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -1976,27 +1972,27 @@ async def chat_stream_get(stream_id: str):
         return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
 
     async def gen():
-        loop = asyncio.get_event_loop()
         yield f"event: start\ndata: {json.dumps({'stream_id': stream_id})}\n\n"
-        for c in list(s['chunks']):
+        # 先回放所有已缓存 chunk
+        idx = 0
+        cached = list(s['chunks'])
+        for c in cached:
             yield c
+            idx += 1
             await asyncio.sleep(0.001)
         if s.get('finished'):
             return
-        q = s['queue']
-        while True:
-            try:
-                c = await loop.run_in_executor(None, lambda: q.get(timeout=30))
-                if c is None:
-                    break
-                yield c
+        # ★ 多消费者广播：用索引轮询 s['chunks'] 而非 q.get()
+        # q.get() 会删除数据，导致多 Tab 瓜分 chunk → 各自缺内容
+        while not s.get('finished'):
+            current_len = len(s['chunks'])
+            while idx < current_len:
+                yield s['chunks'][idx]
+                idx += 1
                 await asyncio.sleep(0.001)
-            except queue.Empty:
-                if s.get('finished'):
-                    break
-                yield f"event: heartbeat\ndata: {json.dumps({'hb': True})}\n\n"
-            except Exception:
+            if s.get('finished'):
                 break
+            await asyncio.sleep(0.05)  # 50ms 轮询新 chunk
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
