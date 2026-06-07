@@ -43,10 +43,26 @@ class BrowserManager:
             return True
 
         try:
+            import aiohttp
             from playwright.async_api import async_playwright
 
+            # ★ 获取 WebSocket URL (绕开 connect_over_cdp 与 snap Chromium v148 的尾斜杠不兼容)
+            ws_url = None
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{self.cdp_url}/json/version") as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            ws_url = data.get("webSocketDebuggerUrl", "")
+            except Exception:
+                pass
+
+            if not ws_url:
+                raise RuntimeError(f"无法从 CDP 获取 WebSocket URL: {self.cdp_url}/json/version")
+
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.connect_over_cdp(self.cdp_url)
+            # connect_over_cdp 也可接受 WebSocket URL 直连
+            self._browser = await self._playwright.chromium.connect_over_cdp(ws_url)
 
             # 获取已有的 context 或创建新的
             contexts = self._browser.contexts
