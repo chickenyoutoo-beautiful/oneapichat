@@ -47,6 +47,17 @@ def _load_proxy_config():
         print(f'[Engine] 代理配置加载失败: {e}')
     return None
 
+# Cross-platform: fcntl is Unix-only
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
+# ── Project root detection ────────────────────────────
+PROJECT_ROOT = str(Path(__file__).parent.parent.resolve())
+
+# ★ _PROXY_URL 依赖 PROJECT_ROOT，必须在 PROJECT_ROOT 之后初始化
 _PROXY_URL = _load_proxy_config()
 
 # ── 全局 Session (带代理) ──────────────────────────────
@@ -59,16 +70,6 @@ def _get_proxies():
     if _PROXY_URL:
         return {'http': _PROXY_URL, 'https': _PROXY_URL}
     return None
-
-# Cross-platform: fcntl is Unix-only
-try:
-    import fcntl
-    HAS_FCNTL = True
-except ImportError:
-    HAS_FCNTL = False
-
-# ── Project root detection ────────────────────────────
-PROJECT_ROOT = str(Path(__file__).parent.parent.resolve())
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'pylib'))
@@ -1019,6 +1020,7 @@ import base64
 
 def _load_encryption_key() -> str:
     return load_encryption_key(PROJECT_ROOT)
+ENCRYPTION_KEY = _load_encryption_key()  # ★ 必须在 _get_aes_key/_decrypt_xor 前初始化
 def _get_aes_key() -> bytes:
     return get_aes_key(ENCRYPTION_KEY)
 def _decrypt_xor(encoded: str) -> str:

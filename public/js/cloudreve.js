@@ -90,6 +90,15 @@ async function engineApiHandler(action, args) {
                 return { error: '引擎服务异常: ' + e.message };
             }
         }
+        if (action === 'agent_run') {
+            var _arUrl = _apiBase + '?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix;
+            if (args.message) _arUrl += '&message=' + encodeURIComponent(args.message);
+            if (args.from_ask) _arUrl += '&from_ask=' + encodeURIComponent(args.from_ask);
+            var _arRes = await fetch(_arUrl);
+            var _arData = await _arRes.json();
+            if (_arData.ok) return { result: '✅ 子代理 ' + args.name + ' 已启动' };
+            return { error: _arData.error || '启动失败' };
+        }
         if (action === 'agent_status') {
             var r = await fetch(_apiBase + '?action=agent_status&name=' + encodeURIComponent(args.name) + authSuffix);
             var d = await r.json();
