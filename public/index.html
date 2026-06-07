@@ -685,6 +685,14 @@ window.VISION_API_KEY = '';
                     <option value="disabled">关闭思考</option>
                 </select>
             </div>
+            <div class="config-toggle-row">
+                <span class="config-label">🧪 可恢复流式传输 <span style="font-size:10px;color:#999">(实验性)</span></span>
+                <label class="switch small"><input type="checkbox" id="resumeStreamToggle" onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0')"><span class="slider"></span></label>
+            </div>
+            <div class="config-toggle-row">
+                <span class="config-label">🔗 链式输出 <span style="font-size:10px;color:#999">(实验性)</span></span>
+                <label class="switch small"><input type="checkbox" id="chainModeToggle" onchange="window.toggleChainMode()"><span class="slider"></span></label>
+            </div>
             </div>
         </details>
 
@@ -763,14 +771,6 @@ window.VISION_API_KEY = '';
                 <div class="config-toggle-row">
                     <span class="config-label">本地知识库</span>
                     <label class="switch small"><input type="checkbox" id="ragToggle" checked><span class="slider"></span></label>
-                </div>
-                <div class="config-toggle-row">
-                    <span class="config-label">🧪 可恢复流式传输 <span style="font-size:10px;color:#999">(实验性)</span></span>
-                    <label class="switch small"><input type="checkbox" id="resumeStreamToggle" onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0')"><span class="slider"></span></label>
-                </div>
-                <div class="config-toggle-row">
-                    <span class="config-label">🔗 链式输出 <span style="font-size:10px;color:#999">(实验性)</span></span>
-                    <label class="switch small"><input type="checkbox" id="chainModeToggle" onchange="window.toggleChainMode()"><span class="slider"></span></label>
                 </div>
                 <div class="config-toggle-row">
                     <span class="config-label" style="cursor:pointer" onclick="var d=document.getElementById('proxyConfigDetails');d.style.display=d.style.display==='none'?'block':'none'">🌐 代理设置 <span style="font-size:10px;color:#999">(穿透网络限制)</span></span>
