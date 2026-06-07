@@ -670,7 +670,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     if (isAgentToolsActive()) {
         let agentPrompt = localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt;
         // ★ 注入工具调用上限(模型一开始就知道最多调用几次)
-        var _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+        var _maxRounds = parseInt(localStorage.getItem('agentMaxToolRounds')) || 1000;
         agentPrompt += '\n\n## 工具调用限制\n本轮对话最多调用 ' + _maxRounds + ' 次工具。请合理规划,避免浪费配额。如果接近上限,优先给出已有结果而不是继续调用。';
         // ★ plan_update 使用提示（精简版，已有则不重复注入）
         if (agentPrompt.indexOf('plan_update') === -1) {
@@ -1174,9 +1174,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (!_isInNoToolList) {
             // ★ MiniMax M3: 限制工具数量避免 400
             if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
-                if (tools.length > 50) {
-                    console.log('[M3] 工具数 ' + tools.length + ' > 50, 截断');
-                    tools = tools.slice(0, 50);
+                // ★ MiniMax 工具数上限 100（避免请求体过大），超过时保留最常用的前100个
+                if (tools.length > 100) {
+                    console.warn('[M3] 工具数 ' + tools.length + ' > 100, 截断前100');
+                    tools = tools.slice(0, 100);
                 }
             }
             // ★ Anthropic 格式需要转换 tools
@@ -1311,7 +1312,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 网络错误重试配置
     var maxRetries = 3;
     // Agent 模式使用自定义最大工具调用轮次
-    var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 50;
+    var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 1000;
     let toolCallCount = 0;
 
     // 离线检测

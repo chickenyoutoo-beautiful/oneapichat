@@ -738,7 +738,7 @@ async function saveConfig(showFeedback = false) {
     // Agent 模式配置
     localStorage.setItem('agentAutoDecision', getChecked('agentAutoDecision'));
     localStorage.setItem('agentProactive', getChecked('agentProactive'));
-    localStorage.setItem('agentMaxToolRounds', getVal('agentMaxToolRounds') || '30');
+    localStorage.setItem('agentMaxToolRounds', getVal('agentMaxToolRounds') || '1000');
     localStorage.setItem('agentThinkingDepth', getVal('agentThinkingDepth') || 'standard');
     localStorage.setItem('agentSystemPrompt', getVal('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
     // ★ TTS 语音合成配置
