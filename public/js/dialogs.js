@@ -754,7 +754,8 @@ window.loadChat = async function (id) {
             var _dlm = chats[id].messages[_dlmi];
             // ★ 隐形截断: 无partial标记+无time+无usage+无tool_calls+无_internal
             // ★ 必须跳过 _recovered(src=resume流创建) 和 _archivedCleaned(已归档)
-            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.time && !_dlm.usage && !_dlm.tool_calls && !_dlm._internal && !_dlm._recovered && !_dlm._archivedCleaned) {
+            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.tool_calls && !_dlm._internal && !_dlm._recovered && !_dlm._archivedCleaned &&
+                !(_dlm.usage && typeof _dlm.usage === 'object' && (!!_dlm.usage.prompt_tokens || !!_dlm.usage.completion_tokens || !!_dlm.usage.total_tokens))) {
                 console.warn('[loadChat] ⚠️ 移除隐形截断消息 id=' + id + ' idx=' + _dlmi + ' contentLen=' + (_dlm.content||'').length);
                 chats[id].messages.splice(_dlmi, 1);
                 _orphanRemoved++;

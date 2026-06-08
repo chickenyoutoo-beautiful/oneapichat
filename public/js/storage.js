@@ -497,7 +497,11 @@ async function restoreUserData() {
                             var _orphanCleaned = 0;
                             for (var _di = chats[_cid].messages.length - 1; _di >= 0; _di--) {
                                 var _dm = chats[_cid].messages[_di];
-                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_dm.usage && !_dm.tool_calls && !_dm._internal && !_dm._recovered && !_dm._archivedCleaned) {
+                                // ★ 隐形截断检测: 无partial + 无tool_calls + 无_internal
+                                // ★ 关键: 不检查!time(旧消息可能被_savedPartial恢复时加了time),
+                                //   而是检查usage是否有效对象(正常完成必有API返回的usage)
+                                var _hasValidUsage = _dm.usage && typeof _dm.usage === 'object' && (!!_dm.usage.prompt_tokens || !!_dm.usage.completion_tokens || !!_dm.usage.total_tokens);
+                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_hasValidUsage && !_dm.tool_calls && !_dm._internal && !_dm._recovered && !_dm._archivedCleaned) {
                                     // ★ 已归档的聊天(_agent_old_*): 自动补全 time 避免反复告警
                                     if (_cid.indexOf('_agent_old_') === 0) {
                                         _dm.time = chats[_cid].messages[Math.min(_di + 1, chats[_cid].messages.length - 1)]?.time || (chats[_cid].updated_at || Date.now());
