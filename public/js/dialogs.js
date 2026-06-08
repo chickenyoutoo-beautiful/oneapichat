@@ -746,25 +746,13 @@ window.loadChat = async function (id) {
     applyParagraphPrefix(prefix);
 
     // ★ 清理chats数据中所有残留 partial 消息
+    // ★ 注意: 隐形截断检测只在restoreUserData中运行(页面加载时),
+    //   不在loadChat中运行(每次切对话/发消息都调用,会误伤正常短回复)
     if (chats[id] && chats[id].messages) {
         var _before = chats[id].messages.length;
-        // ★ 清理隐形截断消息: 无partial标记但有content却无time/usage/tool_calls
-        var _orphanRemoved = 0;
-        for (var _dlmi = chats[id].messages.length - 1; _dlmi >= 0; _dlmi--) {
-            var _dlm = chats[id].messages[_dlmi];
-            // ★ 隐形截断: 无partial标记+无time+无usage+无tool_calls+无_internal
-            // ★ 必须跳过 _recovered(src=resume流创建) 和 _archivedCleaned(已归档)
-            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.tool_calls && !_dlm._internal && !_dlm._recovered && !_dlm._archivedCleaned &&
-                !(_dlm.usage && typeof _dlm.usage === 'object' && (!!_dlm.usage.prompt_tokens || !!_dlm.usage.completion_tokens || !!_dlm.usage.total_tokens))) {
-                console.warn('[loadChat] ⚠️ 移除隐形截断消息 id=' + id + ' idx=' + _dlmi + ' contentLen=' + (_dlm.content||'').length);
-                chats[id].messages.splice(_dlmi, 1);
-                _orphanRemoved++;
-            }
-        }
-        if (_orphanRemoved > 0) console.log('[loadChat] 移除了 ' + _orphanRemoved + ' 条隐形截断消息');
         chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
         if (chats[id].messages.length !== _before) {
-            console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length - _orphanRemoved) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');
+            console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');
         }
     }
     // ★ 删除残留的 typing DOM 气泡（sendMessage 创建但流已完成的）
