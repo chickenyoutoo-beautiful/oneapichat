@@ -480,12 +480,22 @@ async function restoreUserData() {
                                     _partialsBefore.map(function(m){return 'role='+m.role+' contentLen='+(m.content||'').length+' partial='+m.partial+' _recovered='+!!m._recovered;}));
                             }
                             // ★ 同时检查没有partial标记但有内容却没有time/usage的"隐形截断"消息
+                            var _orphanCleaned = 0;
                             for (var _di = chats[_cid].messages.length - 1; _di >= 0; _di--) {
                                 var _dm = chats[_cid].messages[_di];
                                 if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_dm.usage && !_dm.tool_calls && !_dm._internal) {
-                                    console.warn('[restoreUserData] ⚠️ 疑似隐形截断消息 in ' + _cid + ' idx=' + _di + ' contentLen=' + (_dm.content||'').length + ' preview=' + (_dm.content||'').substring(0,80));
+                                    // ★ 已归档的聊天(_agent_old_*): 自动补全 time 避免反复告警
+                                    if (_cid.indexOf('_agent_old_') === 0) {
+                                        _dm.time = chats[_cid].messages[Math.min(_di + 1, chats[_cid].messages.length - 1)]?.time || (chats[_cid].updated_at || Date.now());
+                                        _dm._archivedCleaned = true;
+                                        continue;
+                                    }
+                                    console.warn('[restoreUserData] ⚠️ 隐形截断消息 in ' + _cid + ' idx=' + _di + ' — 自动移除');
+                                    chats[_cid].messages.splice(_di, 1);
+                                    _orphanCleaned++;
                                 }
                             }
+                            if (_orphanCleaned > 0) console.log('[restoreUserData] 清理了 ' + _orphanCleaned + ' 条隐形截断消息(无partial标记无time/usage)');
                             chats[_cid].messages = chats[_cid].messages.filter(function(_pm) { return !_pm.partial; });
                             _cleanedPartial += _before - chats[_cid].messages.length;
                         }
