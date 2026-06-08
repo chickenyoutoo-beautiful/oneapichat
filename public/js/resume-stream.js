@@ -274,7 +274,9 @@ window.ResumeStream = (function() {
                         activeBubbleMap[chatId] = _bub;
                     }
                 }
+                console.log('[RS resume] Before _readSSE — msgs count:', chats[chatId].messages.length);
                 var result = await _readSSE(sid, chatId, pm, true);
+                console.log('[RS resume] After _readSSE — msgs count:', chats[chatId].messages.length);
                 console.log('[RS resume] _readSSE returned:', result ? ('fullText=' + (result.fullText||'').substring(0,80) + ' toolCalls=' + (result.toolCalls||[]).length) : 'NULL');
                 isTypingMap[chatId] = false;
                 await new Promise(function(r) { setTimeout(r, 50); });
