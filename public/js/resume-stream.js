@@ -41,7 +41,7 @@ window.ResumeStream = (function() {
         try { reader = resp.body.getReader(); } catch(e) { return null; }
         if (isResume) { showToast('🔄 续接流式...', 'info'); }
 
-        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false;
+        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false, readerEof=false;
         var _decoder = new TextDecoder();  // ★ 复用解码器，避免 UTF-8 多字节字符跨 chunk 损坏
 
         var timer = setInterval(function(){
@@ -56,6 +56,7 @@ window.ResumeStream = (function() {
             var rr;
             try { rr = await reader.read(); } catch(e) { break; }
             done = rr.done;
+            if (rr.done) readerEof = true;  // ★ 记录是否收到EOF(引擎正常关闭连接)
             if (rr.value) buf += _decoder.decode(rr.value, {stream:true});
             var lines = buf.split('\n'); buf = lines.pop()||'';
             var ev = '';
@@ -173,6 +174,12 @@ window.ResumeStream = (function() {
             }
         }
         try { cleanupStreamState(chatId); } catch(e) {}
+        // ★ 僵尸流修复: 引擎可能缓存了chunks但没写done事件(进程崩溃/超时/etc)
+        // reader已EOF且有内容 → 虽然没有done事件,内容仍是完整的,应持久化
+        if (!streamCompleted && readerEof && (full || tcList.length > 0)) {
+            console.log('[RS] Stream EOF without done event — treating as complete (fullText=' + (full||'').length + ' chars, toolCalls=' + tcList.length + ')');
+            streamCompleted = true;
+        }
         // ★ 标记是否正常完成(收到done事件) — 未完成/错误的内容不应持久化
         return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:streamCompleted};
     }

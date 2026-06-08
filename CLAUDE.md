@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-08**: 🐛 RS刷新旧截断气泡根因修复 — 引擎 SSE 广播无 source 字段导致消息数组被覆盖 + `_syncChatFromServer` 智能合并
 - **2026-06-08**: 🔧 刷课模块修复 — `learning_records.db` 目录权限 + `server_tools.py` 缺失 import + 路径修复
 - **2026-06-08**: 📦 超星/考试模块整理 — `python/api/` + 根目录 `scripts/` + 散落 `.py` → 统一归入 `python/chaoxing/`
 - **2026-06-06**: 🌊 流式处理提取 — stream-handler.js (1,238行, 5函数)，main.js 4,351→3,116 (-28.4%!)

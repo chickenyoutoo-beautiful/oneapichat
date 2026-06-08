@@ -748,6 +748,13 @@ window.loadChat = async function (id) {
     // ★ 清理chats数据中所有残留 partial 消息
     if (chats[id] && chats[id].messages) {
         var _before = chats[id].messages.length;
+        // ★ 诊断: 检查隐形截断消息(无partial标记但有内容却无time/usage)
+        for (var _dlmi = chats[id].messages.length - 1; _dlmi >= 0; _dlmi--) {
+            var _dlm = chats[id].messages[_dlmi];
+            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.time && !_dlm.usage && !_dlm.tool_calls && !_dlm._internal && _dlm.generatedImages && _dlm.generatedImages.length === 0) {
+                console.warn('[loadChat] ⚠️ 隐形截断消息 id=' + id + ' idx=' + _dlmi + ' contentLen=' + (_dlm.content||'').length + ' preview=' + (_dlm.content||'').substring(0,80));
+            }
+        }
         chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
         if (chats[id].messages.length !== _before) {
             console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');

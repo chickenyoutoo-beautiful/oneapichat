@@ -473,6 +473,19 @@ async function restoreUserData() {
                     for (var _cid in chats) {
                         if (chats[_cid] && chats[_cid].messages) {
                             var _before = chats[_cid].messages.length;
+                            // ★ 诊断: 记录过滤前的partial消息状态
+                            var _partialsBefore = chats[_cid].messages.filter(function(m){return m.partial;});
+                            if (_partialsBefore.length > 0) {
+                                console.log('[restoreUserData] chat ' + _cid + ' has ' + _partialsBefore.length + ' partials:',
+                                    _partialsBefore.map(function(m){return 'role='+m.role+' contentLen='+(m.content||'').length+' partial='+m.partial+' _recovered='+!!m._recovered;}));
+                            }
+                            // ★ 同时检查没有partial标记但有内容却没有time/usage的"隐形截断"消息
+                            for (var _di = chats[_cid].messages.length - 1; _di >= 0; _di--) {
+                                var _dm = chats[_cid].messages[_di];
+                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_dm.usage && !_dm.tool_calls && !_dm._internal) {
+                                    console.warn('[restoreUserData] ⚠️ 疑似隐形截断消息 in ' + _cid + ' idx=' + _di + ' contentLen=' + (_dm.content||'').length + ' preview=' + (_dm.content||'').substring(0,80));
+                                }
+                            }
                             chats[_cid].messages = chats[_cid].messages.filter(function(_pm) { return !_pm.partial; });
                             _cleanedPartial += _before - chats[_cid].messages.length;
                         }
