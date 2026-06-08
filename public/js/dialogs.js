@@ -807,7 +807,7 @@ window.loadChat = async function (id) {
 
     // ★ 恢复刷新前未完成的流式消息(仅在开关关闭时使用旧方案兜底)
     var savedPartial = null;
-    if (localStorage.getItem('__enableResumeStream') !== '1') {
+    if (localStorage.getItem('__enableResumeStream') === '0') {
     try {
         savedPartial = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
         if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
