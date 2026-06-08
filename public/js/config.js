@@ -812,8 +812,16 @@ window.getProxyUrl = function() {
 window.proxyFetch = async function(targetUrl, options = {}) {
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
+    // ★ API请求(非本地): 始终通过proxy.php中继避免CORS阻断
+    // 仅当目标为本地地址或llamacpp时才直连
+    var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
+    if (!_isLocal && (!enabled || !proxyUrl)) {
+        // 代理未启用但目标为外部API: 通过proxy.php中继(不带proxy转发)
+        proxyUrl = '';  // 空proxy=仅中继,不转发到外部代理
+        enabled = true;
+    }
     if (!enabled || !proxyUrl) {
-        // 代理未启用或无代理URL,直接请求
+        // 本地请求或无可用的中继路径,直接请求
         return fetch(targetUrl, options);
     }
 
