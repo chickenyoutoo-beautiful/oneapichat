@@ -641,6 +641,21 @@ async function restoreUserData() {
     } catch(e) {}
 
 
+    console.log('[restoreUserData] 恢复完成 — _agent_main msgs=' + (chats['_agent_main'] ? chats['_agent_main'].messages.length : 'N/A'));
+    // ★ DEBUG: 监控_agent_main消息数组的修改,找到旧截断消息来源
+    if (chats['_agent_main']) {
+        var __msgs = chats['_agent_main'].messages;
+        var __origPush = __msgs.push;
+        __msgs.push = function() {
+            console.trace('[TRACE] _agent_main.messages.push called, new count=' + (__msgs.length + arguments.length));
+            return __origPush.apply(this, arguments);
+        };
+        var __origSplice = __msgs.splice;
+        __msgs.splice = function() {
+            console.trace('[TRACE] _agent_main.messages.splice called, args=' + JSON.stringify(Array.prototype.slice.call(arguments, 0, 3)));
+            return __origSplice.apply(this, arguments);
+        };
+    }
     console.log('[restoreUserData] 恢复完成');
     // ★ 启动引擎状态自动刷新
     if (typeof window._startEngineAutoRefresh === 'function') {

@@ -236,7 +236,7 @@ window.ResumeStream = (function() {
             if (Date.now() - ts > 3600000) { console.warn('[RS resume] TTL expired for sid:', sid); return false; }
 
             if (_active[chatId]) { console.log('[RS resume] Already active for chat:', chatId); return false; }
-            console.log('[RS resume] Starting resume: chatId=' + chatId + ' sid=' + sid);
+            console.log('[RS resume] Starting resume: chatId=' + chatId + ' sid=' + sid + ' (msgs before cleanup=' + chats[chatId].messages.length + ')');
             _active[chatId] = true;
             var _isCurrentChat = (currentChatId === chatId);
             try {
