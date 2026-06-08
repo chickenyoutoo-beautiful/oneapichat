@@ -740,16 +740,17 @@ window.loadChat = async function (id) {
     var container = $.chatMessagesContainer;
     if (!container) return;
 
+    // ★ 彻底清空DOM: innerHTML + removeChild双重保险
+    while (container.firstChild) container.removeChild(container.firstChild);
     var prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
-    container.innerHTML = '';
     applyParagraphPrefix(prefix);
 
-    // ★ 清理所有残留 partial 消息
+    // ★ 清理chats数据中所有残留 partial 消息
     if (chats[id] && chats[id].messages) {
         var _before = chats[id].messages.length;
         chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
         if (chats[id].messages.length !== _before) {
-            console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial');
+            console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');
         }
     }
     // ★ 删除残留的 typing DOM 气泡（sendMessage 创建但流已完成的）

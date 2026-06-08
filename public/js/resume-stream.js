@@ -234,16 +234,19 @@ window.ResumeStream = (function() {
             var _isCurrentChat = (currentChatId === chatId);
             try {
                 if (!chats[chatId]) { console.warn('[RS resume] Chat not found:', chatId); return false; }
-                var msgs = chats[chatId].messages;
-                // ★ 先渲染气泡+设typing（loadChat会清partial，必须pm创建之前调用）
-                isTypingMap[chatId] = true;
+                // ★ 强制清理旧partial: 无论是否当前chat都过滤,防止旧截断气泡残留
+                var _beforeClean = chats[chatId].messages.length;
+                chats[chatId].messages = chats[chatId].messages.filter(function(m) { return !m.partial; });
+                if (chats[chatId].messages.length !== _beforeClean) {
+                    console.log('[RS resume] 清理了 ' + (_beforeClean - chats[chatId].messages.length) + ' 条旧partial');
+                }
+                // ★ 清理旧DOM并重新渲染(清除刷新前残留的截断气泡)
                 if (_isCurrentChat) {
                     loadChat(chatId);
                     await new Promise(function(r) { setTimeout(r, 100); });
                 }
-                // ★ loadChat 替换了 chats[id].messages 数组，必须重新获取 msgs 引用
-                msgs = chats[chatId].messages;
-                // ★ 创建 partial 消息（loadChat 已清理旧 partial，现在安全）
+                var msgs = chats[chatId].messages;
+                // ★ 创建 partial 消息（旧 partial 已清理，现在安全）
                 var pm = msgs.find(function(m){return m.partial;});
                 if (!pm) {
                     pm = {role:'assistant',content:'',reasoning:'',partial:true,_recovered:true};
@@ -272,6 +275,7 @@ window.ResumeStream = (function() {
                     console.log('[RS resume] SUCCESS — msgs count:', msgs.length, 'last 3 roles:', msgs.slice(-3).map(function(m){return m.role + (m.partial?'(partial)':'')}).join(', '));
                     slimSaveChats();
                     saveChats();
+                    // ★ 无论是否当前chat都刷新: 清除旧气泡+渲染完成消息
                     if (_isCurrentChat) loadChat(chatId);
                     return true;
                 }
@@ -279,11 +283,13 @@ window.ResumeStream = (function() {
                 console.warn('[RS resume] 流未正常完成,保持partial');
                 var fi = msgs.findIndex(function(m){return m.partial && m._recovered;});
                 if (fi !== -1) msgs.splice(fi, 1);
+                // ★ 未完成也刷新DOM: 清除残留的截断气泡
                 if (_isCurrentChat) loadChat(chatId);
                 return false;
             } catch(e) {
                 console.warn('[RS resume] error:', e.message);
                 isTypingMap[chatId] = false;
+                // ★ 异常也刷新DOM
                 if (_isCurrentChat) loadChat(chatId);
                 return false;
             }

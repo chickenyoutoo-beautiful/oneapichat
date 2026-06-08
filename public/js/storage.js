@@ -461,6 +461,16 @@ async function restoreUserData() {
                         }
                     }
                     chats = merged;
+                    // ★ 清理服务器合并后残留的 partial 消息(刷新前截断的气泡)
+                    var _cleanedPartial = 0;
+                    for (var _cid in chats) {
+                        if (chats[_cid] && chats[_cid].messages) {
+                            var _before = chats[_cid].messages.length;
+                            chats[_cid].messages = chats[_cid].messages.filter(function(_pm) { return !_pm.partial; });
+                            _cleanedPartial += _before - chats[_cid].messages.length;
+                        }
+                    }
+                    if (_cleanedPartial > 0) console.log('[restoreUserData] 清理了 ' + _cleanedPartial + ' 条服务器残留 partial');
                     // ★ 避免 quota exceeded:使用 slimSaveChats 写入(自动压缩+截断大图片)
                     try { slimSaveChats(); } catch(e) {
                         console.warn('[restoreUserData] 写入localStorage失败,尝试精简:', e.message);
