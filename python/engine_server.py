@@ -1977,6 +1977,12 @@ async def chat_stream_offset(
                 if s.get('finished'):
                     break
                 await asyncio.sleep(0.05)
+            # ★ 发送finished=true后可能残留的chunks(含done事件)
+            _cur_len = len(s['chunks'])
+            while _live_idx < _cur_len:
+                yield s['chunks'][_live_idx]
+                _live_idx += 1
+                await asyncio.sleep(0.001)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -2012,19 +2018,23 @@ async def chat_stream_get(stream_id: str):
             yield c
             idx += 1
             await asyncio.sleep(0.001)
-        if s.get('finished'):
-            return
-        # ★ 多消费者广播：用索引轮询 s['chunks'] 而非 q.get()
-        # q.get() 会删除数据，导致多 Tab 瓜分 chunk → 各自缺内容
-        while not s.get('finished'):
-            current_len = len(s['chunks'])
-            while idx < current_len:
-                yield s['chunks'][idx]
-                idx += 1
-                await asyncio.sleep(0.001)
-            if s.get('finished'):
-                break
-            await asyncio.sleep(0.05)
+        if not s.get('finished'):
+            # ★ 多消费者广播：用索引轮询 s['chunks'] 而非 q.get()
+            while not s.get('finished'):
+                current_len = len(s['chunks'])
+                while idx < current_len:
+                    yield s['chunks'][idx]
+                    idx += 1
+                    await asyncio.sleep(0.001)
+                if s.get('finished'):
+                    break
+                await asyncio.sleep(0.05)
+        # ★ 发送finished=true后可能残留的chunks(done事件可能在最后一次poll和finished之间写入)
+        current_len = len(s['chunks'])
+        while idx < current_len:
+            yield s['chunks'][idx]
+            idx += 1
+            await asyncio.sleep(0.001)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
