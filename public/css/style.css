@@ -304,9 +304,9 @@ details.reasoning-details summary {
     gap: 6px;
     user-select: none;
     font-size: calc(var(--chat-font-size, 0.95rem) * 0.95);
-    color: #374151;
+    color: #2563eb;
 }
-.dark details.reasoning-details summary { color: #d1d5db; }
+.dark details.reasoning-details summary { color: #60a5fa; }
 details.reasoning-details summary::before {
     content: "▸";
     font-size: calc(var(--chat-font-size, 0.95rem) * 0.95);
@@ -317,12 +317,12 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
 .reasoning-content {
     margin-top: 4px;
     padding: 4px 8px;
-    border-left: 2px solid #7c3aed;
+    border-left: 2px solid #3b82f6;
     font-style: italic;
     color: #374151;
     white-space: pre-wrap;
     font-size: calc(var(--chat-font-size, 0.95rem) * 0.9);
-    background: rgba(139, 92, 246, 0.08);
+    background: rgba(59, 130, 246, 0.06);
     border-radius: 6px;
     max-height: 999999px;
     opacity: 1;
@@ -338,16 +338,16 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
 /* 代理/非流式模式下的思考块增强样式 */
 .reasoning-content.proxy-mode {
     padding: 8px 12px;
-    border-left: 3px solid #7c3aed;
+    border-left: 3px solid #3b82f6;
     font-style: normal;
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.06) 0%, rgba(199, 210, 254, 0.1) 100%);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.06) 0%, rgba(219, 234, 254, 0.12) 100%);
     border-radius: 8px;
-    color: #3b2766;
+    color: #1e3a5f;
 }
 .dark .reasoning-content.proxy-mode {
-    border-left-color: #a78bfa;
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.12) 0%, rgba(199, 210, 254, 0.06) 100%);
-    color: #c4b5fd;
+    border-left-color: #60a5fa;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(219, 234, 254, 0.06) 100%);
+    color: #93c5fd;
 }
 
 /* ===== 消息页脚 ===== */
