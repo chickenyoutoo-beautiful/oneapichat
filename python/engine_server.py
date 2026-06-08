@@ -1811,10 +1811,19 @@ def _generate_resumable(request: dict, stream_id: str):
         )
         messages = request.get('messages', [])
         # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
+        # ★ 确保 reasoning_content 传递给后续请求(DeepSeek thinking模式要求)
+        _has_any_reasoning = any(
+            isinstance(m, dict) and m.get('role') == 'assistant' and (m.get('reasoning_content') or m.get('reasoning'))
+            for m in messages
+        )
         for m in messages:
             if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
                 if not m['tool_calls'] or len(m['tool_calls']) == 0:
                     del m['tool_calls']
+            # DeepSeek: 若对话中有过reasoning, 所有assistant消息都需带reasoning_content
+            if _has_any_reasoning and isinstance(m, dict) and m.get('role') == 'assistant':
+                if 'reasoning_content' not in m:
+                    m['reasoning_content'] = m.get('reasoning', '')
         params = {
             'model': request.get('model', 'deepseek-chat'),
             'messages': messages,

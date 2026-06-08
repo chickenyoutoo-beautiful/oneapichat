@@ -299,7 +299,12 @@ function buildApiMessages(chatId) {
             if (msg.tool_calls && msg.tool_calls.length > 0) {
                 _assistantMsg.tool_calls = msg.tool_calls;
             }
-            if (msg.reasoning_content) _assistantMsg.reasoning_content = msg.reasoning_content;
+            // ★ thinking模式: reasoning内容必须传回API(空字符串也不行,需保留原值)
+            // DeepSeek要求: 若对话中任何assistant有过reasoning,后续所有assistant都需带回
+            var _rc = msg.reasoning_content || msg.reasoning || '';
+            if (_rc || msg._hadReasoning) {
+                _assistantMsg.reasoning_content = _rc;
+            }
             // ★ 将生成的图片 URL 以文本形式注入到 assistant 消息中
             // （视觉模型可通过这些 URL 了解之前生成了什么，配合 system 指令可以调用 analyze_image 查看）
             var _genImgs = msg.generatedImages || (msg.generatedImage ? [msg.generatedImage] : []);
