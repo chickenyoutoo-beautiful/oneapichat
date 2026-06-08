@@ -1826,6 +1826,8 @@ def _generate_resumable(request: dict, stream_id: str):
             params['tools'] = request['tools']
 
         print(f"[_generate_resumable] Calling API...", flush=True)
+        _tc_by_index = {}  # ★ 按index合并增量tool_call delta
+        _tc_order = []     # 保持顺序
         for chunk in client.chat.completions.create(**params):
             delta = chunk.choices[0].delta
             c = delta.content or ''
@@ -1838,16 +1840,45 @@ def _generate_resumable(request: dict, stream_id: str):
                 _emit('reasoning', {'delta': r})
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    d = {'index': getattr(tc, 'index', len(tool_calls)),
-                         'id': tc.id or f'call_{len(tool_calls)}',
-                         'function': {'name': tc.function.name or '',
-                                      'arguments': tc.function.arguments or ''}}
-                    tool_calls.append(d)
-                    _emit('tool_call', d)
+                    idx = getattr(tc, 'index', 0)
+                    if idx not in _tc_by_index:
+                        _tc = {
+                            'id': tc.id or '',
+                            'type': 'function',
+                            'function': {'name': '', 'arguments': ''}
+                        }
+                        _tc_by_index[idx] = _tc
+                        _tc_order.append(idx)
+                    else:
+                        _tc = _tc_by_index[idx]
+                    # 合并: id取第一次的
+                    if tc.id and not _tc['id']:
+                        _tc['id'] = tc.id
+                    # 合并: name取非空的
+                    if tc.function and tc.function.name:
+                        _tc['function']['name'] = tc.function.name
+                    # 合并: arguments增量拼接
+                    if tc.function and tc.function.arguments:
+                        arg = tc.function.arguments
+                        cur = _tc['function']['arguments']
+                        if not cur:
+                            _tc['function']['arguments'] = arg
+                        elif arg != cur and not cur.endswith(arg):
+                            # ★ 去重: 避免重复拼接相同片段
+                            _tc['function']['arguments'] = cur + arg
+                # ★ 发出合并后的快照(前端实时展示)
+                _merged = [_tc_by_index[i] for i in _tc_order]
+                _emit('tool_call', {'partial': True, 'tools': _merged})
             if hasattr(chunk, 'usage') and chunk.usage:
                 try: usage = chunk.usage.model_dump()
                 except Exception: pass
 
+        # ★ 最终合并的tool_calls
+        tool_calls = [_tc_by_index[i] for i in _tc_order]
+        # 确保每个有id
+        for i, tc in enumerate(tool_calls):
+            if not tc['id']:
+                tc['id'] = f'call_{i}_{int(time.time()*1000)}'
         done_data = {'full_text': full, 'reasoning_text': reasoning,
                      'tool_calls': tool_calls, 'usage': usage}
         _emit('done', done_data)

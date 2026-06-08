@@ -106,7 +106,12 @@ window.ResumeStream = (function() {
                             }
                         }
                     } else if (_evType === 'tool_call' || d.function) {
-                        tcList.push(d.function?d:d);
+                        // ★ 引擎现在发送合并后的{partial:true,tools:[...]}或单独的{function:...}
+                        if (d.tools && Array.isArray(d.tools)) {
+                            tcList = d.tools;  // 合并版,直接替换
+                        } else if (d.function) {
+                            tcList.push(d);
+                        }
                     } else if (_evType === 'done' || d.full_text !== undefined) {
                         // ★ 优先用已累积的 full（可能比引擎 full_text 更完整）
                         if (d.full_text && d.full_text.length > full.length) full = d.full_text;
@@ -155,7 +160,8 @@ window.ResumeStream = (function() {
                         var _rdr = _rd.delta || '';
                         if (_rdr) reasoning += _rdr;
                     } else if (_revType === 'tool_call' || _rd.function) {
-                        tcList.push(_rd.function ? _rd : _rd);
+                        if (_rd.tools && Array.isArray(_rd.tools)) { tcList = _rd.tools; }
+                        else if (_rd.function) { tcList.push(_rd); }
                     }
                     _remEv = '';
                 } catch(e) {}
