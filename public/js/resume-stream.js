@@ -251,9 +251,9 @@ window.ResumeStream = (function() {
                 if (_isCurrentChat) {
                     loadChat(chatId);
                 } else if ($.chatMessagesContainer && currentChatId) {
-                    // 当前在别的chat,但也要确保目标chat的数据干净
                     slimSaveChats();
                 }
+                console.log('[RS resume] After loadChat cleanup — msgs count:', chats[chatId].messages.length);
                 await new Promise(function(r) { setTimeout(r, 150); });
                 var msgs = chats[chatId].messages;
                 var pm = msgs.find(function(m){return m.partial;});
@@ -283,7 +283,11 @@ window.ResumeStream = (function() {
                     pm.content = result.fullText || pm.content || '';
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
+                    pm.time = Date.now();  // ★ 关键: 设置time防止被隐形截断检测误删
                     console.log('[RS resume] SUCCESS — msgs count:', msgs.length, 'last 3 roles:', msgs.slice(-3).map(function(m){return m.role + (m.partial?'(partial)':'')}).join(', '));
+                    // ★ 清除 _savedPartial: _readSSE的定时器可能已重新写入,
+                    // 防止下方 loadChat 的旧版恢复逻辑读取它创建重复消息
+                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                     slimSaveChats();
                     saveChats();
                     // ★ 无论是否当前chat都刷新: 清除旧气泡+渲染完成消息

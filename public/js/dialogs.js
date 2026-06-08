@@ -752,7 +752,9 @@ window.loadChat = async function (id) {
         var _orphanRemoved = 0;
         for (var _dlmi = chats[id].messages.length - 1; _dlmi >= 0; _dlmi--) {
             var _dlm = chats[id].messages[_dlmi];
-            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.time && !_dlm.usage && !_dlm.tool_calls && !_dlm._internal) {
+            // ★ 隐形截断: 无partial标记+无time+无usage+无tool_calls+无_internal
+            // ★ 必须跳过 _recovered(src=resume流创建) 和 _archivedCleaned(已归档)
+            if (_dlm.role === 'assistant' && !_dlm.partial && _dlm.content && !_dlm.time && !_dlm.usage && !_dlm.tool_calls && !_dlm._internal && !_dlm._recovered && !_dlm._archivedCleaned) {
                 console.warn('[loadChat] ⚠️ 移除隐形截断消息 id=' + id + ' idx=' + _dlmi + ' contentLen=' + (_dlm.content||'').length);
                 chats[id].messages.splice(_dlmi, 1);
                 _orphanRemoved++;
@@ -808,6 +810,7 @@ window.loadChat = async function (id) {
     try {
         savedPartial = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
         if (savedPartial && savedPartial.chatId === id && (savedPartial.content || savedPartial.reasoning)) {
+            console.log('[loadChat] _savedPartial recovery: adding partial with contentLen=' + ((savedPartial.content||'').length) + ' to chat ' + id + ' (msgs before=' + chats[id].messages.length + ')');
             // ★ 在恢复前先清理旧的 partial 消息(避免重复)
             chats[id].messages = chats[id].messages.filter(function(m) {
                 return !m.partial;

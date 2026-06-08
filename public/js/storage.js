@@ -483,7 +483,7 @@ async function restoreUserData() {
                             var _orphanCleaned = 0;
                             for (var _di = chats[_cid].messages.length - 1; _di >= 0; _di--) {
                                 var _dm = chats[_cid].messages[_di];
-                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_dm.usage && !_dm.tool_calls && !_dm._internal) {
+                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_dm.usage && !_dm.tool_calls && !_dm._internal && !_dm._recovered && !_dm._archivedCleaned) {
                                     // ★ 已归档的聊天(_agent_old_*): 自动补全 time 避免反复告警
                                     if (_cid.indexOf('_agent_old_') === 0) {
                                         _dm.time = chats[_cid].messages[Math.min(_di + 1, chats[_cid].messages.length - 1)]?.time || (chats[_cid].updated_at || Date.now());
