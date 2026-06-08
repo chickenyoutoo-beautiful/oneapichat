@@ -41,7 +41,7 @@ window.ResumeStream = (function() {
         try { reader = resp.body.getReader(); } catch(e) { return null; }
         if (isResume) { showToast('🔄 续接流式...', 'info'); }
 
-        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false, readerEof=false;
+        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false, readerEof=false, streamError=null;
         var _decoder = new TextDecoder();  // ★ 复用解码器，避免 UTF-8 多字节字符跨 chunk 损坏
 
         var timer = setInterval(function(){
@@ -122,6 +122,7 @@ window.ResumeStream = (function() {
                         streamCompleted=true;  // ★ 真正收到done事件才算完成
                     } else if (_evType === 'error' || d.error) {
                         console.warn('[RS] stream error:', d.error);
+                        streamError = d.error || 'stream error';
                         done=true;
                     } else if (d.delta && !d.full_text) {
                         // ★ 未知 type 但有 delta → 按 content 处理
@@ -187,7 +188,7 @@ window.ResumeStream = (function() {
             streamCompleted = true;
         }
         // ★ 标记是否正常完成(收到done事件) — 未完成/错误的内容不应持久化
-        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:streamCompleted};
+        return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:streamCompleted, error:streamError};
     }
 
     return {

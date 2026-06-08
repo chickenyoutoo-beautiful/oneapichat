@@ -1664,10 +1664,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     chatId, pendingMsg
                 );
                 if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
-                    // ★ 检查流是否正常完成(收到done事件) — 未完成的内容不持久化
                     if (!_rsResult.completed) {
+                        // ★ 有错误时(429等)不回退HTTP直连,避免重复消耗配额
+                        if (_rsResult.error) {
+                            throw new Error('RS: ' + (typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error)));
+                        }
                         console.warn('[RS] 流未正常完成(中断/刷新), 回退到 HTTP 直连');
-                        // 不设置 _rsDone, 流会走 HTTP 直连降级
                     } else {
                         // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
                         usage = _rsResult.usage;
@@ -1689,7 +1691,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         }
                     }
                 } else {
-                    // 引擎流失败：回退普通 HTTP 直连流
+                    // ★ RS错误(429等): 抛出错误不降级HTTP直连
+                    if (_rsResult && _rsResult.error) {
+                        throw new Error('RS: ' + (typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error)));
+                    }
                     console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
                     _useRS = false;
                     var _rsDone = false;
