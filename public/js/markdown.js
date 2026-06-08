@@ -45,21 +45,26 @@ function applyStreamRender(chatId, fullText) {
             var isTyping = isTypingMap[chatId];
             if (!isAlive || !isTyping) {
                 // 气泡被移除或流已停止,清除状态
+                streamingScrollLock = false;
                 cancelAnimationFrame(st2.rafId);
                 delete _streamState[chatId];
                 return;
             }
             // 执行一次渲染
             _flushStreamRender_batched(chatId, st2);
-            // 滚动跟随（流式期间锁定，确保不因短暂 scroll 事件丢失跟随）
+            // 滚动跟随: 流式期间持续锁定, 防止异步scroll事件设置userScrolled
             streamingScrollLock = true;
-            if (!userScrolled && $.chatBox) {
-                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+            if ($.chatBox) {
+                var _scrollTarget = $.chatBox.scrollHeight;
+                $.chatBox.scrollTop = _scrollTarget;
+                // ★ 强制重置: 防止前一个scroll事件已将userScrolled置true
+                userScrolled = false;
             }
-            setTimeout(function() { streamingScrollLock = false; }, 100);
             if (isTyping) {
                 st2.rafId = requestAnimationFrame(_streamLoop);
             } else {
+                // ★ 流结束才释放锁定
+                streamingScrollLock = false;
                 cancelAnimationFrame(st2.rafId);
                 st2.rafId = null;
             }
