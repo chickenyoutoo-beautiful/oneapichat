@@ -2332,6 +2332,9 @@ window.useAlternativeVisionModel = function() {
                 var newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
                 var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
 
+                // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
+                body.messages = buildApiMessages(chatId);
+                console.log('[RS-TOOLS] rebuild body.messages for next round, msgs:', body.messages.length);
                 // 继续循环获取下一个响应
                 return attemptRequestWithFreshAbort(attempt, newAbortCtrl, newTimeoutId);
             }
