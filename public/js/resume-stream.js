@@ -234,19 +234,21 @@ window.ResumeStream = (function() {
             var _isCurrentChat = (currentChatId === chatId);
             try {
                 if (!chats[chatId]) { console.warn('[RS resume] Chat not found:', chatId); return false; }
-                // ★ 强制清理旧partial: 无论是否当前chat都过滤,防止旧截断气泡残留
+                // ★ 强制清理旧partial数据(无论是否当前chat)
                 var _beforeClean = chats[chatId].messages.length;
                 chats[chatId].messages = chats[chatId].messages.filter(function(m) { return !m.partial; });
                 if (chats[chatId].messages.length !== _beforeClean) {
-                    console.log('[RS resume] 清理了 ' + (_beforeClean - chats[chatId].messages.length) + ' 条旧partial');
+                    console.log('[RS resume] 清理了 ' + (_beforeClean - chats[chatId].messages.length) + ' 条旧partial数据');
                 }
-                // ★ 清理旧DOM并重新渲染(清除刷新前残留的截断气泡)
+                // ★ 无条件清理DOM并重渲染(即使非当前chat也清理容器)
                 if (_isCurrentChat) {
                     loadChat(chatId);
-                    await new Promise(function(r) { setTimeout(r, 100); });
+                } else if ($.chatMessagesContainer && currentChatId) {
+                    // 当前在别的chat,但也要确保目标chat的数据干净
+                    slimSaveChats();
                 }
+                await new Promise(function(r) { setTimeout(r, 150); });
                 var msgs = chats[chatId].messages;
-                // ★ 创建 partial 消息（旧 partial 已清理，现在安全）
                 var pm = msgs.find(function(m){return m.partial;});
                 if (!pm) {
                     pm = {role:'assistant',content:'',reasoning:'',partial:true,_recovered:true};
@@ -255,6 +257,8 @@ window.ResumeStream = (function() {
                     if (sp && sp.reasoning) pm.reasoning = sp.reasoning;
                     msgs.push(pm);
                 }
+                // ★ 标记正在生成(控制按钮/UI状态)
+                isTypingMap[chatId] = true;
                 // ★ 手动追加 assistant 气泡到 DOM 作为流式渲染目标
                 if (_isCurrentChat && typeof appendMessage === 'function') {
                     var _bub = appendMessage('assistant', pm.content || '', null, pm.reasoning || '', null, null, true);
