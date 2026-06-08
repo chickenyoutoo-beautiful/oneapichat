@@ -494,8 +494,11 @@ function setupEventListeners() {
 
     if ($.chatBox) {
         $.chatBox.addEventListener('scroll', throttle(() => {
-            if (isAutoScrolling) return;  // 自动滚动时不更新 userScrolled
             var { scrollTop, scrollHeight, clientHeight } = $.chatBox;
+            // ★ 位置匹配: 若scrollTop=上次程序化滚动目标,则是自动滚动→忽略
+            if (window.__lastAutoScrollTarget !== undefined && Math.abs(scrollTop + clientHeight - (window.__lastAutoScrollTarget || 0)) < 10) {
+                return;  // 程序化滚动,不触发userScrolled
+            }
             var atBottom = scrollHeight - scrollTop - clientHeight < 80;
             if ($.scrollToBottomBtn) {
                 if (!atBottom) {

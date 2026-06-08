@@ -53,16 +53,15 @@ function applyStreamRender(chatId, fullText) {
             }
             // 执行一次渲染
             _flushStreamRender_batched(chatId, st2);
-            // 滚动跟随: 标准ChatGPT模式 — 仅在用户处于底部时自动滚动
+            // 滚动跟随: 标准ChatGPT模式 — 仅当用户处于底部时自动滚动
+            // ★ 位置匹配法: 记录程序化滚动目标, scroll事件中匹配则忽略(防自触发)
             if ($.chatBox && !userScrolled) {
                 var _box = $.chatBox;
-                isAutoScrolling = true;
-                _box.scrollTop = _box.scrollHeight;
-                // ★ 短暂锁: 防止本次程序化滚动触发scroll事件后设置userScrolled
-                // 流式内容变化快, >50ms足够scroll事件到达但不会阻挡用户手动滚动
-                setTimeout(function() { isAutoScrolling = false; }, 120);
+                var _target = _box.scrollHeight;
+                _box.scrollTop = _target;
+                window.__lastAutoScrollTarget = _target;  // scroll事件中用于识别
             }
-            // 更新浮动按钮(用户上滑后出现,点击回底部恢复跟随)
+            // 更新浮动按钮
             if ($.chatBox && $.scrollToBottomBtn) {
                 var _dist2 = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
                 if (_dist2 > 200) $.scrollToBottomBtn.classList.add('visible');

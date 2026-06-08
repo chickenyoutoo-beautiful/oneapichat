@@ -349,34 +349,22 @@ function hideSlashPopup() {
 // 自动滚动到底部(用于AI回复等场景)
 function autoScrollToBottom(reason) {
     if (!$.chatBox) return;
-    // 如果用户已经主动滚动离开底部,不要强制拉回(streaming 时由外部控制)
-    // 只有明显在底部时才滚动
     const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
     var distFromBottom = scrollHeight - scrollTop - clientHeight;
-    // 距离底部超过一屏就不跟随了(用户在看上面的内容)
-    // 但如果用户没有手动滚动(streaming),强制跟随
     if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') {
         if (reason !== 'streaming' || userScrolled) return;
     }
-    isAutoScrolling = true;
-    // 流式期间加锁,防止短暂滚动触发 userScrolled 导致中断
-    if (reason === 'streaming') streamingScrollLock = true;
-    // 大幅滚动用 smooth,正常小增长用 instant(避免抖动)
+    // ★ 位置匹配法: 标记程序化滚动目标,scroll事件中匹配则忽略
+    window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
     if (distFromBottom > 200) {
         $.chatBox.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
     } else {
         $.chatBox.scrollTop = $.chatBox.scrollHeight;
     }
-    // streaming 时不清除锁定,等待流结束统一释放
-    if (reason !== 'streaming') {
-        isAutoScrolling = false;
-        streamingScrollLock = false;
-    } else {
-        setTimeout(() => { isAutoScrolling = false; }, 300);
-    }
 }
 
 window.scrollToBottom = () => {
+    window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
     $.chatBox?.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
     userScrolled = false;
 };
