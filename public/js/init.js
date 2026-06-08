@@ -885,6 +885,40 @@ function initializeApp() {
                         await new Promise(function(r) { setTimeout(r, 1500); });
                     } catch(e) { console.warn('[AutoRecover] Engine recovery error:', e.message); }
                 }
+                // ★ Phase 3: 检测未完成的工具调用交互(刷新中断工具链)
+                // 最后一条是tool_result或assistant有tool_calls但无后续响应→自动续接
+                if (!window._backendRecovered && currentChatId && chats[currentChatId]) {
+                    var _tmsgs = chats[currentChatId].messages;
+                    var _lastToolIdx = -1, _lastAsstIdx = -1, _lastUserIdx = -1;
+                    for (var _ti = _tmsgs.length - 1; _ti >= 0; _ti--) {
+                        if (_tmsgs[_ti].role === 'tool' && _lastToolIdx === -1) _lastToolIdx = _ti;
+                        if (_tmsgs[_ti].role === 'assistant' && _lastAsstIdx === -1) _lastAsstIdx = _ti;
+                        if (_tmsgs[_ti].role === 'user' && !_tmsgs[_ti]._internal && _lastUserIdx === -1) _lastUserIdx = _ti;
+                    }
+                    // 工具结果在最后(无assistant响应) 或 assistant有tool_calls等待处理
+                    var _needsContinue = false;
+                    if (_lastToolIdx > _lastAsstIdx && _lastToolIdx > _lastUserIdx) {
+                        _needsContinue = true;  // 工具结果未被处理
+                    } else if (_lastAsstIdx > _lastUserIdx && _tmsgs[_lastAsstIdx].tool_calls && _tmsgs[_lastAsstIdx].tool_calls.length > 0) {
+                        // assistant有tool_calls但工具还未执行→需要重新生成
+                        _needsContinue = true;
+                    }
+                    if (_needsContinue) {
+                        var _age2 = Date.now() - (chats[currentChatId].updated_at || 0);
+                        if (_age2 < 300000) {  // 5分钟内
+                            console.log('[AutoRecover] Phase 3: 检测到未完成工具交互, 自动续接');
+                            showToast('🔄 检测到未完成的工具调用, 正在继续...', 'info', 3000);
+                            setTimeout(function() {
+                                var _lu = _tmsgs[_lastUserIdx];
+                                if (_lu && _lu.role === 'user') {
+                                    sendMessage(true, _lu.text || '', _lu.files || []).catch(function(){});
+                                }
+                            }, 800);
+                            return;
+                        }
+                    }
+                }
+
                 // Phase 2: 如果引擎恢复成功, 跳过旧的 _pendingRecovery 再生
                 if (!window._pendingRecovery) return;
                 // ★ 后端 SSE 恢复过就不再从头重发
