@@ -186,20 +186,28 @@ window.connectSSEChannel = function() {
             if (!window.chats[chatId]) {
                 window.chats[chatId] = JSON.parse(JSON.stringify(serverChat));
             } else {
-                // ★ 合并: 用服务器数据替换消息数组,保留本地partial消息
+                // ★ 智能合并: 本地优先（最新数据），服务器补充缺失（其他设备消息）
                 var serverMsgs = serverChat.messages || [];
                 var localMsgs = window.chats[chatId].messages || [];
-                window.chats[chatId].messages = serverMsgs;
                 window.chats[chatId].title = serverChat.title || window.chats[chatId].title;
                 window.chats[chatId].updated_at = serverChat.updated_at || window.chats[chatId].updated_at;
+                // ★ 修复: 不再直接替换 messages，改为智能合并
+                // 1) 本地消息多 → 保留本地（其他设备只增不减）
+                // 2) 服务器消息多 → 前面多出的是从其他设备来的新消息，追加到本地前面
+                if (serverMsgs.length > localMsgs.length) {
+                    var extraCount = serverMsgs.length - localMsgs.length;
+                    var extra = serverMsgs.slice(0, extraCount);
+                    window.chats[chatId].messages = extra.concat(localMsgs);
+                }
+                // 服务器消息少/等 → 保留本地最新数据，不覆盖
                 // 保留本地 partial 消息（正在流式生成中,服务器尚未有）
                 for (var li = 0; li < localMsgs.length; li++) {
                     if (localMsgs[li].partial && localMsgs[li].role === 'assistant') {
                         var found = false;
-                        for (var si = serverMsgs.length - 1; si >= 0; si--) {
-                            if (serverMsgs[si].role === 'assistant' && !serverMsgs[si].partial &&
-                                serverMsgs[si].content && localMsgs[li].content &&
-                                serverMsgs[si].content.indexOf(localMsgs[li].content.substring(0, 50)) === 0) {
+                        for (var si = window.chats[chatId].messages.length - 1; si >= 0; si--) {
+                            if (window.chats[chatId].messages[si].role === 'assistant' && !window.chats[chatId].messages[si].partial &&
+                                window.chats[chatId].messages[si].content && localMsgs[li].content &&
+                                window.chats[chatId].messages[si].content.indexOf(localMsgs[li].content.substring(0, 50)) === 0) {
                                 found = true; break;
                             }
                         }
@@ -230,10 +238,18 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            console.log('[SSE] Stream done from another device, syncing chat:', ev.chat_id);
+            // ★ 关键修复: 引擎广播的 chat:stream_done 没有 source 字段，
+            // 会触发同一浏览器的 _syncChatFromServer 覆盖正在流式生成的消息数组，
+            // 导致 pm 引用孤立 + 刷新后旧截断气泡残留。
+            var cid = ev.chat_id || currentChatId;
+            if (isTypingMap[cid] || isTypingMap[currentChatId]) {
+                console.log('[SSE] Ignoring chat:stream_done — currently streaming (self engine broadcast)');
+                return;
+            }
+            console.log('[SSE] Stream done from another device, syncing chat:', cid);
             // ★ 先从服务器拉取最新数据，再渲染
-            _syncChatFromServer(ev.chat_id || currentChatId).then(function(ok) {
-                if (ev.chat_id === currentChatId && !isTypingMap[currentChatId]) {
+            _syncChatFromServer(cid).then(function(ok) {
+                if (cid === currentChatId) {
                     loadChat(currentChatId);
                 }
                 updateChatList();
@@ -245,11 +261,16 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            console.log('[SSE] Chat updated from another device:', ev.chat_id);
-            // ★ 先从服务器拉取最新数据，再渲染
+            // ★ 关键修复: 同 chat:stream_done，流式生成期间引擎广播会覆盖本地消息数组
             var cid = ev.chat_id || currentChatId;
+            if (isTypingMap[cid] || isTypingMap[currentChatId]) {
+                console.log('[SSE] Ignoring chat:updated — currently streaming');
+                return;
+            }
+            console.log('[SSE] Chat updated from another device:', cid);
+            // ★ 先从服务器拉取最新数据，再渲染
             _syncChatFromServer(cid).then(function(ok) {
-                if (cid === currentChatId && !isTypingMap[currentChatId]) {
+                if (cid === currentChatId) {
                     console.log('[SSE] Reloading current chat after server sync');
                     loadChat(currentChatId);
                 }
@@ -263,10 +284,15 @@ window.connectSSEChannel = function() {
         try {
             var ev = JSON.parse(e.data);
             if (ev.source === window._sseSourceId) return;
-            console.log('[SSE] New message from another device, chat:', ev.chat_id);
+            // ★ 关键修复: 流式生成期间不处理远程消息同步，防止覆盖本地消息数组
             var cid = ev.chat_id || currentChatId;
+            if (isTypingMap[cid] || isTypingMap[currentChatId]) {
+                console.log('[SSE] Ignoring chat:message_added — currently streaming');
+                return;
+            }
+            console.log('[SSE] New message from another device, chat:', cid);
             _syncChatFromServer(cid).then(function(ok) {
-                if (cid === currentChatId && !isTypingMap[currentChatId]) {
+                if (cid === currentChatId) {
                     loadChat(currentChatId);
                 }
                 updateChatList();

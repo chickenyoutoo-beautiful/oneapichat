@@ -305,6 +305,13 @@ async function loadChatsFromServer() {
 // ★ 登录后的数据恢复:从服务器加载当前账号的配置和聊天记录
 async function restoreUserData() {
     console.log('[restoreUserData] 开始恢复用户数据');
+    // ★ 尽早清除残留的 partial 状态(刷新前流式中断留下的半截数据)
+    // 必须在任何 loadChat/渲染之前执行，否则旧截断气泡会进入 DOM
+    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+    try { localStorage.removeItem('_rs_sid'); } catch(e) {}
+    try { localStorage.removeItem('_rs_cid'); } catch(e) {}
+    try { localStorage.removeItem('_rs_msgid'); } catch(e) {}
+    try { localStorage.removeItem('_rs_ts'); } catch(e) {}
     // ★ 优先读 localStorage,其次跨域 cookie(从其他域名过来时)
     var token = localStorage.getItem('authToken') || getCookie('auth_token');
     if (!token && typeof getAuthToken === 'function') token = getAuthToken();
