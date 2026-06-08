@@ -733,7 +733,11 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                 regenBtn.onclick = async (e) => {
                     e.stopPropagation();
                     var msgs = chats[currentChatId].messages;
-                    var idx = msgs.findIndex(m => m.role === 'assistant' && m.content === text);
+                    // ★ 用msgIndex定位(比content字符串匹配可靠)
+                    var idx = msgIndex;
+                    if (idx < 0 || idx >= msgs.length || msgs[idx].role !== 'assistant') {
+                        idx = msgs.findIndex(m => m.role === 'assistant' && m.content === text);
+                    }
                     if (idx === -1) return;
                     var sys = msgs.filter(m => m.role === 'system' && !m.temporary && !m.timestamp);
                     var timestamp = msgs.find(m => m.timestamp);

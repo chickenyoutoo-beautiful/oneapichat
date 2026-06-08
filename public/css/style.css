@@ -317,12 +317,12 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
 .reasoning-content {
     margin-top: 4px;
     padding: 4px 8px;
-    border-left: 2px solid #9a8cc0;
+    border-left: 2px solid #7c3aed;
     font-style: italic;
-    color: #4b5563;
+    color: #374151;
     white-space: pre-wrap;
     font-size: calc(var(--chat-font-size, 0.95rem) * 0.9);
-    background: rgba(200, 215, 240, 0.2);
+    background: rgba(139, 92, 246, 0.08);
     border-radius: 6px;
     max-height: 999999px;
     opacity: 1;
