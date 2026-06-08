@@ -303,13 +303,13 @@ details.reasoning-details summary {
     align-items: center;
     gap: 6px;
     user-select: none;
-    font-size: 0.9rem;
+    font-size: calc(var(--chat-font-size, 0.95rem) * 0.95);
     color: #374151;
 }
 .dark details.reasoning-details summary { color: #d1d5db; }
 details.reasoning-details summary::before {
     content: "▸";
-    font-size: 0.9rem;
+    font-size: calc(var(--chat-font-size, 0.95rem) * 0.95);
     display: inline-block;
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -321,7 +321,7 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     font-style: italic;
     color: #4b5563;
     white-space: pre-wrap;
-    font-size: 0.85rem;
+    font-size: calc(var(--chat-font-size, 0.95rem) * 0.9);
     background: rgba(200, 215, 240, 0.2);
     border-radius: 6px;
     max-height: 999999px;
