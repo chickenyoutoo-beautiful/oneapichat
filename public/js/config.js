@@ -812,16 +812,14 @@ window.getProxyUrl = function() {
 window.proxyFetch = async function(targetUrl, options = {}) {
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
-    var _forceRelay = options.forceRelay || false;  // ★ 强制纯中继(不走代理)
-    delete options.forceRelay;
-    var _useRelay = !_forceRelay && enabled && proxyUrl;
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
-    if (!_isLocal && !_useRelay) {
-        // 代理未启用(或强制中继)且目标是外部API → proxy.php纯中继
-        proxyUrl = '__relay_only__';
-    }
     if (_isLocal) {
         return fetch(targetUrl, options);
+    }
+    // ★ 外部API: 始终通过proxy.php中继避免CORS
+    //    代理启用时走代理, 未启用时proxy.php纯CURL中继
+    if (!enabled || !proxyUrl) {
+        proxyUrl = '__relay_only__';
     }
 
     console.log('[Proxy] →', targetUrl.substring(0, 80));
@@ -922,7 +920,7 @@ window.fetchModels = async function (silent) {
         var _headers = _isLocalModel ? {} : { Authorization: `Bearer ${key}` };
         var _ctrl = new AbortController();
         var _tid = setTimeout(() => _ctrl.abort(), 8000);  // 8s 超时
-        var res = await window.proxyFetch(`${url}/models`, { headers: _headers, signal: _ctrl.signal, forceRelay: true });
+        var res = await window.proxyFetch(`${url}/models`, { headers: _headers, signal: _ctrl.signal });
         clearTimeout(_tid);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         var data = await res.json();
