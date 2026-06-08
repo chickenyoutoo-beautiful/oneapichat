@@ -45,6 +45,7 @@ function applyStreamRender(chatId, fullText) {
             var isTyping = isTypingMap[chatId];
             if (!isAlive || !isTyping) {
                 // 气泡被移除或流已停止,清除状态
+                isAutoScrolling = false;
                 streamingScrollLock = false;
                 cancelAnimationFrame(st2.rafId);
                 delete _streamState[chatId];
@@ -52,18 +53,17 @@ function applyStreamRender(chatId, fullText) {
             }
             // 执行一次渲染
             _flushStreamRender_batched(chatId, st2);
-            // 滚动跟随: 流式期间持续锁定, 防止异步scroll事件设置userScrolled
-            streamingScrollLock = true;
+            // 滚动跟随: 用isAutoScrolling锁住程序化滚动(自动释放, 不阻止用户手动滚动)
             if ($.chatBox) {
-                var _scrollTarget = $.chatBox.scrollHeight;
-                $.chatBox.scrollTop = _scrollTarget;
-                // ★ 强制重置: 防止前一个scroll事件已将userScrolled置true
+                isAutoScrolling = true;
+                $.chatBox.scrollTop = $.chatBox.scrollHeight;
                 userScrolled = false;
+                setTimeout(function() { isAutoScrolling = false; }, 200);
             }
             if (isTyping) {
                 st2.rafId = requestAnimationFrame(_streamLoop);
             } else {
-                // ★ 流结束才释放锁定
+                // ★ 流结束释放所有锁定
                 streamingScrollLock = false;
                 cancelAnimationFrame(st2.rafId);
                 st2.rafId = null;
