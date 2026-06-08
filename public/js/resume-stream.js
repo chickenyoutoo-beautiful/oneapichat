@@ -247,11 +247,29 @@ window.ResumeStream = (function() {
             var _isCurrentChat = (currentChatId === chatId);
             try {
                 if (!chats[chatId]) { console.warn('[RS resume] Chat not found:', chatId); return false; }
-                // ★ 强制清理旧partial数据(无论是否当前chat)
+                // ★ 强制清理旧partial+旧resume数据(避免新旧气泡并存)
                 var _beforeClean = chats[chatId].messages.length;
+                var _msgs = chats[chatId].messages;
+                // 找到最后一个user消息的位置
+                var _lastUserIdx = -1;
+                for (var _lui = _msgs.length - 1; _lui >= 0; _lui--) {
+                    if (_msgs[_lui].role === 'user') { _lastUserIdx = _lui; break; }
+                }
+                // 移除最后一个user之后的所有assistant(含旧resume: _recovered或partial)
+                if (_lastUserIdx >= 0) {
+                    var _removed = 0;
+                    for (var _ri = _msgs.length - 1; _ri > _lastUserIdx; _ri--) {
+                        if (_msgs[_ri].role === 'assistant') {
+                            _msgs.splice(_ri, 1);
+                            _removed++;
+                        }
+                    }
+                    if (_removed > 0) console.log('[RS resume] 清理了最后user之后的 ' + _removed + ' 条旧assistant(含旧resume)');
+                }
+                // 再清理所有残余partial(兜底)
                 chats[chatId].messages = chats[chatId].messages.filter(function(m) { return !m.partial; });
                 if (chats[chatId].messages.length !== _beforeClean) {
-                    console.log('[RS resume] 清理了 ' + (_beforeClean - chats[chatId].messages.length) + ' 条旧partial数据');
+                    console.log('[RS resume] 清理了 ' + (_beforeClean - chats[chatId].messages.length) + ' 条旧数据');
                 }
                 // ★ 无条件清理DOM并重渲染(即使非当前chat也清理容器)
                 if (_isCurrentChat) {
