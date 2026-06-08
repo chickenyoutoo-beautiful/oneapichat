@@ -535,17 +535,17 @@ window._wsInit = function() {
 // ★ 刷新后从引擎恢复活跃任务（跨浏览器/刷新后继续接收流）
 window._recoverActiveTasks = async function() {
     // ★ 防重入: init.js和storage.js都会调用,只执行一次
-    if (window.__recoveringActive) return;
+    if (window.__recoveringActive) { console.log('[recoverTasks] Skipped: already recovering'); return; }
     window.__recoveringActive = true;
-    var uid = localStorage.getItem('authUserId') || '';
-    var token = localStorage.getItem('authToken') || '';
-    if (!uid || !token) { window.__recoveringActive = false; return; }
     try {
+        var uid = localStorage.getItem('authUserId') || '';
+        var token = localStorage.getItem('authToken') || '';
+        if (!uid || !token) { console.log('[recoverTasks] Skipped: no uid/token'); return; }
         var resp = await fetch('/engine/tasks/active?user_id=' + encodeURIComponent(uid));
-        if (!resp.ok) return;
+        if (!resp.ok) { console.log('[recoverTasks] Engine not reachable, status=' + resp.status); return; }
         var result = await resp.json();
         var tasks = (result && result.tasks) || [];
-        if (tasks.length === 0) return;
+        if (tasks.length === 0) { console.log('[recoverTasks] No active tasks'); return; }
         console.log('[recoverTasks] Found', tasks.length, 'active tasks from engine');
         for (var i = 0; i < tasks.length; i++) {
             var task = tasks[i];
@@ -577,8 +577,9 @@ window._recoverActiveTasks = async function() {
         }
     } catch(e) {
         console.warn('[recoverTasks] Error:', e.message);
+    } finally {
+        window.__recoveringActive = false;  // ★ 确保任何路径(包括early return)都重置
     }
-    window.__recoveringActive = false;
 };
 
 window.checkAgentNotifications = function() {
