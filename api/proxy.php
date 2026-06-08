@@ -33,6 +33,10 @@ $method = strtoupper($data['method'] ?? 'POST');
 $headers = $data['headers'] ?? [];
 $body = $data['body'] ?? null;
 $proxyUrl = $data['proxy'] ?? '';
+// ★ 哨兵值: 前端标记仅需CORS中继, 不转发到外部代理
+if ($proxyUrl === '__relay_only__') {
+    $proxyUrl = '';
+}
 $isStream = !empty($data['stream']);
 
 // ★ 如果 relay 顶层没传 stream, 解析 body 中的 stream 字段

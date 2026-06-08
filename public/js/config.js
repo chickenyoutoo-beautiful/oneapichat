@@ -812,16 +812,16 @@ window.getProxyUrl = function() {
 window.proxyFetch = async function(targetUrl, options = {}) {
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
-    // ★ API请求(非本地): 始终通过proxy.php中继避免CORS阻断
-    // 仅当目标为本地地址或llamacpp时才直连
+    var _useRelay = enabled && proxyUrl;  // 是否需要代理转发
+    // ★ 外部API请求: 始终通过proxy.php中继避免CORS
+    //    (proxy.php在proxyUrl为空时仅做CURL中继,不转发外部代理)
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
-    if (!_isLocal && (!enabled || !proxyUrl)) {
-        // 代理未启用但目标为外部API: 通过proxy.php中继(不带proxy转发)
-        proxyUrl = '';  // 空proxy=仅中继,不转发到外部代理
-        enabled = true;
+    if (!_isLocal && !_useRelay) {
+        // 代理未启用但目标是外部API → 通过proxy.php纯中继
+        proxyUrl = '__relay_only__';  // 哨兵值: PHP端检查后跳过代理设置
     }
-    if (!enabled || !proxyUrl) {
-        // 本地请求或无可用的中继路径,直接请求
+    if (_isLocal) {
+        // 本地请求直连
         return fetch(targetUrl, options);
     }
 
