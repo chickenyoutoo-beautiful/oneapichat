@@ -1663,6 +1663,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                       temp: body.temperature, tokens: body.max_tokens, tools: body.tools },
                     chatId, pendingMsg
                 );
+                console.log('[RS-DEBUG] _rsResult:', _rsResult ? ('fullText=' + (_rsResult.fullText||'').substring(0,60) + ' toolCalls=' + (_rsResult.toolCalls||[]).length + ' completed=' + _rsResult.completed + ' error=' + (_rsResult.error||'none')) : 'NULL');
                 if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
                     if (!_rsResult.completed) {
                         // ★ 有错误时(429等)不回退HTTP直连,避免重复消耗配额
