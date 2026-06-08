@@ -53,18 +53,24 @@ function applyStreamRender(chatId, fullText) {
             }
             // 执行一次渲染
             _flushStreamRender_batched(chatId, st2);
-            // 滚动跟随: 用isAutoScrolling锁住程序化滚动(自动释放, 不阻止用户手动滚动)
-            if ($.chatBox) {
+            // 滚动跟随: 标准ChatGPT模式 — 仅在用户处于底部时自动滚动
+            if ($.chatBox && !userScrolled) {
+                var _box = $.chatBox;
                 isAutoScrolling = true;
-                $.chatBox.scrollTop = $.chatBox.scrollHeight;
-                userScrolled = false;
-                setTimeout(function() { isAutoScrolling = false; }, 200);
+                _box.scrollTop = _box.scrollHeight;
+                // ★ 短暂锁: 防止本次程序化滚动触发scroll事件后设置userScrolled
+                // 流式内容变化快, >50ms足够scroll事件到达但不会阻挡用户手动滚动
+                setTimeout(function() { isAutoScrolling = false; }, 120);
+            }
+            // 更新浮动按钮(用户上滑后出现,点击回底部恢复跟随)
+            if ($.chatBox && $.scrollToBottomBtn) {
+                var _dist2 = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
+                if (_dist2 > 200) $.scrollToBottomBtn.classList.add('visible');
+                else $.scrollToBottomBtn.classList.remove('visible');
             }
             if (isTyping) {
                 st2.rafId = requestAnimationFrame(_streamLoop);
             } else {
-                // ★ 流结束释放所有锁定
-                streamingScrollLock = false;
                 cancelAnimationFrame(st2.rafId);
                 st2.rafId = null;
             }

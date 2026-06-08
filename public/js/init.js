@@ -495,9 +495,8 @@ function setupEventListeners() {
     if ($.chatBox) {
         $.chatBox.addEventListener('scroll', throttle(() => {
             if (isAutoScrolling) return;  // 自动滚动时不更新 userScrolled
-            if (streamingScrollLock) return;  // 流式期间锁定滚动跟随
             var { scrollTop, scrollHeight, clientHeight } = $.chatBox;
-            var atBottom = scrollHeight - scrollTop - clientHeight < 120;
+            var atBottom = scrollHeight - scrollTop - clientHeight < 80;
             if ($.scrollToBottomBtn) {
                 if (!atBottom) {
                     $.scrollToBottomBtn.classList.add('visible');
