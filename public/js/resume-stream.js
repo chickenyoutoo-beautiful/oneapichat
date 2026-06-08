@@ -266,6 +266,12 @@ window.ResumeStream = (function() {
                 }
                 // ★ 标记正在生成(控制按钮/UI状态)
                 isTypingMap[chatId] = true;
+                // ★ 更新按钮状态: 流式生成中应显示停止键
+                if (_isCurrentChat) {
+                    if ($.sendBtn) $.sendBtn.classList.add('hidden');
+                    if ($.stopBtn) { $.stopBtn.classList.remove('hidden'); $.stopBtn.classList.add('visible'); }
+                    window._updateQueueUI();
+                }
                 // ★ 手动追加 assistant 气泡到 DOM 作为流式渲染目标
                 if (_isCurrentChat && typeof appendMessage === 'function') {
                     var _bub = appendMessage('assistant', pm.content || '', null, pm.reasoning || '', null, null, true);
