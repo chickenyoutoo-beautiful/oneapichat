@@ -607,15 +607,14 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
         return (m.role === 'user' ? '用户: ' : 'AI: ') + (m.text || m.content || '').substring(0, 200);
     }).join('\n');
 
-    // 用廉价模型,但必须用 DeepSeek API(不能走 MiniMax)
+    // ★ 使用当前模型(兼容所有OpenAI格式的API)
     var key = localStorage.getItem('apiKey') || '';
-    var baseUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com';
-    if (baseUrl.includes('minimaxi.com') || baseUrl.includes('openrouter.ai') || baseUrl.includes('api.x.ai') || baseUrl.includes('anthropic.com') || baseUrl.includes('generativelanguage.googleapis.com')) {
-        // 非 DeepSeek API 不兼容 deepseek-chat 模型,跳过
-        return;
-    }
-    var model = 'deepseek-chat';
-    if (!key) return;
+    var baseUrl = localStorage.getItem('baseUrl') || (typeof DEFAULT_CONFIG !== 'undefined' ? DEFAULT_CONFIG.url : 'https://api.deepseek.com');
+    if (!key || !baseUrl) return;
+    var _provider = localStorage.getItem('baseUrlProvider') || 'custom';
+    // 本地模型通常兼容deepseek-chat,直接用; 其他provider用当前模型
+    var model = (_provider === 'llamacpp') ? 'deepseek-chat'
+        : (localStorage.getItem('model') || localStorage.getItem('model_' + _provider) || 'deepseek-chat');
 
     try {
         var resp = await window.proxyFetch(baseUrl + '/chat/completions', {
