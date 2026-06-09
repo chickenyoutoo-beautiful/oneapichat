@@ -332,7 +332,7 @@ async function restoreUserData() {
             }
         }
         if (foreignChatIds.length > 0) {
-            console.warn('[restoreUserData] 发现', foreignChatIds.length, '个不属于当前用户的对话,清除:', foreignChatIds);
+            console.log('[restoreUserData] 发现', foreignChatIds.length, '个不属于当前用户的对话,清除:', foreignChatIds);
             for (var _fi = 0; _fi < foreignChatIds.length; _fi++) {
                 delete chats[foreignChatIds[_fi]];
             }
