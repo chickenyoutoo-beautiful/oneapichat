@@ -1666,11 +1666,20 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 console.log('[RS-DEBUG] _rsResult:', _rsResult ? ('fullText=' + (_rsResult.fullText||'').substring(0,60) + ' toolCalls=' + (_rsResult.toolCalls||[]).length + ' completed=' + _rsResult.completed + ' error=' + (_rsResult.error||'none')) : 'NULL');
                 if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
                     if (!_rsResult.completed) {
-                        // ★ 有错误时(429等)不回退HTTP直连,避免重复消耗配额
                         if (_rsResult.error) {
-                            throw new Error('RS: ' + (typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error)));
+                            var _rsErrStr = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
+                            // 400安全过滤: 回退HTTP直连走safety_filter重试逻辑
+                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk')) {
+                                console.warn('[RS] 400安全过滤, 回退HTTP直连重试');
+                                _useRS = false;
+                                var _rsDone = false;
+                            } else {
+                                // 429等: 不降级直接抛出
+                                throw new Error('RS: ' + _rsErrStr);
+                            }
+                        } else {
+                            console.warn('[RS] 流未正常完成(中断/刷新), 回退到 HTTP 直连');
                         }
-                        console.warn('[RS] 流未正常完成(中断/刷新), 回退到 HTTP 直连');
                     } else {
                         // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
                         usage = _rsResult.usage;
@@ -1692,13 +1701,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         }
                     }
                 } else {
-                    // ★ RS错误(429等): 抛出错误不降级HTTP直连
                     if (_rsResult && _rsResult.error) {
-                        throw new Error('RS: ' + (typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error)));
+                        var _rsErrStr2 = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
+                        // 400安全过滤: 回退HTTP直连走safety_filter重试
+                        if (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk')) {
+                            console.warn('[RS] 400安全过滤(空结果), 回退HTTP直连重试');
+                            _useRS = false;
+                            var _rsDone = false;
+                        } else {
+                            throw new Error('RS: ' + _rsErrStr2);
+                        }
+                    } else {
+                        console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
+                        _useRS = false;
+                        var _rsDone = false;
                     }
-                    console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
-                    _useRS = false;
-                    var _rsDone = false;
                 }
             } else { var _rsDone = false; }
 
