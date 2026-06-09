@@ -1670,7 +1670,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             var _rsErrStr = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
                             // 400安全过滤: 回退HTTP直连走safety_filter重试逻辑
                             if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk')) {
-                                console.warn('[RS] 400安全过滤, 回退HTTP直连重试');
+                                console.warn('[RS] 400安全过滤, 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
                                 _useRS = false;
                                 var _rsDone = false;
                             } else {
@@ -1705,7 +1705,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _rsErrStr2 = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
                         // 400安全过滤: 回退HTTP直连走safety_filter重试
                         if (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk')) {
-                            console.warn('[RS] 400安全过滤(空结果), 回退HTTP直连重试');
+                            console.warn('[RS] 400安全过滤(空结果), 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
                             _useRS = false;
                             var _rsDone = false;
                         } else {
@@ -2867,7 +2867,12 @@ window.useAlternativeVisionModel = function() {
                             }
                         }
                     } else if (_retryAction === 'safety_filter') {
-                        // ★ DeepSeek Content Exists Risk: 激进精简策略
+                        // ★ RS直连回退: 不做任何精简, 直接重试
+                        if (window.__rsFallbackRetry) {
+                            window.__rsFallbackRetry = false;
+                            console.log('[safety_filter] RS回退直连, 保留完整消息直接重试');
+                        } else {
+                            // ★ DeepSeek Content Exists Risk: 激进精简策略
                         // 已知触发因素: 长篇system prompt,大量工具描述,多轮tool_call历史
                         // 策略: 移除system prompt → 裁剪对话历史 → 清除工具消息 → 仅保留最后几轮纯文本对话
                         var _sfStripped = 0;
@@ -2897,6 +2902,7 @@ window.useAlternativeVisionModel = function() {
                         if (body.max_tokens && body.max_tokens > 4096) body.max_tokens = 4096;
                         console.log('[safety_filter] 激进精简完成, 移除 ' + _sfStripped + ' 条消息, 剩余 ' + body.messages.length + ' 条');
                         showToast('⚠️ 内容安全过滤, 已精简上下文(' + body.messages.length + '条消息)后重试...', 'warning', 6000);
+                        } // end else (non-RS-fallback safety_filter)
                     } else if (_retryAction === 'clean_params') {
                         // 清理可能有问题的参数
                         delete body.top_p;
