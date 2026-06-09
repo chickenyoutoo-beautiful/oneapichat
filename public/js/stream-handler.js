@@ -782,6 +782,30 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             }
         }
     }
+    // ★ MiniMax思考去重: 思考内容可能在正文中重复出现, 移除正文中的思考前缀
+    if (fullText && reasoningText && fullText.length > reasoningText.length) {
+        var _rtTrimmed = reasoningText.trim();
+        var _ftTrimmed = fullText.trim();
+        // 正文以思考内容开头 → 去除重复
+        if (_ftTrimmed.indexOf(_rtTrimmed) === 0) {
+            fullText = _ftTrimmed.substring(_rtTrimmed.length).trim();
+            pendingMsg.content = fullText;
+            console.log('[MiniMax] 从正文中移除重复的思考内容(' + _rtTrimmed.length + ' chars)');
+        } else if (_ftTrimmed.length > _rtTrimmed.length && _ftTrimmed.indexOf(_rtTrimmed.substring(0, 200)) === 0) {
+            // 部分匹配: 尝试找分界点
+            var _overlap = 0;
+            for (var _oi = Math.min(_rtTrimmed.length, 500); _oi > 100; _oi--) {
+                if (_ftTrimmed.indexOf(_rtTrimmed.substring(0, _oi)) === 0) {
+                    _overlap = _oi; break;
+                }
+            }
+            if (_overlap > 100) {
+                fullText = _ftTrimmed.substring(_overlap).trim();
+                pendingMsg.content = fullText;
+                console.log('[MiniMax] 从正文中移除部分重叠思考内容(overlap=' + _overlap + ' chars)');
+            }
+        }
+    }
     // 有思考但无正文:确保气泡有内容显示(思考已在折叠框,这里只确保气泡不空)
     if (!fullText && reasoningText) {
         pendingMsg.content = reasoningText;

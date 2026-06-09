@@ -179,6 +179,20 @@ window.ResumeStream = (function() {
                 full = full.replace(/<think>[\s\S]*?<\/think>/g, '');
                 if (_thinkText.trim() && !reasoning) reasoning = _thinkText.trim();
             }
+            // ★ MiniMax去重: 思考内容可能在正文中重复出现
+            if (reasoning && full.length > reasoning.length) {
+                var _rt2 = reasoning.trim();
+                var _ft2 = full.trim();
+                if (_ft2.indexOf(_rt2) === 0) {
+                    full = _ft2.substring(_rt2.length).trim();
+                } else if (_ft2.indexOf(_rt2.substring(0, 200)) === 0) {
+                    for (var _oi = Math.min(_rt2.length, 500); _oi > 100; _oi--) {
+                        if (_ft2.indexOf(_rt2.substring(0, _oi)) === 0) {
+                            full = _ft2.substring(_oi).trim(); break;
+                        }
+                    }
+                }
+            }
         }
         try { cleanupStreamState(chatId); } catch(e) {}
         // ★ 僵尸流修复: 引擎可能缓存了chunks但没写done事件(进程崩溃/超时/etc)
