@@ -1395,7 +1395,7 @@ select option { background: white; color: #1f2937; }
     position: relative;
     background: transparent;
     border-radius: 9999px;
-    overflow: visible;
+    overflow: hidden;  /* ★ 裁剪drop overlay使其不超出药丸区域 */
 }
 /* 输入框药丸外观 */
 .input-wrapper > div:first-child {
