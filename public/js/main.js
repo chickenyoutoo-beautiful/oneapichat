@@ -263,6 +263,15 @@ function stopGenerationForChat(chatId) {
         });
     }
     // ★ 清除可恢复流状态 — 防止刷新后误触发续接
+    // 先停掉 _streamSaveTimer，否则会在清除后立刻重新写入 _savedPartial
+    if (chats[chatId] && chats[chatId].messages) {
+        var _msgs = chats[chatId].messages;
+        for (var _mi = _msgs.length - 1; _mi >= 0; _mi--) {
+            var _pm = _msgs[_mi];
+            if (_pm._streamSaveTimer) { clearInterval(_pm._streamSaveTimer); _pm._streamSaveTimer = null; }
+            if (_pm.partial) { delete _pm.partial; _pm._aborted = true; }
+        }
+    }
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
     try { localStorage.removeItem('_lastStreamMsgId_' + chatId); } catch(e) {}
     try { localStorage.removeItem('_rs_sid'); } catch(e) {}
