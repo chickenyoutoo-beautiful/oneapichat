@@ -188,14 +188,10 @@ switch ($action) {
                 echo json_encode(['error' => '获取课程列表失败', 'detail' => $exit_code == 0 ? '无JSON输出' : '退出码='.$exit_code]);
                 exit;
             }
-<<<<<<< Updated upstream
-            if (strpos($json, '"courses"') !== false) file_put_contents($cache_file, $json);
-=======
             // ★ 只缓存成功的响应，不缓存错误
             if (strpos($json, '"courses"') !== false) {
                 file_put_contents($cache_file, $json);
             }
->>>>>>> Stashed changes
         }
         // 从 DB 合并课程状态（通过 Python 查询，避免 PHP SQLite3 扩展依赖）
         $data = json_decode($json, true);
