@@ -805,6 +805,12 @@ window.loadChat = async function (id) {
     }
 
     // ★ 恢复刷新前未完成的流式消息(仅在开关关闭时使用旧方案兜底)
+    // ★ 先检查是否被用户主动停止 — 如果是则跳过续接
+    if (localStorage.getItem('_streamStopped_' + id) === '1') {
+        try { localStorage.removeItem('_streamStopped_' + id); } catch(e) {}
+        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+        console.log('[loadChat] 用户主动停止过，跳过续接');
+    } else {
     var savedPartial = null;
     if (localStorage.getItem('__enableResumeStream') === '0') {
     try {
@@ -840,6 +846,7 @@ window.loadChat = async function (id) {
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
     window._pendingRecovery = null;
     } // end if toggle OFF
+    } // end else (not stopped)
 
     // ★ Agent 模式: 加载记忆/人格/身份,注入 system prompt
     if (id === AGENT_CHAT_ID) {

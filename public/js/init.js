@@ -812,11 +812,14 @@ function initializeApp() {
                         }, 3000);
                     }
                 } catch(e) {
-                    // ★ 网络异常也不应静默: 延迟重试
+                    // ★ 网络异常/502 HTML: 延迟重试，先检查响应是否为JSON
                     console.warn('[Auth] 验证token失败,2s后重试:', e.message);
                     setTimeout(function() {
                         fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token))
-                            .then(function(r2) { return r2.json(); })
+                            .then(function(r2) {
+                                if (!r2.ok) throw new Error('HTTP ' + r2.status);
+                                return r2.json();
+                            })
                             .then(function(d2) {
                                 if (!d2.valid) {
                                     localStorage.removeItem('authToken');

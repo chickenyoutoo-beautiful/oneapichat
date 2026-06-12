@@ -278,6 +278,9 @@ function stopGenerationForChat(chatId) {
     try { localStorage.removeItem('_rs_cid'); } catch(e) {}
     try { localStorage.removeItem('_rs_ts'); } catch(e) {}
     try { localStorage.removeItem('_rs_msgid'); } catch(e) {}
+    // ★ 标记流已被用户主动停止，loadChat 检测到后跳过续接
+    try { localStorage.setItem('_streamStopped_' + chatId, '1'); } catch(e) {}
+    window._pendingRecovery = null;
     // ★ 用户停止后也要处理队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
         setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
