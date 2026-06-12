@@ -185,6 +185,24 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
         }
         fullText = fullText.trim();
 
+        // ★ 更新思考块 DOM（如果还没创建）
+        if (reasoningText && currentChatId === chatId) {
+            var _cbSSE = activeBubbleMap[chatId];
+            if (_cbSSE) {
+                var _detSSE = _cbSSE.querySelector('details.reasoning-details');
+                if (!_detSSE) {
+                    _detSSE = document.createElement('details');
+                    _detSSE.className = 'reasoning-details';
+                    _detSSE.open = true;
+                    _detSSE.innerHTML = '<summary>深度思考</summary><div class="reasoning-content"></div>';
+                    var _mbSSE = _cbSSE.querySelector('.markdown-body');
+                    if (_mbSSE) _cbSSE.insertBefore(_detSSE, _mbSSE);
+                }
+                var _rcSSE = _detSSE.querySelector('.reasoning-content');
+                if (_rcSSE) _rcSSE.textContent = reasoningText;
+            }
+        }
+
         // ★ MiniMax去重: 思考内容可能在正文中重复出现，移除正文中的思考前缀
         var _rt2 = (reasoningText || '').trim();
         var _ft2 = (fullText || '').trim();

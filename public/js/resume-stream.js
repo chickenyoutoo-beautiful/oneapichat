@@ -75,18 +75,51 @@ window.ResumeStream = (function() {
                         if (dl) {
                             full+=dl;
                             pendingMsg.content=full;
-                            // ★ 实时剔除完整闭合的 <think> 块用于显示（不用 $ 兜底，避免吞正文）
+                            // ★ 实时剔除完整闭合的 <think> 和 (think) 块（与 streamResponse 行为一致）
                             var _display = full;
                             if (full.indexOf('<think>') !== -1 && full.indexOf('</think>') > full.indexOf('<think>')) {
                                 _display = full.replace(/<think>[\s\S]*?<\/think>/g, '');
                             }
-                            // ★ MiniMax 实时去重: 正文可能包含思考内容前缀, 流式时即清除
-                            // (与 _backendSSEHandler / streamResponse 行为一致, 修复 MiniMax-M3 思考泄漏到正文)
+                            // MiniMax (think)...(endthink) 格式
+                            if (_display.indexOf('(think)') !== -1 && _display.indexOf('(endthink)') > _display.indexOf('(think)')) {
+                                // 提取完整的 (think)...(endthink) 块到 reasoning
+                                var _mtRS2 = _display.match(/\(think\)([\s\S]*?)\(endthink\)/g);
+                                if (_mtRS2) {
+                                    for (var _mti3 = 0; _mti3 < _mtRS2.length; _mti3++) {
+                                        reasoning += _mtRS2[_mti3].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
+                                    }
+                                    _display = _display.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
+                                    pendingMsg.reasoning = reasoning;
+                                }
+                                // 未闭合的 (think) — 流式传输中，只暂存不破坏正文
+                                var _openRS2 = _display.match(/\(think\)([\s\S]*?)$/);
+                                if (_openRS2 && _openRS2[1].length > 5 && _openRS2[1].length < 3000) {
+                                    reasoning += _openRS2[1];
+                                    _display = _display.replace(/\(think\)[\s\S]*$/, '');
+                                    pendingMsg.reasoning = reasoning;
+                                }
+                            }
+                            // ★ 创建/更新思考块 DOM（从 content 中提取的 reasoning）
+                            if (reasoning && currentChatId === chatId) {
+                                var _bubRS = activeBubbleMap[chatId];
+                                if (_bubRS) {
+                                    var _detRS = _bubRS.querySelector('details.reasoning-details');
+                                    if (!_detRS) {
+                                        _detRS = document.createElement('details');
+                                        _detRS.className = 'reasoning-details';
+                                        _detRS.open = true;
+                                        _detRS.innerHTML = '<summary>思考过程</summary><div class="reasoning-content"></div>';
+                                        var _mbRS = _bubRS.querySelector('.markdown-body');
+                                        if (_mbRS) _bubRS.insertBefore(_detRS, _mbRS);
+                                    }
+                                    var _rcRS = _detRS.querySelector('.reasoning-content');
+                                    if (_rcRS) _rcRS.textContent = reasoning;
+                                }
+                            }
+                            // ★ MiniMax 实时去重: 正文可能包含思考内容前缀
                             if (reasoning && _display.indexOf(reasoning) === 0) {
-                                _display = _display.substring(reasoning.length);
-                                _display = _display.replace(/^[\s\n]+/, '');
+                                _display = _display.substring(reasoning.length).replace(/^[\s\n]+/, '');
                             } else if (reasoning && reasoning.length > 30 && _display.length > reasoning.length * 0.5) {
-                                // 部分前缀重叠 (MiniMax-M3 有时会切碎重复)
                                 for (var _oi = Math.min(reasoning.length, 500); _oi > 30; _oi--) {
                                     if (_display.indexOf(reasoning.substring(0, _oi)) === 0) {
                                         _display = _display.substring(_oi).replace(/^[\s\n]+/, '');
