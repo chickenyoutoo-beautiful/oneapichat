@@ -365,6 +365,23 @@ function buildApiMessages(chatId) {
                 if (_tcId0) _assistantTcIds[_tcId0] = true;
             }
         }
+        // ★ 链式模式: tool_calls 可能已被移入 _chainCompletedToolCalls
+        if (_tmsg1._chainCompletedToolCalls && _tmsg1._chainCompletedToolCalls.length > 0) {
+            for (var _tci1 = 0; _tci1 < _tmsg1._chainCompletedToolCalls.length; _tci1++) {
+                var _tcId1 = _tmsg1._chainCompletedToolCalls[_tci1].id;
+                if (_tcId1) _assistantTcIds[_tcId1] = true;
+            }
+        }
+    }
+    // ★ 额外: 扫描源消息中的 _chainCompletedToolCalls
+    for (var _si = 0; _si < msgs.length; _si++) {
+        var _sm = msgs[_si];
+        if (_sm._chainCompletedToolCalls && _sm._chainCompletedToolCalls.length > 0) {
+            for (var _sci = 0; _sci < _sm._chainCompletedToolCalls.length; _sci++) {
+                var _scId = _sm._chainCompletedToolCalls[_sci].id;
+                if (_scId) _assistantTcIds[_scId] = true;
+            }
+        }
     }
     // 第三遍: 清理 assistant tool_calls 中无对应 tool 结果的
     var _removedTcCount = 0;
@@ -403,16 +420,12 @@ function buildApiMessages(chatId) {
             }
         }
     }
-    // ★ 从源 chats 数组中永久删除孤 tool 消息，避免每次 buildApiMessages 重复清理
-    if (_orphanSrcIndices.length > 0) {
-        _orphanSrcIndices.sort(function(a, b) { return b - a; });  // 降序，从后往前删不扰索引
-        for (var _oi = 0; _oi < _orphanSrcIndices.length; _oi++) {
-            msgs.splice(_orphanSrcIndices[_oi], 1);
-        }
-        console.log('[buildApiMessages] 从聊天历史永久删除 ' + _orphanSrcIndices.length + ' 条孤 tool 消息');
+    // ★ 仅从本轮API消息中过滤孤tool消息，不再从源数组永久删除（永久删除导致AI失忆→重复调用→死循环）
+    if (_removedToolMsgCount > 0) {
+        apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
     }
     if (_removedTcCount > 0 || _removedToolMsgCount > 0) {
-        console.log('[buildApiMessages] 双向配对清理: ' + _removedTcCount + ' 个孤 tool_call + ' + _removedToolMsgCount + ' 个孤 tool 消息');
+        console.log('[buildApiMessages] 双向配对清理: ' + _removedTcCount + ' 个孤 tool_call + ' + _removedToolMsgCount + ' 个孤 tool 消息(仅本轮过滤,未删源)');
     }
 
     // ★ 清理空 tool_calls:[] — 部分 API (DeepSeek) 拒绝 empty array

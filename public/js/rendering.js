@@ -251,10 +251,6 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     var card = document.createElement('div');
     card.className = 'tool-call-card';
 
-    var meta = (window.toolRegistry && toolRegistry.has(toolName)) ? toolRegistry.get(toolName) : null;
-    var capHint = meta ? meta.capabilities.slice(0, 2).join(', ') : '';
-    var toolHint = meta ? meta.searchHint : '';
-
     var typeIcons = {
         'web_search': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>',
         'web_fetch': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
@@ -263,68 +259,68 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     };
     var iconHtml = typeIcons[toolName] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
 
-    var summary = (meta && meta.getSummary) ? meta.getSummary(args) : (toolName + ': ' + JSON.stringify(args).substring(0, 60));
-
     var resultText = '';
     if (result) {
         if (typeof result === 'string') resultText = result;
-        else if (result.result) resultText = result.result;
-        else if (result.error) resultText = result.error;
-        else if (result.output) resultText = result.output;
+        else if (result.result) resultText = String(result.result);
+        else if (result.error) resultText = String(result.error);
         else resultText = JSON.stringify(result).substring(0, 300);
     }
+    var _preview = (resultText || '').split('\n')[0].replace(/\s+/g, ' ').trim().substring(0, 60);
 
     var durationStr = '';
-    if (durationMs !== undefined && durationMs !== null) {
+    if (durationMs > 0) {
         if (durationMs < 1000) durationStr = durationMs + 'ms';
         else if (durationMs < 60000) durationStr = (durationMs / 1000).toFixed(1) + 's';
-        else durationStr = Math.floor(durationMs / 60000) + 'm ' + Math.floor((durationMs % 60000) / 1000) + 's';
+        else durationStr = Math.floor(durationMs / 60000) + 'm' + Math.floor((durationMs % 60000) / 1000) + 's';
     }
 
-    var isError = result && result.error;
-    var statusColor = isError ? '#ef4444' : (durationStr ? '#059669' : '#6366f1');
+    var isError = !!(result && result.error);
+    var statusColor = isError ? '#ef4444' : '#059669';
     var statusText = isError ? '失败' : '成功';
 
-    var html = '<details class="tool-call-details">' +
-        '<summary class="tool-call-summary" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;">' +
-            '<span class="tool-call-icon" style="color:' + statusColor + ';flex-shrink:0;">' + iconHtml + '</span>' +
-            '<span class="tool-call-name" style="font-weight:600;font-size:12px;">' + escapeHtml(toolName) + '</span>' +
-            '<span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(summary) + '</span>' +
-            (durationStr ? '<span style="font-size:10px;color:#6b7280;flex-shrink:0;">' + durationStr + '</span>' : '') +
-            '<span style="font-size:10px;color:' + statusColor + ';flex-shrink:0;font-weight:500;">' + statusText + '</span>' +
-            '<span class="tool-call-chevron" style="margin-left:4px;color:#9ca3af;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
-        '</summary>' +
-        '<div class="tool-call-body" style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:8px;font-size:11px;">';
+    var html = '<div class="tool-call-card-header" onclick="this.parentNode.classList.toggle(\'expanded\')">' +
+        '<span class="tool-call-card-icon" style="color:' + statusColor + ';">' + iconHtml + '</span>' +
+        '<span style="font-weight:600;font-size:12px;flex-shrink:0;">' + escapeHtml(toolName) + '</span>' +
+        '<span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">' + escapeHtml(_preview || '') + '</span>' +
+        (durationStr ? '<span style="font-size:10px;color:#9ca3af;flex-shrink:0;">' + durationStr + '</span>' : '') +
+        '<span style="font-size:10px;color:' + statusColor + ';flex-shrink:0;font-weight:500;">' + statusText + '</span>' +
+        '<span class="tool-call-card-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+    '</div>' +
+    '<div class="tool-call-card-body">';
 
     if (execDetails && execDetails.command) {
-        html += '<details class="tool-exec-details" open>' +
-            '<summary class="tool-exec-summary" style="cursor:pointer;font-weight:500;color:#374151;margin-bottom:4px;">' +
-                '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" style="vertical-align:middle;">' +
-                '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> ' + escapeHtml(execDetails.command) +
-            '</summary>' +
-            '<pre class="tool-exec-output" style="margin:4px 0 0 16px;padding:6px 8px;background:#1e1e2e;color:#cdd6f4;border-radius:6px;font-family:monospace;font-size:10px;line-height:1.5;max-height:200px;overflow-y:auto;">' +
-            escapeHtml((execDetails.output || execDetails.error || '').substring(0, 5000)) + '</pre>' +
-            (execDetails.exitCode !== undefined ? '<div style="margin:4px 0 0 16px;font-size:10px;color:' + (execDetails.exitCode === 0 ? '#059669' : '#ef4444') + ';">退出码: ' + execDetails.exitCode + '</div>' : '') +
+        html += '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:#6366f1;display:flex;align-items:center;gap:3px;">' +
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>' + escapeHtml(execDetails.command).substring(0, 60) +
+            '</summary><pre style="margin:2px 0 0 12px;padding:4px 6px;background:#1e1e2e;color:#cdd6f4;border-radius:4px;font-size:10px;max-height:150px;overflow:auto;">' + escapeHtml((execDetails.output || execDetails.error || '').substring(0, 4000)) + '</pre>' +
+            (execDetails.exitCode !== undefined ? '<div style="margin:2px 0 0 12px;font-size:10px;color:' + (execDetails.exitCode === 0 ? '#059669' : '#ef4444') + ';">退出码: ' + execDetails.exitCode + '</div>' : '') +
             '</details>';
     }
 
-    html += '<details class="tool-args-details" style="margin-top:4px;">' +
-        '<summary class="tool-args-summary" style="cursor:pointer;font-size:10px;color:#9ca3af;">参数</summary>' +
-        '<pre class="tool-call-args" style="margin:4px 0 0 16px;padding:6px;background:#f3f4f6;border-radius:4px;font-size:10px;max-height:120px;overflow:auto;">' + escapeHtml(JSON.stringify(args, null, 2).substring(0, 2000)) + '</pre>' +
+    html += '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:#9ca3af;display:flex;align-items:center;gap:3px;">' +
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>参数</summary>' +
+        '<pre style="margin:2px 0 0 12px;padding:4px 6px;background:#f3f4f6;border-radius:4px;font-size:10px;max-height:100px;overflow:auto;">' + escapeHtml(JSON.stringify(args, null, 2).substring(0, 2000)) + '</pre>' +
         '</details>';
 
     if (resultText) {
         var displayResult = resultText.length > 500 ? resultText.substring(0, 500) : resultText;
         var isLongResult = resultText.length > 500;
-        html += '<details class="tool-result-details" style="margin-top:4px;" ' + (isError ? 'open' : '') + '>' +
-            '<summary class="tool-result-summary" style="cursor:pointer;font-size:10px;color:' + (isError ? '#ef4444' : '#059669') + ';">' + (isError ? '错误' : '结果') + (isLongResult ? ' (' + resultText.length + ' 字符)' : '') + '</summary>' +
-            '<pre class="tool-call-result" style="margin:4px 0 0 16px;padding:6px;background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border-radius:4px;font-size:10px;max-height:200px;overflow:auto;white-space:pre-wrap;color:' + (isError ? '#dc2626' : '#374151') + ';">' + escapeHtml(displayResult) + '</pre>' +
-            (isLongResult ? '<button onclick="this.previousElementSibling.textContent=' + JSON.stringify(escapeHtml(resultText.substring(0, 10000))) + ';this.remove()" style="margin:4px 0 0 16px;font-size:10px;color:#6366f1;border:none;background:none;cursor:pointer;">展开全部</button>' : '') +
+        html += '<details style="margin-top:2px;" ' + (isError ? 'open' : '') + '><summary style="cursor:pointer;font-size:10px;color:' + (isError ? '#ef4444' : '#059669') + ';display:flex;align-items:center;gap:3px;">' +
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 10 13 20 5"/><line x1="21" y1="12" x2="12" y2="19"/></svg>' + (isError ? '错误' : '结果') + (isLongResult ? ' (' + resultText.length + ' 字符)' : '') +
+            '</summary>' +
+            '<pre class="tool-call-result" style="margin:2px 0 0 12px;padding:4px 6px;background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border-radius:4px;font-size:10px;max-height:150px;overflow:auto;white-space:pre-wrap;color:' + (isError ? '#dc2626' : '#374151') + ';">' + escapeHtml(displayResult) + '</pre>' +
+            (isLongResult ? '<button onclick="var p=this.previousElementSibling;p.style.maxHeight=\'none\';p.textContent=p.getAttribute(\'data-full\')||p.textContent;this.remove()" style="margin:2px 0 0 12px;font-size:10px;color:#6366f1;border:none;background:none;cursor:pointer;">展开全部 (' + resultText.length + '字符)</button>' : '') +
             '</details>';
     }
 
-    html += '</div></details>';
+    html += '</div>';
     card.innerHTML = html;
+
+    if (resultText && resultText.length > 500) {
+        var _preEl = card.querySelector('.tool-call-result');
+        if (_preEl) _preEl.setAttribute('data-full', resultText.substring(0, 10000));
+    }
+
     return card;
 }
 function appendToolCallMessage(toolName, args, result, durationMs, chatId) {

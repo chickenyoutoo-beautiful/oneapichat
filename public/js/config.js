@@ -812,6 +812,8 @@ window.getProxyUrl = function() {
 window.proxyFetch = async function(targetUrl, options = {}) {
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
+    // 解析相对URL为绝对URL(proxy.php只接受http/https开头)
+    if (targetUrl.startsWith('/')) { targetUrl = window.location.origin + targetUrl; }
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
     if (_isLocal) {
         return fetch(targetUrl, options);

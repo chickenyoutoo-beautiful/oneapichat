@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixel Robot Face · 灵动颜文字</title>
+<style>
+  :root { --bg: #000; --cyan: #00f0ff; --glow: #00e0ff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    user-select: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+  .stage {
+    position: relative;
+    width: min(86vw, 440px);
+    height: min(86vw, 440px);
+    cursor: crosshair;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .kaomoji-label {
+    color: var(--cyan);
+    font-size: clamp(22px, 5vw, 34px);
+    text-align: center;
+    margin-top: 10px;
+    letter-spacing: 4px;
+    text-shadow: 0 0 22px var(--glow), 0 0 48px var(--glow);
+    min-height: 56px;
+    line-height: 56px;
+    transition: all 0.3s ease;
+    opacity: 0.9;
+  }
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    justify-content: center;
+    max-width: 520px;
+    padding: 0 8px;
+  }
+  .btn {
+    background: transparent;
+    border: 1.5px solid rgba(0, 240, 255, 0.35);
+    color: var(--cyan);
+    padding: 6px 11px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+  }
+  .btn:hover {
+    background: rgba(0, 240, 255, 0.10);
+    border-color: var(--cyan);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.22);
+  }
+  .btn.active {
+    background: rgba(0, 240, 255, 0.20);
+    border-color: var(--cyan);
+    box-shadow: 0 0 22px rgba(0, 240, 255, 0.38);
+  }
+  .auto-btn {
+    border-color: rgba(255, 120, 180, 0.48);
+    color: #ff88b0;
+  }
+  .auto-btn.on {
+    background: rgba(255, 120, 180, 0.16);
+    border-color: #ff88b0;
+    box-shadow: 0 0 20px rgba(255, 120, 180, 0.30);
+    animation: pulse 1.1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .hint {
+    color: rgba(0, 240, 255, 0.28);
+    font-size: 10px;
+    margin-top: 8px;
+    letter-spacing: 2px;
+    text-align: center;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <canvas id="c"></canvas>
+</div>
+<div class="kaomoji-label" id="kaomoji">(・_・)</div>
+
+<div class="btn-row" id="btnRow"></div>
+<div class="hint">
+  键盘 1~8 切换表情 &nbsp;|&nbsp; ← → 切换 &nbsp;|&nbsp; 空格 自动循环<br>
+  🖱 鼠标移动 → 眼睛追踪光标
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+//  表情定义 — 8 种颜文字，五官位置/尺寸独立
+//  Canvas: 200×200 内部像素空间
+// ═══════════════════════════════════════════
+const EXPRESSIONS = [
+  {
+    name: '默认平静', kaomoji: '(・_・)',
+    eyeY: 76, eyeSpacing: 30,
+    eyeW: 20, eyeH: 48, eyeRound: 0.84, eyeRot: 0, eyeGlow: 1.0,
+    mouthY: 138, mouthX: 0,
+    mouthType: 'line', mouthW: 28, mouthH: 0, mouthAmp: 0,
+  },
+  {
+    name: '开心笑', kaomoji: '(＾▽＾)',
+    eyeY: 64, eyeSpacing: 33,
+    eyeW: 26, eyeH: 11, eyeRound: 0.92, eyeRot: 0, eyeGlow: 1.15,
+    mouthY: 129, mouthX: 0,
+    mouthType: 'arc_up', mouthW: 40, mouthH: 15, mouthAmp: 0,
+  },
+  {
+    name: '害羞心动', kaomoji: '(〃ω〃)',
+    eyeY: 82, eyeSpacing: 24,
+    eyeW: 14, eyeH: 26, eyeRound: 0.96, eyeRot: 0, eyeGlow: 1.35,
+    mouthY: 145, mouthX: 0,
+    mouthType: 'circle', mouthW: 10, mouthH: 10, mouthAmp: 0,
+  },
+  {
+    name: '惊讶', kaomoji: '(⊙△⊙)',
+    eyeY: 60, eyeSpacing: 38,
+    eyeW: 30, eyeH: 34, eyeRound: 1.0, eyeRot: 0, eyeGlow: 1.55,
+    mouthY: 149, mouthX: 0,
+    mouthType: 'triangle', mouthW: 20, mouthH: 15, mouthAmp: 0,
+  },
+  {
+    name: '难过', kaomoji: '(´；ω；`)',
+    eyeY: 90, eyeSpacing: 35,
+    eyeW: 14, eyeH: 24, eyeRound: 0.66, eyeRot: 10, eyeGlow: 0.6,
+    mouthY: 152, mouthX: 0,
+    mouthType: 'arc_down', mouthW: 28, mouthH: 11, mouthAmp: 0,
+  },
+  {
+    name: '生气', kaomoji: '(｀皿´)',
+    eyeY: 72, eyeSpacing: 21,
+    eyeW: 15, eyeH: 34, eyeRound: 0.55, eyeRot: -14, eyeGlow: 1.25,
+    mouthY: 136, mouthX: 0,
+    mouthType: 'zigzag', mouthW: 34, mouthH: 11, mouthAmp: 3,
+  },
+  {
+    name: '疑惑', kaomoji: '(・ˍ・)',
+    eyeY: 74, eyeSpacing: 32,
+    eyeW: 17, eyeH: 40, eyeRound: 0.72, eyeRot: 0, eyeGlow: 0.8,
+    mouthY: 141, mouthX: 3,
+    mouthType: 'wave', mouthW: 28, mouthH: 6, mouthAmp: 3,
+  },
+  {
+    name: '爱心眼', kaomoji: '(*´∀`*)',
+    eyeY: 66, eyeSpacing: 28,
+    eyeW: 22, eyeH: 24, eyeRound: 0.96, eyeRot: 0, eyeGlow: 1.45,
+    mouthY: 131, mouthX: 0,
+    mouthType: 'arc_up', mouthW: 36, mouthH: 15, mouthAmp: 0,
+  },
+];
+
+// ═══════════════ 画布初始化 ═══════════════
+const SIZE = 200;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = SIZE;
+canvas.height = SIZE;
+
+const offscreen = document.createElement('canvas');
+offscreen.width = SIZE;
+offscreen.height = SIZE;
+const oc = offscreen.getContext('2d');
+
+// ═══════════════ 状态 ═══════════════
+const state = {
+  eyeY: 76, eyeSpacing: 30,
+  eyeW: 20, eyeH: 48, eyeRound: 0.84, eyeRot: 0, eyeGlow: 1.0,
+  mouthY: 138, mouthX: 0,
+  mouthType: 'line', mouthW: 28, mouthH: 0, mouthAmp: 0,
+  mAlphaO: 0, mAlphaN: 1, mScaleO: 1, mScaleN: 1,
+  mTypeO: 'line', mwO: 28, mhO: 0, mAmpO: 0,
+};
+const target = JSON.parse(JSON.stringify(state));
+const vel = {};
+const NUM_KEYS = [
+  'eyeY','eyeSpacing','eyeW','eyeH','eyeRound','eyeRot','eyeGlow',
+  'mouthY','mouthX','mouthW','mouthH','mouthAmp',
+  'mAlphaO','mAlphaN','mScaleO','mScaleN','mwO','mhO','mAmpO',
+];
+NUM_KEYS.forEach(k => { vel[k] = 0; });
+
+let currentIdx = 0;
+let targetIdx = 0;
+let autoCycle = false;
+let autoTimer = null;
+const AUTO_INTERVAL = 2000;
+
+// ═══════════════ 鼠标追踪 ═══════════════
+let mouseX = SIZE / 2, mouseY = SIZE / 2;
+const stage = document.getElementById('stage');
+
+function updateMouse(cx, cy) {
+  const rect = stage.getBoundingClientRect();
+  const s = SIZE / rect.width;
+  mouseX = (cx - rect.left) * s;
+  mouseY = (cy - rect.top) * s;
+}
+stage.addEventListener('mousemove', e => updateMouse(e.clientX, e.clientY));
+stage.addEventListener('touchmove', e => {
+  if (e.touches.length > 0) updateMouse(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: true });
+
+// ═══════════════ 设置目标表情 ═══════════════
+function setTarget(idx) {
+  const e = EXPRESSIONS[idx];
+  const dyEye = e.eyeY - state.eyeY;
+  const ds = e.eyeSpacing - state.eyeSpacing;
+  const dyMouth = e.mouthY - state.mouthY;
+
+  target.eyeY = e.eyeY;     target.eyeSpacing = e.eyeSpacing;
+  target.eyeW = e.eyeW;     target.eyeH = e.eyeH;
+  target.eyeRound = e.eyeRound;
+  target.eyeRot = e.eyeRot * (Math.PI / 180);
+  target.eyeGlow = e.eyeGlow;
+  target.mouthY = e.mouthY; target.mouthX = e.mouthX;
+
+  if (Math.abs(dyEye) > 1.5)  vel.eyeY  = dyEye  * 0.50;
+  if (Math.abs(ds) > 1.5)     vel.eyeSpacing = ds * 0.40;
+  if (Math.abs(dyMouth) > 1.5) vel.mouthY = dyMouth * 0.40;
+
+  if (target.mouthType !== e.mouthType ||
+      target.mouthW !== e.mouthW ||
+      target.mouthH !== e.mouthH) {
+    state.mTypeO  = target.mouthType;
+    state.mwO     = target.mouthW;
+    state.mhO     = target.mouthH;
+    state.mAmpO   = target.mouthAmp;
+    state.mAlphaO = 1;
+    state.mAlphaN = 0;
+    state.mScaleO  = 1;
+    state.mScaleN  = 1.4;
+    vel.mAlphaO = 0; vel.mAlphaN = 0;
+    vel.mScaleO  = 0; vel.mScaleN  = 0;
+  }
+
+  target.mouthType = e.mouthType;
+  target.mouthW    = e.mouthW;
+  target.mouthH    = e.mouthH;
+  target.mouthAmp  = e.mouthAmp;
+  target.mAlphaO   = 0;
+  target.mAlphaN   = 1;
+  target.mScaleO   = 1;
+  target.mScaleN   = 1;
+  targetIdx = idx;
+}
+
+// ═══════════════ Spring 物理 ═══════════════
+const K = 0.18, D = 0.78;
+function spring(val, tgt, v) {
+  const f = (tgt - val) * K;
+  const nv = (v + f) * D;
+  return { val: val + nv, vel: nv };
+}
+
+function updateSpring() {
+  for (const k of NUM_KEYS) {
+    const r = spring(state[k], target[k], vel[k] || 0);
+    state[k] = r.val;
+    vel[k] = r.vel;
+  }
+  if (state.mAlphaN > 0.93) {
+    state.mTypeO = target.mouthType;
+    state.mwO   = target.mouthW;
+    state.mhO   = target.mouthH;
+    state.mAmpO = target.mouthAmp;
+  }
+}
+
+// ═══════════════ 呼吸 / 抖动 / 眨眼 ═══════════════
+let breathPhase = 0;
+let jitterTimer = 0;
+let blinkTimer = 0;
+let blinkVal = 1;
+let jx = 0, jy = 0, jm = 0;
+const BLINK_SPEED = 0.25;
+
+// ═══════════════ 绘制 ═══════════════
+function drawEye(cx, cy, w, h, rnd, rot, glowMul, blink) {
+  oc.save();
+  oc.translate(cx, cy);
+  oc.rotate(rot);
+
+  const hhBlink = (h / 2) * blink;
+  const hw = w / 2;
+  const hh = Math.max(hhBlink, 1.2);
+  const r = Math.min(hw, hh) * rnd * 0.88;
+
+  oc.shadowColor = `rgba(0,240,255,${0.88 * glowMul})`;
+  oc.shadowBlur = 13 * glowMul;
+  oc.fillStyle = '#00f0ff';
+  oc.beginPath();
+  oc.moveTo(-hw + r, -hh); oc.lineTo(hw - r, -hh);
+  oc.quadraticCurveTo(hw, -hh, hw, -hh + r);
+  oc.lineTo(hw, hh - r);
+  oc.quadraticCurveTo(hw, hh, hw - r, hh);
+  oc.lineTo(-hw + r, hh);
+  oc.quadraticCurveTo(-hw, hh, -hw, hh - r);
+  oc.lineTo(-hw, -hh + r);
+  oc.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
+  oc.closePath();
+  oc.fill();
+
+  oc.shadowBlur = 0;
+  if (blink > 0.22) {
+    oc.fillStyle = `rgba(190,255,255,${0.68 * glowMul})`;
+    const iw = hw * 0.38, ih = hh * 0.38;
+    if (iw > 0.7 && ih > 0.7) {
+      const ir = Math.min(iw, ih) * rnd;
+      oc.beginPath();
+      oc.moveTo(-iw + ir, -ih); oc.lineTo(iw - ir, -ih);
+      oc.quadraticCurveTo(iw, -ih, iw, -ih + ir);
+      oc.lineTo(iw, ih - ir);
+      oc.quadraticCurveTo(iw, ih, iw - ir, ih);
+      oc.lineTo(-iw + ir, ih);
+      oc.quadraticCurveTo(-iw, ih, -iw, ih - ir);
+      oc.lineTo(-iw, -ih + ir);
+      oc.quadraticCurveTo(-iw, -ih, -iw + ir, -ih);
+      oc.closePath();
+      oc.fill();
+    }
+  }
+
+  oc.restore();
+}
+
+function drawMouth(type, cx, cy, w, h, amp, alpha, scale) {
+  if (alpha < 0.008) return;
+  oc.save();
+  oc.globalAlpha = alpha;
+  oc.translate(cx, cy);
+  oc.scale(scale, scale);
+  oc.strokeStyle = '#00f0ff';
+  oc.lineWidth = 3.0;
+  oc.lineCap = 'round';
+  oc.lineJoin = 'round';
+  oc.shadowColor = 'rgba(0,240,255,0.65)';
+  oc.shadowBlur = 7;
+
+  const hw = w / 2;
+
+  switch (type) {
+    case 'line':
+      oc.beginPath();
+      oc.moveTo(-hw, 0); oc.lineTo(hw, 0);
+      oc.stroke();
+      break;
+    case 'arc_up':
+      oc.beginPath();
+      oc.arc(0, h * 0.25, hw * 0.88, Math.PI * 0.12, Math.PI * 0.88);
+      oc.stroke();
+      break;
+    case 'arc_down':
+      oc.beginPath();
+      oc.arc(0, -h * 0.35, hw * 0.82, -Math.PI * 0.88, -Math.PI * 0.12);
+      oc.stroke();
+      break;
+    case 'circle':
+      oc.fillStyle = '#00f0ff';
+      oc.beginPath();
+      oc.arc(0, 0, Math.max(w * 0.32, 3), 0, Math.PI * 2);
+      oc.fill();
+      break;
+    case 'triangle':
+      oc.fillStyle = '#00f0ff';
+      oc.beginPath();
+      oc.moveTo(0, h * 0.65);
+      oc.lineTo(-hw * 0.75, -h * 0.45);
+      oc.lineTo(hw * 0.75, -h * 0.45);
+      oc.closePath();
+      oc.fill();
+      break;
+    case 'zigzag': {
+      oc.beginPath();
+      const segs = Math.max(Math.floor(amp), 3);
+      const step = w / segs;
+      oc.moveTo(-hw, 0);
+      for (let i = 1; i <= segs; i++) {
+        const sx = -hw + step * i;
+        const sy = (i % 2 === 0) ? -h * 0.4 : h * 0.4;
+        oc.lineTo(sx, sy);
+      }
+      oc.stroke();
+      break;
+    }
+    case 'wave': {
+      oc.beginPath();
+      const pts = 14;
+      oc.moveTo(-hw, 0);
+      for (let i = 1; i <= pts; i++) {
+        const fx = -hw + (w / pts) * i;
+        const fy = Math.sin(i * Math.PI * amp / pts) * h * 0.4;
+        oc.lineTo(fx, fy);
+      }
+      oc.stroke();
+      break;
+    }
+  }
+
+  oc.restore();
+}
+
+// ═══════════════ 背景粒子 ═══════════════
+const particles = [];
+for (let i = 0; i < 18; i++) {
+  particles.push({
+    x: Math.random() * SIZE,
+    y: Math.random() * SIZE,
+    life: Math.random(),
+    speed: 0.003 + Math.random() * 0.008,
+    size: 1 + Math.random() * 2,
+  });
+}
+
+function updateParticles() {
+  for (const p of particles) {
+    p.life -= p.speed;
+    if (p.life <= 0) {
+      p.x = Math.random() * SIZE;
+      p.y = Math.random() * SIZE;
+      p.life = 1;
+    }
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const alpha = Math.sin(p.life * Math.PI) * 0.32;
+    if (alpha < 0.02) continue;
+    oc.fillStyle = `rgba(0,240,255,${alpha})`;
+    oc.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+  }
+}
+
+// ═══════════════ 主渲染 ═══════════════
+function render(ts) {
+  updateSpring();
+
+  // 呼吸
+  breathPhase += 0.014;
+  const breath = Math.sin(breathPhase) * 1.8;
+
+  // 随机眨眼
+  blinkTimer -= 0.016;
+  if (blinkTimer <= 0) {
+    blinkTimer = 3 + Math.random() * 5;
+    blinkVal = 0.06;
+  }
+  blinkVal += (1 - blinkVal) * BLINK_SPEED;
+
+  // 随机微抖
+  jitterTimer -= 0.016;
+  if (jitterTimer <= 0) {
+    jitterTimer = 0.5 + Math.random() * 1.4;
+    jx = (Math.random() - 0.5) * 2.2;
+    jy = (Math.random() - 0.5) * 1.8;
+    jm = (Math.random() - 0.5) * 1.6;
+  }
+
+  // 鼠标追踪偏移
+  const eyeCX = 100;
+  const mxPull = (mouseX - eyeCX) * 0.07;
+  const myPull = (mouseY - state.eyeY) * 0.08;
+
+  const ey = state.eyeY + breath + jy;
+  const es = state.eyeSpacing + jx;
+  const my = state.mouthY + breath + jm;
+  const mx = state.mouthX;
+
+  // 清屏
+  oc.fillStyle = '#000';
+  oc.fillRect(0, 0, SIZE, SIZE);
+
+  // 粒子
+  updateParticles();
+  drawParticles();
+
+  // 左眼
+  drawEye(
+    eyeCX - es + mxPull, ey + myPull,
+    state.eyeW, state.eyeH,
+    state.eyeRound, state.eyeRot,
+    state.eyeGlow, blinkVal
+  );
+  // 右眼
+  drawEye(
+    eyeCX + es + mxPull, ey + myPull,
+    state.eyeW, state.eyeH,
+    state.eyeRound, -state.eyeRot,
+    state.eyeGlow, blinkVal
+  );
+
+  // 嘴 — 旧形态淡出 + 新形态淡入
+  drawMouth(state.mTypeO, eyeCX + mx, my, state.mwO, state.mhO, state.mAmpO, state.mAlphaO, state.mScaleO);
+  drawMouth(state.mouthType, eyeCX + mx, my, state.mouthW, state.mouthH, state.mouthAmp, state.mAlphaN, state.mScaleN);
+
+  // 输出到显示 canvas
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(offscreen, 0, 0);
+
+  // 同步当前索引
+  if (Math.abs(state.eyeY - target.eyeY) < 0.12 &&
+      Math.abs(state.eyeW - target.eyeW) < 0.18 &&
+      state.mAlphaN > 0.9) {
+    if (currentIdx !== targetIdx) {
+      currentIdx = targetIdx;
+      document.getElementById('kaomoji').textContent = EXPRESSIONS[currentIdx].kaomoji;
+      updateButtons();
+    }
+  }
+}
+
+// ═══════════════ 按钮 ═══════════════
+function updateButtons() {
+  document.querySelectorAll('.btn:not(.auto-btn)').forEach((b, i) => {
+    b.classList.toggle('active', i === currentIdx);
+  });
+}
+
+function buildButtons() {
+  const row = document.getElementById('btnRow');
+  EXPRESSIONS.forEach((e, i) => {
+    const btn = document.createElement('span');
+    btn.className = 'btn';
+    btn.textContent = (i + 1) + '.' + e.name;
+    btn.addEventListener('click', () => switchTo(i));
+    row.appendChild(btn);
+  });
+
+  const autoBtn = document.createElement('span');
+  autoBtn.className = 'btn auto-btn';
+  autoBtn.textContent = '⏯ 自动';
+  autoBtn.id = 'autoBtn';
+  autoBtn.addEventListener('click', toggleAuto);
+  row.appendChild(autoBtn);
+}
+
+function switchTo(idx) {
+  setTarget(idx);
+}
+
+function toggleAuto() {
+  autoCycle = !autoCycle;
+  const btn = document.getElementById('autoBtn');
+  if (autoCycle) {
+    btn.classList.add('on');
+    btn.textContent = '⏸ 停止';
+    autoTimer = setInterval(() => {
+      const next = (currentIdx + 1) % EXPRESSIONS.length;
+      switchTo(next);
+    }, AUTO_INTERVAL);
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = '⏯ 自动';
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+}
+
+// ═══════════════ 键盘 ═══════════════
+document.addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '8') {
+    const idx = parseInt(e.key) - 1;
+    if (autoCycle) toggleAuto();
+    switchTo(idx);
+  } else if (e.key === 'ArrowRight') {
+    if (autoCycle) toggleAuto();
+    switchTo((currentIdx + 1) % EXPRESSIONS.length);
+  } else if (e.key === 'ArrowLeft') {
+    if (autoCycle) toggleAuto();
+    switchTo((currentIdx - 1 + EXPRESSIONS.length) % EXPRESSIONS.length);
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    toggleAuto();
+  }
+});
+
+// ═══════════════ 启动 ═══════════════
+buildButtons();
+updateButtons();
+document.getElementById('kaomoji').textContent = EXPRESSIONS[0].kaomoji;
+
+function loop(ts) {
+  render(ts);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>

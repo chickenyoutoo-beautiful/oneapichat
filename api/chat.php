@@ -98,6 +98,13 @@ if (!is_dir($configDir)) @mkdir($configDir, 0755, true);
 
 // ★ 用户配置持久化（独立处理）
 $action = isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : '');
+
+$publicActions = ['login', 'register', 'send_reg_code', 'verify', 'cross_domain_token'];
+if (!$userId && !in_array($action, $publicActions)) {
+    http_response_code(401);
+    echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
+    exit;
+}
 if ($action === 'save_config' && $userId && $method === 'POST') {
     $input = file_get_contents('php://input');
     $configFile = $configDir . 'config_' . $namespace . '.json';

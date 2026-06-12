@@ -1974,9 +1974,9 @@ window._checkTaskCompletion = function(taskId) {
     var agentNames = Object.keys(task.agents);
     if (agentNames.length === 0) { console.log('[Task] ' + taskId + ' 无子代理,跳过'); return; }
     
-    // 检查是否所有子代理都完成了（completed/failed）
+    // 检查是否所有子代理都完成了（completed/failed/error，running/idle不算）
     var allDone = agentNames.every(function(name) {
-        return task.agents[name].status === 'completed' || task.agents[name].status === 'failed' || task.agents[name].status === 'idle' || task.agents[name].status === 'error';
+        return task.agents[name].status === 'completed' || task.agents[name].status === 'failed' || task.agents[name].status === 'error';
     });
     
     console.log('[Task] ' + taskId + ' allDone=' + allDone + ' agents=' + JSON.stringify(agentNames.map(function(n){return n+':'+task.agents[n].status})));
@@ -2092,7 +2092,7 @@ window.triggerAgentAutoReplyForSubAgent = function(agentName) {
             var _t = window._tasks[_tId];
             if (_t && _t.agents && _t.agents[agentName] && !_t.mainResponded) {
                 // 状态可能还是 running，手动标记为 completed
-                if (_t.agents[agentName].status === 'running' || _t.agents[agentName].status === 'idle') {
+                if (_t.agents[agentName].status === 'running') {
                     _t.agents[agentName].status = 'completed';
                 }
                 var stored = (window._pendingSubAgentResultsData || {})[agentName];

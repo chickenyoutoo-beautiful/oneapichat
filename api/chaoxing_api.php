@@ -187,7 +187,7 @@ switch ($action) {
                 echo json_encode(['error' => '获取课程列表失败', 'detail' => $exit_code == 0 ? '无JSON输出' : '退出码='.$exit_code]);
                 exit;
             }
-            file_put_contents($cache_file, $json);
+            if (strpos($json, '"courses"') !== false) file_put_contents($cache_file, $json);
         }
         // 从 DB 合并课程状态（通过 Python 查询，避免 PHP SQLite3 扩展依赖）
         $data = json_decode($json, true);
@@ -725,7 +725,9 @@ switch ($action) {
         $ini = preg_replace('/^password\s*=\s*.*/m', 'password = ' . $pass, $ini);
         file_put_contents($config_path, $ini);
 
-        // 清理缓存
+        $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));
+if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无法连接超星服务器，请检查网络或稍后重试']); exit; }
+// 清理缓存
         $cache_file = userCoursesCachePath($userId);
         @unlink($cache_file);
 

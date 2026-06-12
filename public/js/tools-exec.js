@@ -470,6 +470,14 @@
                             } else {
                                 toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' };
                             }
+                        } else if (planAction === 'running') {
+                            if (window._agentPlan && window._agentPlan.tasks) {
+                                var _firstPending = null;
+                                window._agentPlan.tasks.forEach(function(t) { if (!_firstPending && t.status === 'pending') _firstPending = t; });
+                                if (_firstPending) { _firstPending.status = 'running'; window._agentPlan.currentTaskId = _firstPending.id; window.updatePlanTaskStatus(_firstPending.id, 'running'); toolResult = { result: '✅ 自动开始任务 \"' + _firstPending.id + '\": ' + _firstPending.title + '。提示: plan_update action 只支持 create/update/complete，\"running\" 是 status 参数的值。' }; }
+                                else { toolResult = { error: '没有待执行(pending)的任务。可用 plan_update(action=\"update\", task_id=\"X\", status=\"running\") 指定具体任务。' }; }
+                            } else { toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' }; }
+
                         } else if (planAction === 'complete') {
                             if (window._agentPlan) {
                                 window._agentPlan.status = 'completed';

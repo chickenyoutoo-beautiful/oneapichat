@@ -7,8 +7,8 @@ setCorsHeaders();
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 // ── 引擎请求辅助 (替代 @file_get_contents 抑制) ──
-function _engine_get(string $path, string $fallback = '{}'): string {
-    $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]);
+function _engine_get(string $path, string $fallback = '{}', $customCtx = null): string {
+    if ($customCtx) { $resp = file_get_contents($path, false, $customCtx); } else { $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]); $resp = file_get_contents($path, false, $ctx); }
     $resp = file_get_contents($path, false, $ctx);
     return ($resp !== false) ? $resp : $fallback;
 }

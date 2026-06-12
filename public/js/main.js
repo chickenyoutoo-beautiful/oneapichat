@@ -2239,6 +2239,17 @@ window.useAlternativeVisionModel = function() {
                                     chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
                                 }
                             }
+                            // ★ 追加可折叠工具调用详情卡片
+                            if (typeof appendToolCallMessage === 'function') {
+                                var _cardDur = Date.now() - (_toolStartTime || Date.now());
+                                var _cardArgs = {};
+                                try { _cardArgs = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
+                                var _cardResult = toolResult.error || toolResult.result || '(empty)';
+                                var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs, _cardResult, _cardDur, chatId, toolResult._execDetails || null);
+                                if (_cardRow) {
+                                    chats[chatId].messages.push({ role: 'tool_card', content: _cardResult, _tcName: tc.function.name, _tcArgs: _cardArgs, _tcDur: _cardDur, _tcExecDetails: toolResult._execDetails || null, _tcId: tc.id || '', _toolCard: true, time: Date.now() });
+                                }
+                            }
                         }
                     }
                 }
@@ -2334,7 +2345,10 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg._chainContents.push(pendingMsg.content || '');
                     pendingMsg.content = '';
                     pendingMsg.reasoning = '';
-                    // ★ 清除旧 tool_calls — 新轮次不应继承上一轮的 tool_calls
+                    // ★ 清除旧 tool_calls — 先保存到 _chainCompletedToolCalls 供 buildApiMessages 配对
+                    if (pendingMsg.tool_calls) {
+                        pendingMsg._chainCompletedToolCalls = pendingMsg.tool_calls;
+                    }
                     delete pendingMsg.tool_calls;
                     pendingMsg._chainSegment = (pendingMsg._chainSegment || 0) + 1;
                     try { localStorage.removeItem('_savedPartial'); } catch(e) {}

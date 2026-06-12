@@ -548,6 +548,7 @@ function renderChatHistory() {
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
     // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
+    if (_chatIds.length === 0 && chats['_agent_main']) { _chatIds = ['_agent_main']; }
     if (_chatIds.length === 0 && _uid) {
         var _cached = localStorage.getItem('chats');
         if (_cached) {
