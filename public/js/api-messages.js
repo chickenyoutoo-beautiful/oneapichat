@@ -436,6 +436,22 @@ function buildApiMessages(chatId) {
         console.log('[buildApiMessages] 双向配对清理: ' + _removedTcCount + ' 个孤 tool_call + ' + _removedToolMsgCount + ' 个孤 tool 消息(仅本轮过滤,未删源)');
     }
 
+    // ★ 去重 tool_call_id: 删除旧轮次的重复 tool 结果(DeepSeek 拒绝 duplicate tool_call_id)
+    var _seenTcIds = {};
+    var _dupRemoved = 0;
+    for (var _dfi = apiMessagesUnfiltered.length - 1; _dfi >= 0; _dfi--) {
+        var _dm = apiMessagesUnfiltered[_dfi];
+        if (_dm.role === 'tool' && _dm.tool_call_id) {
+            if (_seenTcIds[_dm.tool_call_id]) {
+                apiMessagesUnfiltered.splice(_dfi, 1);
+                _dupRemoved++;
+            } else {
+                _seenTcIds[_dm.tool_call_id] = true;
+            }
+        }
+    }
+    if (_dupRemoved > 0) console.log('[buildApiMessages] 去重 ' + _dupRemoved + ' 条重复 tool_call_id');
+
     // ★ 清理空 tool_calls:[] — 部分 API (DeepSeek) 拒绝 empty array
     for (var _efi = 0; _efi < apiMessagesUnfiltered.length; _efi++) {
         var _em = apiMessagesUnfiltered[_efi];
