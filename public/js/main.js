@@ -1700,6 +1700,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
                         usage = _rsResult.usage;
                         toolCalls = _rsResult.toolCalls || [];
+                        // ★ RS路径: 必须同步到 pendingMsg，否则 buildApiMessages 会孤立所有tool结果→AI看不到→死循环
+                        pendingMsg.tool_calls = toolCalls;
                         if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
                         // ★ 图像模型: 进度条清除
                         try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
