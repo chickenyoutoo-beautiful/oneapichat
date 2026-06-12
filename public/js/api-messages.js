@@ -394,7 +394,7 @@ function buildApiMessages(chatId) {
                     _validCalls.push(_tmsg2.tool_calls[_tci]);
                 } else {
                     _removedTcCount++;
-                    console.warn('[buildApiMessages] 移除孤立 tool_call:', _tcId, _tmsg2.tool_calls[_tci].function?.name);
+                    console.log('[buildApiMessages] 过滤孤立 tool_call:', _tcId, _tmsg2.tool_calls[_tci].function?.name);
                 }
             }
             if (_validCalls.length > 0) {
@@ -424,7 +424,7 @@ function buildApiMessages(chatId) {
                 if (!_matched) {
                     _tmsg3._removeOrphan = true;
                     _removedToolMsgCount++;
-                    console.warn('[buildApiMessages] 移除孤立 tool 消息(无对应 tool_calls):', _tmsg3.tool_call_id);
+                    console.log('[buildApiMessages] 过滤孤立 tool 消息(无对应 tool_calls):', _tmsg3.tool_call_id);
                 }
             }
         }
