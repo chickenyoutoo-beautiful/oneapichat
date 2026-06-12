@@ -99,23 +99,12 @@ if (!is_dir($configDir)) @mkdir($configDir, 0755, true);
 // ★ 用户配置持久化（独立处理）
 $action = isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : '');
 
-<<<<<<< Updated upstream
 $publicActions = ['login', 'register', 'send_reg_code', 'verify', 'cross_domain_token'];
 if (!$userId && !in_array($action, $publicActions)) {
-=======
-// ★ 强制认证: 除 auth 相关操作外，所有 action 都需要登录
-$publicActions = ['login', 'register', 'send_reg_code', 'verify', 'cross_domain_token'];
-$isAuthAction = in_array($action, $publicActions);
-if (!$userId && !$isAuthAction) {
->>>>>>> Stashed changes
     http_response_code(401);
     echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
 }
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
 if ($action === 'save_config' && $userId && $method === 'POST') {
     $input = file_get_contents('php://input');
     $configFile = $configDir . 'config_' . $namespace . '.json';

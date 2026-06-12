@@ -373,11 +373,6 @@ function buildApiMessages(chatId) {
             }
         }
     }
-<<<<<<< Updated upstream
-    // ★ 额外: 扫描源消息中的 _chainCompletedToolCalls
-=======
-    // ★ 额外: 扫描源消息中的 _chainCompletedToolCalls (可能不在 apiMessagesUnfiltered 中)
->>>>>>> Stashed changes
     for (var _si = 0; _si < msgs.length; _si++) {
         var _sm = msgs[_si];
         if (_sm._chainCompletedToolCalls && _sm._chainCompletedToolCalls.length > 0) {
@@ -434,12 +429,6 @@ function buildApiMessages(chatId) {
             }
         }
     }
-<<<<<<< Updated upstream
-    // ★ 仅从本轮API消息中过滤孤tool消息，不再从源数组永久删除（永久删除导致AI失忆→重复调用→死循环）
-=======
-    // ★ 第四遍标记孤tool消息后: 仅从本次API消息中过滤，不再从源数组永久删除
-    // 永久删除会导致AI在下一轮"忘记"工具调用结果→重复调用→死循环
->>>>>>> Stashed changes
     if (_removedToolMsgCount > 0) {
         apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
     }

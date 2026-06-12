@@ -350,9 +350,7 @@
                      else if (func.name === 'server_exec') {
                         // ★ 参数别名容错: AI可能用不同参数名
                         if (!args.cmd && args.command) args.cmd = args.command;
-                        if (!args.cmd && args.command) args.cmd = args.command;
                         if (!args.cmd && args.query) args.cmd = args.query;
-                        if (!args.cmd && args.code) args.cmd = args.code;
                         if (!args.cmd && args.code) args.cmd = args.code;
                         if (!args.cmd) { toolResult = { error: '缺少 cmd 参数。格式: server_exec(cmd="shell命令")' }; }
                         else if (isHighRiskTool(func.name) && isApprovalMode()) {
@@ -363,9 +361,7 @@
                      else if (func.name === 'server_python') {
                         // ★ 参数别名容错: AI可能用不同参数名
                         if (!args.script && args.code) args.script = args.code;
-                        if (!args.script && args.code) args.script = args.code;
                         if (!args.script && args.query) args.script = args.query;
-                        if (!args.script && args.cmd) args.script = args.cmd;
                         if (!args.script && args.cmd) args.script = args.cmd;
                         if (!args.script) { toolResult = { error: '缺少 script 参数。格式: server_python(script="python代码")' }; }
                         else if (isHighRiskTool(func.name) && isApprovalMode()) {
@@ -573,15 +569,6 @@
                                 toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' };
                             }
                         } else if (planAction === 'running') {
-<<<<<<< Updated upstream
-                            if (window._agentPlan && window._agentPlan.tasks) {
-                                var _firstPending = null;
-                                window._agentPlan.tasks.forEach(function(t) { if (!_firstPending && t.status === 'pending') _firstPending = t; });
-                                if (_firstPending) { _firstPending.status = 'running'; window._agentPlan.currentTaskId = _firstPending.id; window.updatePlanTaskStatus(_firstPending.id, 'running'); toolResult = { result: '✅ 自动开始任务 \"' + _firstPending.id + '\": ' + _firstPending.title + '。提示: plan_update action 只支持 create/update/complete，\"running\" 是 status 参数的值。' }; }
-                                else { toolResult = { error: '没有待执行(pending)的任务。可用 plan_update(action=\"update\", task_id=\"X\", status=\"running\") 指定具体任务。' }; }
-                            } else { toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' }; }
-
-=======
                             // ★ action="running" 是常见误用，自动转换为 update + 自动选择第一个 pending 任务
                             if (window._agentPlan && window._agentPlan.tasks) {
                                 var _firstPending = null;
@@ -599,14 +586,6 @@
                             } else {
                                 toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。\n提示: "running" 是任务状态(status字段)，不是 action 字段。action 只支持: create, update, complete。' };
                             }
->>>>>>> Stashed changes
-                        } else if (planAction === 'running') {
-                            if (window._agentPlan && window._agentPlan.tasks) {
-                                var _firstPending = null;
-                                window._agentPlan.tasks.forEach(function(t) { if (!_firstPending && t.status === 'pending') _firstPending = t; });
-                                if (_firstPending) { _firstPending.status = 'running'; window._agentPlan.currentTaskId = _firstPending.id; window.updatePlanTaskStatus(_firstPending.id, 'running'); toolResult = { result: '✅ 自动开始任务 "' + _firstPending.id + '": ' + _firstPending.title + '。提示: action 只支持 create/update/complete，"running" 是 status 参数的值。' }; }
-                                else { toolResult = { error: '没有待执行(pending)的任务。' }; }
-                            } else { toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' }; }
                         } else if (planAction === 'complete') {
                             if (window._agentPlan) {
                                 window._agentPlan.status = 'completed';

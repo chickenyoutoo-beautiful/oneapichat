@@ -2287,21 +2287,12 @@ window.useAlternativeVisionModel = function() {
                                     chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
                                 }
                             }
-<<<<<<< Updated upstream
-                            // ★ 追加可折叠工具调用详情卡片
-=======
                             // ★ 追加可折叠工具调用详情卡片（必须在 for 循环内, currentBubble 块内）
->>>>>>> Stashed changes
                             if (typeof appendToolCallMessage === 'function') {
                                 var _cardDur = Date.now() - (_toolStartTime || Date.now());
                                 var _cardArgs = {};
                                 try { _cardArgs = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
                                 var _cardResult = toolResult.error || toolResult.result || '(empty)';
-<<<<<<< Updated upstream
-                                var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs, _cardResult, _cardDur, chatId, toolResult._execDetails || null);
-                                if (_cardRow) {
-                                    chats[chatId].messages.push({ role: 'tool_card', content: _cardResult, _tcName: tc.function.name, _tcArgs: _cardArgs, _tcDur: _cardDur, _tcExecDetails: toolResult._execDetails || null, _tcId: tc.id || '', _toolCard: true, time: Date.now() });
-=======
                                 var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs,
                                     _cardResult, _cardDur, chatId, toolResult._execDetails || null);
                                 // ★ 持久化卡片到数据模型，避免重渲染后消失
@@ -2317,7 +2308,6 @@ window.useAlternativeVisionModel = function() {
                                         _toolCard: true,
                                         time: Date.now()
                                     });
->>>>>>> Stashed changes
                                 }
                             }
                         }
@@ -2413,12 +2403,8 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg._chainContents.push(pendingMsg.content || '');
                     pendingMsg.content = '';
                     pendingMsg.reasoning = '';
-<<<<<<< Updated upstream
-                    // ★ 清除旧 tool_calls — 先保存到 _chainCompletedToolCalls 供 buildApiMessages 配对
-=======
                     // ★ 清除旧 tool_calls — 新轮次不应继承上一轮的 tool_calls
                     // 但保留 _savedToolCalls 在对象上供 buildApiMessages 配对，仅标记为已处理
->>>>>>> Stashed changes
                     if (pendingMsg.tool_calls) {
                         pendingMsg._chainCompletedToolCalls = pendingMsg.tool_calls;
                     }
