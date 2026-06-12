@@ -121,6 +121,24 @@ body {
 .markdown-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; cursor: pointer; }
 .markdown-body img:hover { opacity: 0.9; }
 .mermaid svg { max-width: 100%; height: auto; display: block; }
+/* Mermaid 渲染中：预留高度 + 脉冲动画防抖动 */
+.mermaid.mermaid-rendering {
+    background: linear-gradient(135deg, rgba(59,130,246,0.03) 0%, rgba(139,92,246,0.03) 100%);
+    border: 1px dashed rgba(59,130,246,0.15);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+}
+.mermaid.mermaid-rendering::after {
+    content: '图表渲染中...';
+    font-size: 0.8rem;
+    color: var(--text-secondary, #9ca3af);
+    animation: mermaid-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mermaid-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+}
 
 /* KaTeX 稳定性:防止数学公式渲染时抖动 */
 .katex { line-height: 1.4; }
@@ -423,6 +441,10 @@ details.reasoning-details[open] summary::before { content: "▸"; transform: rot
     padding: 0 1rem;
     width: 100%;
     position: relative;
+    background-color: inherit;  /* ★ 继承父级实色作为涂料屏障 */
+}
+.input-clip {
+    overflow: hidden;  /* ★ 裁剪子元素毛玻璃/白色背景不溢出至两侧遮挡气泡，同时不影响queue-bar绝对定位 */
 }
 
 /* 确保主区域不透明 — 与 body 背景一致 */
@@ -668,8 +690,11 @@ header, #chatBox {
     max-width: 720px;
     margin: 10px auto 12px;
     border-radius: 16px;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
+    /* ★ 半透明毛玻璃 — 不遮挡后方消息 */
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0,0,0,0.06);
     box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 20px rgba(0,0,0,0.06);
     overflow: hidden;
     transition: opacity 0.25s cubic-bezier(0.16,1,0.3,1),
@@ -687,8 +712,10 @@ header, #chatBox {
 }
 .flow-panel.hidden { display: none !important; }
 .dark .flow-panel {
-    background: #1e293b;
-    border-color: #334155;
+    background: rgba(30, 41, 59, 0.78);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-color: rgba(255,255,255,0.06);
     box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 20px rgba(0,0,0,0.25);
 }
 
@@ -1388,25 +1415,24 @@ select option { background: white; color: #1f2937; }
 
 /* ===== 输入框包装与拖拽层 ===== */
 .input-area {
-    background: transparent !important;
-    z-index: 10;
+    z-index: 1;
 }
 .input-wrapper {
     position: relative;
     background: transparent;
     border-radius: 9999px;
-    overflow: hidden;  /* ★ 裁剪drop overlay使其不超出药丸区域 */
+    overflow: hidden;
 }
 /* 输入框药丸外观 */
 .input-wrapper > div:first-child {
-    background: #ffffff !important;
-    border-color: #d1d5db !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+    background: rgba(255, 255, 255, 0.72) !important;
+    border-color: rgba(0,0,0,0.06) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
 }
 .dark .input-wrapper > div:first-child {
-    background: #1e293b !important;
-    border-color: #334155 !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    background: rgba(30, 41, 59, 0.72) !important;
+    border-color: rgba(255,255,255,0.06) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
 }
 .drop-overlay-input {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -2041,7 +2067,7 @@ html:not(.dark) select,
 html:not(.dark) input,
 html:not(.dark) textarea {
     background-color: white !important;
-    border-color: #d1d5db !important;
+    border-color: rgba(0,0,0,0.06) !important;
 }
 html:not(.dark) .sidebar input[type="checkbox"] { accent-color: #2563eb !important; }
 /* 确保主题图标正确 */
@@ -2422,7 +2448,7 @@ html.dark #sunPath { display: block !important; }
     html:not(.dark) input,
     html:not(.dark) textarea {
         background-color: white !important;
-        border-color: #d1d5db !important;
+        border-color: rgba(0,0,0,0.06) !important;
     }
     html:not(.dark) .sidebar input[type="checkbox"] {
         accent-color: #2563eb !important;
@@ -2736,11 +2762,13 @@ html.dark #sunPath { display: block !important; }
     color: #f3f4f6 !important;
 }
 
-/* ===== 强制亮色模式下输入框背景为纯白（覆盖之前的浅灰） ===== */
+/* ===== 输入框背景（亮色模式） ===== */
 html:not(.dark) .input-wrapper,
 html:not(.dark) .input-wrapper .flex,
 html:not(.dark) #userInput {
     background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+    color: #1f2937 !important;
 }
 
 /* 让 markdown-body 中的链接更明显 */

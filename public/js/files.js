@@ -26,11 +26,70 @@ async function extractFileContent(file) {
                 console.warn('[docx] mammoth 解析失败，降级为原始提取:', e.message);
             }
         }
-        // ★ 2) mammoth 失败 → 原始 XML 文本提取
+        // ★ 2) mammoth 失败 → 用 JSZip 解压后提取 XML 文本（DOCX 本质是 ZIP）
+        if (!_docText && window.JSZip) {
+            try {
+                var _docZip = await JSZip.loadAsync(_ab);
+                var _docXmlFile = _docZip.files['word/document.xml'];
+                if (_docXmlFile) {
+                    var _docXml = await _docXmlFile.async('text');
+                    var _wTexts = [];
+                    var _wRe = /<w:t[^>]*>([^<]*)<\/w:t>/g; var _wM;
+                    while ((_wM = _wRe.exec(_docXml)) !== null) {
+                        if (_wM[1]) _wTexts.push(_wM[1]);
+                    }
+                    // ★ 段落之间用换行分隔，提升可读性
+                    var _wParas = [];
+                    var _pRe = /<w:p[ >]/g; var _wP;
+                    var _lastPIdx = 0;
+                    while ((_wP = _pRe.exec(_docXml)) !== null) {
+                        if (_wP.index > _lastPIdx) {
+                            var _seg = _docXml.substring(_lastPIdx, _wP.index);
+                            var _segTexts = [];
+                            var _sRe = /<w:t[^>]*>([^<]*)<\/w:t>/g; var _sM;
+                            while ((_sM = _sRe.exec(_seg)) !== null) {
+                                if (_sM[1]) _segTexts.push(_sM[1]);
+                            }
+                            if (_segTexts.length > 0) _wParas.push(_segTexts.join(''));
+                        }
+                        _lastPIdx = _wP.index;
+                    }
+                    if (_wTexts.length > 0) {
+                        _docText = _wParas.length > 1 ? _wParas.join('\n') : _wTexts.join('');
+                    }
+                }
+                if (!_docText || _docText.trim().length < 5) {
+                    // ★ 检查 header/footer/footnotes/endnotes
+                    var _extraParts = ['word/header1.xml','word/footer1.xml','word/footnotes.xml','word/endnotes.xml'];
+                    var _extraTexts = [];
+                    for (var _epi = 0; _epi < _extraParts.length; _epi++) {
+                        var _epFile = _docZip.files[_extraParts[_epi]];
+                        if (_epFile) {
+                            try {
+                                var _epXml = await _epFile.async('text');
+                                var _epMatches = _epXml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
+                                if (_epMatches) {
+                                    for (var _epj = 0; _epj < _epMatches.length; _epj++) {
+                                        var _epT = _epMatches[_epj].replace(/<\/?w:t[^>]*>/g, '');
+                                        if (_epT.trim()) _extraTexts.push(_epT.trim());
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                    if (_extraTexts.length > 0) {
+                        _docText = (_docText || '') + '\n[页眉页脚/脚注]\n' + _extraTexts.join(' ');
+                    }
+                }
+            } catch(_jsZipErr) {
+                console.warn('[docx] JSZip 解压失败，降级为原始提取:', _jsZipErr.message);
+            }
+        }
+        // ★ 2b) JSZip 也失败/不可用 → 原始二进制中尽力提取（最后手段）
         if (!_docText) {
             var _raw = new TextDecoder('utf-8', {fatal: false}).decode(_ab);
             var _texts = [];
-            var _re = /<w:t[^>]*>([^<]*)<\/w:t>/g; let _m;
+            var _re = /<w:t[^>]*>([^<]*)<\/w:t>/g; var _m;
             while ((_m = _re.exec(_raw)) !== null) {
                 if (_m[1]) _texts.push(_m[1]);
             }
@@ -38,12 +97,12 @@ async function extractFileContent(file) {
                 _docText = _texts.join('');
             } else {
                 var _plain = [];
-                var _re2 = />([^<]{2,})</g; let _m2;
+                var _re2 = />([^<]{2,})</g; var _m2;
                 while ((_m2 = _re2.exec(_raw)) !== null) {
                     var _t = _m2[1].replace(/&[a-z]+;/g, ' ').trim();
                     if (_t.length > 1) _plain.push(_t);
                 }
-                _docText = _plain.length > 0 ? '[DOCX] （文件已损坏，尽力提取碎片文本）\n\n' + _plain.slice(0, 200).join(' ') : '';
+                _docText = _plain.length > 0 ? '[DOCX] （无法完整解析，尽力提取碎片文本）\n\n' + _plain.slice(0, 200).join(' ') : '';
             }
         }
 
@@ -89,10 +148,94 @@ async function extractFileContent(file) {
         }
         return _docText || '[DOCX] 无法提取文本。文件可能已损坏，请尝试用 Word 重新保存后再上传。';
     }
+    if (ext === 'pdf' || file.type === 'application/pdf') {
+        // ★ PDF: 通过 parse.php 后端提取（使用 pdftotext）
+        try {
+            var _token = localStorage.getItem('authToken') || '';
+            var _formData = new FormData();
+            _formData.append('file', file);
+            var _resp = await fetch('/oneapichat/api/parse.php?auth_token=' + encodeURIComponent(_token), {
+                method: 'POST',
+                body: _formData
+            });
+            if (_resp.ok) {
+                var _data = await _resp.json();
+                if (_data.success && _data.content && _data.content.trim()) {
+                    return _data.content;
+                }
+                console.warn('[PDF] parse.php 返回失败:', _data.error || 'empty content');
+                throw new Error(_data.error || 'PDF text extraction failed');
+            }
+            throw new Error('parse.php HTTP ' + _resp.status);
+        } catch(_pdfErr) {
+            console.warn('[PDF] 解析失败:', _pdfErr.message);
+            // ★ 降级: 检测是否有效PDF,给出有意义提示
+            var _pdfAb = await file.arrayBuffer();
+            var _pdfHeader = new TextDecoder('utf-8', {fatal: false}).decode(_pdfAb.slice(0, 5));
+            if (_pdfHeader.startsWith('%PDF')) {
+                return '[PDF] 无法提取文字。此PDF可能是扫描图片或图片型PDF（无文字层），建议用OCR工具转换后再上传。';
+            }
+            return '[PDF] 文件解析失败: ' + _pdfErr.message + '。请尝试另存为新PDF后重新上传。';
+        }
+    }
     if (['xlsx', 'xls', 'xlsm'].includes(ext) || file.type.includes('spreadsheet')) {
-        if (!window.XLSX) throw new Error('SheetJS 未加载');
-        var wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-        return wb.SheetNames.map((name, i) => `【工作表 ${i + 1}: ${name}】\n` + XLSX.utils.sheet_to_csv(wb.Sheets[name], { FS: '\t', RS: '\n' })).join('\n\n');
+        var _xlsxAb = await file.arrayBuffer();
+        // ★ 1) 优先用 SheetJS
+        if (window.XLSX) {
+            try {
+                var wb = XLSX.read(_xlsxAb, { type: 'array' });
+                return wb.SheetNames.map((name, i) => '【工作表 ' + (i + 1) + ': ' + name + '】\n' + XLSX.utils.sheet_to_csv(wb.Sheets[name], { FS: '\t', RS: '\n' })).join('\n\n');
+            } catch(_xlsxErr) {
+                console.warn('[xlsx] SheetJS 解析失败，降级为 JSZip:', _xlsxErr.message);
+            }
+        }
+        // ★ 2) SheetJS 不可用/失败 → JSZip 直接解析 XML
+        if (window.JSZip) {
+            try {
+                var _xlsxZip = await JSZip.loadAsync(_xlsxAb);
+                var _sharedStrings = [];
+                if (_xlsxZip.files['xl/sharedStrings.xml']) {
+                    var _ssXml = await _xlsxZip.files['xl/sharedStrings.xml'].async('text');
+                    var _ssRe = /<si>[\s\S]*?<t[^>]*>([^<]*)<\/t>[\s\S]*?<\/si>/g; var _ssM;
+                    while ((_ssM = _ssRe.exec(_ssXml)) !== null) {
+                        _sharedStrings.push(_ssM[1] || '');
+                    }
+                }
+                var _sheetFiles = Object.keys(_xlsxZip.files).filter(function(f) {
+                    return /^xl\/worksheets\/sheet\d+\.xml$/i.test(f);
+                }).sort();
+                var _xlsxSheets = [];
+                for (var _xsi = 0; _xsi < _sheetFiles.length; _xsi++) {
+                    var _sXml = await _xlsxZip.files[_sheetFiles[_xsi]].async('text');
+                    var _rows = [];
+                    var _rowRe = /<row[ >][\s\S]*?<\/row>/g; var _rowM;
+                    while ((_rowM = _rowRe.exec(_sXml)) !== null) {
+                        var _cells = [];
+                        var _cellRe = /<c[ >][\s\S]*?<\/c>/g; var _cellM;
+                        while ((_cellM = _cellRe.exec(_rowM[0])) !== null) {
+                            var _tMatch = _cellM[0].match(/t="([^"]*)"/);
+                            var _vMatch = _cellM[0].match(/<v[^>]*>([^<]*)<\/v>/);
+                            var _val = _vMatch ? _vMatch[1] : '';
+                            if (_tMatch && _tMatch[1] === 's' && _sharedStrings.length > 0) {
+                                var _ssIdx = parseInt(_val) || 0;
+                                _val = _ssIdx < _sharedStrings.length ? _sharedStrings[_ssIdx] : _val;
+                            }
+                            _cells.push(_val);
+                        }
+                        if (_cells.some(function(c) { return c.trim(); })) {
+                            _rows.push(_cells.join('\t'));
+                        }
+                    }
+                    if (_rows.length > 0) {
+                        _xlsxSheets.push('【工作表 ' + (_xsi + 1) + '】\n' + _rows.join('\n'));
+                    }
+                }
+                if (_xlsxSheets.length > 0) return _xlsxSheets.join('\n\n');
+            } catch(_jsZipXlsxErr) {
+                console.warn('[xlsx] JSZip 解析失败:', _jsZipXlsxErr.message);
+            }
+        }
+        throw new Error('无法解析 xlsx 文件，请刷新页面后重试');
     }
     if (ext === 'pptx' || ext === 'ppt') {
         if (!window.JSZip) throw new Error('JSZip 未加载，请刷新页面后重试');

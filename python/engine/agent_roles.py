@@ -10,7 +10,7 @@ AGENT_ROLES = {
     "explorer": {
         "label": "🔍 搜索专员",
         "desc": "只读搜索,适合查资料、抓网页。不可修改文件或执行命令",
-        "tools": ["web_search", "web_fetch", "engine_push", "browser_get_content", "browser_get_snapshot"],
+        "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "browser_get_content", "browser_get_snapshot"],
         "model_tier": "cheap",
         "max_rounds": 10
     },
@@ -24,7 +24,7 @@ AGENT_ROLES = {
     "developer": {
         "label": "⚡ 开发者",
         "desc": "读写文件、执行命令、搜索、浏览器操控。全能执行角色",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python",
+        "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "server_exec", "server_python",
                    "server_file_read", "server_file_write", "server_file_append", "video_edit",
                    "browser_navigate", "browser_screenshot", "browser_click", "browser_type",
                    "browser_get_content", "browser_get_snapshot"],
@@ -34,7 +34,7 @@ AGENT_ROLES = {
     "verifier": {
         "label": "✅ 验证者",
         "desc": "检查结果、找问题。只读,不可修改",
-        "tools": ["web_search", "web_fetch", "server_file_read", "engine_push",
+        "tools": ["web_search", "web_fetch", "platform_extract", "server_file_read", "engine_push",
                    "browser_get_content", "browser_get_snapshot"],
         "model_tier": "smart",
         "max_rounds": 15
@@ -42,7 +42,7 @@ AGENT_ROLES = {
     "general": {
         "label": "🌐 全能代理",
         "desc": "所有工具可用(默认角色)",
-        "tools": ["web_search", "web_fetch", "engine_push", "server_exec", "server_python",
+        "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "server_exec", "server_python",
                    "server_file_read", "server_file_write", "server_file_append", "server_sys_info",
                    "video_edit", "browser_navigate", "browser_screenshot", "browser_click",
                    "browser_type", "browser_get_content", "browser_get_snapshot"],
@@ -56,6 +56,21 @@ ALL_TOOLS_DEF = [
     {
         "type": "function",
         "function": {
+            "name": "run_skill",
+            "description": "运行一个已保存的可复用技能。技能是预设的提示词模板+工具集。当用户任务与已保存技能匹配时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "要运行的技能名称"},
+                    "params": {"type": "object", "description": "技能参数, 用于填充提示词模板的 {param} 占位符"}
+                },
+                "required": ["skill_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_fetch",
             "description": "抓取一个网页URL的内容,返回提取后的文本。支持批量抓取(最多3个URL同时)。",
             "parameters": {
@@ -65,6 +80,20 @@ ALL_TOOLS_DEF = [
                     "urls": {"type": "array", "items": {"type": "string"}, "description": "批量抓取多个URL(最多3个)"}
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "platform_extract",
+            "description": "从特定平台提取结构化内容。支持 Bilibili 视频/专栏信息(标题、UP主、播放量等)。当用户分享B站等平台链接并想了解内容时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要提取的平台URL(如B站视频链接)"}
+                },
+                "required": ["url"]
             }
         }
     },

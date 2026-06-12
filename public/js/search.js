@@ -125,10 +125,33 @@ async function performWebSearch(query, signal, type = 'web') {
         var res = await fetchWithRetry(url, { method: 'GET', headers, signal: combinedSignal });
         clearTimeout(timeoutId);
         if (!res.ok) throw new Error(`搜索失败: ${res.status}`);
-        var data = await res.json();
+        var rawText = await res.text();
+        // DuckDuckGo 直接API 可能返回HTML而非JSON(限流/反爬)
+        if (rawText.trim().startsWith('<')) {
+            throw new Error('搜索API返回HTML(可能被限流), 尝试回退...');
+        }
+        var data = JSON.parse(rawText);
         return parseSearchResults(data, provider, type);
     } catch (e) {
         clearTimeout(timeoutId);
+        // 回退: 通过服务器端引擎搜索
+        if (provider === 'duckduckgo' || provider === 'brave' || e.message.includes('HTML')) {
+            try {
+                console.warn('[Search] 直接API失败(' + e.message + '), 回退到服务端搜索...');
+                var fbRes = await fetchWithRetry(
+                    SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max,
+                    { method: 'GET', signal: combinedSignal }
+                );
+                if (fbRes.ok) {
+                    var fbData = await fbRes.json();
+                    if (fbData.results) {
+                        return fbData.results.map(function(r) { return { title: r.title || '', url: r.url || '', snippet: r.snippet || r.body || '' }; });
+                    }
+                }
+            } catch (fbErr) {
+                console.warn('[Search] 服务端回退也失败:', fbErr.message);
+            }
+        }
         throw e;
     }
 }

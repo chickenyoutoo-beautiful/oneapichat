@@ -114,9 +114,17 @@ window.showToolStatus = function(toolName, argPreview, status, chatId) {
         else bubble.appendChild(tcContainer);
     }
 
-    if (status === null) return;
+    if (status === null) {
+        // ★ 清除所有工具状态: 延迟移除容器, 动画收尾
+        if (tcContainer) {
+            tcContainer.style.transition = 'opacity 0.2s ease';
+            tcContainer.style.opacity = '0';
+            setTimeout(function() { if (tcContainer.parentNode) tcContainer.remove(); }, 250);
+        }
+        return;
+    }
 
-    // ★ 旧行推出 - 用 opacity + margin-top 压缩
+    // ★ 旧行推出动画后移除
     tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
         old.style.transition = 'all 0.15s ease';
         old.style.opacity = '0';

@@ -3,22 +3,35 @@
 
 // ==================== 刷课工具处理器 ====================
 async function chaoxingToolHandler(action, ids, username, password) {
-    var token = localStorage.getItem('authToken') || '';
+    // ★ 优先 authToken，fallback deviceId（与 chaoxing.html 行为一致）
+    var token = localStorage.getItem('authToken') || localStorage.getItem('deviceId') || '';
     var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
     try {
         if (action === 'login') {
             var r = await fetch('/oneapichat/api/chaoxing_api.php?action=login&username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password) + authSuffix, { method: 'POST' });
             var d = await r.json();
             if (d.success) return { result: '登录成功: ' + d.username };
-            return { error: d.error || '登录失败,请检查账号密码' };
+            var _msg = d.error || '登录失败,请检查账号密码';
+            // ★ 如果是验证码问题，引导用户浏览器登录
+            if (_msg.indexOf('验证码') >= 0 || _msg.indexOf('手动登录') >= 0) {
+                _msg += '\n\n💡 解决方法：请先在电脑浏览器打开 https://i.chaoxing.com 用手机号+密码登录一次（可能需要滑块验证），超星会记住你的设备。登录成功后回到这里，不需要重新输入密码，直接调用 chaoxing_auth 即可。';
+            }
+            return { error: _msg };
         }
         if (action === 'courses') {
-            var r = await fetch('/oneapichat/api/chaoxing_api.php?action=courses' + authSuffix);
+            var _force = ids === 'force' ? '&force=true' : '';
+            var r = await fetch('/oneapichat/api/chaoxing_api.php?action=courses' + _force + authSuffix);
             var d = await r.json();
             if (d.courses) {
-                return { result: '课程列表:\n' + d.courses.map(function(c) { return c.courseId + ': ' + c.title; }).join('\n') };
+                var _list = d.courses.map(function(c) { return c.courseId + ': ' + c.title; }).join('\n');
+                return { result: '课程列表:\n' + _list };
             }
-            return { error: d.error || '获取失败' };
+            var _err = d.error || '获取失败';
+            // ★ 如果是风控/网络问题，提示重试
+            if (_err.includes('获取失败') || _err.includes('风控') || _err.includes('timeout')) {
+                _err += '。可能是网络波动或超星风控，请稍后重试，或用 chaoxing_auth 先确认登录状态。';
+            }
+            return { error: _err };
         }
         if (action === 'start' && ids) {
             var r = await fetch('/oneapichat/api/chaoxing_api.php?action=start&ids=' + encodeURIComponent(ids) + authSuffix);
@@ -49,16 +62,23 @@ async function chaoxingToolHandler(action, ids, username, password) {
             return { error: '获取统计失败' };
         }
         if (action === 'overview') {
-            // 综合总览:登录+运行状态+进度
-            var [sR, stR] = await Promise.all([
+            // 综合总览:登录+运行状态+进度（★ 先验证登录）
+            var [authR, sR, stR] = await Promise.all([
+                fetch('/oneapichat/api/chaoxing_api.php?action=courses' + authSuffix),
                 fetch('/oneapichat/api/chaoxing_api.php?action=status' + authSuffix),
                 fetch('/oneapichat/api/chaoxing_api.php?action=stats' + authSuffix)
             ]);
             var sD = await sR.json();
             var stD = await stR.json();
+            // ★ 真正检查登录状态
+            var _loggedIn = false;
+            try {
+                var _authD = await authR.json();
+                _loggedIn = !!(_authD.success || (_authD.courses !== undefined));
+            } catch(e) {}
             var running = !!sD.running;
             var msg = '📋 超星刷课总览\n';
-            msg += '登录状态: ✅ 已登录\n';
+            msg += '登录状态: ' + (_loggedIn ? '✅ 已登录' : '❌ 凭证过期，需重新登录') + '\n';
             msg += '刷课状态: ' + (running ? '🟢 运行中' : '⚪ 空闲') + '\n';
             if (running && sD.log) {
                 var lastLine = sD.log.split('\n').filter(function(l) { return l.indexOf('开始学习课程') >= 0; }).pop();
@@ -75,8 +95,14 @@ async function chaoxingToolHandler(action, ids, username, password) {
         }
         if (action === 'auth_check') {
             var r = await fetch('/oneapichat/api/chaoxing_api.php?action=courses' + authSuffix);
-            if (r.ok) return { result: '✅ 学习通已登录,可直接操作' };
-            return { error: '❌ 未登录,需要提供学习通手机号和密码' };
+            if (!r.ok) return { error: '❌ 未登录,需要提供学习通手机号和密码' };
+            // ★ 必须检查响应内容: HTTP 200 但 success=false 说明凭证过期
+            var d = await r.json();
+            if (d.success || (d.courses && d.courses.length >= 0)) {
+                return { result: '✅ 学习通已登录,可直接操作' };
+            }
+            var _msg = d.error || '凭证失效';
+            return { error: '❌ 登录凭证已过期: ' + _msg + '。请用 chaoxing_login 重新登录，需要手机号和密码。' };
         }
         if (action === 'exam_list') {
             var r = await fetch('/oneapichat/api/chaoxing_api.php?action=exam_list' + authSuffix);

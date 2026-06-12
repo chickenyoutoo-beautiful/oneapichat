@@ -251,6 +251,11 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     var card = document.createElement('div');
     card.className = 'tool-call-card';
 
+<<<<<<< Updated upstream
+=======
+    var meta = (window.toolRegistry && toolRegistry.has(toolName)) ? toolRegistry.get(toolName) : null;
+
+>>>>>>> Stashed changes
     var typeIcons = {
         'web_search': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>',
         'web_fetch': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
@@ -264,12 +269,20 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
         if (typeof result === 'string') resultText = result;
         else if (result.result) resultText = String(result.result);
         else if (result.error) resultText = String(result.error);
+<<<<<<< Updated upstream
+=======
+        else if (result.output) resultText = String(result.output);
+>>>>>>> Stashed changes
         else resultText = JSON.stringify(result).substring(0, 300);
     }
     var _preview = (resultText || '').split('\n')[0].replace(/\s+/g, ' ').trim().substring(0, 60);
 
     var durationStr = '';
+<<<<<<< Updated upstream
     if (durationMs > 0) {
+=======
+    if (durationMs !== undefined && durationMs !== null && durationMs > 0) {
+>>>>>>> Stashed changes
         if (durationMs < 1000) durationStr = durationMs + 'ms';
         else if (durationMs < 60000) durationStr = (durationMs / 1000).toFixed(1) + 's';
         else durationStr = Math.floor(durationMs / 60000) + 'm' + Math.floor((durationMs % 60000) / 1000) + 's';
@@ -290,6 +303,7 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     '<div class="tool-call-card-body">';
 
     if (execDetails && execDetails.command) {
+<<<<<<< Updated upstream
         html += '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:#6366f1;display:flex;align-items:center;gap:3px;">' +
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>' + escapeHtml(execDetails.command).substring(0, 60) +
             '</summary><pre style="margin:2px 0 0 12px;padding:4px 6px;background:#1e1e2e;color:#cdd6f4;border-radius:4px;font-size:10px;max-height:150px;overflow:auto;">' + escapeHtml((execDetails.output || execDetails.error || '').substring(0, 4000)) + '</pre>' +
@@ -300,31 +314,64 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     html += '<details style="margin-top:2px;"><summary style="cursor:pointer;font-size:10px;color:#9ca3af;display:flex;align-items:center;gap:3px;">' +
         '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>参数</summary>' +
         '<pre style="margin:2px 0 0 12px;padding:4px 6px;background:#f3f4f6;border-radius:4px;font-size:10px;max-height:100px;overflow:auto;">' + escapeHtml(JSON.stringify(args, null, 2).substring(0, 2000)) + '</pre>' +
+=======
+        html += '<details class="tool-exec-details">' +
+            '<summary class="tool-exec-summary" style="cursor:pointer;font-weight:500;color:#374151;margin-bottom:4px;display:flex;align-items:center;gap:4px;">' +
+                '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> ' + escapeHtml(execDetails.command) +
+            '</summary>' +
+            '<pre class="tool-exec-output" style="margin:4px 0 0 16px;padding:6px 8px;background:#1e1e2e;color:#cdd6f4;border-radius:6px;font-family:monospace;font-size:10px;line-height:1.5;max-height:200px;overflow-y:auto;">' +
+            escapeHtml((execDetails.output || execDetails.error || '').substring(0, 5000)) + '</pre>' +
+            (execDetails.exitCode !== undefined ? '<div style="margin:4px 0 0 16px;font-size:10px;color:' + (execDetails.exitCode === 0 ? '#059669' : '#ef4444') + ';">退出码: ' + execDetails.exitCode + '</div>' : '') +
+            '</details>';
+    }
+
+    html += '<details class="tool-args-details" style="margin-top:4px;">' +
+        '<summary class="tool-args-summary" style="cursor:pointer;font-size:10px;color:#9ca3af;display:flex;align-items:center;gap:3px;">' +
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>参数</summary>' +
+        '<pre class="tool-call-args" style="margin:4px 0 0 16px;padding:6px;background:#f3f4f6;border-radius:4px;font-size:10px;max-height:120px;overflow:auto;">' + escapeHtml(JSON.stringify(args, null, 2).substring(0, 2000)) + '</pre>' +
+>>>>>>> Stashed changes
         '</details>';
 
     if (resultText) {
         var displayResult = resultText.length > 500 ? resultText.substring(0, 500) : resultText;
         var isLongResult = resultText.length > 500;
+<<<<<<< Updated upstream
         html += '<details style="margin-top:2px;" ' + (isError ? 'open' : '') + '><summary style="cursor:pointer;font-size:10px;color:' + (isError ? '#ef4444' : '#059669') + ';display:flex;align-items:center;gap:3px;">' +
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 10 13 20 5"/><line x1="21" y1="12" x2="12" y2="19"/></svg>' + (isError ? '错误' : '结果') + (isLongResult ? ' (' + resultText.length + ' 字符)' : '') +
             '</summary>' +
             '<pre class="tool-call-result" style="margin:2px 0 0 12px;padding:4px 6px;background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border-radius:4px;font-size:10px;max-height:150px;overflow:auto;white-space:pre-wrap;color:' + (isError ? '#dc2626' : '#374151') + ';">' + escapeHtml(displayResult) + '</pre>' +
             (isLongResult ? '<button onclick="var p=this.previousElementSibling;p.style.maxHeight=\'none\';p.textContent=p.getAttribute(\'data-full\')||p.textContent;this.remove()" style="margin:2px 0 0 12px;font-size:10px;color:#6366f1;border:none;background:none;cursor:pointer;">展开全部 (' + resultText.length + '字符)</button>' : '') +
+=======
+        html += '<details class="tool-result-details" style="margin-top:4px;" ' + (isError ? 'open' : '') + '>' +
+            '<summary class="tool-result-summary" style="cursor:pointer;font-size:10px;color:' + (isError ? '#ef4444' : '#059669') + ';display:flex;align-items:center;gap:3px;">' +
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 10 13 20 5"/><line x1="21" y1="12" x2="12" y2="19"/></svg>' + (isError ? '错误' : '结果') + (isLongResult ? ' (' + resultText.length + ' 字符)' : '') + '</summary>' +
+            '<pre class="tool-call-result" style="margin:4px 0 0 16px;padding:6px;background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border-radius:4px;font-size:10px;max-height:200px;overflow:auto;white-space:pre-wrap;color:' + (isError ? '#dc2626' : '#374151') + ';">' + escapeHtml(displayResult) + '</pre>' +
+            (isLongResult ? '<button onclick="var p=this.previousElementSibling;p.style.maxHeight=\'none\';p.textContent=p.getAttribute(\'data-full\')||p.textContent;this.remove()" style="margin:4px 0 0 16px;font-size:10px;color:#6366f1;border:none;background:none;cursor:pointer;">展开全部 (' + resultText.length + ' 字符)</button>' : '') +
+>>>>>>> Stashed changes
             '</details>';
     }
 
     html += '</div>';
     card.innerHTML = html;
 
+<<<<<<< Updated upstream
     if (resultText && resultText.length > 500) {
         var _preEl = card.querySelector('.tool-call-result');
         if (_preEl) _preEl.setAttribute('data-full', resultText.substring(0, 10000));
+=======
+    // ★ 注入全文到 pre 的 data-full 属性（textContent 不解析 HTML，存原文安全）
+    if (resultText && resultText.length > 500) {
+        var _preEl = card.querySelector('.tool-call-result');
+        if (_preEl) {
+            _preEl.setAttribute('data-full', resultText.substring(0, 10000));
+        }
+>>>>>>> Stashed changes
     }
 
     return card;
 }
-function appendToolCallMessage(toolName, args, result, durationMs, chatId) {
-    var card = createToolCallCard(toolName, args, result, durationMs);
+function appendToolCallMessage(toolName, args, result, durationMs, chatId, execDetails) {
+    var card = createToolCallCard(toolName, args, result, durationMs, execDetails);
     var container = $.chatMessagesContainer;
     if (!container) return;
 
@@ -520,8 +567,8 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
             contentDiv.innerHTML = _renderMarkdownWithMath(display);
             // ★ 延迟Mermaid渲染(appendMessage自身有内联处理,不与_triggerPostRender冲突)
             setTimeout(() => {
-                // 查找所有 language-mermaid 的代码块(来自 ```mermaid)
-                var mermaidCodes = contentDiv.querySelectorAll('pre code[class*="mermaid"]');
+                // 查找所有 mermaid 相关代码块(含 gantt/dot 等图表类型)
+                var mermaidCodes = contentDiv.querySelectorAll('pre code[class*="mermaid"], pre code[class*="gantt"], pre code[class*="dot"]');
                 mermaidCodes.forEach(codeBlock => {
                     var pre = codeBlock.parentNode;
                     var mermaidDiv = document.createElement('div');
@@ -577,6 +624,10 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                         console.warn('Mermaid 渲染失败', err);
                         contentDiv.querySelectorAll('.mermaid').forEach(div => {
                             if (!div.isConnected) return;
+                            // ★ 如果 div 已被上面 then() 替换过，跳过
+                            if (div.querySelector('svg') === null && !div.querySelector('.mermaid')) {
+                                // div 已被清理，跳过
+                            }
                             var originalCode = div.getAttribute('data-original-code') || div.textContent;
                             // 检查是否是 UnsupportedDiagramError / UnknownDiagramError
                             var isUnsupported = err && (err.message?.includes('No diagram type detected') || err.message?.includes('UnsupportedDiagramError'));
@@ -883,7 +934,7 @@ function applySyntaxHighlighting(container) {
         // 静默 highlight.js 的安全警告(代码块中含 HTML 标签时触发,非真安全问题)
         var _warn = console.warn;
         console.warn = function() {};
-        container.querySelectorAll('pre code:not([class*="mermaid"])').forEach(function(block) {
+        container.querySelectorAll('pre code:not([class*="mermaid"]):not([class*="gantt"]):not([class*="dot"])').forEach(function(block) {
             try { hljs.highlightElement(block); } catch(e) {}
         });
         console.warn = _warn;

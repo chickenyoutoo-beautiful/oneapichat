@@ -78,7 +78,10 @@ function _protectMath(text) {
 function _restoreMath(html) {
     if (!html || _mathCounter === 0) return html;
 
-    for (const [id, info] of Object.entries(_mathStore)) {
+    // ★ 按 ID 长度降序排列，防止 MATHBx1 错误匹配 MATHBx10 (前缀碰撞)
+    const sortedIds = Object.keys(_mathStore).sort((a, b) => b.length - a.length);
+    for (const id of sortedIds) {
+        const info = _mathStore[id];
         let rendered;
         try {
             if (window.katex) {
@@ -107,6 +110,8 @@ function _restoreMath(html) {
 function _renderMarkdownWithMath(text) {
     if (!text) return '';
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
+    // ★ 预处理: 自动包裹未加围栏的 mermaid 代码块
+    if (typeof _autoFenceMermaid === 'function') text = _autoFenceMermaid(text);
     var protected = _protectMath(text);
     var html = marked.parse(protected);
     let tempHtml = _restoreMath(html);

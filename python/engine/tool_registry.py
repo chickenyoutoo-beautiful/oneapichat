@@ -116,6 +116,21 @@ def _default_tools() -> list[ToolDef]:
     """默认注册的工具列表"""
     return [
         ToolDef(
+            name="run_skill",
+            description="运行一个已保存的技能。技能是可复用的提示词模板。当用户任务与已保存技能匹配时使用。可用技能列表见系统提示词。",
+            capabilities={Capability.Sandboxable},
+            approval=ApprovalKind.AUTO,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "要运行的技能名称"},
+                    "params": {"type": "object", "description": "技能参数(键值对), 用于填充提示词模板的 {param} 占位符"},
+                },
+                "required": ["skill_name"],
+            },
+            tags=["技能", "自动化"],
+        ),
+        ToolDef(
             name="web_search",
             description="搜索互联网，返回标题+链接+摘要。用于查找最新信息、攻略等。",
             capabilities={Capability.ReadOnly, Capability.Network},
@@ -142,6 +157,20 @@ def _default_tools() -> list[ToolDef]:
                 },
             },
             tags=["网络", "抓取"],
+        ),
+        ToolDef(
+            name="platform_extract",
+            description="从特定平台提取结构化内容。支持 Bilibili 视频/专栏信息(标题、UP主、播放量、弹幕数等)。当用户分享B站等平台链接并想了解内容时调用。",
+            capabilities={Capability.ReadOnly, Capability.Network},
+            approval=ApprovalKind.AUTO,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要提取的平台URL(如B站视频链接)"},
+                },
+                "required": ["url"],
+            },
+            tags=["网络", "平台", "提取"],
         ),
         ToolDef(
             name="engine_push",

@@ -40,42 +40,50 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=1780927000">
+    <link rel="stylesheet" href="./css/style.css?v=1781400000">
     <link rel="stylesheet" href="./css/src-console.css?v=4">
     <script src="./lib/highlight.min.js"></script>
     <!-- Markdown 解析库 (marked) — 必须在 core.js 之前加载 -->
     <script src="./lib/marked.min.js"></script>
+    <!-- Mermaid 图表渲染 — defer 加载，确保 window.mermaid 在所有 JS 之前可用 -->
+    <script defer src="./lib/mermaid/mermaid.min.js"></script>
     <!-- ═══ 核心模块 (defer 按序加载) ═══ -->
-    <script defer src="./js/core.js?v=3"></script>
+    <script defer src="./js/core.js?v=6"></script>
     <script defer src="./js/translations.js?v=2"></script>
     <script defer src="./js/image-gen.js?v=2"></script>
+<<<<<<< Updated upstream
     <script defer src="./js/markdown.js?v=6"></script>
     <script defer src="./js/agent.js?v=6"></script>
     <script defer src="./js/storage.js?v=14"></script>
-    <script defer src="./js/config.js?v=6"></script>
+    <script defer src="./js/config.js?v=8"></script>
     <script defer src="./js/dialogs.js?v=16"></script>
     <script defer src="./js/cloudreve.js?v=9"></script>
     <script defer src="./js/rag-system.js?v=2"></script>
-    <script defer src="./js/chaoxing-tools.js?v=2"></script>
+    <script defer src="./js/chaoxing-tools.js?v=7"></script>
     <script defer src="./js/files.js?v=2"></script>
     <script defer src="./js/rendering.js?v=13"></script>
     <script defer src="./js/search.js?v=2"></script>
     <script defer src="./js/ui.js?v=3"></script>
     <script defer src="./js/utils.js?v=2"></script>
     <script defer src="./js/tools-exec.js?v=9"></script>
-    <script defer src="./js/init.js?v=5"></script>
+    <script defer src="./js/init.js?v=11"></script>
+=======
+>>>>>>> Stashed changes
     <script defer src="./js/agent-notify.js?v=5"></script>
     <script defer src="./js/models.js?v=10"></script>
     <!-- PPT/PPTX 解析 -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script defer src="./js/tools.js?v=9"></script>
-    <script defer src="./js/upload.js?v=1"></script>
+    <script defer src="./js/tools.js?v=10"></script>
+    <script defer src="./js/upload.js?v=3"></script>
     <script defer src="./js/queue.js?v=1"></script>
     <script defer src="./js/commands.js?v=1"></script>
-    <script defer src="./js/resume-stream.js?v=15"></script>
+<<<<<<< Updated upstream
+    <script defer src="./js/resume-stream.js?v=17"></script>
     <script defer src="./js/api-messages.js?v=10"></script>
     <script defer src="./js/stream-handler.js?v=3"></script>
-    <script defer src="./js/main.js?v=1780930000"></script>
+    <script defer src="./js/main.js?v=1781340000"></script>
+=======
+>>>>>>> Stashed changes
     <script defer src="./js/src-manager.js?v=4"></script>
 
     <!-- /命令列表 SVG 图标库 -->
@@ -351,6 +359,8 @@ window.VISION_API_KEY = '';
                     <div id="queueMsgList" class="queue-msg-list"></div>
                 </div>
             </div>
+            <!-- ★ 裁剪容器：防止子元素毛玻璃/白色背景溢出至两侧遮挡气泡 -->
+            <div class="input-clip">
             <!-- Agent 模式提示 -->
             <div id="agentBanner" class="agent-banner hidden"></div>
             <!-- ★ 任务计划流面板 (Agent模式 - 任务规划与进度追踪) -->
@@ -387,9 +397,9 @@ window.VISION_API_KEY = '';
             <!-- ★ 消息队列栏 (AI生成时显示) -->
 
 <div class="input-wrapper">
-                <div class="flex items-center gap-2 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition" style="overflow:hidden;background:transparent;">
+                <div class="flex items-center gap-2 border border-gray-200 dark:border-gray-700 rounded-full p-2 shadow-sm focus-within:shadow-md transition" style="overflow:hidden;background:#ffffff;">
                     <label class="cursor-pointer p-3 text-gray-400 hover:text-blue-500 transition" title="上传文件或图片">
-                        <input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.xlsx,.xls,.csv,.pptx,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg,.mp4,.webm,.mov,.avi,.mkv,.flv,.wmv">
+                        <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.txt,.md,.docx,.xlsx,.xls,.csv,.pptx,.json,.js,.ts,.tsx,.jsx,.vue,.html,.css,.scss,.xml,.yaml,.yml,.toml,.log,.sh,.bat,.conf,.ini,.cfg,.cpp,.c,.h,.java,.py,.php,.go,.rs,.rb,.pl,.lua,.dart,.swift,.kt,.scala,.sql,.r,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg,.mp4,.webm,.mov,.avi,.mkv,.flv,.wmv">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
                         </svg>
@@ -422,6 +432,7 @@ window.VISION_API_KEY = '';
                     </div>
                 </div>
             </div>
+            </div>  <!-- ★ /.input-clip -->
         </div>
     </div>
 
@@ -687,7 +698,7 @@ window.VISION_API_KEY = '';
             </div>
             <div class="config-toggle-row">
                 <span class="config-label">🧪 可恢复流式传输 <span style="font-size:10px;color:#999">(实验性)</span></span>
-                <label class="switch small"><input type="checkbox" id="resumeStreamToggle" onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0')"><span class="slider"></span></label>
+                <label class="switch small"><input type="checkbox" id="resumeStreamToggle" checked onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0')"><span class="slider"></span></label>
             </div>
             <div class="config-toggle-row">
                 <span class="config-label">🔗 链式输出 <span style="font-size:10px;color:#999">(实验性)</span></span>

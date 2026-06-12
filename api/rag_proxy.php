@@ -26,27 +26,84 @@ if ($method === 'GET') {
         echo json_encode(['error' => 'RAG engine unreachable']);
     }
 } elseif ($method === 'POST') {
-    $body = file_get_contents('php://input');
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 120,
-        CURLOPT_CONNECTTIMEOUT => 5,
-    ]);
-    $resp = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    http_response_code($code ?: 200);
-    echo $resp;
+    if ($action === 'upload' && !empty($_FILES['file'])) {
+        // 文件上传: 读取 $_FILES, 构建 JSON 转发给引擎
+        $file = $_FILES['file'];
+        $filename = $file['name'];
+        $tmpPath = $file['tmp_name'];
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            http_response_code(400);
+            echo json_encode(['error' => '文件上传失败, code=' . $file['error']]);
+            exit;
+        }
+        $content = file_get_contents($tmpPath);
+        if ($content === false || strlen($content) === 0) {
+            http_response_code(400);
+            echo json_encode(['error' => '文件为空或无法读取']);
+            exit;
+        }
+        // 二进制文件（PDF/DOCX/XLSX）：base64编码后传给引擎
+        $isUtf8 = mb_check_encoding($content, 'UTF-8');
+        $collection = $_GET['collection'] ?? 'default';
+        if ($isUtf8) {
+            $jsonBody = json_encode([
+                'collection' => $collection,
+                'filename' => $filename,
+                'content' => $content,
+            ], JSON_UNESCAPED_UNICODE);
+        } else {
+            $jsonBody = json_encode([
+                'collection' => $collection,
+                'filename' => $filename,
+                'content_base64' => base64_encode($content),
+            ]);
+        }
+        if ($jsonBody === false) {
+            http_response_code(400);
+            echo json_encode(['error' => '文件编码处理失败']);
+            exit;
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $jsonBody,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        http_response_code($code ?: 200);
+        echo $resp;
+    } else {
+        $body = file_get_contents('php://input');
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        http_response_code($code ?: 200);
+        echo $resp;
+    }
 } elseif ($method === 'DELETE') {
-    $body = file_get_contents('php://input');
+    // DELETE: 从 query params 构建 JSON body(前端通过 URL 传参)
+    $deleteBody = json_encode([
+        'doc_id' => $_GET['doc_id'] ?? '',
+        'collection' => $_GET['collection'] ?? 'default',
+    ]);
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => 'DELETE',
-        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_POSTFIELDS => $deleteBody,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 30,

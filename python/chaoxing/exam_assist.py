@@ -63,10 +63,13 @@ def cmd_list(args):
     Chaoxing, Account, init_session, _, ChaoxingExam = _get_api()
     acc = Account(u, p)
     api = Chaoxing(account=acc)
-    lr = api.login()
-    if not lr['status']:
-        print(f'登录失败: {lr.get("msg","")}')
-        return
+    # ★ 先尝试用已有 Cookie
+    courses = api.get_course_list()
+    if not courses:
+        lr = api.login()
+        if not lr['status']:
+            print(f'登录失败: {lr.get("msg","")}')
+            return
     s = init_session()
     from chaoxing.exam_auto import ChaoxingExam
     exam = ChaoxingExam(acc, session=s)

@@ -82,7 +82,8 @@ async function loadSearchConfig() {
     var ragChecked = localStorage.getItem('ragEnabled') !== 'false';
     setChecked('ragToggle', ragChecked);
     window.RAG_ENABLED = ragChecked;
-    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
+    // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
+    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') !== '0');
     setChecked('proxyToggle', localStorage.getItem('proxyEnabled') === '1');
     setVal('proxyUrl', localStorage.getItem('proxyUrl') || '');
     var _proxyDetails = document.getElementById('proxyConfigDetails');
@@ -810,12 +811,18 @@ window.getProxyUrl = function() {
 
 // ★ 代理 fetch — 通过 PHP 代理中继转发请求
 window.proxyFetch = async function(targetUrl, options = {}) {
+    // ★ 解析相对URL为绝对URL（proxy.php只接受http/https开头的URL）
+    if (targetUrl.startsWith('/')) {
+        targetUrl = window.location.origin + targetUrl;
+    }
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
     // 解析相对URL为绝对URL(proxy.php只接受http/https开头)
     if (targetUrl.startsWith('/')) { targetUrl = window.location.origin + targetUrl; }
+    if (targetUrl.startsWith('/')) { targetUrl = window.location.origin + targetUrl; }
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
-    if (_isLocal) {
+    // ★ 同源请求不需要走proxy.php中继
+    if (_isLocal || targetUrl.startsWith(window.location.origin)) {
         return fetch(targetUrl, options);
     }
     // ★ 外部API: 始终通过proxy.php中继避免CORS

@@ -170,7 +170,8 @@ switch ($action) {
     case 'courses':
         $cache_file = userCoursesCachePath($userId);
         $cache_ttl = 300;
-        if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
+        $force = ($_GET['force'] ?? '') === 'true';
+        if (!$force && file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
             $json = file_get_contents($cache_file);
         } else {
             $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
@@ -187,7 +188,14 @@ switch ($action) {
                 echo json_encode(['error' => '获取课程列表失败', 'detail' => $exit_code == 0 ? '无JSON输出' : '退出码='.$exit_code]);
                 exit;
             }
+<<<<<<< Updated upstream
             if (strpos($json, '"courses"') !== false) file_put_contents($cache_file, $json);
+=======
+            // ★ 只缓存成功的响应，不缓存错误
+            if (strpos($json, '"courses"') !== false) {
+                file_put_contents($cache_file, $json);
+            }
+>>>>>>> Stashed changes
         }
         // 从 DB 合并课程状态（通过 Python 查询，避免 PHP SQLite3 扩展依赖）
         $data = json_decode($json, true);
@@ -731,6 +739,13 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         $cache_file = userCoursesCachePath($userId);
         @unlink($cache_file);
 
+        // ★ 先检查网络连通性（超星是否可达）
+        $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));
+        if ($net_test === false) {
+            echo json_encode(['success' => false, 'error' => '无法连接超星服务器，请检查网络或稍后重试']);
+            exit;
+        }
+
         $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
         exec($cmd, $out, $code);
         $json_line = '';
@@ -741,12 +756,15 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         if ($json_line && strpos($json_line, '"courses"') !== false) {
             echo json_encode(['success' => true, 'username' => $user]);
         } elseif ($json_line) {
-            // 返回 Python 侧的具体错误消息（如 用户名或密码错误）
             $err_data = json_decode($json_line, true);
             $err_msg = $err_data['error'] ?? '登录验证失败，请检查账号密码';
+            // ★ 如果提示密码错误，添加验证码/风控提示
+            if (strpos($err_msg, '密码错误') !== false || strpos($err_msg, '用户名或密码') !== false) {
+                $err_msg .= '。可能是：(1)超星要求验证码——请先在浏览器访问 https://i.chaoxing.com 手动登录一次，超星会记住设备；或 (2)账号密码确实有误，请核实。';
+            }
             echo json_encode(['success' => false, 'error' => $err_msg]);
         } else {
-            echo json_encode(['success' => false, 'error' => '登录验证失败，请检查账号密码']);
+            echo json_encode(['success' => false, 'error' => '登录验证失败：Python脚本无输出，请检查服务器日志。可能是超星接口变动或网络问题。']);
         }
         break;
 

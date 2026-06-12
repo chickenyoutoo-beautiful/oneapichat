@@ -66,6 +66,10 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     var delta = event.delta || event.content || '';
                     if (delta) {
                         fullText += delta;
+                        // ★ MiniMax实时去重: 正文可能包含思考内容前缀, 流式时即清除
+                        if (reasoningText && fullText.indexOf(reasoningText) === 0) {
+                            fullText = fullText.substring(reasoningText.length).trim();
+                        }
                         applyStreamRender(chatId, fullText);
                     }
                 } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
@@ -150,6 +154,69 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
     // 清理 savedPartial 和 msg_id 标记
     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
     try { localStorage.removeItem('_lastStreamMsgId_' + chatId); } catch(e) {}
+
+    // ★ MiniMax/DeepSeek 思考标签提取与去重（SSE路径）
+    if (fullText) {
+        var _allThink2 = '';
+        // 提取完整 <think>...</think> 标签
+        var _mt2 = fullText.match(/<think>([\s\S]*?)<\/think>/g);
+        if (_mt2) {
+            for (var _mti = 0; _mti < _mt2.length; _mti++) {
+                _allThink2 += _mt2[_mti].replace(/<\/?think>/g, '');
+            }
+            fullText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '');
+        }
+        // 提取 MiniMax (think)...(endthink) 格式
+        var _mt3 = fullText.match(/\(think\)([\s\S]*?)\(endthink\)/g);
+        if (_mt3) {
+            for (var _mti2 = 0; _mti2 < _mt3.length; _mti2++) {
+                _allThink2 += _mt3[_mti2].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
+            }
+            fullText = fullText.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
+        }
+        // 未闭合的 (think) 兜底 — 只匹配到行尾避免吞掉正文
+        var _open2 = fullText.match(/\(think\)([\s\S]*?)$/);
+        if (_open2 && _open2[1].length < 2000) {
+            _allThink2 += _open2[1];
+            fullText = fullText.replace(/\(think\)[\s\S]*$/, '');
+        }
+        if (_allThink2.trim() && !reasoningText) {
+            reasoningText = _allThink2.trim();
+        }
+        fullText = fullText.trim();
+
+        // ★ MiniMax去重: 思考内容可能在正文中重复出现，移除正文中的思考前缀
+        var _rt2 = (reasoningText || '').trim();
+        var _ft2 = (fullText || '').trim();
+        if (_rt2 && _ft2 && _rt2.length > 20) {
+            // 1) 正文前缀精确匹配
+            if (_ft2.indexOf(_rt2) === 0) {
+                fullText = _ft2.substring(_rt2.length).trim();
+                console.log('[MM-SSE] 从正文移除重复思考前缀(' + _rt2.length + ' chars)');
+            // 2) 正文部分前缀匹配（重叠检测）
+            } else if (_ft2.length > _rt2.length * 0.5) {
+                for (var _oi = Math.min(_rt2.length, 500); _oi > 50; _oi--) {
+                    if (_ft2.indexOf(_rt2.substring(0, _oi)) === 0) {
+                        fullText = _ft2.substring(_oi).trim();
+                        console.log('[MM-SSE] 从正文移除部分重叠思考(overlap=' + _oi + ' chars)');
+                        break;
+                    }
+                }
+            }
+            // 3) 正文中间内嵌思考文本（位置在前500字符内）
+            if (_rt2.length > 30 && fullText && fullText.length > 0) {
+                var _rtPos = fullText.substring(0, Math.min(fullText.length, 1000)).indexOf(_rt2);
+                if (_rtPos > 0 && _rtPos < 500) {
+                    fullText = (fullText.substring(0, _rtPos) + fullText.substring(_rtPos + _rt2.length)).trim();
+                    console.log('[MM-SSE] 从正文中间移除内嵌思考(pos=' + _rtPos + ')');
+                }
+            }
+            // 4) 正文开头的 (think) 标签残留清理
+            if (fullText && /^\(think\)/i.test(fullText)) {
+                fullText = fullText.replace(/^\(think\)\s*/i, '').trim();
+            }
+        }
+    }
 
     return { fullText, reasoningText, usage, toolCalls };
 };
@@ -568,35 +635,58 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         fullText += textContent;
                         fullText = fullText.replace(/\[object Object\]/g, '');
 
-                        // ★ 实时提取所有<think>和(think)块到思考区
+                        // ★ 实时提取 <think> 和 (think) 块到思考区
+                        // ★ 关键修复: 只用完整闭合标签，不用 $ 兜底（流式中未闭合会导致全部内容被吞）
                         var _t = fullText;
                         var _allThink = '';
-                        // 提取 <think>...</think> 标签
-                        var _matches = _t.match(/<think>([\s\S]*?)(?:<\/think>|$)/g);
+                        // 提取完整 <think>...</think> 标签（必须闭合）
+                        var _matches = _t.match(/<think>([\s\S]*?)<\/think>/g);
                         if (_matches) {
                             for (var _mi = 0; _mi < _matches.length; _mi++) {
                                 _allThink += _matches[_mi].replace(/<\/?think>/g, '');
                             }
-                            _t = _t.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+                            _t = _t.replace(/<think>[\s\S]*?<\/think>/g, '');
                         }
-                        // 提取 MiniMax (think) 和 (endthink) 格式 (MiniMax M2.7)
-                        var _t2 = _t;
-                        var _matches2 = _t2.match(/\(think\)([\s\S]*?)(?:\(endthink\)|$)/g);
+                        // 提取完整 MiniMax (think)...(endthink) 格式（必须闭合）
+                        var _matches2 = _t.match(/\(think\)([\s\S]*?)\(endthink\)/g);
                         if (_matches2) {
                             for (var _mi2 = 0; _mi2 < _matches2.length; _mi2++) {
                                 _allThink += _matches2[_mi2].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
                             }
-                            _t = _t.replace(/\(think\)[\s\S]*?(?:\(endthink\)|$)/g, '');
+                            _t = _t.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
                         }
-                        // 也处理只有开头的 (think) 后面没有关闭标签的情况
-                        _t = _t.replace(/\(think\)\s*/g, '');
+                        // ★ 未闭合的 <think> 或 (think) — 正在流式传输中，只暂存到思考区，不破坏正文
+                        var _openThink = _t.match(/<think>([\s\S]*?)$/) || _t.match(/\(think\)([\s\S]*?)$/);
+                        if (_openThink) {
+                            _allThink += _openThink[1];
+                            _t = _t.replace(/<think>[\s\S]*$/, '').replace(/\(think\)[\s\S]*$/, '');
+                        }
                         if (_allThink.trim()) {
                             reasoningText = _allThink.trim();
                             pendingMsg.reasoning = reasoningText;
                         }
                         pendingMsg.content = _t.trim() || (_allThink.trim() ? '' : fullText);
                         var _displayText = _t.trim();
-                        // ★ 如果正文为空但思考有内容,不显示原始 (think) 标签
+                        // ★ MiniMax去重: 推理内容泄漏到正文中
+                        var _rt = (reasoningText || '').trim();
+                        if (_displayText && _rt && _rt.length > 20) {
+                            // 1) 正文前缀匹配
+                            if (_displayText.indexOf(_rt) === 0) {
+                                _displayText = _displayText.substring(_rt.length).trim();
+                            // 2) 正文前50%包含推理 → 模糊匹配
+                            } else {
+                                var _chunk = _displayText.substring(0, Math.floor(_displayText.length * 0.5));
+                                for (var _rl = Math.min(_rt.length, 300); _rl > 30; _rl -= 10) {
+                                    var _idx = _chunk.indexOf(_rt.substring(0, _rl));
+                                    if (_idx >= 0 && _idx < 100) {
+                                        _displayText = (_displayText.substring(0, _idx) + _displayText.substring(_idx + _rl)).trim();
+                                        break;
+                                    }
+                                }
+                            }
+                            if (_displayText !== _t.trim()) pendingMsg.content = _displayText;
+                        }
+                        // ★ 如果正文为空但思考有内容,不显示空白气泡
                         if (!_displayText && _allThink.trim()) {
                             _displayText = '';
                         } else if (!_displayText) {
@@ -783,26 +873,34 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         }
     }
     // ★ MiniMax思考去重: 思考内容可能在正文中重复出现, 移除正文中的思考前缀
-    if (fullText && reasoningText && fullText.length > reasoningText.length) {
+    if (fullText && reasoningText && fullText.length > 20) {
         var _rtTrimmed = reasoningText.trim();
         var _ftTrimmed = fullText.trim();
-        // 正文以思考内容开头 → 去除重复
-        if (_ftTrimmed.indexOf(_rtTrimmed) === 0) {
+        if (_rtTrimmed && _ftTrimmed.indexOf(_rtTrimmed) === 0) {
             fullText = _ftTrimmed.substring(_rtTrimmed.length).trim();
             pendingMsg.content = fullText;
             console.log('[MiniMax] 从正文中移除重复的思考内容(' + _rtTrimmed.length + ' chars)');
-        } else if (_ftTrimmed.length > _rtTrimmed.length && _ftTrimmed.indexOf(_rtTrimmed.substring(0, 200)) === 0) {
+        } else if (_rtTrimmed && _ftTrimmed.length > _rtTrimmed.length * 0.5 && _ftTrimmed.indexOf(_rtTrimmed.substring(0, 100)) === 0) {
             // 部分匹配: 尝试找分界点
             var _overlap = 0;
-            for (var _oi = Math.min(_rtTrimmed.length, 500); _oi > 100; _oi--) {
+            for (var _oi = Math.min(_rtTrimmed.length, 500); _oi > 50; _oi--) {
                 if (_ftTrimmed.indexOf(_rtTrimmed.substring(0, _oi)) === 0) {
                     _overlap = _oi; break;
                 }
             }
-            if (_overlap > 100) {
+            if (_overlap > 50) {
                 fullText = _ftTrimmed.substring(_overlap).trim();
                 pendingMsg.content = fullText;
                 console.log('[MiniMax] 从正文中移除部分重叠思考内容(overlap=' + _overlap + ' chars)');
+            }
+        }
+        // ★ 更激进: 如果正文前1000字符内嵌了完整思考, 直接去除
+        if (_rtTrimmed && _rtTrimmed.length > 30) {
+            var _rtPos = _ftTrimmed.substring(0, Math.min(_ftTrimmed.length, 1000)).indexOf(_rtTrimmed);
+            if (_rtPos > 0 && _rtPos < 500) {
+                fullText = (_ftTrimmed.substring(0, _rtPos) + _ftTrimmed.substring(_rtPos + _rtTrimmed.length)).trim();
+                pendingMsg.content = fullText;
+                console.log('[MiniMax] 从正文中间移除内嵌的思考内容(pos=' + _rtPos + ')');
             }
         }
     }

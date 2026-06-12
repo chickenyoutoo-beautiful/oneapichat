@@ -183,7 +183,11 @@ async function compressContextIfNeeded(chatId) {
         let conv = ''
         for (var si = 0; si < toSummarize.length; si++) {
             var m = toSummarize[si];
-            if (m.role === 'user') {
+            if (m.role === 'tool_card') {
+                if (typeof appendToolCallMessage === 'function') {
+                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {}, m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
+                }
+            } else if (m.role === 'user') {
                 conv += '用户: ' + (m.text || m.content || '').substring(0, 2000) + '\n';
             } else if (m.role === 'tool') {
                 // ★ 保留工具执行结果的关键信息
@@ -543,10 +547,13 @@ function renderChatHistory() {
     // ★ 登录用户只显示自己账号的聊天记录
     var _uid = localStorage.getItem('authUserId') || '';
     var _chatIds = Object.keys(chats).filter(function(id) {
-        // ★ 过滤: 排除 agent 独立聊天
-        if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
+        if (id === AGENT_CHAT_ID) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
+    // ★ 如果过滤后为空但有 _agent_main（Agent 模式），也显示它
+    if (_chatIds.length === 0 && chats['_agent_main']) {
+        _chatIds = ['_agent_main'];
+    }
     // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
     if (_chatIds.length === 0 && chats['_agent_main']) { _chatIds = ['_agent_main']; }
     if (_chatIds.length === 0 && _uid) {
@@ -632,9 +639,12 @@ window.deleteChat = async function (e, id) {
     // ★ 只检查当前用户的聊天数量,忽略其他用户的残留
     var _uid = localStorage.getItem('authUserId') || '';
     var myKeys = Object.keys(chats).filter(function(k) {
+        // ★ _agent_main 是 Agent 模式的持久会话，不算"空"
         return !_uid || !chats[k].userId || chats[k].userId === _uid;
     });
+    // ★ 如果所有普通会话都被删除但 _agent_main 存在，切到它
     if (myKeys.length) loadChat(myKeys[myKeys.length - 1]);
+    else if (chats['_agent_main']) loadChat('_agent_main');
     else createNewChat();
     renderChatHistory();
 };
@@ -869,36 +879,55 @@ window.loadChat = async function (id) {
             } else if (m.content === undefined || m.content === null) {
                 m.content = '';
             }
-            if (m.role === 'user') {
+            if (m.role === 'tool_card') {
+                // ★ 工具调用卡片: 渲染为可折叠的详情卡
+                if (typeof appendToolCallMessage === 'function') {
+                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {},
+                        m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
+                }
+            } else if (m.role === 'tool_card') {
+                if (typeof appendToolCallMessage === 'function') {
+                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {}, m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
+                }
+            } else if (m.role === 'user') {
                 appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx);
             } else {
-                // ★ 修复: 对带工具调用的消息,在文本前追加工具调用可视化说明
+                // ★ 工具调用历史：可折叠卡片式列表
                 var toolDisplayHtml = '';
                 if (m.tool_calls && m.tool_calls.length > 0) {
-                    toolDisplayHtml = '<div class="tool-calls-history">';
+                    var _hasToolCards = chats[id].messages.some(function(_cm) { return _cm._toolCard; });
+                    toolDisplayHtml = '<details class="tool-calls-history"' + (_hasToolCards ? '' : '') + '>';
+                    toolDisplayHtml += '<summary style="font-size:12px;color:#6b7280;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 0;">' +
+                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>' +
+                        '工具调用 · ' + m.tool_calls.length + ' 次' +
+                        '<span class="tool-calls-chevron" style="margin-left:auto;transition:transform 0.2s;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+                    '</summary>';
+                    toolDisplayHtml += '<div style="display:flex;flex-wrap:wrap;gap:3px 6px;margin-top:4px;">';
                     m.tool_calls.forEach(function(tc) {
-                        var toolIcon = '🔧';
-                        if (tc.function && tc.function.name) {
-                            if (tc.function.name === 'web_search') toolIcon = '🔍';
-                            else if (tc.function.name === 'web_fetch') toolIcon = '🌐';
-                            else if (tc.function.name === 'generate_image' || tc.function.name === 'generate_image_i2i') toolIcon = '🎨';
-                            else if (tc.function.name.indexOf('agent') !== -1) toolIcon = '🤖';
-                            else if (tc.function.name.indexOf('cron') !== -1) toolIcon = '⏰';
-                            else if (tc.function.name.indexOf('server_') !== -1) toolIcon = '🖥️';
-                            toolDisplayHtml += '<div class="tool-call-item">' + toolIcon + ' ' + escapeHtml(tc.function.name) + '</div>';
-                        }
+                        var _tn = tc.function && tc.function.name ? tc.function.name : 'unknown';
+                        var iconSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">';
+                        if (_tn === 'web_search') iconSvg += '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>';
+                        else if (_tn === 'web_fetch') iconSvg += '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+                        else if (_tn.indexOf('generate_image') !== -1 || _tn === 'mmx_image') iconSvg += '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
+                        else if (_tn.indexOf('agent') !== -1 || _tn === 'delegate_task') iconSvg += '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+                        else if (_tn.indexOf('cron') !== -1) iconSvg += '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+                        else if (_tn.indexOf('server_') !== -1) iconSvg += '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
+                        else if (_tn.indexOf('browser') !== -1) iconSvg += '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+                        else if (_tn.indexOf('mmx_') !== -1) iconSvg += '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
+                        else if (_tn.indexOf('file_') !== -1 || _tn === 'server_file_read' || _tn === 'server_file_write' || _tn === 'server_file_edit') iconSvg += '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+                        else if (_tn === 'plan_update') iconSvg += '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>';
+                        else if (_tn === 'analyze_image' || _tn === 'mmx_vision') iconSvg += '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+                        else iconSvg += '<circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
+                        var _color = '#6b7280';
+                        if (_tn.indexOf('server_') !== -1) _color = '#6366f1';
+                        else if (_tn === 'web_search' || _tn === 'web_fetch') _color = '#059669';
+                        else if (_tn.indexOf('agent') !== -1 || _tn === 'delegate_task') _color = '#8b5cf6';
+                        else if (_tn.indexOf('cron') !== -1) _color = '#f59e0b';
+                        else if (_tn.indexOf('mmx_') !== -1 || _tn.indexOf('generate') !== -1) _color = '#ec4899';
+                        toolDisplayHtml += '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 7px;border-radius:999px;background:#f3f4f6;font-size:11px;color:' + _color + ';">' +
+                            iconSvg + escapeHtml(_tn) + '</span>';
                     });
-                    // 如果有工具结果,显示简短结果
-                    if (m.tool_results && m.tool_results.length > 0) {
-                        m.tool_results.forEach(function(tr, ti) {
-                            var resultText = typeof tr === 'string' ? tr : (tr.content || tr.result || '');
-                            if (resultText && resultText.length > 120) resultText = resultText.slice(0, 120) + '...';
-                            if (resultText && toolDisplayHtml) {
-                                toolDisplayHtml += '<div class="tool-result-item">→ ' + escapeHtml(resultText).replace(/\n/g, '<br>') + '</div>';
-                            }
-                        });
-                    }
-                    toolDisplayHtml += '</div>';
+                    toolDisplayHtml += '</div></details>';
                 }
                 var displayText = compressNewlines(m.content, 2);
                 if (toolDisplayHtml) {

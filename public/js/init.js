@@ -704,26 +704,27 @@ function loadInitialData() {
 }
 
 async function loadAllResources() {
+    // ★ mermaid 已通过 index.html <script defer> 加载，此处不再重复加载
     var resources = [
         { type: 'script', src: 'lib/marked.min.js' },
         { type: 'script', src: 'lib/highlight.min.js' },
         { type: 'script', src: 'lib/mammoth.browser.min.js' },
         { type: 'script', src: 'lib/xlsx.full.min.js' },
-        { type: 'style', href: 'lib/atom-one-light.min.css', id: 'hljsTheme' },
-        { type: 'script', src: 'lib/mermaid/mermaid.min.js' } // Mermaid 图表渲染(本地加载避免境外CDN慢)
+        { type: 'style', href: 'lib/atom-one-light.min.css', id: 'hljsTheme' }
     ];
     try {
         await Promise.all(resources.map(r => r.type === 'script' ? loadScript(r.src) : loadStyle(r.href, r.id)));
+        // ★ mermaid 已通过 index.html 的 <script defer> 加载，此处只做初始化
         if (window.mermaid) {
-            mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', suppressErrorRendering: true }); // 初始化 Mermaid
-            // ★ Mermaid 加载完成后,重新渲染所有已有气泡中的图表
+            console.log('[Init] mermaid 已就绪，初始化...');
+            mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', suppressErrorRendering: true, maxEdges: 10000, maxTextSize: 100000 });
             setTimeout(function _renderPendingMermaid() {
                 document.querySelectorAll('.markdown-body').forEach(function(el) {
-                    if (el.querySelector('pre code[class*="language-mermaid"]') || el.querySelector('.mermaid:not(svg)')) {
-                        MarkdownRenderer.renderMermaid(el);
-                    }
+                    MarkdownRenderer.renderMermaid(el);
                 });
             }, 100);
+        } else {
+            console.error('[Init] mermaid 仍未加载！index.html 的 defer script 可能被阻止');
         }
     } catch (err) {
         console.warn('部分资源加载失败', err);
@@ -787,6 +788,11 @@ function initializeApp() {
             (async function() {
                 try {
                     var resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
+                    if (!resp.ok) {
+                        // ★ 429 限流或网络错误: 重试一次
+                        await new Promise(function(r) { setTimeout(r, 2000); });
+                        resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
+                    }
                     var data = await resp.json();
                     if (!data.valid) {
                         localStorage.removeItem('authToken');
@@ -794,15 +800,36 @@ function initializeApp() {
                         localStorage.removeItem('authUserId');
                         if (typeof showAuthOverlay === 'function') showAuthOverlay();
                     } else {
-                        // ★ 登录成功,预加载云端记忆和身份
+                        // ★ 从 verify 响应同步登录状态到 localStorage（修复 authUsername 丢失导致 UI 显示未登录）
+                        if (data.username) localStorage.setItem('authUsername', data.username);
+                        if (data.user_id) localStorage.setItem('authUserId', data.user_id);
+                        if (data.role) localStorage.setItem('authRole', data.role);
+                        if (typeof updateAuthHeaderBtn === 'function') updateAuthHeaderBtn();
                         if (typeof window._loadCloudMemories === 'function') window._loadCloudMemories();
                         if (typeof window._loadCloudIdentity === 'function') window._loadCloudIdentity();
-                        // ★ AI 自主询问身份: 如果没有身份信息,自动在 Agent 聊天中询问
                         setTimeout(function() {
                             if (typeof window._autoAskIdentity === 'function') window._autoAskIdentity();
                         }, 3000);
                     }
-                } catch(e) {}
+                } catch(e) {
+                    // ★ 网络异常也不应静默: 延迟重试
+                    console.warn('[Auth] 验证token失败,2s后重试:', e.message);
+                    setTimeout(function() {
+                        fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token))
+                            .then(function(r2) { return r2.json(); })
+                            .then(function(d2) {
+                                if (!d2.valid) {
+                                    localStorage.removeItem('authToken');
+                                    showAuthOverlay && showAuthOverlay();
+                                } else {
+                                    if (d2.username) localStorage.setItem('authUsername', d2.username);
+                                    if (d2.user_id) localStorage.setItem('authUserId', d2.user_id);
+                                    if (d2.role) localStorage.setItem('authRole', d2.role);
+                                    if (typeof updateAuthHeaderBtn === 'function') updateAuthHeaderBtn();
+                                }
+                            }).catch(function() {});
+                    }, 2000);
+                }
             })();
         }
 

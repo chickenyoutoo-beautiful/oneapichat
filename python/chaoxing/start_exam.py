@@ -32,15 +32,25 @@ def main():
     from chaoxing.exam_auto import ChaoxingExam, ExamAccessDenied, ExamIsCommitted, ExamNotStart
     from chaoxing.answer import Tiku
 
-    # 登录
     acc = Account(username, password)
     api = Chaoxing(account=acc)
-    lr = api.login()
-    if not lr['status']:
-        print(json.dumps({"error": f"登录失败: {lr.get('msg','')}"}))
-        return
-
+    # ★ 先尝试用已有 Cookie（避免重复登录触发验证码）
     s = init_session()
+    # 用 cookie session 快速验证课程是否可访问
+    try:
+        test_courses = api.get_course_list()
+        if not test_courses:
+            lr = api.login()
+            if not lr['status']:
+                print(json.dumps({"error": f"登录失败: {lr.get('msg','')}"}))
+                return
+            s = init_session()
+    except Exception:
+        lr = api.login()
+        if not lr['status']:
+            print(json.dumps({"error": f"登录失败: {lr.get('msg','')}"}))
+            return
+        s = init_session()
     tiku = Tiku()
     try:
         tiku = tiku.get_tiku_from_config()

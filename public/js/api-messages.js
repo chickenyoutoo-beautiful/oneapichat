@@ -373,7 +373,11 @@ function buildApiMessages(chatId) {
             }
         }
     }
+<<<<<<< Updated upstream
     // ★ 额外: 扫描源消息中的 _chainCompletedToolCalls
+=======
+    // ★ 额外: 扫描源消息中的 _chainCompletedToolCalls (可能不在 apiMessagesUnfiltered 中)
+>>>>>>> Stashed changes
     for (var _si = 0; _si < msgs.length; _si++) {
         var _sm = msgs[_si];
         if (_sm._chainCompletedToolCalls && _sm._chainCompletedToolCalls.length > 0) {
@@ -408,19 +412,34 @@ function buildApiMessages(chatId) {
     // 第四遍: 标记孤立 tool 消息（无对应 assistant tool_call）
     // 发生在链式模式 delete pendingMsg.tool_calls 后旧轮次 tool 结果残留
     var _removedToolMsgCount = 0;
-    var _orphanSrcIndices = [];  // ★ 记录源数组中需删除的索引
     for (var _tfi3 = 0; _tfi3 < apiMessagesUnfiltered.length; _tfi3++) {
         var _tmsg3 = apiMessagesUnfiltered[_tfi3];
         if (_tmsg3.role === 'tool' && _tmsg3.tool_call_id) {
             if (!_assistantTcIds[_tmsg3.tool_call_id]) {
-                _tmsg3._removeOrphan = true;
-                if (_tmsg3._srcIndex !== undefined) _orphanSrcIndices.push(_tmsg3._srcIndex);
-                _removedToolMsgCount++;
-                console.warn('[buildApiMessages] 移除孤立 tool 消息(无对应 tool_calls):', _tmsg3.tool_call_id);
+                // ★ 兜底: 尝试用前缀匹配(某些API返回的tool_call_id格式可能不一致)
+                var _matched = false;
+                var _tcKeys = Object.keys(_assistantTcIds);
+                for (var _tck = 0; _tck < _tcKeys.length; _tck++) {
+                    if (_tmsg3.tool_call_id.indexOf(_tcKeys[_tck]) >= 0 || _tcKeys[_tck].indexOf(_tmsg3.tool_call_id) >= 0) {
+                        _matched = true;
+                        _tmsg3.tool_call_id = _tcKeys[_tck];  // 修复为匹配的ID
+                        break;
+                    }
+                }
+                if (!_matched) {
+                    _tmsg3._removeOrphan = true;
+                    _removedToolMsgCount++;
+                    console.warn('[buildApiMessages] 移除孤立 tool 消息(无对应 tool_calls):', _tmsg3.tool_call_id);
+                }
             }
         }
     }
+<<<<<<< Updated upstream
     // ★ 仅从本轮API消息中过滤孤tool消息，不再从源数组永久删除（永久删除导致AI失忆→重复调用→死循环）
+=======
+    // ★ 第四遍标记孤tool消息后: 仅从本次API消息中过滤，不再从源数组永久删除
+    // 永久删除会导致AI在下一轮"忘记"工具调用结果→重复调用→死循环
+>>>>>>> Stashed changes
     if (_removedToolMsgCount > 0) {
         apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
     }

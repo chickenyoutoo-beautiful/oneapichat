@@ -44,12 +44,15 @@ def cmd_list(args):
 
     try:
         api = Chaoxing(account=account, tiku=tiku)
-        login_result = api.login()
-        if not login_result["status"]:
-            print(json.dumps({"error": f"登录失败: {login_result.get('msg', '?')}"}))
-            return
-
+        # ★ 先尝试用已有 Cookie 获取课程（避免重复登录触发验证码）
         courses = api.get_course_list()
+        if not courses:
+            login_result = api.login()
+            if not login_result["status"]:
+                print(json.dumps({"error": f"登录失败: {login_result.get('msg', '?')}"}))
+                return
+            courses = api.get_course_list()
+
         from chaoxing.base import init_session
         exam_runner = ChaoxingExam(account, tiku=tiku, session=init_session())
         all_exams = []

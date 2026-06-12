@@ -25,7 +25,18 @@
                     } catch (parseErr) {
                         // ★ 尝试更激进的修复: 直接按名称提取参数
                         var argStr2 = typeof func.arguments === 'string' ? func.arguments : '';
-                        if (func.name === 'engine_agent_create') {
+                        if (func.name === 'server_file_edit' || func.name === 'server_file_write') {
+                            var _pMatch = argStr2.match(/"path"\s*:\s*"([^"]*)"/);
+                            var _oMatch = argStr2.match(/"old_string"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
+                            var _nMatch = argStr2.match(/"new_string"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
+                            var _cMatch = argStr2.match(/"content"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
+                            args = {
+                                path: _pMatch ? _pMatch[1] : '',
+                                old_string: _oMatch ? _oMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+                                new_string: _nMatch ? _nMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+                                content: _cMatch ? _cMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : ''
+                            };
+                        } else if (func.name === 'engine_agent_create') {
                             var nameMatch = argStr2.match(/"name"\s*:\s*"([^"]+)"/);
                             var promptMatch = argStr2.match(/"prompt"\s*:\s*"([\s\S]*?)"(?=\s*[,\}])/);
                             var modelMatch = argStr2.match(/"model"\s*:\s*"([^"]+)"/);
@@ -63,9 +74,26 @@
                                 tasks: _tasks,
                                 note: _noteMatch ? _noteMatch[1] : ''
                             };
-                            console.log('[plan_update] JSON修复模式, 提取到 action=' + args.action + ' task_id=' + args.task_id + ' status=' + args.status);
                         } else {
-                            args = { query: typeof func.arguments === 'string' ? func.arguments : (func.arguments?.query || '') };
+                            // ★ 通用回退: 正则提取所有 "key":"value" 对
+                            args = {};
+                            var _kvRegex = /"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+                            var _kvMatch;
+                            while ((_kvMatch = _kvRegex.exec(argStr2)) !== null) {
+                                args[_kvMatch[1]] = _kvMatch[2].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                            }
+                            // 也提取数字和布尔值
+                            var _kvNumRegex = /"(\w+)"\s*:\s*(-?\d+(?:\.\d+)?|true|false)/g;
+                            while ((_kvMatch = _kvNumRegex.exec(argStr2)) !== null) {
+                                var _v = _kvMatch[2];
+                                if (_v === 'true') _v = true;
+                                else if (_v === 'false') _v = false;
+                                else _v = parseFloat(_v);
+                                args[_kvMatch[1]] = _v;
+                            }
+                        }
+                        if (Object.keys(args).length === 0) {
+                            console.warn('[executeToolCallForRetry] 无法解析工具参数:', func.name, argStr2.substring(0, 200));
                         }
                     }
                     let toolResult = { error: `Unknown tool: ${func.name}` };
@@ -149,6 +177,49 @@
                             }
                         } else {
                             toolResult = { error: 'Missing urls parameter. Provide a URL or array of URLs.' };
+                        }
+                    }
+                    else if (func.name === 'run_skill') {
+                        var skillName = args.skill_name || '';
+                        var skillParams = args.params || {};
+                        if (skillName) {
+                            try {
+                                var skillResp = await fetch('/oneapichat/api/engine_api.php?action=skills_run&auth_token=' + encodeURIComponent(window.getAuthToken ? getAuthToken() : ''), {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ skill_name: skillName, params: skillParams })
+                                });
+                                var skillData = await skillResp.json();
+                                if (skillData && skillData.ok) {
+                                    toolResult = { result: skillData.prompt || '技能已执行' };
+                                } else {
+                                    toolResult = { error: (skillData && skillData.error) || '技能执行失败' };
+                                }
+                            } catch (e) {
+                                toolResult = { error: e.message };
+                            }
+                        } else {
+                            toolResult = { error: 'Missing skill_name parameter' };
+                        }
+                    }
+                    else if (func.name === 'platform_extract') {
+                        var platUrl = args.url || '';
+                        if (platUrl) {
+                            try {
+                                var platResp = await fetch('/oneapichat/api/engine_api.php?action=platform_extract&url=' + encodeURIComponent(platUrl) + '&auth_token=' + encodeURIComponent(window.getAuthToken ? getAuthToken() : ''));
+                                var platData = await platResp.json();
+                                if (platData && platData.result) {
+                                    toolResult = { result: platData.result };
+                                } else if (platData && platData.error) {
+                                    toolResult = { error: platData.error };
+                                } else {
+                                    toolResult = { result: '内容提取完成' };
+                                }
+                            } catch (e) {
+                                toolResult = { error: e.message };
+                            }
+                        } else {
+                            toolResult = { error: 'Missing url parameter' };
                         }
                     }
                     else if (func.name === 'rag_search') {
@@ -277,13 +348,27 @@
                         } else { toolResult = await engineApiHandler('cron_delete', args); }
                     }
                      else if (func.name === 'server_exec') {
-                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                        // ★ 参数别名容错: AI可能用不同参数名
+                        if (!args.cmd && args.command) args.cmd = args.command;
+                        if (!args.cmd && args.command) args.cmd = args.command;
+                        if (!args.cmd && args.query) args.cmd = args.query;
+                        if (!args.cmd && args.code) args.cmd = args.code;
+                        if (!args.cmd && args.code) args.cmd = args.code;
+                        if (!args.cmd) { toolResult = { error: '缺少 cmd 参数。格式: server_exec(cmd="shell命令")' }; }
+                        else if (isHighRiskTool(func.name) && isApprovalMode()) {
                             var approved = await requestToolApproval(func.name, args);
                             if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('exec', args); }
                         } else { toolResult = await engineApiHandler('exec', args); }
                     }
                      else if (func.name === 'server_python') {
-                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                        // ★ 参数别名容错: AI可能用不同参数名
+                        if (!args.script && args.code) args.script = args.code;
+                        if (!args.script && args.code) args.script = args.code;
+                        if (!args.script && args.query) args.script = args.query;
+                        if (!args.script && args.cmd) args.script = args.cmd;
+                        if (!args.script && args.cmd) args.script = args.cmd;
+                        if (!args.script) { toolResult = { error: '缺少 script 参数。格式: server_python(script="python代码")' }; }
+                        else if (isHighRiskTool(func.name) && isApprovalMode()) {
                             var approved = await requestToolApproval(func.name, args);
                             if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('python', args); }
                         } else { toolResult = await engineApiHandler('python', args); }
@@ -292,19 +377,36 @@
                         toolResult = await engineApiHandler('file_read', args);
                     }
                      else if (func.name === 'server_file_write') {
-                        if (isHighRiskTool(func.name) && isApprovalMode()) {
+                        // ★ 参数别名容错
+                        if (!args.path && args.file_path) args.path = args.file_path;
+                        if (!args.path && args.file) args.path = args.file;
+                        if (!args.path && args.filename) args.path = args.filename;
+                        if (!args.content && args.text) args.content = args.text;
+                        if (!args.content && args.data) args.content = args.data;
+                        if (!args.content && args.body) args.content = args.body;
+                        if (!args.path) { toolResult = { error: '缺少 path 参数。格式: server_file_write(path="/path/to/file", content="文件内容")' }; }
+                        else if (!args.content && args.content !== '') { toolResult = { error: '缺少 content 参数。格式: server_file_write(path="/path/to/file", content="文件内容")' }; }
+                        else if (isHighRiskTool(func.name) && isApprovalMode()) {
                             var approved = await requestToolApproval(func.name, args);
                             if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_write', args); }
                         } else { toolResult = await engineApiHandler('file_write', args); }
                     }
                      else if (func.name === 'server_file_edit') {
                         // ★ 参数别名容错
+                        if (!args.path && args.file_path) args.path = args.file_path;
+                        if (!args.path && args.file) args.path = args.file;
                         if (!args.old_string && args.old_str) args.old_string = args.old_str;
+                        if (!args.old_string && args.old) args.old_string = args.old;
+                        if (!args.old_string && args.original) args.old_string = args.original;
                         if (!args.new_string && args.new_str) args.new_string = args.new_str;
+                        if (!args.new_string && args.new) args.new_string = args.new;
+                        if (!args.new_string && args.replacement) args.new_string = args.replacement;
                         if (!args.path) {
                             toolResult = { error: '缺少 path 参数。格式: server_file_edit(path="/path/to/file", old_string="原文", new_string="新文")' };
-                        } else if (!args.old_string || !args.new_string) {
-                            toolResult = { error: '缺少 old_string 或 new_string 参数' };
+                        } else if (!args.old_string && !args.old_str) {
+                            toolResult = { error: '缺少 old_string 参数' };
+                        } else if (!args.new_string && !args.new_str) {
+                            toolResult = { error: '缺少 new_string 参数' };
                         } else if (isApprovalMode()) {
                             var _editApproved = await requestToolApproval(func.name, args);
                             if (!_editApproved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_edit', args); }
@@ -471,6 +573,7 @@
                                 toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' };
                             }
                         } else if (planAction === 'running') {
+<<<<<<< Updated upstream
                             if (window._agentPlan && window._agentPlan.tasks) {
                                 var _firstPending = null;
                                 window._agentPlan.tasks.forEach(function(t) { if (!_firstPending && t.status === 'pending') _firstPending = t; });
@@ -478,6 +581,32 @@
                                 else { toolResult = { error: '没有待执行(pending)的任务。可用 plan_update(action=\"update\", task_id=\"X\", status=\"running\") 指定具体任务。' }; }
                             } else { toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' }; }
 
+=======
+                            // ★ action="running" 是常见误用，自动转换为 update + 自动选择第一个 pending 任务
+                            if (window._agentPlan && window._agentPlan.tasks) {
+                                var _firstPending = null;
+                                window._agentPlan.tasks.forEach(function(t) {
+                                    if (!_firstPending && t.status === 'pending') _firstPending = t;
+                                });
+                                if (_firstPending) {
+                                    _firstPending.status = 'running';
+                                    window._agentPlan.currentTaskId = _firstPending.id;
+                                    window.updatePlanTaskStatus(_firstPending.id, 'running');
+                                    toolResult = { result: '✅ 自动开始任务 "' + _firstPending.id + '": ' + _firstPending.title + '。\n提示: plan_update 的 action 参数只支持 create/update/complete。"running" 是 status 参数的值。' };
+                                } else {
+                                    toolResult = { error: '没有待执行(pending)的任务。可用 plan_update(action="update", task_id="X", status="running") 指定具体任务。' };
+                                }
+                            } else {
+                                toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。\n提示: "running" 是任务状态(status字段)，不是 action 字段。action 只支持: create, update, complete。' };
+                            }
+>>>>>>> Stashed changes
+                        } else if (planAction === 'running') {
+                            if (window._agentPlan && window._agentPlan.tasks) {
+                                var _firstPending = null;
+                                window._agentPlan.tasks.forEach(function(t) { if (!_firstPending && t.status === 'pending') _firstPending = t; });
+                                if (_firstPending) { _firstPending.status = 'running'; window._agentPlan.currentTaskId = _firstPending.id; window.updatePlanTaskStatus(_firstPending.id, 'running'); toolResult = { result: '✅ 自动开始任务 "' + _firstPending.id + '": ' + _firstPending.title + '。提示: action 只支持 create/update/complete，"running" 是 status 参数的值。' }; }
+                                else { toolResult = { error: '没有待执行(pending)的任务。' }; }
+                            } else { toolResult = { error: '没有活跃计划。请先用 action=create 创建计划。' }; }
                         } else if (planAction === 'complete') {
                             if (window._agentPlan) {
                                 window._agentPlan.status = 'completed';

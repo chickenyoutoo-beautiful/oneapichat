@@ -197,24 +197,110 @@ class BrowserManager:
     # ── 点击 ──────────────────────────────────────────
 
     async def click(self, selector: str) -> dict:
-        """点击元素"""
+        """点击元素 — 三级降级:正常 → force → evaluate 派发 DOM 事件"""
         await self._ensure_page()
+        # 第一级:正常点击(需要元素可见)
         try:
-            await self._page.click(selector, timeout=10000)
-            return {"ok": True, "selector": selector}
-        except Exception as e:
-            return {"ok": False, "error": f"点击失败: {str(e)}"}
+            await self._page.click(selector, timeout=4000)
+            return {"ok": True, "selector": selector, "method": "normal"}
+        except Exception as e1:
+            # 第二级:force click(绕过可见性检查)
+            try:
+                await self._page.click(selector, timeout=4000, force=True)
+                return {"ok": True, "selector": selector, "method": "force"}
+            except Exception as e2:
+                # 第三级:evaluate 直接派发 DOM 事件(终极方案,绕过所有 Playwright 检查)
+                try:
+                    result = await self._page.evaluate(
+                        """(sel) => {
+                            const el = document.querySelector(sel);
+                            if (!el) return {ok: false, error: '元素不存在'};
+                            // 强制让元素可见
+                            el.style.display = el.style.display || 'block';
+                            el.style.visibility = 'visible';
+                            el.style.opacity = '1';
+                            el.style.pointerEvents = 'auto';
+                            // 派发 click 事件
+                            el.click();
+                            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                                el.dispatchEvent(new MouseEvent(evt, {bubbles: true, cancelable: true, view: window}));
+                            });
+                            return {ok: true};
+                        }""",
+                        selector,
+                    )
+                    if result.get("ok"):
+                        return {"ok": True, "selector": selector, "method": "evaluate"}
+                    return {"ok": False, "error": f"evaluate 失败: {result.get('error', '未知')}"}
+                except Exception as e3:
+                    return {
+                        "ok": False,
+                        "error": f"点击失败(三级降级均失败): 正常={e1!s} | force={e2!s} | evaluate={e3!s}",
+                    }
 
     # ── 输入 ──────────────────────────────────────────
 
     async def type_text(self, selector: str, text: str) -> dict:
-        """输入文字（先清空再输入）"""
+        """输入文字 — 三级降级:正常 → force → evaluate 派发 input 事件"""
         await self._ensure_page()
+        # 第一级:正常 fill(需要元素可见可编辑)
         try:
-            await self._page.fill(selector, text, timeout=10000)
-            return {"ok": True, "selector": selector, "text_length": len(text)}
-        except Exception as e:
-            return {"ok": False, "error": f"输入失败: {str(e)}"}
+            await self._page.fill(selector, text, timeout=4000)
+            return {"ok": True, "selector": selector, "text_length": len(text), "method": "normal"}
+        except Exception as e1:
+            # 第二级:force fill(绕过可见性检查)
+            try:
+                await self._page.fill(selector, text, timeout=4000, force=True)
+                return {"ok": True, "selector": selector, "text_length": len(text), "method": "force"}
+            except Exception as e2:
+                # 第三级:evaluate + native setter + 派发 input 事件(终极方案)
+                try:
+                    result = await self._page.evaluate(
+                        """([sel, txt]) => {
+                            const el = document.querySelector(sel);
+                            if (!el) return {ok: false, error: '元素不存在'};
+                            // 强制可见可编辑
+                            el.style.display = el.style.display || 'block';
+                            el.style.visibility = 'visible';
+                            el.style.opacity = '1';
+                            el.style.pointerEvents = 'auto';
+                            el.removeAttribute('readonly');
+                            el.removeAttribute('disabled');
+                            el.focus();
+                            // 用 native setter 绕过 React/Vue 的 value 拦截
+                            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                                const proto = el.tagName === 'INPUT'
+                                    ? window.HTMLInputElement.prototype
+                                    : window.HTMLTextAreaElement.prototype;
+                                const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                                if (setter) setter.call(el, txt);
+                                else el.value = txt;
+                            } else if (el.isContentEditable) {
+                                el.innerText = txt;
+                            } else {
+                                el.textContent = txt;
+                            }
+                            // 派发 input/change 事件,让框架能监听到
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                            return {ok: true, value: el.value || el.innerText || el.textContent};
+                        }""",
+                        [selector, text],
+                    )
+                    if result.get("ok"):
+                        return {
+                            "ok": True,
+                            "selector": selector,
+                            "text_length": len(text),
+                            "method": "evaluate",
+                            "value_set": (result.get("value", "") or "")[:100],
+                        }
+                    return {"ok": False, "error": f"evaluate 失败: {result.get('error', '未知')}"}
+                except Exception as e3:
+                    return {
+                        "ok": False,
+                        "error": f"输入失败(三级降级均失败): 正常={e1!s} | force={e2!s} | evaluate={e3!s}",
+                    }
 
     # ── 获取内容 ──────────────────────────────────────
 

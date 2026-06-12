@@ -75,10 +75,24 @@ window.ResumeStream = (function() {
                         if (dl) {
                             full+=dl;
                             pendingMsg.content=full;
-                            // ★ 实时剔除 <think> 块用于显示
+                            // ★ 实时剔除完整闭合的 <think> 块用于显示（不用 $ 兜底，避免吞正文）
                             var _display = full;
-                            if (full.indexOf('<think>') !== -1) {
-                                _display = full.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+                            if (full.indexOf('<think>') !== -1 && full.indexOf('</think>') > full.indexOf('<think>')) {
+                                _display = full.replace(/<think>[\s\S]*?<\/think>/g, '');
+                            }
+                            // ★ MiniMax 实时去重: 正文可能包含思考内容前缀, 流式时即清除
+                            // (与 _backendSSEHandler / streamResponse 行为一致, 修复 MiniMax-M3 思考泄漏到正文)
+                            if (reasoning && _display.indexOf(reasoning) === 0) {
+                                _display = _display.substring(reasoning.length);
+                                _display = _display.replace(/^[\s\n]+/, '');
+                            } else if (reasoning && reasoning.length > 30 && _display.length > reasoning.length * 0.5) {
+                                // 部分前缀重叠 (MiniMax-M3 有时会切碎重复)
+                                for (var _oi = Math.min(reasoning.length, 500); _oi > 30; _oi--) {
+                                    if (_display.indexOf(reasoning.substring(0, _oi)) === 0) {
+                                        _display = _display.substring(_oi).replace(/^[\s\n]+/, '');
+                                        break;
+                                    }
+                                }
                             }
                             applyStreamRender(chatId, _display);
                         }
@@ -168,29 +182,58 @@ window.ResumeStream = (function() {
                 } catch(e) {}
             }
         }
-        // ★ 清理 <think> 标签：提取思考内容到 reasoning，从正文移除
+        // ★ 清理 <think> 和 (think) 标签：提取思考内容到 reasoning，从正文移除
         if (full) {
+            var _allThinkRS = '';
+            // 格式1: <think>...</think> (DeepSeek r1 等)
             var _thinkMatch = full.match(/<think>([\s\S]*?)<\/think>/g);
             if (_thinkMatch) {
-                var _thinkText = '';
                 for (var _ti = 0; _ti < _thinkMatch.length; _ti++) {
-                    _thinkText += _thinkMatch[_ti].replace(/<\/?think>/g, '');
+                    _allThinkRS += _thinkMatch[_ti].replace(/<\/?think>/g, '');
                 }
                 full = full.replace(/<think>[\s\S]*?<\/think>/g, '');
-                if (_thinkText.trim() && !reasoning) reasoning = _thinkText.trim();
             }
+            // 格式2: MiniMax (think)...(endthink)
+            var _mtRS = full.match(/\(think\)([\s\S]*?)\(endthink\)/g);
+            if (_mtRS) {
+                for (var _mti = 0; _mti < _mtRS.length; _mti++) {
+                    _allThinkRS += _mtRS[_mti].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
+                }
+                full = full.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
+            }
+            // 未闭合 (think) 兜底
+            var _openRS = full.match(/\(think\)([\s\S]*?)$/);
+            if (_openRS && _openRS[1].length < 2000 && _openRS[1].length > 5) {
+                _allThinkRS += _openRS[1];
+                full = full.replace(/\(think\)[\s\S]*$/, '');
+            }
+            if (_allThinkRS.trim() && !reasoning) reasoning = _allThinkRS.trim();
+            full = full.trim();
+
             // ★ MiniMax去重: 思考内容可能在正文中重复出现
-            if (reasoning && full.length > reasoning.length) {
+            if (reasoning && full && full.length > 20) {
                 var _rt2 = reasoning.trim();
                 var _ft2 = full.trim();
-                if (_ft2.indexOf(_rt2) === 0) {
+                if (_rt2 && _ft2.indexOf(_rt2) === 0) {
                     full = _ft2.substring(_rt2.length).trim();
-                } else if (_ft2.indexOf(_rt2.substring(0, 200)) === 0) {
-                    for (var _oi = Math.min(_rt2.length, 500); _oi > 100; _oi--) {
+                } else if (_rt2 && _ft2.length > _rt2.length * 0.5) {
+                    // 部分前缀重叠
+                    for (var _oi = Math.min(_rt2.length, 500); _oi > 50; _oi--) {
                         if (_ft2.indexOf(_rt2.substring(0, _oi)) === 0) {
                             full = _ft2.substring(_oi).trim(); break;
                         }
                     }
+                }
+                // 正文中间内嵌思考
+                if (_rt2.length > 30 && full && full.length > 0) {
+                    var _rtPos = full.substring(0, Math.min(full.length, 1000)).indexOf(_rt2);
+                    if (_rtPos > 0 && _rtPos < 500) {
+                        full = (full.substring(0, _rtPos) + full.substring(_rtPos + _rt2.length)).trim();
+                    }
+                }
+                // 开头的 (think) 标签残留
+                if (full && /^\(think\)/i.test(full)) {
+                    full = full.replace(/^\(think\)\s*/i, '').trim();
                 }
             }
         }

@@ -100,10 +100,13 @@ function _flushStreamRender_batched(chatId, st) {
             }
         }
         mb.innerHTML = _html;
-        // ★ 代码高亮（DOM方式，只处理新增的未高亮块）
+        // ★ 流式过程中不渲染 Mermaid — 保留为代码块，避免渲染中 SVG 突然撑大气泡导致页面抖动
+        // 代码高亮正常执行，mermaid 块已被 :not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"]) 排除
+        // 流结束后由 _triggerPostRender 统一批量渲染所有 Mermaid 图表
+        // ★ 代码高亮（排除 mermaid — hljs 无此语言模块，会报 WARN）
         if (typeof hljs !== 'undefined') {
             try {
-                var _blocks = mb.querySelectorAll('pre code[class*="language-"]:not(.hljs)');
+                var _blocks = mb.querySelectorAll('pre code[class*="language-"]:not(.hljs):not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"])');
                 for (var _bi = 0; _bi < _blocks.length && _bi < 20; _bi++) {
                     try { hljs.highlightElement(_blocks[_bi]); } catch(e) {}
                 }
@@ -122,11 +125,100 @@ function _flushStreamRender_batched(chatId, st) {
     requestAnimationFrame(function() { mb.style.minHeight = ''; });
 }
 
+// ★ 自动检测未加围栏的 mermaid 代码，补上 ```mermaid ``` 包裹
+// 模型有时会输出 mermaid 语法但忘记加代码围栏（尤其是 gantt 图）
+function _autoFenceMermaid(text) {
+    if (!text) return text;
+    // ★ 检测不在 ``` 围栏内的 mermaid 块：以 mermaid 关键字开头，缩进，多行
+    // 匹配：gantt / pie / graph / flowchart / sequenceDiagram 等关键字开头的段落
+    var _mermaidKeywords = 'gantt|pie|graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|mindmap|timeline|gitgraph|xychart-beta|xychart|sankey-beta|block-beta|dot';
+    // 检测：title + dateFormat 组合（甘特图无 gantt 关键字开头时的特征）
+    var _hasGanttPattern = /\btitle\s+.+\n\s+(dateFormat|axisFormat|section)\s+/i.test(text);
+    // 构建正则：不在围栏内的 mermaid 块
+    var _bareRe = new RegExp('(^|\\n\\n)(\\s{0,4})(' + _mermaidKeywords + ')\\b', 'i');
+    var _match = _bareRe.exec(text);
+    var _ganttMatch = _hasGanttPattern ? text.match(/(^|\n\n)(\s{0,4}title\s+[^\n]+\n(?:\s{2,}[^\n]+\n?)+)/i) : null;
+
+    if (_match) {
+        // ★ 找到裸 mermaid 块 → 提取整个缩进块并包裹
+        var _startIdx = _match.index + _match[1].length;
+        var _blockStart = _match[1] + _match[2] + _match[3];
+        var _rest = text.substring(_startIdx + _match[2].length + _match[3].length);
+        // 提取到下一个空行或文本结束
+        var _endMatch = _rest.match(/\n\n(?!\s)/);
+        var _blockBody = _endMatch ? _rest.substring(0, _endMatch.index) : _rest;
+        var _after = _endMatch ? _rest.substring(_endMatch.index) : '';
+        var _fenced = '\n\n```mermaid\n' + _match[3] + _blockBody.trimEnd() + '\n```\n' + _after;
+        text = text.substring(0, _startIdx) + _fenced;
+        console.log('[Mermaid] 自动包裹未加围栏的 ' + (_match[3] || 'mermaid') + ' 代码块');
+    } else if (_ganttMatch) {
+        var _gBody = _ganttMatch[2];
+        var _gStart = _ganttMatch.index + _ganttMatch[1].length;
+        var _fencedGantt = '\n\n```mermaid\ngantt\n' + _gBody.trimEnd() + '\n```';
+        text = text.substring(0, _gStart) + _fencedGantt + text.substring(_gStart + _gBody.length);
+        console.log('[Mermaid] 自动包裹未加围栏的 gantt 代码块 (title+section 特征)');
+    }
+    return text;
+}
+
+// ★ 隐藏未闭合的公式(流式时避免原始LaTeX闪烁 → 界面抖动)
+// 从左到右扫描 $/$$ 配对, 截断末尾未闭合的公式
+function _hideIncompleteMath(text) {
+    var i = 0;
+    var cutAt = -1;
+    var inDisplay = false, displayOpenAt = -1;
+    var inInline = false, inlineOpenAt = -1;
+
+    while (i < text.length) {
+        // 检测 $$ (优先, 因为包含两个$)
+        if (i + 1 < text.length && text[i] === '$' && text[i+1] === '$') {
+            if (inDisplay) {
+                inDisplay = false;           // 闭合块公式
+            } else if (!inInline) {
+                inDisplay = true;            // 打开块公式
+                displayOpenAt = i;
+            }
+            i += 2;
+        } else if (text[i] === '$') {
+            // 单个 $ (行内公式)
+            if (inInline) {
+                inInline = false;            // 闭合行内公式
+            } else if (!inDisplay) {
+                inInline = true;             // 打开行内公式
+                inlineOpenAt = i;
+            }
+            i++;
+        } else {
+            i++;
+        }
+    }
+
+    // 未闭合的公式 → 截断
+    if (inInline && inlineOpenAt >= 0) {
+        cutAt = inlineOpenAt;
+    }
+    if (inDisplay && displayOpenAt >= 0) {
+        cutAt = (cutAt < 0) ? displayOpenAt : Math.min(cutAt, displayOpenAt);
+    }
+
+    if (cutAt >= 0) {
+        text = text.substring(0, cutAt);
+    }
+
+    return text;
+}
+
 // ★ 流式期间: 实时 KaTeX 渲染 + 公式缓存, 避免重复渲染已闭合的公式
 // 缓存 key = formula_text → rendered HTML, 只有新公式或变化才调用 katex
 function _renderMarkdownWithMath_cached(text, st) {
     if (!text) return '';
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
+
+    // ★ 预处理: 检测未加围栏的 mermaid 代码块，自动补上包裹
+    text = _autoFenceMermaid(text);
+
+    // ★ 隐藏未闭合公式: 流式时截断末尾不完整的 $...$ 避免 raw LaTeX 闪烁
+    text = _hideIncompleteMath(text);
 
     // ★ 增量公式缓存: st._mathCache = { formulaText: renderedHtml }
     if (!st._mathCache) st._mathCache = {};
@@ -163,6 +255,9 @@ function _renderMarkdownWithMath_cached(text, st) {
     });
 
     var html = window.marked.parse(protected_);
+
+    // ★ 按 ID 长度降序排列，防止 MATHB0 错误匹配 MATHB10 (前缀碰撞)
+    formulas.sort(function(a, b) { return b.id.length - a.id.length; });
 
     // 渲染公式(带缓存)
     for (var i = 0; i < formulas.length; i++) {
@@ -323,42 +418,65 @@ const MarkdownRenderer = {
      * 后处理:代码高亮 + Mermaid + 图片优化
      */
     postRender(container) {
-        try { this.highlightCode(container); } catch(e) {}
+        // ★ mermaid 必须在 highlightCode 之前：先把 gantt/dot/mermaid 代码块转为 .mermaid div，
+        // 否则 hljs 对不支持的语言报 WARN
         try { this.renderMermaid(container); } catch(e) {}
+        try { this.highlightCode(container); } catch(e) {}
         try { this.optimizeImages(container); } catch(e) {}
     },
 
     /** 渲染 Mermaid 图表(支持流式实时渲染) */
     renderMermaid(container) {
-        if (typeof mermaid === 'undefined') return;
+        if (typeof mermaid === 'undefined') { console.log('[Mermaid] renderMermaid skipped — mermaid 库未加载，等待 _triggerPostRender 重试'); return; }
 
-        // 步骤1: 将 marked 输出的 language-mermaid 代码块转换为 .mermaid div
-        container.querySelectorAll('pre code[class*="language-mermaid"]').forEach(function(codeBlock) {
+        // 步骤1: 将 marked 输出的 mermaid 代码块转换为 .mermaid div（含变体）+ 预留高度
+        container.querySelectorAll('pre code[class*="language-mermaid"], pre code[class*="language-mer"], pre code[class="language-m"], pre code[class*="language-gantt"], pre code[class*="language-dot"]').forEach(function(codeBlock) {
             if (codeBlock.closest('.mermaid')) return;
             var pre = codeBlock.parentNode;
             var mermaidDiv = document.createElement('div');
-            mermaidDiv.className = 'mermaid';
+            mermaidDiv.className = 'mermaid mermaid-rendering';
             var code = codeBlock.textContent;
             mermaidDiv.textContent = code;
             mermaidDiv.setAttribute('data-original-code', code);
+            // ★ 预留高度防抖动：每行 ~24px，min 120px
+            var _lineCount = (code.match(/\n/g) || []).length + 1;
+            mermaidDiv.style.minHeight = Math.max(120, _lineCount * 24) + 'px';
             pre.parentNode.replaceChild(mermaidDiv, pre);
         });
 
-        // 步骤2: 渲染所有尚未渲染的 .mermaid div(流式渲染时每帧重建,会自动重试)
+        // 步骤2: 批量渲染所有 .mermaid div，全部完成后滚到底部
         var mermaidDivs = container.querySelectorAll('.mermaid');
         if (!mermaidDivs.length) return;
+        var _pendingRenders = 0;
+        console.log('[Mermaid] renderMermaid found', mermaidDivs.length, 'mermaid divs');
         mermaidDivs.forEach(function(div) {
             var code = div.getAttribute('data-original-code') || div.textContent;
             if (!code || div.querySelector('svg')) return;
-            // 流式渲染: 如果 mermaid 代码还在不断变化,跳过本次渲染避免闪烁
             var prevCode = div.getAttribute('data-prev-code') || '';
             if (code === prevCode) return;
             div.setAttribute('data-prev-code', code);
+            _pendingRenders++;
             window.ChartRenderer.render(code.trim()).then(function(result) {
                 if (result.success) {
                     div.innerHTML = result.svg;
+                    div.classList.remove('mermaid-rendering');
+                    div.style.minHeight = '';
+                    console.log('[Mermaid] render success, type:', result.type);
+                } else {
+                    console.warn('[Mermaid] render failed:', result.message || result.error, 'code preview:', code.substring(0, 60));
                 }
-            }).catch(function() {});
+            }).catch(function(e) {
+                console.error('[Mermaid] render exception:', e.message || e);
+            }).finally(function() {
+                _pendingRenders--;
+                // ★ 所有图渲染完成后，滚到底部（如果用户未手动上滑）
+                if (_pendingRenders <= 0 && $.chatBox && !userScrolled && currentChatId) {
+                    setTimeout(function() {
+                        $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                        window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
+                    }, 50);
+                }
+            });
         });
     },
 
@@ -367,7 +485,7 @@ const MarkdownRenderer = {
      */
     highlightCode(container) {
         if (typeof hljs === 'undefined') return;
-        var _blocks = container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"])');
+        var _blocks = container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"]):not([class*="gantt"]):not([class*="dot"])');
         for (var _i = 0; _i < _blocks.length && _i < 30; _i++) {
             try { hljs.highlightElement(_blocks[_i]); } catch (e) {}
         }
@@ -395,13 +513,38 @@ const MarkdownRenderer = {
 // 后处理辅助:渲染完 HTML 后触发代码高亮 + Mermaid 图表 + Code Apply 按钮
 function _triggerPostRender(container) {
     if (!container || !MarkdownRenderer) return;
-    setTimeout(function() {
+    // ★ 检查是否有 mermaid 代码块需要渲染（含缩写变体）
+    var _hasMermaid = container.querySelector && (
+        container.querySelector('pre code[class*="language-mermaid"]') ||
+        container.querySelector('pre code[class*="language-mer"]') ||
+        container.querySelector('pre code[class="language-m"]') ||
+        container.querySelector('pre code[class*="language-gantt"]') ||
+        container.querySelector('pre code[class*="language-dot"]') ||
+        container.querySelector('.mermaid:not(svg)')
+    );
+    var _tryRender = function() {
         try {
             MarkdownRenderer.postRender(container);
-            // ★ 添加代码块 Apply 按钮 (diff viewer)
             if (window.addCodeBlockButtons) window.addCodeBlockButtons(container);
         } catch(e) { /* 静默失败 */ }
-    }, 0);
+    };
+    // ★ 如果当前 mermaid 未加载但有 mermaid 块，延迟重试等待加载
+    if (_hasMermaid && typeof mermaid === 'undefined') {
+        var _retries = 0;
+        var _retryTimer = setInterval(function() {
+            _retries++;
+            if (typeof mermaid !== 'undefined') {
+                clearInterval(_retryTimer);
+                console.log('[Mermaid] 库加载完成，延迟渲染 (retry=' + _retries + ')');
+                _tryRender();
+            } else if (_retries > 50) {
+                clearInterval(_retryTimer);
+                console.warn('[Mermaid] 等待超时，放弃渲染');
+            }
+        }, 200);
+    } else {
+        setTimeout(_tryRender, 0);
+    }
 }
 
 // ==================== 图表绘制工具 (AI可调用) ====================
@@ -411,12 +554,27 @@ window.ChartRenderer = {
         if (typeof mermaid === 'undefined') return { success: false, error: 'Mermaid未加载' };
         var processed = this.preprocess(code);
         let id = 'chart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        // ★ parse() 预检 — 语法错误提前拦截，避免 Mermaid 向 DOM 注入 error-icon CSS
+        try {
+            await mermaid.parse(processed);
+        } catch(parseErr) {
+            return this.handleError(parseErr, code);
+        }
         try {
             var result = await mermaid.render(id, processed);
-            return { success: true, svg: result.svg, type: this.detectType(code) };
+            // ★ 剥离 Mermaid 自带的 .error-icon / .error-text 残留
+            var cleanSvg = this._stripErrorElements(result.svg);
+            return { success: true, svg: cleanSvg, type: this.detectType(code) };
         } catch (e) {
             return this.handleError(e, code);
         }
+    },
+
+    _stripErrorElements(svg) {
+        if (!svg) return svg;
+        return svg
+            .replace(/<g[^>]*class="[^"]*error[^"]*"[^>]*>[\s\S]*?<\/g>/gi, '')
+            .replace(/<text[^>]*class="[^"]*error[^"]*"[^>]*>[\s\S]*?<\/text>/gi, '');
     },
 
     handleError(e, code) {
@@ -478,6 +636,35 @@ window.ChartRenderer = {
                 c = c.replace(/x-axis[^[]*\[([^\]]*)\]/, xMatch[0].replace(xMatch[1], newLabels.join(', ')));
             }
         }
+        }
+        // ★ Unicode 数学符号清洗 — Mermaid 10.x lexer 无法消化这些字符
+        //   mindmap / sankey / class 三种图的 lexer 最严格，触之即崩
+        var _type = this.detectType(c);
+        if (_type === 'mindmap' || _type === 'sankey' || _type === 'unsupported') {
+            var _symMap = [
+                ['√','sqrt'],['²','^2'],['³','^3'],['⁴','^4'],['⁵','^5'],
+                ['±','+/-'],['×','x'],['÷','/'],
+                ['Σ','SUM'],['∫','INT'],['∂','d'],['∇','grad'],
+                ['π','pi'],['∞','inf'],['Δ','Delta'],['Ω','Omega'],
+                ['α','alpha'],['β','beta'],['γ','gamma'],['δ','delta'],
+                ['ε','epsilon'],['ζ','zeta'],['η','eta'],['θ','theta'],
+                ['λ','lambda'],['μ','mu'],['ν','nu'],['ξ','xi'],
+                ['ρ','rho'],['σ','sigma'],['τ','tau'],['φ','phi'],
+                ['ψ','psi'],['ω','omega'],['Ψ','Psi'],['Φ','Phi'],
+                ['Γ','Gamma'],['Θ','Theta'],['Λ','Lambda'],
+                ['⁻','-'],['⁺','+'],['→','->'],['⇒','=>'],
+                ['⟨','<'],['⟩','>'],['⋅','*'],['…','...'],
+                ['≤','<='],['≥','>='],['≠','!=']
+            ];
+            for (var _si = 0; _si < _symMap.length; _si++) {
+                c = c.split(_symMap[_si][0]).join(_symMap[_si][1]);
+            }
+            // 去掉 undefined type 的 unicode 行内点号
+            c = c.replace(/•/g, '-');
+        }
+        // sankey / class: 移除 $ 符号（lexer 会剥离导致语法错误）
+        if (_type === 'sankey' || _type === 'class') {
+            c = c.replace(/\$/g, '');
         }
         return c;
     },

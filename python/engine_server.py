@@ -91,7 +91,8 @@ from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind
 from engine.event_frame import EventFlowBuilder, EventType, EventLog
 from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
 from engine.rag_engine import (rag_list_collections, rag_create_collection, rag_delete_collection,
-                                rag_upload_document, rag_search, rag_list_documents, rag_delete_document)
+                                rag_upload_document, rag_search, rag_list_documents, rag_delete_document,
+                                _get_embedding, _load_json, _save_json, RAG_DIR)
 from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
     str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect, init_video_context,
     _apply_subtitle, _apply_filter, _apply_transition, _apply_tts,
@@ -237,10 +238,15 @@ def cron_create(
     action: str = Query(...),
     user_id: str = Query("")
 ):
+    # ★ 防护: 拒绝空值或前端透传的 undefined 字符串
+    if not action or not action.strip() or action.strip().lower() == 'undefined':
+        return {"ok": False, "error": "action 参数无效(空值或 undefined)"}
+    if interval < 10:
+        return {"ok": False, "error": "interval 不能小于10秒"}
     store = get_ns("cron", user_id)
     jobs = store.get()
     jobs[name] = {
-        "name": name, "interval": interval, "action": action,
+        "name": name, "interval": interval, "action": action.strip(),
         "enabled": True, "created": datetime.now().isoformat()
     }
     store.set(jobs)
@@ -314,6 +320,10 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     agent = agents.get(name)
     if not agent:
         raise HTTPException(404, f"Agent {name} not found")
+    # ★ 防止重复运行: 已完成/运行中的代理不允许再次启动
+    _current_status = agent.get("status", "")
+    if _current_status in ("running", "completed"):
+        return {"ok": False, "error": f"Agent 已在运行或已完成 (status={_current_status})，请勿重复启动"}
     # 如果from_ask,把消息追加到agent的prompt
     if from_ask and message:
         agent["prompt"] = agent.get("prompt", "") + f"\n\n用户消息: {message}"
@@ -545,20 +555,74 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             results = []
             for url in urls:
                 try:
-                    r = _http_session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-                    # ★ 修复:过滤控制字符+null字节,防止JSON序列化崩溃
-                    raw = r.text
-                    # 移除控制字符(保留换行和制表符)
-                    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
-                    # 移除HTML标签,只保留文本
-                    raw = re.sub(r'<[^>]+>', ' ', raw)
-                    # 合并空白
-                    raw = re.sub(r'\s+', ' ', raw).strip()
-                    text = raw[:3000]  # 限制长度
+                    # 使用增强提取器(支持平台特定 + 通用HTML解析)
+                    from engine.web_extract import web_extractor as _wex
+                    import asyncio as _asyncio
+                    bm = None
+                    try:
+                        from engine.browser import ensure_browser_connected
+                        bm = _asyncio.run(ensure_browser_connected())
+                    except Exception:
+                        pass
+                    ext_result = _asyncio.run(_wex.extract(url, _http_session, bm))
+                    if ext_result and ext_result.content and len(ext_result.content) > 50:
+                        text = ext_result.content
+                    else:
+                        # 回退到简单HTTP请求
+                        r = _http_session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                        raw = r.text
+                        raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+                        raw = re.sub(r'<[^>]+>', ' ', raw)
+                        raw = re.sub(r'\s+', ' ', raw).strip()
+                        text = raw[:20000]
                     results.append(f"[{url}]: {text}")
                 except Exception as e:
                     results.append(f"[{url}]: 错误 - {str(e)}")
             return "\n\n".join(results) if results else "未提供URL"
+        elif tool_name == "run_skill":
+            skill_name = args.get("skill_name", "")
+            skill_params = args.get("params", {})
+            if not skill_name:
+                return "错误: 缺少 skill_name 参数"
+            try:
+                from engine.skills import get_skill, render_prompt
+                skill = get_skill(user_id, skill_name)
+                if not skill:
+                    return f"技能 '{skill_name}' 不存在。可用技能请查看系统提示词。"
+                prompt = render_prompt(skill.get("prompt_template", ""), skill_params)
+                if not prompt:
+                    return "技能提示词模板为空"
+                # 将渲染后的提示词作为当前对话的上下文返回
+                return (
+                    f"[技能: {skill.get('label', skill_name)}]\n"
+                    f"已为以下任务生成定制提示词。请按照以下指示完成任务:\n\n"
+                    f"---\n{prompt}\n---\n\n"
+                    f"可用工具: {', '.join(skill.get('tools', []))}"
+                )
+            except Exception as e:
+                return f"run_skill 错误: {str(e)}"
+        elif tool_name == "platform_extract":
+            url = args.get("url", "")
+            if not url:
+                return "错误: 缺少 url 参数"
+            try:
+                from engine.web_extract import web_extractor as _wex
+                import asyncio as _asyncio
+                bm = None
+                try:
+                    from engine.browser import ensure_browser_connected
+                    bm = _asyncio.run(ensure_browser_connected())
+                except Exception:
+                    pass
+                result = _asyncio.run(_wex.extract(url, _http_session, bm))
+                if result and result.content:
+                    output = result.content
+                    if result.structured:
+                        output += "\n\n[结构化数据]\n" + json.dumps(result.structured, ensure_ascii=False, indent=2)[:5000]
+                    return output
+                return f"无法从 {url} 提取内容"
+            except Exception as e:
+                return f"platform_extract 错误: {str(e)}"
         elif tool_name == "engine_push":
             msg = args.get("msg", "")
             if msg:
@@ -695,7 +759,6 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if not os.path.exists(input_path):
                     return f"错误: 输入文件不存在: {input_path}"
                 if action == "info":
-                    import subprocess
                     cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path]
                     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
                     return r.stdout
@@ -2593,10 +2656,17 @@ async def rag_knowledge(collection: str = Query("default"), user_id: str = Query
 @app.post("/engine/rag/upload")
 async def rag_upload(request: Request, user_id: str = Query("")):
     try:
+        import base64 as _b64
         body = await request.json()
         collection = body.get("collection", "default")
         filename = body.get("filename", "upload.txt")
         content = body.get("content", "")
+        # 支持 base64 编码的二进制文件（PDF/DOCX/XLSX等）
+        if not content and body.get("content_base64"):
+            try:
+                content = _b64.b64decode(body["content_base64"]).decode("utf-8", errors="replace")
+            except Exception:
+                content = ""
         chunk_size = int(body.get("chunk_size", 512))
         chunk_overlap = int(body.get("chunk_overlap", 50))
         api_key = body.get("api_key", "")
@@ -2635,15 +2705,22 @@ async def rag_search_post(request: Request, user_id: str = Query("")):
 
 @app.delete("/engine/rag/knowledge")
 async def rag_delete_doc(request: Request, user_id: str = Query("")):
-    body = await request.json()
-    doc_id = body.get("doc_id", "")
-    collection = body.get("collection", "default")
+    doc_id = request.query_params.get("doc_id", "")
+    collection = request.query_params.get("collection", "default")
+    # 也支持 JSON body
+    if not doc_id:
+        try:
+            body = await request.json()
+            doc_id = body.get("doc_id", "")
+            collection = body.get("collection", collection)
+        except Exception:
+            pass
     if not doc_id:
         return {"error": "doc_id 不能为空"}
     return rag_delete_document(doc_id, collection, user_id)
 
 @app.get("/engine/rag/embed_config")
-async def rag_embed_config():
+async def rag_embed_config(request: Request):
     """返回嵌入模型配置（从 config 读取）"""
     import json as _json
     config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
@@ -2654,17 +2731,173 @@ async def rag_embed_config():
                 cfg = _json.load(f)
         except Exception:
             pass
+    collection = request.query_params.get("collection", "default")
+    # 读取集合级 mode 配置
+    coll_mode = cfg.get("rag_modes", {}).get(collection, cfg.get("rag_mode", "hybrid"))
     return {
         "embed_model": cfg.get("embed_model", "text-embedding-3-small"),
         "embed_api_base": cfg.get("api_base", cfg.get("base_url", "")),
         "embed_api_key": cfg.get("api_key", cfg.get("mmx_api_key", ""))[:8] + "***" if cfg.get("api_key") else "",
+        "mode": coll_mode,
         "chunk_size": 512,
         "chunk_overlap": 50
     }
 
+@app.post("/engine/rag/embed_config")
+async def rag_embed_config_post(request: Request):
+    """保存嵌入配置并重新嵌入已有文档"""
+    import json as _json
+    from pathlib import Path as _Path
+
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
+    config_p = _Path(config_path)
+
+    collection = request.query_params.get("collection", "default")
+    embed_model = request.query_params.get("embed_model", "")
+    mode = request.query_params.get("mode", "hybrid")
+
+    # 读取/更新配置
+    cfg = _load_json(config_p) if config_p.exists() else {}
+
+    if embed_model:
+        cfg["embed_model"] = embed_model
+    # 按集合保存 mode
+    if "rag_modes" not in cfg:
+        cfg["rag_modes"] = {}
+    cfg["rag_modes"][collection] = mode
+
+    with open(config_path, "w") as f:
+        _json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    # 重新嵌入已有文档
+    embedded = 0
+    if embed_model:
+        user_id = request.query_params.get("user_id", "")
+        docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+        data = _load_json(docs_file)
+        api_key = cfg.get("api_key", "") or cfg.get("mmx_api_key", "")
+        api_base = cfg.get("api_base", "") or cfg.get("base_url", "")
+        for doc in data.get("documents", []):
+            for chunk in doc.get("chunks", []):
+                try:
+                    emb = _get_embedding(chunk["text"], api_key, api_base, embed_model)
+                    if emb:
+                        chunk["embedding"] = emb
+                        embedded += 1
+                except Exception:
+                    pass
+        if embedded > 0:
+            _save_json(docs_file, data)
+
+    return {"success": True, "embedded": embedded, "embed_model": embed_model, "mode": mode}
+
 @app.get("/engine/rag/list_models")
 async def rag_list_models():
     return {"models": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"]}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Platform Extract API — 平台特定网页内容提取
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/engine/platform_extract")
+async def platform_extract(url: str = Query(""), user_id: str = Query("")):
+    """从支持的平台(B站等)提取结构化内容"""
+    if not url:
+        return {"ok": False, "error": "缺少 url 参数"}
+    try:
+        from engine.web_extract import web_extractor as _wex
+        bm = None
+        try:
+            from engine.browser import ensure_browser_connected
+            bm = await ensure_browser_connected()
+        except Exception:
+            pass
+        result = await _wex.extract(url, _http_session, bm)
+        return {
+            "ok": True,
+            "result": result.content,
+            "title": result.title,
+            "platform": result.platform,
+            "structured": result.structured,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Skills API — 可复用提示词模板系统
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/engine/skills/list")
+async def skills_list(user_id: str = Query("")):
+    """列出用户的所有技能"""
+    from engine.skills import list_skills
+    return {"skills": list_skills(user_id)}
+
+
+@app.post("/engine/skills/create")
+async def skills_create(request: Request, user_id: str = Query("")):
+    """创建新技能"""
+    try:
+        body = await request.json()
+        from engine.skills import create_skill
+        return create_skill(user_id, body)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/engine/skills/update")
+async def skills_update(request: Request, user_id: str = Query("")):
+    """更新技能"""
+    try:
+        body = await request.json()
+        name = body.get("name", "")
+        from engine.skills import update_skill
+        return update_skill(user_id, name, {k: v for k, v in body.items() if k != "name"})
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/engine/skills/delete")
+async def skills_delete(name: str = Query(""), user_id: str = Query("")):
+    """删除技能"""
+    if not name:
+        return {"ok": False, "error": "缺少 name 参数"}
+    from engine.skills import delete_skill
+    return delete_skill(user_id, name)
+
+
+@app.post("/engine/skills/run")
+async def skills_run(request: Request, user_id: str = Query("")):
+    """执行技能: 注入参数 → 返回渲染后的提示词供 Agent 使用"""
+    try:
+        body = await request.json()
+        skill_name = body.get("skill_name", "")
+        params = body.get("params", {})
+        if not skill_name:
+            return {"ok": False, "error": "缺少 skill_name 参数"}
+
+        from engine.skills import get_skill, render_prompt, extract_params
+
+        skill = get_skill(user_id, skill_name)
+        if not skill:
+            return {"ok": False, "error": f"技能 '{skill_name}' 不存在"}
+
+        prompt = render_prompt(skill.get("prompt_template", ""), params)
+        if not prompt:
+            return {"ok": False, "error": "技能提示词模板为空"}
+
+        # 返回渲染后的提示词和工具列表, 由调用方(Agent系统的 _execute_tool)创建子代理执行
+        return {
+            "ok": True,
+            "prompt": prompt,
+            "tools": skill.get("tools", []),
+            "model_tier": skill.get("model_tier", "smart"),
+            "max_rounds": int(skill.get("max_rounds", 10)),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════

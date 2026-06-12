@@ -173,8 +173,9 @@ def rag_upload_document(collection: str, filename: str, content: str,
         _save_json(collections_file, col_data)
 
     _save_json(docs_file, data)
-    return {"ok": True, "doc_id": doc_id, "chunk_count": len(indexed_chunks),
-            "filename": filename, "collection": collection}
+    return {"success": True, "doc_id": doc_id, "chunks": len(indexed_chunks),
+            "chunk_count": len(indexed_chunks), "source": filename, "filename": filename,
+            "collection": collection}
 
 
 def rag_search(query: str, collection: str = "default", top_k: int = 5,
@@ -237,12 +238,14 @@ def rag_list_documents(collection: str = "default", user_id: str = "") -> dict:
     items = []
     for doc in data.get("documents", []):
         items.append({
+            "id": doc["doc_id"],
             "doc_id": doc["doc_id"],
-            "filename": doc["filename"],
+            "source": doc.get("filename", doc.get("source", "")),
+            "chunks": doc.get("chunk_count", doc.get("chunks", 0)),
             "chunk_count": doc.get("chunk_count", 0),
             "uploaded_at": doc.get("uploaded_at", 0)
         })
-    return {"items": items, "total": len(items), "collection": collection}
+    return {"documents": items, "total": len(items), "collection": collection}
 
 
 def rag_delete_document(doc_id: str, collection: str = "default", user_id: str = "") -> dict:
@@ -252,4 +255,4 @@ def rag_delete_document(doc_id: str, collection: str = "default", user_id: str =
     original_len = len(data.get("documents", []))
     data["documents"] = [d for d in data.get("documents", []) if d.get("doc_id") != doc_id]
     _save_json(docs_file, data)
-    return {"ok": True, "removed": original_len - len(data.get("documents", []))}
+    return {"success": True, "ok": True, "removed": original_len - len(data.get("documents", []))}

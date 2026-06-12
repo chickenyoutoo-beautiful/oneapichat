@@ -8,8 +8,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 // ── 引擎请求辅助 (替代 @file_get_contents 抑制) ──
 function _engine_get(string $path, string $fallback = '{}', $customCtx = null): string {
+<<<<<<< Updated upstream
     if ($customCtx) { $resp = file_get_contents($path, false, $customCtx); } else { $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]); $resp = file_get_contents($path, false, $ctx); }
     $resp = file_get_contents($path, false, $ctx);
+=======
+    if ($customCtx) {
+        $resp = file_get_contents($path, false, $customCtx);
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]);
+        $resp = file_get_contents($path, false, $ctx);
+    }
+>>>>>>> Stashed changes
     return ($resp !== false) ? $resp : $fallback;
 }
 function _engine_mmx_config_read(): array {
@@ -90,6 +99,13 @@ if (!empty($authToken)) {
     }
 }
 $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
+
+// ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开接口）
+if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search') {
+    http_response_code(401);
+    echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
+    exit;
+}
 
 switch ($action) {
     case 'health':
@@ -739,5 +755,34 @@ switch ($action) {
         } else {
             echo json_encode(['ok'=>false,'error'=>'复制失败']);
         }
+        break;
+
+    case 'platform_extract':
+        $platUrl = $_GET['url'] ?? '';
+        if (!$platUrl) { echo json_encode(['ok'=>false,'error'=>'缺少url参数']); exit; }
+        $engineUrl = 'http://127.0.0.1:8766/engine/platform_extract?url=' . urlencode($platUrl);
+        $ctx = stream_context_create(['http' => ['timeout' => 30, 'ignore_errors' => true]]);
+        $resp = file_get_contents($engineUrl, false, $ctx);
+        if ($resp !== false) {
+            echo $resp;
+        } else {
+            echo json_encode(['ok'=>false,'error'=>'引擎无响应']);
+        }
+        break;
+
+    case 'skills_run':
+        $input = json_decode(file_get_contents('php://input'), true);
+        $engineUrl = 'http://127.0.0.1:8766/engine/skills/run';
+        $ch = curl_init($engineUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($input),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        echo $resp;
         break;
 }

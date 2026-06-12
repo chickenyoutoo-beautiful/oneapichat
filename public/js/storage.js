@@ -472,20 +472,6 @@ async function restoreUserData() {
                     var _cleanedPartial = 0;
                     for (var _cid in chats) {
                         if (chats[_cid] && chats[_cid].messages) {
-                            // ★ DEBUG: 对_agent_main打印每条消息的完整属性
-                            if (_cid === '_agent_main') {
-                                console.log('[restoreUserData] _agent_main BEFORE filter — ' + chats[_cid].messages.length + ' msgs:');
-                                for (var _dbi = 0; _dbi < chats[_cid].messages.length; _dbi++) {
-                                    var _dbm = chats[_cid].messages[_dbi];
-                                    console.log('  [' + _dbi + ']', Object.keys(_dbm).join(','),
-                                        'role=' + _dbm.role, 'partial=' + _dbm.partial,
-                                        'time=' + (!!_dbm.time), 'usage=' + (!!_dbm.usage),
-                                        'tool_calls=' + (!!_dbm.tool_calls),
-                                        '_internal=' + (!!_dbm._internal),
-                                        '_recovered=' + (!!_dbm._recovered),
-                                        'contentLen=' + ((typeof _dbm.content === 'string') ? _dbm.content.length : 'N/A'));
-                                }
-                            }
                             var _before = chats[_cid].messages.length;
                             // ★ 诊断: 记录过滤前的partial消息状态
                             var _partialsBefore = chats[_cid].messages.filter(function(m){return m.partial;});
@@ -516,9 +502,6 @@ async function restoreUserData() {
                             }
                             if (_orphanCleaned > 0) console.log('[restoreUserData] 清理了 ' + _orphanCleaned + ' 条隐形截断消息(无partial标记无time/usage)');
                             chats[_cid].messages = chats[_cid].messages.filter(function(_pm) { return !_pm.partial; });
-                            if (_cid === '_agent_main') {
-                                console.log('[restoreUserData] _agent_main AFTER filter — ' + chats[_cid].messages.length + ' msgs');
-                            }
                             _cleanedPartial += _before - chats[_cid].messages.length;
                         }
                     }

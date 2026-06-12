@@ -621,6 +621,40 @@ const WEB_FETCH_TOOL_DEFINITION = {
     }
 };
 
+const RUN_SKILL_TOOL_DEFINITION = {
+    type: "function",
+    function: {
+        name: "run_skill",
+        description: "运行一个已保存的可复用技能。技能是预设的提示词模板+工具集。当用户的任务与已保存技能匹配时调用。",
+        parameters: {
+            type: "object",
+            properties: {
+                skill_name: { type: "string", description: "要运行的技能名称" },
+                params: { type: "object", description: "技能参数, 用于填充提示词模板的 {param} 占位符" }
+            },
+            required: ["skill_name"]
+        }
+    }
+};
+
+const PLATFORM_EXTRACT_TOOL_DEFINITION = {
+    type: "function",
+    function: {
+        name: "platform_extract",
+        description: "从特定平台提取结构化内容。支持 Bilibili 视频/专栏信息(标题、UP主、播放量、弹幕数等)。当用户分享B站、YouTube等平台链接并想了解其内容时调用。",
+        parameters: {
+            type: "object",
+            properties: {
+                url: {
+                    type: "string",
+                    description: "要提取的平台URL(如B站视频链接 https://www.bilibili.com/video/BV...)"
+                }
+            },
+            required: ["url"]
+        }
+    }
+};
+
 const RAG_SEARCH_TOOL_DEFINITION = {
     type: "function",
     function: {
@@ -1042,6 +1076,18 @@ const toolRegistry = (function() {
     isReadOnly: true,
     searchHint: '抓取网页内容',
   }));
+  toolRegistry.register('platform_extract', buildToolMeta('platform_extract', {
+    capabilities: [ToolCapability.NETWORK],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '提取B站等平台视频/文章信息',
+  }));
+  toolRegistry.register('run_skill', buildToolMeta('run_skill', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '运行已保存的技能',
+  }));
   toolRegistry.register('rag_search', buildToolMeta('rag_search', {
     capabilities: [ToolCapability.NETWORK],
     approval: ApprovalLevel.AUTO,
@@ -1378,13 +1424,13 @@ window.setToolEnabled = function(toolKey, enabled) {
 // 加载工具开关配置到 UI
 // ── 工具分类定义 ──
 const _TOOL_CATEGORIES = [
-    { label: '🔍 搜索与获取', keys: ['web_search','web_fetch','rag_search'] },
+    { label: '🔍 搜索与获取', keys: ['web_search','web_fetch','platform_extract','rag_search'] },
     { label: '🎨 图像',       keys: ['generate_image','analyze_image'] },
     { label: '🎬 视频',       keys: ['video_understanding','video_edit'] },
     { label: '📚 刷课',       keys: ['chaoxing_login','chaoxing_list_courses','chaoxing_auto','chaoxing_status','chaoxing_stop','chaoxing_stats','chaoxing_overview'] },
     { label: '📝 考试',       keys: ['chaoxing_auth','chaoxing_exam_list','chaoxing_exam_start','chaoxing_exam_status','chaoxing_exam_stop'] },
     { label: '💻 服务器操控 ⚠️', keys: ['server_exec','server_python','server_file_read','server_file_write','server_file_edit','server_file_grep','server_sys_info','server_ps','server_disk','server_network','server_docker','server_db_query','server_file_search','server_file_op'], agentOnly: true },
-    { label: '🤖 引擎/Agent', keys: ['engine_cron_list','engine_cron_create','engine_cron_delete','delegate_task','engine_agent_status','engine_agent_list','engine_agent_delete','engine_agent_ask','engine_agent_stop','engine_push','plan_update','delegate_workflow'], agentOnly: true },
+    { label: '🤖 引擎/Agent', keys: ['engine_cron_list','engine_cron_create','engine_cron_delete','delegate_task','engine_agent_status','engine_agent_list','engine_agent_delete','engine_agent_ask','engine_agent_stop','engine_push','plan_update','delegate_workflow','run_skill'], agentOnly: true },
     { label: '🧠 AI 自主控制', keys: ['ask_agent','autonomous_mode'] },
     { label: '🎮 SRC 星穹铁道', keys: ['src_status','src_dashboard','src_start','src_stop','src_get_tasks','src_toggle_task','src_get_config','src_set_config','src_get_logs','src_check_upgrade','src_do_upgrade'] },
     { label: '🪟 Windows 本机', keys: ['win_info','win_processes','win_kill','win_start','win_restart','win_file','win_screenshot'], agentOnly: true },
@@ -1395,7 +1441,7 @@ const _TOOL_CATEGORIES = [
 
 // ── 工具中文标签 ──
 const _TOOL_LABELS = {
-    'web_search':'联网搜索','web_fetch':'网页抓取','rag_search':'知识库搜索',
+    'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索',
     'generate_image':'图片生成','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑',
     'chaoxing_login':'超星登录','chaoxing_list_courses':'课程列表','chaoxing_auto':'刷课执行','chaoxing_status':'刷课状态','chaoxing_stop':'停止刷课','chaoxing_stats':'刷课统计','chaoxing_overview':'超星总览',
     'chaoxing_auth':'考试登录','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',

@@ -38,6 +38,14 @@ password = config.get("common", "password")
 
 account = Account(username, password)
 chaoxing = Chaoxing(account=account)
+
+# ★ 先尝试用已有 Cookie 获取课程（避免重复登录触发验证码）
+courses = chaoxing.get_course_list()
+if courses is not None and len(courses) > 0:
+    print(json.dumps({"courses": courses}), flush=True)
+    sys.exit(0)
+
+# Cookie 失效，重新登录
 result = chaoxing.login()
 if not result["status"]:
     print(json.dumps({"error": result["msg"]}), flush=True)

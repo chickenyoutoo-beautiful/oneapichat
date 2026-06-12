@@ -4,6 +4,15 @@
 
 ## 最近变更
 
+- **2026-06-12**: 🔒 强制认证 — `chat.php`和`engine_api.php`未登录时fallback到`device_id`/`default` namespace导致无需登录即可使用。修复: 两文件新增auth中间件,非public action直接返回401
+- **2026-06-12**: 🐛 MiniMax思考重复显示+输入框溢出 — ①MiniMax: `_backendSSEHandler`(SSE路径)缺少`(think)...(endthink)`标签提取+综合去重,修复3条路径 ②输入框: 新增`.input-clip`裁剪容器+`background-color:inherit`
+- **2026-06-12**: 🔧 MCP mmx工具路由修复(方案A) — 根因: MCP server(`/home/naujtrats/mcp-server/server.js`)未实现mmx路由,mmx_chat/speech/image/music被错误fallback到server_network导致"Invalid target URL"。修复: 新增`/mmx`端点,直接调用`mmx` CLI二进制(绕过Nginx HTTP路由和PHP中转),支持chat/image/speech/voices/music/vision/search/quota全部9个子命令,含进程隔离HOME目录和5分钟超时
+- **2026-06-12**: 🔧 输入框/流程面板背景溢出回归修复 — 根因: `d279784`移除`.input-area`实色背景+`z-index:10`导致半透明子元素(flow-panel毛玻璃78%+backdrop-filter/input-wrapper 72%)失去涂料屏障和裁剪边界。修复: ①新增`.input-clip`裁剪容器(`overflow:hidden`)包裹除queue-bar外的所有input-area子元素 ②`.input-area`添加`background-color:inherit`继承父级`bg-gray-50`/`bg-gray-950`作为涂料屏障 ③清理未使用的`--iw-glass-*` CSS变量
+- **2026-06-11**: 🤖 Skills系统 + 🕷️ 网页抓取增强 — 新增skills.py(SkillDef/SkillStore/API CRUD/run_skill工具) + web_extract.py(PlatformExtractor插件+BilibiliExtractor+增强HTML解析) + web_fetch升级(3000→20000字符+链接/标题保留) + platform_extract新工具 + 公式渲染回滚为纯原生(移除_fixBareLatex)
+- **2026-06-10**: 🧠 LaTeX智能修复 — markdown.js新增 `_fixBareLatex()`: AI输出的裸LaTeX命令(\mathbf,\cos,\dfrac等)自动包裹$...$，字符级扫描处理嵌套括号和连续命令。跳过\text等非数学命令。
+- **2026-06-10**: 🐛 RAG修复(全链路) — embed_config 405(缺POST端点) + upload完全不可用(php://input+json_encode二进制崩溃)+ 模型列表空白(data.models字符串数组当对象). 修复:引擎新增POST+PHP代理读$_FILES+base64编码+前端链式fetch消竞态
+- **2026-06-10**: 🐛 Mermaid根因修复 — `window.mermaid`始终undefined：本地mermaid.min.js执行时可能因DOM未就绪抛错（onload仍触发）。添加CDN回退(mermaid@10 UMD) + 加载状态日志。RS think regex $兜底修复 + 缩写检测
+- **2026-06-10**: 🐛 MiniMax markdown渲染修复 — think标签正则$兜底在流式中吞掉全部正文，改为仅匹配完整闭合标签。streaming中实时渲染完整Mermaid块
 - **2026-06-08**: 🐛 RS刷新旧截断气泡根因修复 — 引擎 SSE 广播无 source 字段导致消息数组被覆盖 + `_syncChatFromServer` 智能合并
 - **2026-06-08**: 🔧 刷课模块修复 — `learning_records.db` 目录权限 + `server_tools.py` 缺失 import + 路径修复
 - **2026-06-08**: 📦 超星/考试模块整理 — `python/api/` + 根目录 `scripts/` + 散落 `.py` → 统一归入 `python/chaoxing/`

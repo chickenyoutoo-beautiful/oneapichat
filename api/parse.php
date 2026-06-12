@@ -1,6 +1,6 @@
 <?php
 // parse.php - AI可调用的文件解析API
-// 支持: txt, md, js, py, json, html, css, xml, csv, log, sh, bat, conf, ini, docx, xlsx, xls, xlsm, jpg, png, gif, webp, bmp, svg
+// 支持: txt, md, js, py, json, html, css, xml, csv, log, sh, bat, conf, ini, pdf, docx, xlsx, xls, xlsm, jpg, png, gif, webp, bmp, svg
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -38,8 +38,8 @@ try {
         throw new Exception('No file. POST multipart/form-data with "file", or JSON body with filename+content.');
     }
     // 限制内容长度，避免超出模型上下文
-    if (strlen($content) > 8000) {
-        $content = substr($content, 0, 8000) . "\n\n[内容过长，已截断前8000字符...]";
+    if (strlen($content) > 50000) {
+        $content = substr($content, 0, 50000) . "\n\n[内容过长，已截断前50000字符...]";
     }
     
     $result['success'] = true;
@@ -72,6 +72,10 @@ function parseFile($path, $ext, $mime) {
         return $content;
     }
 
+    if ($ext === 'pdf' || strpos($mime, 'pdf') !== false) {
+        return parsePdf($path);
+    }
+
     if ($ext === 'docx' || strpos($mime, 'word') !== false || strpos($mime, 'document') !== false) {
         return parseDocx($path);
     }
@@ -84,6 +88,83 @@ function parseFile($path, $ext, $mime) {
     $content = file_get_contents($path);
     if ($content !== false) return $content;
     throw new Exception("Unsupported: $ext ($mime)");
+}
+
+function parsePdf($path) {
+    $escapedPath = escapeshellarg($path);
+    // ★ 1) 先尝试 pdftotext 提取文字层
+    $cmd = "pdftotext -layout -nopgbrk " . $escapedPath . " - 2>&1";
+    @exec($cmd, $lines, $ret);
+    $text = $ret === 0 ? implode("\n", $lines) : '';
+    $cleanText = trim(preg_replace('/\s+/', '', $text));
+
+    // ★ 2) 文字层有效(>50个非空白字符) → 直接返回
+    if (mb_strlen($cleanText) > 50) {
+        return $text;
+    }
+
+    // ★ 3) 文字层空/极少 → 扫描版PDF，用 OCR 识别
+    // 先获取页数
+    $pageCountCmd = "pdfinfo " . $escapedPath . " 2>/dev/null | grep -i '^Pages:' | awk '{print $2}'";
+    @exec($pageCountCmd, $pageOut, $pageRet);
+    $totalPages = intval($pageOut[0] ?? 0);
+    if ($totalPages <= 0) $totalPages = 50; // 默认上限
+
+    $maxOcrPages = min($totalPages, 100); // ★ 最多OCR前100页（提高覆盖率）
+    $tmpDir = sys_get_temp_dir() . '/pdfocr_' . uniqid();
+    @mkdir($tmpDir, 0700, true);
+
+    $ocrText = '';
+    $lang = 'chi_sim+chi_tra+eng'; // 中文简繁+英文
+
+    try {
+        // ★ pdftoppm 将页面转为灰度PNG（300 DPI 提高识别准确率）
+        $ppmCmd = "pdftoppm -png -gray -r 300 -f 1 -l " . $maxOcrPages . " " . $escapedPath . " " . escapeshellarg($tmpDir . '/page') . " 2>&1";
+        @exec($ppmCmd, $ppmOut, $ppmRet);
+        if ($ppmRet !== 0) {
+            throw new Exception('pdftoppm failed: ' . implode("\n", $ppmOut));
+        }
+
+        // ★ tesseract OCR 每页
+        $pageFiles = glob($tmpDir . '/page-*.png');
+        natsort($pageFiles);
+        $ocrCount = 0;
+        foreach ($pageFiles as $pf) {
+            if ($ocrCount >= $maxOcrPages) break;
+            $baseName = $tmpDir . '/ocr_' . $ocrCount;
+            $tessCmd = "tesseract " . escapeshellarg($pf) . " " . escapeshellarg($baseName) . " -l " . $lang . " --psm 6 2>&1";
+            @exec($tessCmd, $tessOut, $tessRet);
+            $txtFile = $baseName . '.txt';
+            if (file_exists($txtFile)) {
+                $pageText = @file_get_contents($txtFile);
+                if (!empty(trim($pageText))) {
+                    $ocrText .= "=== 第 " . ($ocrCount + 1) . " 页 ===\n" . $pageText . "\n\n";
+                }
+                @unlink($txtFile);
+            }
+            $ocrCount++;
+        }
+
+        // ★ 如果OCR结果比文字层多，使用OCR结果
+        $cleanOcr = trim(preg_replace('/\s+/', '', $ocrText));
+        if (mb_strlen($cleanOcr) > mb_strlen($cleanText)) {
+            $text = $ocrText;
+            $cleanText = $cleanOcr;
+        }
+    } catch (Exception $e) {
+        // OCR失败时保留原有文字层(即使很少)
+    }
+
+    // ★ 清理临时文件
+    foreach (glob($tmpDir . '/*') as $f) @unlink($f);
+    @rmdir($tmpDir);
+
+    if (mb_strlen($cleanText) > 50) {
+        $source = ($ocrText && mb_strlen(trim(preg_replace('/\s+/', '', $ocrText))) > 50) ? ' [OCR识别]' : '';
+        return "[PDF" . $source . "]\n\n" . $text;
+    }
+
+    throw new Exception('PDF text extraction failed — both text layer and OCR could not extract readable content. The PDF may be heavily degraded.');
 }
 
 function parseDocx($path) {

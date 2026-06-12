@@ -68,7 +68,7 @@ class Chaoxing:
         self.tiku = tiku
         self._tracker = tracker
 
-    def login(self):
+    def login(self, captcha_token=None):
         _session = requests.session()
         _session.verify = True
         _url = "https://passport2.chaoxing.com/fanyalogin"
@@ -78,11 +78,11 @@ class Chaoxing:
                     "refer": "https%3A%2F%2Fi.chaoxing.com",
                     "t": True,
                     "forbidotherlogin": 0,
-                    "validate": "",
+                    "validate": captcha_token or "",
                     "doubleFactorLogin": 0,
                     "independentId": 0,
                 }
-        
+
         logger.trace("正在尝试登录...")
         resp = _session.post(_url, headers=gc.HEADERS, data=_data)
         if resp and resp.json()["status"] == True:
@@ -90,7 +90,18 @@ class Chaoxing:
             logger.info("登录成功...")
             return {"status": True, "msg": "登录成功"}
         else:
-            return {"status": False, "msg": str(resp.json()["msg2"])}
+            msg2 = str(resp.json().get("msg2", ""))
+            # ★ 检测是否需要验证码 — 超星有时把验证码缺失伪装成"密码错误"
+            if "密码错误" in msg2 or "用户名或密码" in msg2:
+                # 二次确认：不带加密检查是否需要验证码
+                try:
+                    check_url = "https://passport2.chaoxing.com/fanyalogin?uname=" + self.account.username
+                    check_resp = _session.get(check_url, headers=gc.HEADERS, timeout=5)
+                    if "needCaptcha" in check_resp.text or "captcha" in check_resp.text.lower():
+                        return {"status": False, "msg": "需要验证码，请先通过浏览器登录一次超星学习通（https://i.chaoxing.com），登录后Cookie会自动同步。或使用手机验证码登录。"}
+                except Exception:
+                    pass
+            return {"status": False, "msg": msg2}
 
     def get_fid(self):
         _session = init_session()

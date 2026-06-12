@@ -1669,7 +1669,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         if (_rsResult.error) {
                             var _rsErrStr = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
                             // 400安全过滤: 回退HTTP直连走safety_filter重试逻辑
-                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk')) {
+                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk') || _rsErrStr.includes('sensitive') || _rsErrStr.includes('422')) {
                                 console.warn('[RS] 400安全过滤, 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
                                 _useRS = false;
                                 var _rsDone = false;
@@ -2032,8 +2032,53 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     var ob = (argStr.match(/\{/g) || []).length;
                     var cb = (argStr.match(/\}/g) || []).length;
                     while (cb < ob) { argStr += '}'; cb++; }
+                    while (ob < cb) { argStr = '{' + argStr; ob++; }      // 缺少开头 {
                     // 清理非法控制字符和未转义换行
-                    argStr = argStr.replace(/[\x00-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
+                    argStr = argStr.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
+                    // ★ 最终验证: 如果JSON仍无效, 用正则提取参数重新序列化
+                    try { JSON.parse(argStr); } catch(_argErr) {
+                        console.warn('[normalize] 修复后JSON仍无效, 正则提取:', tc.function.name, _argErr.message);
+                        var _fixed2 = {};
+                        // ★ 预清理: AI有时输出 {, 开头等畸形JSON
+                        var _workStr = argStr;
+                        // 移除开头的 { 后的逗号: {, → {
+                        _workStr = _workStr.replace(/^\{\s*,/, '{');
+                        // 移除末尾 ,} : {...,} → {...}
+                        _workStr = _workStr.replace(/,\s*\}$/, '}');
+                        // 移除重复逗号: ,, → ,
+                        _workStr = _workStr.replace(/,\s*,/g, ',');
+                        // 尝试替换单引号 key/value 为双引号
+                        var _cleanStr = _workStr.replace(/'([^'\\]*)'/g, '"$1"');
+                        try { JSON.parse(_cleanStr); argStr = _cleanStr; _fixed2 = null; } catch(_e2) {
+                        // 双引号 key: string value
+                        var _r = /"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g, _rm;
+                        while ((_rm = _r.exec(_workStr)) !== null) _fixed2[_rm[1]] = _rm[2];
+                        // 双引号 key: number/boolean/null value
+                        var _r2 = /"(\w+)"\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
+                        while ((_rm = _r2.exec(_workStr)) !== null) {
+                            var _v = _rm[2];
+                            _fixed2[_rm[1]] = _v === 'true' ? true : _v === 'false' ? false : _v === 'null' ? null : parseFloat(_v);
+                        }
+                        // 无引号 key (AI有时输出 {key:value} 格式)
+                        var _r3 = /(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+                        while ((_rm = _r3.exec(_workStr)) !== null) { if (!_fixed2[_rm[1]]) _fixed2[_rm[1]] = _rm[2]; }
+                        // 无引号 key: number
+                        var _r4 = /(\w+)\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
+                        while ((_rm = _r4.exec(_workStr)) !== null) {
+                            if (!_fixed2[_rm[1]]) {
+                                var _v4 = _rm[2];
+                                _fixed2[_rm[1]] = _v4 === 'true' ? true : _v4 === 'false' ? false : _v4 === 'null' ? null : parseFloat(_v4);
+                            }
+                        }
+                        // 如果仍然没有提取到任何参数, 保留原始 argStr (让后续工具自己报错)
+                        if (Object.keys(_fixed2).length === 0) {
+                            console.warn('[normalize] 无法从JSON中提取任何参数, 原始:', argStr.substring(0, 200));
+                            argStr = '{}';
+                        } else {
+                            argStr = JSON.stringify(_fixed2);
+                        }
+                        }  // end catch _e2
+                    }
                     // 针对 engine_agent_create 的 prompt 做特殊处理:截断过长内容
                     if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
                         try {
@@ -2143,6 +2188,9 @@ window.useAlternativeVisionModel = function() {
 
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId);
 
+                    // ★ 记录工具开始时间（用于详情卡片展示耗时）
+                    var _toolStartTime = Date.now();
+
                     // ★ 传递工具调用的 abort 信号,让 fetch 也能被中断
                     var _toolAbortCtrl = new AbortController();
                     var _toolAbortKey = chatId + '_tool_' + Date.now();
@@ -2239,15 +2287,37 @@ window.useAlternativeVisionModel = function() {
                                     chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
                                 }
                             }
+<<<<<<< Updated upstream
                             // ★ 追加可折叠工具调用详情卡片
+=======
+                            // ★ 追加可折叠工具调用详情卡片（必须在 for 循环内, currentBubble 块内）
+>>>>>>> Stashed changes
                             if (typeof appendToolCallMessage === 'function') {
                                 var _cardDur = Date.now() - (_toolStartTime || Date.now());
                                 var _cardArgs = {};
                                 try { _cardArgs = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
                                 var _cardResult = toolResult.error || toolResult.result || '(empty)';
+<<<<<<< Updated upstream
                                 var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs, _cardResult, _cardDur, chatId, toolResult._execDetails || null);
                                 if (_cardRow) {
                                     chats[chatId].messages.push({ role: 'tool_card', content: _cardResult, _tcName: tc.function.name, _tcArgs: _cardArgs, _tcDur: _cardDur, _tcExecDetails: toolResult._execDetails || null, _tcId: tc.id || '', _toolCard: true, time: Date.now() });
+=======
+                                var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs,
+                                    _cardResult, _cardDur, chatId, toolResult._execDetails || null);
+                                // ★ 持久化卡片到数据模型，避免重渲染后消失
+                                if (_cardRow) {
+                                    chats[chatId].messages.push({
+                                        role: 'tool_card',
+                                        content: _cardResult,
+                                        _tcName: tc.function.name,
+                                        _tcArgs: _cardArgs,
+                                        _tcDur: _cardDur,
+                                        _tcExecDetails: toolResult._execDetails || null,
+                                        _tcId: tc.id || '',
+                                        _toolCard: true,
+                                        time: Date.now()
+                                    });
+>>>>>>> Stashed changes
                                 }
                             }
                         }
@@ -2261,9 +2331,10 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
                 }
                 // ★ 持久化 tool_calls 到 chat 历史 — 防止下轮 sendMessage 丢失工具上下文导致幻觉
-                // 使用 normalizedToolCalls(已确保 arguments 是字符串)而非 validToolCalls
+                // ★ 累积而非覆盖: 多轮工具调用时保留所有 tool_calls, 避免旧 tool 结果变孤立
                 if (normalizedToolCalls && normalizedToolCalls.length > 0) {
-                    pendingMsg.tool_calls = normalizedToolCalls;
+                    if (!pendingMsg.tool_calls) pendingMsg.tool_calls = [];
+                    pendingMsg.tool_calls = pendingMsg.tool_calls.concat(normalizedToolCalls);
                 }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
@@ -2327,10 +2398,7 @@ window.useAlternativeVisionModel = function() {
                         if (_bub) {
                             var _md = _bub.querySelector('.markdown-body');
                             if (_md) {
-                                // ★ 强制最终渲染当前内容（确保完整 HTML 被保存）
-                                if (pendingMsg.content) {
-                                    _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
-                                }
+                                // ★ 流式已完成, 直接保存当前innerHTML(不再重复全局渲染)
                                 // 追加链式分隔线
                                 var _sep = document.createElement('div');
                                 _sep.className = 'chain-separator';
@@ -2345,7 +2413,12 @@ window.useAlternativeVisionModel = function() {
                     pendingMsg._chainContents.push(pendingMsg.content || '');
                     pendingMsg.content = '';
                     pendingMsg.reasoning = '';
+<<<<<<< Updated upstream
                     // ★ 清除旧 tool_calls — 先保存到 _chainCompletedToolCalls 供 buildApiMessages 配对
+=======
+                    // ★ 清除旧 tool_calls — 新轮次不应继承上一轮的 tool_calls
+                    // 但保留 _savedToolCalls 在对象上供 buildApiMessages 配对，仅标记为已处理
+>>>>>>> Stashed changes
                     if (pendingMsg.tool_calls) {
                         pendingMsg._chainCompletedToolCalls = pendingMsg.tool_calls;
                     }
@@ -2363,6 +2436,8 @@ window.useAlternativeVisionModel = function() {
                 var newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
                 var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
 
+                // ★ 清除 partial 标记(工具调用循环中 assistant 消息已完成)
+                delete pendingMsg.partial;
                 // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
                 body.messages = buildApiMessages(chatId);
                 console.log('[RS-TOOLS] rebuild body.messages for next round, msgs:', body.messages.length);
@@ -2386,9 +2461,12 @@ window.useAlternativeVisionModel = function() {
                 var _bubble = activeBubbleMap[chatId];
                 console.log('[ImageModel] completion: chatId match=', (currentChatId === chatId), 'bubble exists=', !!_bubble, 'hasImages=', !!(pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0));
                 if (_bubble) {
+                    // ★ 清理工具调用状态残留（tool-call-lines 在 markdown-body 外面）
+                    var _tcLines = _bubble.querySelector('.tool-call-lines');
+                    if (_tcLines) _tcLines.remove();
                     var _md = _bubble.querySelector('.markdown-body');
-                    if (_md && pendingMsg.content) {
-                        _md.innerHTML = _renderMarkdownWithMath(pendingMsg.content);
+                    // ★ 流式已完成, 不再重复全局渲染(避免覆盖流式结果)
+                    if (_md) {
                         _triggerPostRender(_md);
                         _bubble.classList.remove('typing');
                     }
@@ -2637,18 +2715,23 @@ window.useAlternativeVisionModel = function() {
                     // 模型完全不支持工具 → 移除全部 tools
                     _shouldRetry = true;
                     _retryAction = 'remove_tools';
-                } else if (_errMsg.includes('Content Exists Risk') || _errMsg.includes('content filter') || _errMsg.includes('safety')) {
+                } else if (_errMsg.includes('Content Exists Risk') || _errMsg.includes('content filter') || _errMsg.includes('safety') || _errMsg.includes('sensitive')) {
                     // 内容安全过滤 — 尝试精简消息体
-                    // ★ 如果已经精简过(system+tools已移除),不再重试 — 用户输入本身触发
-                    var _noSys = !body.messages.some(function(m){return m.role==='system';});
-                    var _noTools = !body.tools || body.tools.length === 0;
-                    if (_noSys && _noTools && body.messages.length <= 6) {
-                        // 已是最简形式,问题在用户输入本身
-                        _shouldRetry = false;
-                        showToast('⚠️ 内容安全过滤: 消息内容被接口拒绝,请修改提问方式后重试', 'error', 8000);
-                    } else {
+                    // ★ 如果是图片敏感(image is sensitive)，走专门的重试策略
+                    if (_errMsg.includes('image') && _errMsg.includes('sensitive')) {
                         _shouldRetry = true;
-                        _retryAction = 'safety_filter';
+                        _retryAction = 'strip_images';
+                    } else {
+                        var _noSys = !body.messages.some(function(m){return m.role==='system';});
+                        var _noTools = !body.tools || body.tools.length === 0;
+                        if (_noSys && _noTools && body.messages.length <= 6) {
+                            // 已是最简形式,问题在用户输入本身
+                            _shouldRetry = false;
+                            showToast('⚠️ 内容安全过滤: 消息内容被接口拒绝,请修改提问方式后重试', 'error', 8000);
+                        } else {
+                            _shouldRetry = true;
+                            _retryAction = 'safety_filter';
+                        }
                     }
                 } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error') {
                     // 通用参数错误 → 尝试清理 body 重试
@@ -2880,6 +2963,25 @@ window.useAlternativeVisionModel = function() {
                                 console.warn('[Search-Fallback] 搜索回退失败:', _se.message);
                             }
                         }
+                    } else if (_retryAction === 'strip_images') {
+                        // ★ 图片敏感: 从所有消息中移除 image_url 内容，只保留文本
+                        var _siStripped = 0;
+                        for (var _sii = 0; _sii < body.messages.length; _sii++) {
+                            var _smsg = body.messages[_sii];
+                            if (Array.isArray(_smsg.content)) {
+                                var _origLen = _smsg.content.length;
+                                _smsg.content = _smsg.content.filter(function(_c) {
+                                    if (_c.type === 'image_url') { _siStripped++; return false; }
+                                    return true;
+                                });
+                                // 如果只剩一项文本，还原为字符串格式
+                                if (_smsg.content.length === 1 && _smsg.content[0].type === 'text') {
+                                    _smsg.content = _smsg.content[0].text;
+                                }
+                            }
+                        }
+                        console.log('[strip_images] 移除 ' + _siStripped + ' 个敏感图片后重试');
+                        showToast('⚠️ 图片被安全过滤，已移除 ' + _siStripped + ' 张图片后重试...', 'warning', 6000);
                     } else if (_retryAction === 'safety_filter') {
                         // ★ RS直连回退: 不做任何精简, 直接重试
                         if (window.__rsFallbackRetry) {

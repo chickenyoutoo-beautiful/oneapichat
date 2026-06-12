@@ -22,7 +22,14 @@ async function cloudreveApiHandler(action, args) {
         if (d.success) {
             return { result: JSON.stringify(d, null, 2) };
         }
-        return { error: d.error || d.msg || '操作失败' };
+        // ★ 增强错误信息，引导 AI 正确修复
+        var _err = d.error || d.msg || '操作失败';
+        if (_err.includes('无法获取') && _err.includes('token')) {
+            _err += '。请先用 cr_login(server_url="https://your-cloudreve-url", email="xxx", password="xxx") 登录。';
+        } else if (_err.includes('Incorrect password') || _err.includes('密码')) {
+            _err += '。请检查 server_url/email/password 是否正确，确认 Cloudreve 服务可访问后重试。';
+        }
+        return { error: _err };
     } catch(e) {
         return { error: 'Cloudreve API 错误: ' + e.message };
     }
@@ -51,7 +58,8 @@ async function engineApiHandler(action, args) {
         if (action === 'cron_create') {
             var url = '/oneapichat/api/engine_api.php?action=cron_create&name=' + encodeURIComponent(args.name);
             url += '&interval=' + encodeURIComponent(args.interval);
-            url += '&action_cmd=' + encodeURIComponent(args.action_cmd);
+            var _cmd = args.action_cmd || args.action || args.command || args.cmd || '';
+            url += '&action_cmd=' + encodeURIComponent(_cmd);
             url += authSuffix;
             var r = await fetch(url);
             var d = await r.json();
@@ -183,10 +191,11 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '获取系统信息失败' };
         }
         if (action === 'exec') {
-            var r = await fetch(_apiBase + '?action=exec&cmd=' + encodeURIComponent(args.cmd) + '&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix);
+            var _execCmd = args.cmd || args.command || args.query || '';
+            var r = await fetch(_apiBase + '?action=exec&cmd=' + encodeURIComponent(_execCmd) + '&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix);
             var d = await r.json();
             if (d.ok) {
-                var out = '💻 命令: ' + args.cmd + '\n退出码: ' + d.exit_code + '\n';
+                var out = '💻 命令: ' + _execCmd + '\n退出码: ' + d.exit_code + '\n';
                 if (d.stdout) out += '输出:\n' + d.stdout + '\n';
                 if (d.stderr) out += '错误:\n' + d.stderr + '\n';
                 if (d.error) out += '异常: ' + d.error;
@@ -243,38 +252,43 @@ async function engineApiHandler(action, args) {
             return { error: _fgd.error || '搜索失败' };
         }
         if (action === 'file_edit') {
-            let _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(args.path);
+            var _fePath = args.path || args.file_path || args.file || '';
+            var _feOld = args.old_string || args.old_str || args.old || args.original || '';
+            var _feNew = args.new_string || args.new_str || args.new || args.replacement || '';
+            let _feUrl = _apiBase + '?action=file_edit&path=' + encodeURIComponent(_fePath);
             if (args.replace_all) _feUrl += '&replace_all=true';
             _feUrl += authSuffix + '&t=' + Date.now();
             var _fer = await fetch(_feUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ old_string: args.old_string, new_string: args.new_string })
+                body: JSON.stringify({ old_string: _feOld, new_string: _feNew })
             });
             var _fed = await _fer.json();
             if (_fed.ok) {
-                return { result: '✅ 已编辑 ' + args.path + ' (' + _fed.replaced + ' 处替换)' + (_fed.backup ? ' [备份: ' + _fed.backup + ']' : '') };
+                return { result: '✅ 已编辑 ' + _fePath + ' (' + _fed.replaced + ' 处替换)' + (_fed.backup ? ' [备份: ' + _fed.backup + ']' : '') };
             }
             return { error: _fed.error || '编辑失败', old_string_preview: _fed.old_string_preview };
         }
         if (action === 'file_write') {
+            var _fwPath = args.path || args.file_path || args.file || args.filename || '';
+            var _fwContent = args.content !== undefined ? args.content : (args.text || args.data || args.body || '');
             var appendParam = args.append ? '&append=true' : '';
-            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(args.path) + appendParam + authSuffix + '&t=' + Date.now(), {
+            var r = await fetch(_apiBase + '?action=file_write&path=' + encodeURIComponent(_fwPath) + appendParam + authSuffix + '&t=' + Date.now(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
-                body: args.content || ''
+                body: typeof _fwContent === 'string' ? _fwContent : JSON.stringify(_fwContent)
             });
             var d = await r.json();
             if (d.ok) {
                 // ★ 自动生成可访问URL（根据当前访问域名动态生成）
-                var _fp = args.path;
+                var _fp = _fwPath;
                 var _webUrl = '';
                 if (_fp.indexOf('/oneapichat/') !== -1) {
                     _webUrl = window.location.origin + '/' + _fp.substring(_fp.indexOf('oneapichat/'));
                 } else if (_fp.startsWith('/tmp/')) {
                     _webUrl = '(服务器临时文件: ' + _fp + ', 如需访问请用 engine_push 推送)';
                 }
-                let _resultMsg = '✅ 已写入 ' + args.path + ' (' + d.written + ' 字符)';
+                let _resultMsg = '✅ 已写入 ' + _fp + ' (' + d.written + ' 字符)';
                 if (_webUrl && !_webUrl.startsWith('(')) {
                     _resultMsg += '\n🔗 在线访问: ' + _webUrl;
                 } else if (_webUrl) {
@@ -321,7 +335,20 @@ async function engineApiHandler(action, args) {
             if (_bmethod === 'POST') {
                 var _r = await fetch(_burl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(args || {}) });
                 var _d = await _r.json();
-                return _d.error ? { error: _d.error } : (_d.content || _d.snapshot || _d.result || _d.ok ? '操作完成' : _d);
+                if (_d.error) return { error: _d.error };
+                // ★ 修复: 返回实际内容而非空壳 '操作完成'
+                if (_d.content !== undefined) return { result: _d.content };
+                if (_d.snapshot !== undefined) return { result: typeof _d.snapshot === 'string' ? _d.snapshot : JSON.stringify(_d.snapshot) };
+                if (_d.result !== undefined) return { result: _d.result };
+                if (_d.ok) {
+                    // navigate 返回 {ok:true, url:"...", title:"..."}
+                    var _parts = [];
+                    if (_d.url) _parts.push('📍 ' + _d.url);
+                    if (_d.title) _parts.push('📄 ' + _d.title);
+                    if (_d.warning) _parts.push('⚠️ ' + _d.warning);
+                    return { result: _parts.join('\n') || '操作完成', _url: _d.url };
+                }
+                return { result: JSON.stringify(_d) };
             } else {
                 // GET: 拼参数到 URL
                 Object.keys(args || {}).forEach(function(k) {
@@ -366,12 +393,17 @@ async function engineApiHandler(action, args) {
                 var _d = await _r.json();
                 if (_d.error) return { error: _d.error };
                 // 引擎返回的是对象 (如 {ok:true, stdout:"..."}), 直接返回
-                if (_d.ok) return _d.stdout ? { result: _d.stdout, stderr: _d.stderr } : { result: JSON.stringify(_d) };
+                if (_d.ok) {
+                    if (_d.stdout) return { result: _d.stdout, stderr: _d.stderr };
+                    if (_d.files) return { result: _d.files.length > 0 ? '找到 ' + _d.total + ' 个文件:\n' + _d.files.join('\n') : '未找到匹配文件', files: _d.files, total: _d.total };
+                    if (action === 'file_search') return { result: (_d.files && _d.files.length > 0) ? '找到 ' + _d.total + ' 个文件:\n' + _d.files.join('\n') : '未找到匹配文件' };
+                    return { result: JSON.stringify(_d) };
+                }
                 if (_d.result) return _d;
                 // stdout 格式: 提取关键输出
                 if (_d.stdout) return { result: _d.stdout, stderr: _d.stderr, exitCode: _d.exit_code };
                 // files 格式
-                if (_d.files) return { result: _d.files.join('\n'), files: _d.files, total: _d.total };
+                if (_d.files) return { result: _d.files.length > 0 ? '找到 ' + _d.total + ' 个文件:\n' + _d.files.join('\n') : '未找到匹配文件', files: _d.files, total: _d.total };
                 return _d;
             } catch(_e) {
                 console.error('[engineApiHandler] action=' + action + ' url=' + _url + ' error:', _e.message, _e.stack);
@@ -431,7 +463,7 @@ function deleteDocument(docId) {
     var ns = uid ? uid + '_' + coll : coll;
     var _token = getAuthToken();
     showToast('删除中...', 'info');
-    fetch(RAG_API + '?action=delete_document&collection=' + encodeURIComponent(ns) + '&doc_id=' + encodeURIComponent(docId) + '&auth_token=' + encodeURIComponent(_token))
+    fetch(RAG_API + '?action=knowledge&collection=' + encodeURIComponent(ns) + '&doc_id=' + encodeURIComponent(docId) + '&auth_token=' + encodeURIComponent(_token), {method: 'DELETE'})
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (d && d.success) {
@@ -449,35 +481,34 @@ function loadEmbedConfig() {
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var uid = localStorage.getItem('authUserId') || '';
     var ns = uid ? encodeURIComponent(uid + '_' + coll) : encodeURIComponent(coll);
-
-    // 先获取本地模型列表,更新下拉框
     var _token = getAuthToken();
+
+    // 先获取模型列表填充下拉框,再加载当前配置设置选中值(链式避免竞态)
     fetch(RAG_API + '?action=list_models&auth_token=' + encodeURIComponent(_token))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var sm = getEl('ragEmbedModel');
             if (!sm) return;
-            // 保留当前选中值
             var curVal = sm.value;
-            // 构建选项:API模型 + 本地模型
-            let html = '<option value="">TF-IDF(纯词法)</option>';
+            var html = '<option value="">TF-IDF(纯词法)</option>';
             html += '<option value="text-embedding-3-small">text-embedding-3-small(OpenAI)</option>';
             html += '<option value="text-embedding-3-large">text-embedding-3-large(OpenAI)</option>';
             if (data && data.models) {
                 data.models.forEach(function(m) {
-                    if (m.model.includes('zh') || m.model.includes('jina')) {
-                        html += '<option value="' + m.model + '">' + m.model + ' (本地, ' + m.dim + '维)</option>';
+                    var mn = typeof m === 'string' ? m : (m.model || '');
+                    var dim = m.dim || 0;
+                    if (mn && (mn.includes('zh') || mn.includes('jina') || mn.includes('bge'))) {
+                        html += '<option value="' + mn + '">' + mn + (dim ? ' (' + dim + '维)' : '') + '</option>';
                     }
                 });
             }
             sm.innerHTML = html;
             if (curVal) sm.value = curVal;
-        }).catch(function() {});
 
-    // 加载当前配置
-    var _token = getAuthToken();
-    fetch(RAG_API + '?action=embed_config&collection=' + ns + '&auth_token=' + encodeURIComponent(_token))
-        .then(function(r) { return r.json(); })
+            // 下拉框就绪后再加载当前配置设置选中值
+            return fetch(RAG_API + '?action=embed_config&collection=' + ns + '&auth_token=' + encodeURIComponent(_token));
+        })
+        .then(function(r) { return r ? r.json() : null; })
         .then(function(d) {
             if (!d) return;
             var sm = getEl('ragEmbedModel');
