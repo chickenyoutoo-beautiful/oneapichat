@@ -262,6 +262,13 @@ function stopGenerationForChat(chatId) {
             }
         });
     }
+    // ★ 清除可恢复流状态 — 防止刷新后误触发续接
+    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+    try { localStorage.removeItem('_lastStreamMsgId_' + chatId); } catch(e) {}
+    try { localStorage.removeItem('_rs_sid'); } catch(e) {}
+    try { localStorage.removeItem('_rs_cid'); } catch(e) {}
+    try { localStorage.removeItem('_rs_ts'); } catch(e) {}
+    try { localStorage.removeItem('_rs_msgid'); } catch(e) {}
     // ★ 用户停止后也要处理队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
         setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
