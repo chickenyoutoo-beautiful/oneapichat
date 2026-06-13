@@ -1863,10 +1863,15 @@ def _generate_resumable(request: dict, stream_id: str):
 
     try:
         print(f"[_generate_resumable] Starting stream {stream_id} with model={request.get('model','?')} base_url={request.get('base_url','?')[:50]}", flush=True)
-        # ★ 代理配置: 请求级优先 → 全局 env 回退
+        # ★ 代理配置: 请求级优先 → 全局 env 回退（公网域名→内网IP映射）
         _http_client = None
         _req_proxy = request.get('proxy_url', '')
         if request.get('proxy_enabled') and _req_proxy:
+            # ★ 公网地址映射为内网（与 proxy.php 逻辑一致）
+            if 'proxy.naujtrats.xyz:8888' in _req_proxy:
+                _req_proxy = 'http://192.168.195.213:10808'
+            elif 'proxy.naujtrats.xyz:8889' in _req_proxy:
+                _req_proxy = 'http://192.168.195.22:10808'
             import httpx
             _http_client = httpx.Client(proxy=_req_proxy)
         elif _PROXY_URL:
