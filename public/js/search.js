@@ -80,7 +80,7 @@ async function performWebSearch(query, signal, type = 'web') {
     } else if (provider === 'google') {
         url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(query)}&num=${max}&_t=${t}${country ? '&gl=' + country : ''}`;
     } else if (provider === 'tavily') {
-        // Tavily AI Search API - POST JSON
+        // Tavily AI Search API - 通过 proxyFetch 中继避免 CORS
         url = 'https://api.tavily.com/search';
         var body = JSON.stringify({
             api_key: apiKey,
@@ -91,12 +91,12 @@ async function performWebSearch(query, signal, type = 'web') {
         try {
             var controller = new AbortController();
             var timeoutId = setTimeout(() => controller.abort(), timeout);
-            var combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
-            var res = await fetchWithRetry(url, {
+            var _fetchFn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+            var res = await _fetchFn(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: body,
-                signal: combinedSignal
+                signal: controller.signal
             });
             clearTimeout(timeoutId);
             if (!res.ok) throw new Error(`搜索失败: ${res.status}`);
