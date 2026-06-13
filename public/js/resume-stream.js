@@ -75,29 +75,30 @@ window.ResumeStream = (function() {
                         if (dl) {
                             full+=dl;
                             pendingMsg.content=full;
-                            // ★ 实时剔除完整闭合的 <think> 和 (think) 块（与 streamResponse 行为一致）
+                            // ★ 实时剔除闭合的 <think>/</think> 和 (think)/(endthink) 块
                             var _display = full;
-                            if (full.indexOf('<think>') !== -1 && full.indexOf('</think>') > full.indexOf('<think>')) {
-                                _display = full.replace(/<think>[\s\S]*?<\/think>/g, '');
+                            // 格式1: <think>...</think> (大小写不敏感)
+                            var _tRe1 = /<think>([\s\S]*?)<\/think>/gi;
+                            if (_tRe1.test(full)) {
+                                _display = full.replace(_tRe1, '');
                             }
-                            // MiniMax (think)...(endthink) 格式
-                            if (_display.indexOf('(think)') !== -1 && _display.indexOf('(endthink)') > _display.indexOf('(think)')) {
-                                // 提取完整的 (think)...(endthink) 块到 reasoning
-                                var _mtRS2 = _display.match(/\(think\)([\s\S]*?)\(endthink\)/g);
-                                if (_mtRS2) {
-                                    for (var _mti3 = 0; _mti3 < _mtRS2.length; _mti3++) {
-                                        reasoning += _mtRS2[_mti3].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
-                                    }
-                                    _display = _display.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
-                                    pendingMsg.reasoning = reasoning;
+                            // 格式2: MiniMax (think)...(endthink) (大小写不敏感)
+                            var _tRe2 = /\(think\)([\s\S]*?)\(endthink\)/gi;
+                            var _mtRS2 = _display.match(_tRe2);
+                            if (_mtRS2) {
+                                for (var _mti3 = 0; _mti3 < _mtRS2.length; _mti3++) {
+                                    reasoning += _mtRS2[_mti3].replace(/\(endthink\)/gi, '').replace(/\(think\)/gi, '');
                                 }
-                                // 未闭合的 (think) — 流式传输中，只暂存不破坏正文
-                                var _openRS2 = _display.match(/\(think\)([\s\S]*?)$/);
-                                if (_openRS2 && _openRS2[1].length > 5 && _openRS2[1].length < 3000) {
-                                    reasoning += _openRS2[1];
-                                    _display = _display.replace(/\(think\)[\s\S]*$/, '');
-                                    pendingMsg.reasoning = reasoning;
-                                }
+                                _display = _display.replace(_tRe2, '');
+                                pendingMsg.reasoning = reasoning;
+                            }
+                            // 未闭合的 (think) — 流式传输中暂存不破坏正文
+                            var _tRe3 = /\(think\)([\s\S]*?)$/i;
+                            var _openRS2 = _display.match(_tRe3);
+                            if (_openRS2 && _openRS2[1].length > 5 && _openRS2[1].length < 3000) {
+                                reasoning += _openRS2[1];
+                                _display = _display.replace(_tRe3, '');
+                                pendingMsg.reasoning = reasoning;
                             }
                             // ★ 创建/更新思考块 DOM（从 content 中提取的 reasoning）
                             if (reasoning && currentChatId === chatId) {
