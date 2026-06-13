@@ -96,7 +96,7 @@ if (!empty($authToken)) {
 $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
 
 // ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开接口）
-if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search') {
+if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search') {
     http_response_code(401);
     echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
@@ -724,6 +724,25 @@ switch ($action) {
                 echo $output;
             }
         }
+        break;
+
+    case 'tavily_search':
+        $tsQuery = $_GET['q'] ?? '';
+        $tsKey = $_GET['api_key'] ?? '';
+        $tsLimit = intval($_GET['limit'] ?? 5);
+        if (!$tsQuery) { echo json_encode(['error' => '缺少 q 参数']); exit; }
+        if (!$tsKey) { echo json_encode(['error' => '缺少 Tavily API Key']); exit; }
+        $tsBody = json_encode(['api_key' => $tsKey, 'query' => $tsQuery, 'search_depth' => 'basic', 'max_results' => min($tsLimit, 10)]);
+        $tsCtx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => $tsBody,
+            'timeout' => 15,
+            'ignore_errors' => true
+        ]]);
+        $tsResp = file_get_contents('https://api.tavily.com/search', false, $tsCtx);
+        if ($tsResp === false) { echo json_encode(['error' => 'Tavily API 请求失败']); exit; }
+        echo $tsResp;
         break;
 
     case 'push_file':

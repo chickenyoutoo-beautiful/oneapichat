@@ -80,32 +80,18 @@ async function performWebSearch(query, signal, type = 'web') {
     } else if (provider === 'google') {
         url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(query)}&num=${max}&_t=${t}${country ? '&gl=' + country : ''}`;
     } else if (provider === 'tavily') {
-        // Tavily AI Search API - 通过 proxyFetch 中继避免 CORS
-        url = 'https://api.tavily.com/search';
-        var body = JSON.stringify({
-            api_key: apiKey,
-            query: query,
-            search_depth: 'basic',
-            max_results: max
-        });
+        // Tavily 搜索通过服务器端代理（绕过浏览器CORS + proxy.php 401）
+        url = SERVER_API_BASE + '/engine_api.php?action=tavily_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(apiKey);
         try {
-            var controller = new AbortController();
-            var timeoutId = setTimeout(() => controller.abort(), timeout);
-            // Tavily 始终走 proxyFetch（跨域API，浏览器直连必CORS）
-            var _fetchFn = window.proxyFetch || fetch;
-            var res = await _fetchFn(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: body,
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            if (!res.ok) throw new Error(`搜索失败: ${res.status}`);
-            var data = await res.json();
-            return parseSearchResults(data, provider, type);
-        } catch (e) {
-            throw e;
-        }
+            var _tvCtrl = new AbortController();
+            var _tvTid = setTimeout(() => _tvCtrl.abort(), timeout);
+            var _tvRes = await fetch(url, { signal: _tvCtrl.signal });
+            clearTimeout(_tvTid);
+            if (!_tvRes.ok) throw new Error('Tavily搜索失败: ' + _tvRes.status);
+            var _tvData = await _tvRes.json();
+            if (_tvData.error) throw new Error(_tvData.error);
+            return parseSearchResults(_tvData, provider, type);
+        } catch (e) { throw e; }
     } else if (provider === 'minimax') {
         // MiniMax 搜索通过服务器端 CLI 调用
         // MiniMax 搜索通过服务器端 CLI 调用,传 API Key(从聊天模型配置复用)
