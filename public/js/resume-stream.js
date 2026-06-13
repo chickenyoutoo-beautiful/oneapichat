@@ -30,7 +30,27 @@ window.ResumeStream = (function() {
                 var _jd = await resp.json();
                 if (_jd && (_jd.full_text || (_jd.tool_calls && _jd.tool_calls.length > 0))) {
                     console.log('[RS] JSON快路径恢复, full_text长度:', (_jd.full_text||'').length);
-                    return {fullText: _jd.full_text||'', reasoningText: _jd.reasoning_text||'',
+                    var _rsnJson = _jd.reasoning_text || '';
+                    var _ftJson = _jd.full_text || '';
+                    // ★ 清理内联 (think)...(endthink) 标签（引擎可能未提取 — MiniMax等内联思考格式）
+                    var _tJson = _ftJson.match(/\(think\)([\s\S]*?)\(endthink\)/g);
+                    if (_tJson) {
+                        for (var _tj = 0; _tj < _tJson.length; _tj++) {
+                            _rsnJson += _tJson[_tj].replace(/\(endthink\)/g, '').replace(/\(think\)/g, '');
+                        }
+                        _ftJson = _ftJson.replace(/\(think\)[\s\S]*?\(endthink\)/g, '');
+                    }
+                    // 未闭合 (think) 兜底
+                    var _openJson = _ftJson.match(/\(think\)([\s\S]*?)$/);
+                    if (_openJson && _openJson[1].length < 2000 && _openJson[1].length > 5) {
+                        _rsnJson += _openJson[1];
+                        _ftJson = _ftJson.replace(/\(think\)[\s\S]*$/, '');
+                    }
+                    // 去重: 正文前缀与思考重复
+                    if (_rsnJson && _ftJson && _ftJson.indexOf(_rsnJson.trim()) === 0) {
+                        _ftJson = _ftJson.substring(_rsnJson.trim().length).trim();
+                    }
+                    return {fullText: _ftJson.trim(), reasoningText: _rsnJson.trim(),
                             usage: _jd.usage||null, toolCalls: _jd.tool_calls||[], completed: true};
                 }
             } catch(e) { console.warn('[RS] JSON parse error:', e.message); }
@@ -86,8 +106,24 @@ window.ResumeStream = (function() {
                             var _tRe2 = /\(think\)([\s\S]*?)\(endthink\)/gi;
                             var _mtRS2 = _display.match(_tRe2);
                             if (_mtRS2) {
+                                // ★ 去重: 如果之前 unclosed handler 已部分提取，closed handler 只追加新增部分
+                                var _prevReasoningLen = reasoning.length;
                                 for (var _mti3 = 0; _mti3 < _mtRS2.length; _mti3++) {
-                                    reasoning += _mtRS2[_mti3].replace(/\(endthink\)/gi, '').replace(/\(think\)/gi, '');
+                                    var _extracted = _mtRS2[_mti3].replace(/\(endthink\)/gi, '').replace(/\(think\)/gi, '');
+                                    // 检查是否与已提取的 reasoning 重叠
+                                    if (reasoning && reasoning.length >= _extracted.length &&
+                                        reasoning.substring(reasoning.length - _extracted.length) === _extracted) {
+                                        // 完全相同 → unclosed 已提前全量提取, 跳过
+                                    } else if (reasoning && reasoning.length > 0 && _extracted.indexOf(reasoning) === 0) {
+                                        // 新提取的以旧 reasoning 为前缀 → 只追加新增部分
+                                        reasoning = _extracted;
+                                    } else if (reasoning && reasoning.length > 0 && _extracted.length > reasoning.length &&
+                                               _extracted.substring(0, reasoning.length) === reasoning) {
+                                        // 新提取的包含旧 reasoning → 替换为完整版
+                                        reasoning = _extracted;
+                                    } else {
+                                        reasoning += _extracted;
+                                    }
                                 }
                                 _display = _display.replace(_tRe2, '');
                                 pendingMsg.reasoning = reasoning;

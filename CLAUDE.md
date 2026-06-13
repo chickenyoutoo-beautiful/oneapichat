@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-13**: 🐛 MiniMax RS思考不进入代码块根因修复 — 根因: MiniMax API将思考内联在`delta.content`作为`(think)...(endthink)`标签,而非`delta.reasoning_content`字段。引擎`_generate_resumable`和`_stream_openai_to_sse`只读`reasoning_content`,导致`done`事件`reasoning_text`为空+`full_text`含原始标签。RS JSON快路径直接返回未处理数据。修复: ①引擎双侧新增流式状态机提取内联`(think)`标签→路由到`reasoning`事件(含跨chunk边界保护) ②引擎`done`前安全网正则清理残留标签 ③前端`_readSSE` JSON快路径新增标签提取+去重 ④流式路径闭标签处理器新增去重防unclosed→closed二重提取
 - **2026-06-12**: 🔒 强制认证 — `chat.php`和`engine_api.php`未登录时fallback到`device_id`/`default` namespace导致无需登录即可使用。修复: 两文件新增auth中间件,非public action直接返回401
 - **2026-06-12**: 🐛 MiniMax思考重复显示+输入框溢出 — ①MiniMax: `_backendSSEHandler`(SSE路径)缺少`(think)...(endthink)`标签提取+综合去重,修复3条路径 ②输入框: 新增`.input-clip`裁剪容器+`background-color:inherit`
 - **2026-06-12**: 🔧 MCP mmx工具路由修复(方案A) — 根因: MCP server(`/home/naujtrats/mcp-server/server.js`)未实现mmx路由,mmx_chat/speech/image/music被错误fallback到server_network导致"Invalid target URL"。修复: 新增`/mmx`端点,直接调用`mmx` CLI二进制(绕过Nginx HTTP路由和PHP中转),支持chat/image/speech/voices/music/vision/search/quota全部9个子命令,含进程隔离HOME目录和5分钟超时

@@ -1668,18 +1668,64 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         yield sse_event(json.dumps({'type': 'start', 'msg_id': msg_id}))
 
         stream = client.chat.completions.create(**stream_params)
+        # ★ MiniMax/DeepSeek 内联思考标签提取状态机（含跨chunk边界保护）
+        _think_buf_s2 = ''
+        _in_think_s2 = False
+        _chunk_carry_s2 = ''
+        _TAG_MAX2 = 10
+        _TAGS2 = ('(think)', '(endthink)', '<think>', '</think>')
         for chunk in stream:
             delta = chunk.choices[0].delta
             seq += 1
 
-            # 内容增量
             content_delta = delta.content or ''
             if content_delta:
-                full_text += content_delta
-                store.write_chunk(msg_id, 'content', content_delta)
-                yield sse_event(json.dumps({'type': 'content', 'delta': content_delta, 'seq': seq}))
+                # ★ 拼接上一chunk尾部缓冲以检测跨边界标签
+                _c2 = _chunk_carry_s2 + content_delta
+                _chunk_carry_s2 = ''
+                _display_c = ''
+                _pos = 0
+                while _pos < len(_c2):
+                    if _in_think_s2:
+                        _end_idx = _c2.find('(endthink)', _pos)
+                        if _end_idx != -1:
+                            _think_buf_s2 += _c2[_pos:_end_idx]
+                            reasoning_text += _think_buf_s2
+                            store.write_chunk(msg_id, 'reasoning', _think_buf_s2)
+                            yield sse_event(json.dumps({'type': 'reasoning', 'delta': _think_buf_s2, 'seq': seq}))
+                            _think_buf_s2 = ''
+                            _in_think_s2 = False
+                            _pos = _end_idx + 10
+                        else:
+                            _think_buf_s2 += _c2[_pos:]
+                            reasoning_text += _c2[_pos:]
+                            store.write_chunk(msg_id, 'reasoning', _c2[_pos:])
+                            yield sse_event(json.dumps({'type': 'reasoning', 'delta': _c2[_pos:], 'seq': seq}))
+                            _pos = len(_c2)
+                    else:
+                        _start_idx = _c2.find('(think)', _pos)
+                        if _start_idx != -1:
+                            _display_c += _c2[_pos:_start_idx]
+                            _pos = _start_idx + 7
+                            _in_think_s2 = True
+                        else:
+                            _display_c += _c2[_pos:]
+                            _pos = len(_c2)
+                # ★ 跨chunk边界保护: 尾部可能是不完整标签前缀
+                if _display_c and not _in_think_s2:
+                    _tail_start2 = max(0, len(_display_c) - _TAG_MAX2)
+                    for _ti2 in range(_tail_start2, len(_display_c)):
+                        _tail2 = _display_c[_ti2:]
+                        if any(tag.startswith(_tail2) for tag in _TAGS2):
+                            _chunk_carry_s2 = _tail2
+                            _display_c = _display_c[:_ti2]
+                            break
+                if _display_c:
+                    full_text += _display_c
+                    store.write_chunk(msg_id, 'content', _display_c)
+                    yield sse_event(json.dumps({'type': 'content', 'delta': _display_c, 'seq': seq}))
 
-            # 思考增量
+            # 思考增量（reasoning_content 字段 — DeepSeek 等）
             reasoning_delta = delta.reasoning_content or ''
             if reasoning_delta:
                 reasoning_text += reasoning_delta
@@ -1705,9 +1751,22 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
                     except Exception:
                         usage = dict(chunk.usage)
 
-        # 流结束
-        store.finish_stream(msg_id, full_text, reasoning_text, tool_calls, usage)
-        yield sse_event(json.dumps({'type': 'done', 'full_text': full_text, 'reasoning_text': reasoning_text,
+        # 流结束 — 刷新跨chunk缓冲 + 安全网清理内联标签
+        if _chunk_carry_s2:
+            full_text += _chunk_carry_s2
+        if _in_think_s2 and _think_buf_s2:
+            reasoning_text += _think_buf_s2
+        import re as _re_tmp2
+        _inlines2 = _re_tmp2.findall(r'\(think\)([\s\S]*?)\(endthink\)', full_text)
+        if _inlines2:
+            reasoning_text += ''.join(_inlines2)
+            full_text = _re_tmp2.sub(r'', full_text)
+        _open_m2 = _re_tmp2.search(r'\(think\)([\s\S]*?)$', full_text)
+        if _open_m2 and len(_open_m2.group(1)) < 3000:
+            reasoning_text += _open_m2.group(1)
+            full_text = _re_tmp2.sub(r'', full_text)
+        store.finish_stream(msg_id, full_text.strip(), reasoning_text.strip(), tool_calls, usage)
+        yield sse_event(json.dumps({'type': 'done', 'full_text': full_text.strip(), 'reasoning_text': reasoning_text.strip(),
                                      'tool_calls': tool_calls, 'usage': usage}))
 
     except Exception as e:
@@ -1883,6 +1942,22 @@ def _generate_resumable(request: dict, stream_id: str):
             http_client=_http_client
         )
         messages = request.get('messages', [])
+        # ★ 去重 tool_call_id: MiniMax/DeepSeek 拒绝同一请求中重复的 tool_call id
+        seen_tc_ids = set()
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
+                unique_calls = []
+                for tc in m['tool_calls']:
+                    tc_id = tc.get('id', '') if isinstance(tc, dict) else ''
+                    if tc_id and tc_id not in seen_tc_ids:
+                        seen_tc_ids.add(tc_id)
+                        unique_calls.append(tc)
+                    elif tc_id:
+                        print(f"[_generate_resumable] 去重 tool_call_id: {tc_id}", flush=True)
+                if unique_calls:
+                    m['tool_calls'] = unique_calls
+                else:
+                    del m['tool_calls']
         # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
         # ★ 确保 reasoning_content 传递给后续请求(DeepSeek thinking模式要求)
         _has_any_reasoning = any(
@@ -1910,13 +1985,58 @@ def _generate_resumable(request: dict, stream_id: str):
         print(f"[_generate_resumable] Calling API...", flush=True)
         _tc_by_index = {}  # ★ 按index合并增量tool_call delta
         _tc_order = []     # 保持顺序
+        # ★ MiniMax/DeepSeek 内联思考标签提取状态机（流式分块处理，含跨chunk边界保护）
+        _think_buf = ''      # 暂存 (think)...(endthink) 跨chunk不完整块
+        _in_think = False    # 是否在 (think) 块内
+        _chunk_carry = ''    # ★ 跨chunk边界保护: 上一chunk尾部可能是不完整标签前缀
+        _TAG_MAX = 10        # max(len('(endthink)'), len('</think>'), len('(think)'), len('<think>'))
+        _TAGS = ('(think)', '(endthink)', '<think>', '</think>')
         for chunk in client.chat.completions.create(**params):
             delta = chunk.choices[0].delta
-            c = delta.content or ''
+            c = (delta.content or '')
             r = getattr(delta, 'reasoning_content', '') or ''
             if c:
-                full += c
-                _emit('content', {'delta': c})
+                # ★ 拼接上一chunk的尾部缓冲以检测跨边界标签
+                c = _chunk_carry + c
+                _chunk_carry = ''
+                _display_c = ''
+                _pos = 0
+                while _pos < len(c):
+                    if _in_think:
+                        _end_idx = c.find('(endthink)', _pos)
+                        if _end_idx != -1:
+                            _think_buf += c[_pos:_end_idx]
+                            reasoning += _think_buf
+                            _emit('reasoning', {'delta': _think_buf})
+                            _think_buf = ''
+                            _in_think = False
+                            _pos = _end_idx + 10  # len('(endthink)') = 10
+                        else:
+                            _think_buf += c[_pos:]
+                            reasoning += c[_pos:]
+                            _emit('reasoning', {'delta': c[_pos:]})
+                            _pos = len(c)
+                    else:
+                        _start_idx = c.find('(think)', _pos)
+                        if _start_idx != -1:
+                            _display_c += c[_pos:_start_idx]  # 标签前的内容作为正文
+                            _pos = _start_idx + 7  # len('(think)') = 7
+                            _in_think = True
+                        else:
+                            _display_c += c[_pos:]
+                            _pos = len(c)
+                # ★ 跨chunk边界保护: 尾部可能是不完整标签前缀，截留到下一chunk
+                if _display_c and not _in_think:
+                    _tail_start = max(0, len(_display_c) - _TAG_MAX)
+                    for _ti in range(_tail_start, len(_display_c)):
+                        _tail = _display_c[_ti:]
+                        if any(tag.startswith(_tail) for tag in _TAGS):
+                            _chunk_carry = _tail
+                            _display_c = _display_c[:_ti]
+                            break
+                if _display_c:
+                    full += _display_c
+                    _emit('content', {'delta': _display_c})
             if r:
                 reasoning += r
                 _emit('reasoning', {'delta': r})
@@ -1961,7 +2081,23 @@ def _generate_resumable(request: dict, stream_id: str):
         for i, tc in enumerate(tool_calls):
             if not tc['id']:
                 tc['id'] = f'call_{i}_{int(time.time()*1000)}'
-        done_data = {'full_text': full, 'reasoning_text': reasoning,
+        # ★ 刷新流式状态机缓冲（跨chunk尾部残留 + 未闭合think块）
+        if _chunk_carry:
+            full += _chunk_carry
+        if _in_think and _think_buf:
+            reasoning += _think_buf
+        # ★ 安全网: 清理 full 中残留的 (think)...(endthink) 标签（流式状态机未覆盖的边界情况）
+        import re as _re_tmp
+        _inlines = _re_tmp.findall(r'\(think\)([\s\S]*?)\(endthink\)', full)
+        if _inlines:
+            reasoning += ''.join(_inlines)
+            full = _re_tmp.sub(r'', full)
+        # 未闭合 (think) 兜底
+        _open_m = _re_tmp.search(r'\(think\)([\s\S]*?)$', full)
+        if _open_m and len(_open_m.group(1)) < 3000:
+            reasoning += _open_m.group(1)
+            full = _re_tmp.sub(r'', full)
+        done_data = {'full_text': full.strip(), 'reasoning_text': reasoning.strip(),
                      'tool_calls': tool_calls, 'usage': usage}
         _emit('done', done_data)
         _resumable[stream_id]['finished'] = True
