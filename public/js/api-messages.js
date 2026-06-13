@@ -402,6 +402,14 @@ function buildApiMessages(chatId) {
             } else {
                 delete _tmsg2.tool_calls;
             }
+            // ★ 同步清理源消息中的孤立tool_call，防止下轮重复出现导致API 400 duplicate
+            if (_removedTcCount > 0 && _tmsg2._srcIndex !== undefined) {
+                var _srcMsg = msgs[_tmsg2._srcIndex];
+                if (_srcMsg && _srcMsg.tool_calls) {
+                    if (_validCalls.length > 0) _srcMsg.tool_calls = JSON.parse(JSON.stringify(_validCalls));
+                    else delete _srcMsg.tool_calls;
+                }
+            }
         }
     }
     // 第四遍: 标记孤立 tool 消息（无对应 assistant tool_call）
