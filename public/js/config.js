@@ -817,9 +817,6 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     }
     var proxyUrl = window.getProxyUrl();
     var enabled = window.isProxyEnabled();
-    // 解析相对URL为绝对URL(proxy.php只接受http/https开头)
-    if (targetUrl.startsWith('/')) { targetUrl = window.location.origin + targetUrl; }
-    if (targetUrl.startsWith('/')) { targetUrl = window.location.origin + targetUrl; }
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
     // ★ 同源请求不需要走proxy.php中继
     if (_isLocal || targetUrl.startsWith(window.location.origin)) {
@@ -829,9 +826,11 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     //    代理启用时走代理, 未启用时proxy.php纯CURL中继
     if (!enabled || !proxyUrl) {
         proxyUrl = '__relay_only__';
+    } else if (!/^https?:\/\//.test(proxyUrl) && !/^socks[45]?:\/\//.test(proxyUrl)) {
+        proxyUrl = 'http://' + proxyUrl;  // ★ 自动补全协议前缀
     }
 
-    console.log('[Proxy] →', targetUrl.substring(0, 80));
+    console.log('[Proxy] →', targetUrl.substring(0, 80), enabled ? '(via ' + proxyUrl + ')' : '(relay only)');
 
     var headers = {};
     if (options.headers) {
