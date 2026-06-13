@@ -18,7 +18,7 @@ window.ResumeStream = (function() {
     }
 
     async function _readSSE(sid, chatId, pendingMsg, isResume) {
-        var url = _base + '/engine/chat/stream/' + encodeURIComponent(sid);
+        var url = '/engine/chat/stream/' + encodeURIComponent(sid);
         var resp;
         try { resp = await fetch(url); } catch(e) { return null; }
         if (!resp.ok) { return null; }
@@ -291,7 +291,8 @@ window.ResumeStream = (function() {
                 // ★ 传递代理配置到引擎，让子代理/可恢复流也走代理
                 var _proxyEnabled = (window.isProxyEnabled && window.isProxyEnabled()) || false;
                 var _proxyUrl = _proxyEnabled ? (window.getProxyUrl ? window.getProxyUrl() : '') : '';
-                var cr = await fetch(_base+'/oneapichat/api/engine_api.php?action=chat_create', {
+                // ★ 用相对URL避免代理拦截同源请求
+                var cr = await fetch('/oneapichat/api/engine_api.php?action=chat_create', {
                     method:'POST',
                     headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
                     body:JSON.stringify({
