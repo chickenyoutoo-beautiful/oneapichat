@@ -2684,7 +2684,7 @@ window.useAlternativeVisionModel = function() {
 
                 // 检测可恢复的 400 错误类型
                 // ★ 先检查 max_tokens 超限（必须在 token/context 之前，否则会被错误归类为 trim_context）
-                var _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i) || _errMsg.match(/max_tokens.*?(\d{4,})/i);
+                var _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i) || _errMsg.match(/max_tokens.*?(\d{4,})/i) || _errMsg.match(/does not support max tokens.*?[>≥]\s*(\d+)/i) || _errMsg.match(/support max tokens.*?(\d{4,})/i);
                 if (_maxTokensLimit || _errMsg.includes('max_tokens') || _errMsg.includes('max completion') || _errMsg.includes('does not support max tokens')) {
                     _shouldRetry = true;
                     _retryAction = 'adjust_max_tokens';
