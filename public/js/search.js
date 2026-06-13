@@ -65,20 +65,13 @@ async function performWebSearch(query, signal, type = 'web') {
         let params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
         if (country) params += `&country=${country}`;
         params += '&safesearch=off';
-        if (SEARCH_PROXY) {
-            url = `${SEARCH_PROXY}?engine=brave&${params}&type=${type}&key=${encodeURIComponent(apiKey)}`;
-        } else {
-            var endpoint = '';
-            switch (type) {
-                case 'news': endpoint = '/news/search'; break;
-                case 'images': endpoint = '/images/search'; break;
-                default: endpoint = '/web/search';
-            }
-            url = `https://api.search.brave.com/res/v1${endpoint}?${params}`;
-        }
-        headers['X-Subscription-Token'] = apiKey;
+        var endpoint = type === 'news' ? '/news/search' : (type === 'images' ? '/images/search' : '/web/search');
+        url = `https://api.search.brave.com/res/v1${endpoint}?${params}`;
+        // ★ 通过服务器代理避免浏览器CORS
+        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url) + '&header_key=X-Subscription-Token&header_val=' + encodeURIComponent(apiKey);
     } else if (provider === 'google') {
         url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(query)}&num=${max}&_t=${t}${country ? '&gl=' + country : ''}`;
+        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url);
     } else if (provider === 'tavily') {
         // Tavily 搜索通过服务器端代理（绕过浏览器CORS + proxy.php 401）
         url = SERVER_API_BASE + '/engine_api.php?action=tavily_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(apiKey);
@@ -99,9 +92,8 @@ async function performWebSearch(query, signal, type = 'web') {
         var _mmxApiKey = _k; try { _mmxApiKey = await decrypt(_k) || _k; } catch(e) {}
         url = SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(_mmxApiKey);
     } else {
-        url = SEARCH_PROXY
-            ? `${SEARCH_PROXY}?engine=duckduckgo&q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`
-            : `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`;
+        url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`;
+        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url);
     }
 
     var controller = new AbortController();

@@ -96,7 +96,7 @@ if (!empty($authToken)) {
 $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
 
 // ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开接口）
-if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search') {
+if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search' && $action !== 'search_proxy') {
     http_response_code(401);
     echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
@@ -724,6 +724,18 @@ switch ($action) {
                 echo $output;
             }
         }
+        break;
+
+    case 'search_proxy':
+        // ★ 通用搜索引擎代理 — 所有外部搜索API走服务器端，避免浏览器CORS
+        $spUrl = $_GET['url'] ?? '';
+        if (!$spUrl || !preg_match('#^https?://#', $spUrl)) { echo json_encode(['error' => '缺少合法 url 参数']); exit; }
+        $spCtx = stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true,
+            'header' => ($_GET['header_key'] ?? '') ? ($_GET['header_key'] . ': ' . ($_GET['header_val'] ?? '')) . "\r\n" : ''
+        ]]);
+        $spResp = file_get_contents($spUrl, false, $spCtx);
+        if ($spResp === false) { echo json_encode(['error' => '搜索请求失败']); exit; }
+        echo $spResp;
         break;
 
     case 'tavily_search':
