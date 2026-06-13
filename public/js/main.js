@@ -1687,13 +1687,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (!_rsResult.completed) {
                         if (_rsResult.error) {
                             var _rsErrStr = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
-                            // 400安全过滤: 回退HTTP直连走safety_filter重试逻辑
-                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk') || _rsErrStr.includes('sensitive') || _rsErrStr.includes('422')) {
-                                console.warn('[RS] 400安全过滤, 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
+                            // 400/网络错误: 回退HTTP直连重试
+                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk') || _rsErrStr.includes('sensitive') || _rsErrStr.includes('422') || _rsErrStr.includes('Connection error') || _rsErrStr.includes('connect') || _rsErrStr.includes('timeout')) {
+                                console.warn('[RS] 引擎连接失败(' + _rsErrStr + '), 回退HTTP直连重试'); window.__rsFallbackRetry = true;
                                 _useRS = false;
                                 var _rsDone = false;
                             } else {
-                                // 429等: 不降级直接抛出
                                 throw new Error('RS: ' + _rsErrStr);
                             }
                         } else {
@@ -1725,7 +1724,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (_rsResult && _rsResult.error) {
                         var _rsErrStr2 = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
                         // 400安全过滤: 回退HTTP直连走safety_filter重试
-                        if (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk')) {
+                        if (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk') || _rsErrStr2.includes('Connection error') || _rsErrStr2.includes('connect') || _rsErrStr2.includes('timeout')) {
                             console.warn('[RS] 400安全过滤(空结果), 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
                             _useRS = false;
                             var _rsDone = false;
