@@ -1671,9 +1671,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
             // ★ 工具续接也走RS: 每轮独立stream_id不嵌套,前8轮走RS超8轮退直连
             var _isContinuation = (toolCallCount > 8);
-            // ★ 代理模式下禁用RS(引擎侧代理不可达)，走proxyFetch直连
-            var _proxyActive = (window.isProxyEnabled && window.isProxyEnabled()) || false;
-            var _useRS = _rsEnabled && !_isContinuation && !_proxyActive;
+            var _useRS = _rsEnabled && !_isContinuation;
             if (_useRS) {
                 // ★ 先持久化用户消息到服务器，防止刷新丢失
                 saveChats();

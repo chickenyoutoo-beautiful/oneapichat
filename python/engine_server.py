@@ -1636,10 +1636,15 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         return f"event: {event_type}\ndata: {data_str}\n\n"
 
     try:
-        # ★ 代理配置: 请求级优先
+        # ★ 代理配置: 请求级优先（公网域名→内网IP映射）
         _httpc = None
         _rp = request_data.get('proxy_url', '')
         if request_data.get('proxy_enabled') and _rp:
+            # ★ 公网地址映射为内网（与 proxy.php 逻辑一致）
+            if 'proxy.naujtrats.xyz:8888' in _rp:
+                _rp = 'http://192.168.195.213:10808'
+            elif 'proxy.naujtrats.xyz:8889' in _rp:
+                _rp = 'http://192.168.195.22:10808'
             import httpx; _httpc = httpx.Client(proxy=_rp)
         elif _PROXY_URL:
             import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
