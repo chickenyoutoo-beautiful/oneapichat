@@ -91,7 +91,8 @@ async function performWebSearch(query, signal, type = 'web') {
         try {
             var controller = new AbortController();
             var timeoutId = setTimeout(() => controller.abort(), timeout);
-            var _fetchFn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+            // Tavily 始终走 proxyFetch（跨域API，浏览器直连必CORS）
+            var _fetchFn = window.proxyFetch || fetch;
             var res = await _fetchFn(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
