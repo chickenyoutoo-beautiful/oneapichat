@@ -498,8 +498,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ 保存标记供 buildApiMessages 使用(pendingFiles 即将被清空)
     window.__currentMessageHasImages = currentMessageHasImages;
 
-    // 立即清空输入框,让用户知道消息已发送
-    if (input) {
+    // 立即清空输入框,让用户知道消息已发送（队列消息不清空）
+    if (input && !window._isQueueMessage) {
         input.value = '';
         window.autoResize(input);
     }
