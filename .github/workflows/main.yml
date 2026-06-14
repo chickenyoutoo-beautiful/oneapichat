@@ -9,6 +9,7 @@ jobs:
   Start:
     runs-on: ubuntu-latest
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       CHAOXING_USERNAME: ${{ secrets.CHAOXING_USERNAME }}
       CHAOXING_PASSWORD: ${{ secrets.CHAOXING_PASSWORD }}
       CHAOXING_COURSE_ID: ${{ secrets.CHAOXING_COURSE_ID }}
