@@ -29,4 +29,4 @@ jobs:
         run: pip install -r python/requirements.txt
 
       - name: Run main.py
-        run: cd python/chaoxing && python main.py -c config.ini
+        run: cd python/chaoxing && python main.py -u "$CHAOXING_USERNAME" -p "$CHAOXING_PASSWORD" -l "$CHAOXING_COURSE_ID" -s 2.0
