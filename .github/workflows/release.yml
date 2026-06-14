@@ -1,72 +1,53 @@
-name: Build and Release
+name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 v1.2.3)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build ${{ matrix.os }}
-        run: npm run build:${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'windows-latest' && 'win' || 'mac' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.os }}-build
-          path: release/
-
-  create_release:
-    name: Create Release
-    needs: [build]
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Create archive
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          mkdir -p release
+          # 排除不需要的文件
+          tar --exclude='.git' --exclude='.archive_backups' --exclude='__pycache__' \
+              --exclude='*.pyc' --exclude='.engine' --exclude='node_modules' \
+              --exclude='.claude' -czf "release/oneapichat-${VERSION}.tar.gz" .
+          cd release && sha256sum "oneapichat-${VERSION}.tar.gz" > "oneapichat-${VERSION}.tar.gz.sha256"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: OneAPIChat ${{ github.ref_name }}
+          tag_name: ${{ github.event.inputs.version }}
+          name: OneAPIChat ${{ github.event.inputs.version }}
           body: |
-            ## OneAPIChat ${{ github.ref_name }}
+            ## OneAPIChat ${{ github.event.inputs.version }}
 
-            ### 更新内容
-            - 🎨 全新的桌面客户端（Electron 封装）
-            - 🔄 跨域登录状态同步
-            - 📊 PPT/PPTX 文件解析
-            - 🖼️ 图片预览缩放增强
-            - 📈 Mermaid 图表即时渲染
-            - 🎯 流式输出性能优化
-            - 🔧 Agent 引擎修复
-            - ✨ 其他多项改进和修复
+            ### 部署要求
+            - Ubuntu/Debian + Nginx + PHP 8.3 + Python 3.11+
+            - 可选: Chromium (浏览器自动化)、Playwright
 
-            ### 下载
-            请根据操作系统选择对应版本。
-          files: |
-            ubuntu-latest-build/*
-            windows-latest-build/*
-            macos-latest-build/*
+            ### 快速部署
+            ```bash
+            tar xzf oneapichat-${VERSION}.tar.gz -C /var/www/html/oneapichat
+            cd /var/www/html/oneapichat/python
+            pip install -r requirements.txt
+            python engine_server.py &
+            ```
+
+            ### 校验
+            SHA256: 见 .sha256 文件
+          files: release/*
           draft: false
           prerelease: false
