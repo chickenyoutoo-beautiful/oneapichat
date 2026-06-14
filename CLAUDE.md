@@ -4,56 +4,17 @@
 
 ## 最近变更
 
-- **2026-06-13**: 🐛 DeepSeek/MiniMax duplicate tool_call_id 400修复 — 根因: ①`buildApiMessages`双向配对清理孤立tool消息时只从API消息数组移除,不删源(`chats[id].messages`),导致孤tool消息逐轮累积 ②引擎`_generate_resumable`只去重assistant `tool_calls[].id`,不去重tool消息的`tool_call_id` ③`_stream_openai_to_sse`完全无去重。修复: ①`buildApiMessages`检测到孤tool消息时同步从源数组`splice`删除 ②引擎双侧新增assistant+tool全量去重 ③前端+引擎新增诊断日志(每次打印消息摘要含tool_call_id+重复⚠️标记)
-- **2026-06-13**: 🐛 MiniMax RS思考不进入代码块根因修复 — 根因: MiniMax API将思考内联在`delta.content`作为`(think)...(endthink)`标签,而非`delta.reasoning_content`字段。引擎`_generate_resumable`和`_stream_openai_to_sse`只读`reasoning_content`,导致`done`事件`reasoning_text`为空+`full_text`含原始标签。RS JSON快路径直接返回未处理数据。修复: ①引擎双侧新增流式状态机提取内联`(think)`标签→路由到`reasoning`事件(含跨chunk边界保护) ②引擎`done`前安全网正则清理残留标签 ③前端`_readSSE` JSON快路径新增标签提取+去重 ④流式路径闭标签处理器新增去重防unclosed→closed二重提取
-- **2026-06-12**: 🔒 强制认证 — `chat.php`和`engine_api.php`未登录时fallback到`device_id`/`default` namespace导致无需登录即可使用。修复: 两文件新增auth中间件,非public action直接返回401
-- **2026-06-12**: 🐛 MiniMax思考重复显示+输入框溢出 — ①MiniMax: `_backendSSEHandler`(SSE路径)缺少`(think)...(endthink)`标签提取+综合去重,修复3条路径 ②输入框: 新增`.input-clip`裁剪容器+`background-color:inherit`
-- **2026-06-12**: 🔧 MCP mmx工具路由修复(方案A) — 根因: MCP server(`/home/naujtrats/mcp-server/server.js`)未实现mmx路由,mmx_chat/speech/image/music被错误fallback到server_network导致"Invalid target URL"。修复: 新增`/mmx`端点,直接调用`mmx` CLI二进制(绕过Nginx HTTP路由和PHP中转),支持chat/image/speech/voices/music/vision/search/quota全部9个子命令,含进程隔离HOME目录和5分钟超时
-- **2026-06-12**: 🔧 输入框/流程面板背景溢出回归修复 — 根因: `d279784`移除`.input-area`实色背景+`z-index:10`导致半透明子元素(flow-panel毛玻璃78%+backdrop-filter/input-wrapper 72%)失去涂料屏障和裁剪边界。修复: ①新增`.input-clip`裁剪容器(`overflow:hidden`)包裹除queue-bar外的所有input-area子元素 ②`.input-area`添加`background-color:inherit`继承父级`bg-gray-50`/`bg-gray-950`作为涂料屏障 ③清理未使用的`--iw-glass-*` CSS变量
-- **2026-06-11**: 🤖 Skills系统 + 🕷️ 网页抓取增强 — 新增skills.py(SkillDef/SkillStore/API CRUD/run_skill工具) + web_extract.py(PlatformExtractor插件+BilibiliExtractor+增强HTML解析) + web_fetch升级(3000→20000字符+链接/标题保留) + platform_extract新工具 + 公式渲染回滚为纯原生(移除_fixBareLatex)
-- **2026-06-10**: 🧠 LaTeX智能修复 — markdown.js新增 `_fixBareLatex()`: AI输出的裸LaTeX命令(\mathbf,\cos,\dfrac等)自动包裹$...$，字符级扫描处理嵌套括号和连续命令。跳过\text等非数学命令。
-- **2026-06-10**: 🐛 RAG修复(全链路) — embed_config 405(缺POST端点) + upload完全不可用(php://input+json_encode二进制崩溃)+ 模型列表空白(data.models字符串数组当对象). 修复:引擎新增POST+PHP代理读$_FILES+base64编码+前端链式fetch消竞态
-- **2026-06-10**: 🐛 Mermaid根因修复 — `window.mermaid`始终undefined：本地mermaid.min.js执行时可能因DOM未就绪抛错（onload仍触发）。添加CDN回退(mermaid@10 UMD) + 加载状态日志。RS think regex $兜底修复 + 缩写检测
-- **2026-06-10**: 🐛 MiniMax markdown渲染修复 — think标签正则$兜底在流式中吞掉全部正文，改为仅匹配完整闭合标签。streaming中实时渲染完整Mermaid块
-- **2026-06-08**: 🐛 RS刷新旧截断气泡根因修复 — 引擎 SSE 广播无 source 字段导致消息数组被覆盖 + `_syncChatFromServer` 智能合并
-- **2026-06-08**: 🔧 刷课模块修复 — `learning_records.db` 目录权限 + `server_tools.py` 缺失 import + 路径修复
-- **2026-06-08**: 📦 超星/考试模块整理 — `python/api/` + 根目录 `scripts/` + 散落 `.py` → 统一归入 `python/chaoxing/`
-- **2026-06-06**: 🌊 流式处理提取 — stream-handler.js (1,238行, 5函数)，main.js 4,351→3,116 (-28.4%!)
-- **2026-06-06**: 🧩 verifyToken 统一 — 4 实现→1 共享 `verifyAuthToken` (auth_helpers.php)，消除重复
-- **2026-06-06**: 🔄 fetchWithRetry 合并 — main.js + agent.js 重复 → utils.js 统一版本
-- **2026-06-06**: 🖥️ 服务器工具提取 — engine/server_tools.py (399行, 14端点)，engine_server.py 3,119→2,736 (-12.3%)
-- **2026-06-06**: 🛠️ 厂商切换修复 — onProviderChange 空壳移除 + onchange 接线 + fetchModels 自动刷新
-- **2026-06-06**: 📻 小米 MiMo — 新增 `mimo` 厂商 (api.xiaomimimo.com/v1, MiMo-V2-Flash)
-- **2026-06-06**: 📦 Phase 9 拆分 — 删除重复工具函数(333行) + 提取 resume-stream.js(158) + commands.js(210)，main.js 5,105→4,408 (-13.6%)
-- **2026-06-06**: ✅ 存储层模块化 — 提取 `python/engine/store.py` (EngineStore+ChatStore)，engine_server.py 4917→4719行
-- **2026-06-06**: 🧪 单元测试 — `python/tests/test_store.py` (14 tests)，覆盖 EngineStore/ChatStore 核心功能
-- **2026-06-06**: 🔒 SSL证书验证 — 移除全部 6 处 `verify=False`，启用 HTTPS 证书验证防 MITM
-- **2026-06-06**: 🚫 禁轮询子代理 — delegate_task结果/tool描述/系统提示词 三处同步禁止 engine_agent_status 轮询
-- **2026-06-06**: 🔧 临时授权对话隔离 — _hasTempForThisChat 范围检查，跨对话不污染
-- **2026-06-06**: 🎵 工具结果内联 — mmx_speech/music/browser_screenshot 结果嵌入回复气泡尾部
-- **2026-06-06**: 🔧 临时授权修复 — _effectiveAgent 统一临时授权工具范围 + WIN_TOOLS 仅完整 Agent 可用
-- **2026-06-06**: 🧹 工具定义归位 — main.js 中 10 个工具常量迁入 tools.js (244行)，main.js 减至 5,611 行
-- **2026-06-06**: 🗑️ 清理冗余 — 删除 4 个 .bak 备份文件 + 1 个重复 engine_api.php
-- **2026-06-06**: 📋 流程面板 — plan_update 工具 + Flow Panel UI 完整实现
-- **2026-06-06**: ⚡ 懒加载/代码分割 — 三级加载(Tier 0 defer 507KB + Tier 1 idle 175KB + Tier 2 on-demand 277KB)，首屏阻塞 -40%
-- **2026-06-06**: 🛡️ 速率限制 — Nginx limit_req (auth 5/min + API 10/s) + PHP checkLoginRateLimit (IP+用户双维度)
-- **2026-06-06**: 🔒 安全升级 — XOR→AES-256-GCM 加密 + CORS 白名单 + 密钥外部化到 config.ini
-- **2026-06-06**: Phase 7 拆分 — 抽取 ui/utils (1,031行)，🔥 main.js 减至 5,611 行 (-72%)
-- **2026-06-06**: Phase 5 拆分 — 抽取 storage.js (704行)
-- **2026-06-06**: Phase 4 拆分 — 抽取 init/agent-notify (1,662行)
-- **2026-06-06**: Phase 3 拆分 — 抽取 config/dialogs/cloudreve/rag/chaoxing 5 个模块 (2,856行)
-- **2026-06-06**: Phase 2 拆分 — 抽取 `js/agent.js` (2,669行)，三模式/审批门/计划流/Session 全迁出
-- **2026-06-06**: image-gen.js 补全 — analyzeImage + compressImage 迁入，image-gen.js 达 834 行
-- **2026-06-06**: Phase 1 拆分 — 抽取 `js/image-gen.js` (834行) + `js/markdown.js` (490行)
-- **2026-06-06**: Phase 0 拆分 — 抽取 `js/core.js` (309行)，全局常量/DOM/加密/Cookie 模块化
-- **2026-06-03**: 无感断点续传 — StreamBuffer 磁盘持久化 + msg_id/offset 续接（刷新不丢 chunks）
-- **2026-06-03**: 全面审计修复文件重构后的路径断裂问题
-- **2026-06-03**: SSE 事件总线实现跨浏览器实时同步 + 任务持久化 + 队列对齐
-- **2026-06-03**: 402 余额不足自动降级 max_tokens 重试
-- **2026-06-03**: ask_agent 单次授权 + 临时权限呼吸灯指示
-- **2026-06-03**: 消息队列 sessionStorage→localStorage 持久化 + 节流优化
-- **2026-06-03**: PWA manifest 路径修正为 `/oneapichat/`
-- **2026-06-03**: 文件重构 — 前端移入 `public/`，后端 Python 脚本从备份恢复
+- **2026-06-13**: 🔧 综合修复轮次 — ①RS+代理引擎侧URL映射 ②duplicate tool_call_id全局去重 ③MiniMax思考`(think)`标签大小写不敏感提取 ④max_tokens自动减小regex补充 ⑤`_engine_get` POST支持修复 ⑥`_generate_resumable`代理URL映射 ⑦`buildApiMessages`孤tool_call同步清理源消息
+- **2026-06-12**: 🔒 强制认证 — `chat.php`+`engine_api.php`新增auth中间件,非public action返回401
+- **2026-06-12**: 🔧 输入框溢出+MiniMax思考 — ①`.input-clip`裁剪容器+`background-color:inherit` ②`_backendSSEHandler`+RS双路径`(think)`提取+去重
+- **2026-06-12**: 🔧 MCP mmx路由修复 — MCP server新增`/mmx`端点直接CLI调用,支持9个子命令
+- **2026-06-12**: 🍪 超星cookie-first登录 — `api_get_courses.py/exam_api.py/start_exam.py`先试用Cookie获取课程,失效才登录
+- **2026-06-12**: 🖥️ browser click/type三级降级 — 正常→force→evaluate派发DOM事件
+- **2026-06-12**: 🔍 搜索引擎全走服务器代理 — Brave/Google/DuckDuckGo/Tavily统一走`engine_api.php?action=search_proxy`
+- **2026-06-11**: 🤖 Skills系统+网页抓取增强
+- **2026-06-10**: 🐛 RAG+Mermaid+MiniMax markdown修复
+- **2026-06-08**: 🐛 RS刷新+刷课模块修复
+- **2026-06-06**: 📦 Phase 0-9 代码拆分 + 🔒 安全升级 + ⚡ 懒加载
 
 ## 项目概览
 
