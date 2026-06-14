@@ -1585,20 +1585,8 @@ function requestToolApproval(toolName, args) {
     return new Promise(function(resolve) {
         var mode = getAgentMode();
 
-        // ★ 超时保护: 30秒内未响应则自动拒绝
-        var _approvalTimer = setTimeout(function() {
-            console.warn('[审批] 超时未响应,自动拒绝:', toolName);
-            sessionUsage.approvalsRejected++;
-            resolve(false);
-        }, 30000);
-
-        function _cleanup() {
-            clearTimeout(_approvalTimer);
-        }
-
         // YOLO 模式: 自动批准所有操作
         if (mode === 'yolo') {
-            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -1606,7 +1594,6 @@ function requestToolApproval(toolName, args) {
 
         // ★ ask_agent 单次授权: 本轮对话自动批准所有工具（无需弹窗）
         if (window._tempAgentGranted && window._tempAgentChatId === currentChatId) {
-            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -1614,7 +1601,6 @@ function requestToolApproval(toolName, args) {
 
         // Plan 模式: 拒绝所有写操作
         if (mode === 'plan') {
-            _cleanup();
             sessionUsage.approvalsRejected++;
             resolve(false);
             return;
@@ -1622,7 +1608,6 @@ function requestToolApproval(toolName, args) {
 
         // Agent 模式: 检查 '始终允许此工具' 规则
         if (isAlwaysAllowed(toolName)) {
-            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -1630,7 +1615,6 @@ function requestToolApproval(toolName, args) {
 
         // 只读工具自动批准 (Feature 6)
         if (isReadOnlyTool(toolName)) {
-            _cleanup();
             sessionUsage.approvalsGranted++;
             resolve(true);
             return;
@@ -1643,7 +1627,6 @@ function requestToolApproval(toolName, args) {
         if (args && args.name && !cmdPart) cmdPart = args.name.substring(0, 50);
         var rememberKey = toolName + '_' + (cmdPart || '');
         if (remembered[rememberKey] !== undefined) {
-            _cleanup();
             var approved = remembered[rememberKey];
             if (approved) { sessionUsage.approvalsGranted++; } else { sessionUsage.approvalsRejected++; }
             resolve(approved);
@@ -1743,7 +1726,6 @@ function requestToolApproval(toolName, args) {
         var rejectBtn = overlay.querySelector('#approvalRejectBtn');
 
         confirmBtn.onclick = function() {
-            _cleanup();
             var remember = overlay.querySelector('#approvalRememberCheck');
             if (remember && remember.checked) {
                 remembered[rememberKey] = true;
@@ -1760,7 +1742,6 @@ function requestToolApproval(toolName, args) {
         };
 
         rejectBtn.onclick = function() {
-            _cleanup();
             var remember = overlay.querySelector('#approvalRememberCheck');
             if (remember && remember.checked) {
                 remembered[rememberKey] = false;
