@@ -706,9 +706,7 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('proxyUrl', getVal('proxyUrl') || '');
     localStorage.setItem('compress', getChecked('compressToggle'));
     localStorage.setItem('threshold', getVal('compressThreshold') || '10');
-    // ★ 持久化压缩设置
-    if (getVal('compressModel')) localStorage.setItem('compressModel', getVal('compressModel'));
-    localStorage.setItem('compress', getChecked('compressToggle'));
+    localStorage.setItem('compressModel', getVal('compressModel') || 'auto');
     localStorage.setItem('customParams', getVal('customParams') || '');
     localStorage.setItem('customEnabled', getChecked('customParamsToggle'));
     localStorage.setItem('lineHeight', getVal('lineHeight') || '1.1');
