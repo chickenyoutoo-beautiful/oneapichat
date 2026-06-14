@@ -28,8 +28,5 @@ jobs:
       - name: 安装依赖包
         run: pip install -r python/requirements.txt
 
-      - name: 生成配置文件
-        run: python generate_config.py
-
       - name: Run main.py
-        run: python main.py -c config.ini
+        run: cd python/chaoxing && python main.py -c config.ini
