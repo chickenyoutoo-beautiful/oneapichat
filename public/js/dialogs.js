@@ -66,11 +66,13 @@ function estimateMessagesTokenCount(msgs) {
  * 否则使用 deepseek-chat
  */
 function selectCompressModel() {
+    // ★ 手动选择优先
+    var _manual = getVal('compressModel') || localStorage.getItem('compressModel') || '';
+    if (_manual && _manual !== 'auto') return _manual;
+    // 自动选择
     var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
     var ctxLen = getModelContextLength(currentModel);
-    if (ctxLen >= 131072) {
-        return currentModel;
-    }
+    if (ctxLen >= 131072) return currentModel;
     return 'deepseek-chat';
 }
 

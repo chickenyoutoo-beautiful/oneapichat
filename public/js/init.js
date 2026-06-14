@@ -322,12 +322,15 @@ async function initializeConfig() {
     setVal('requestTimeout', localStorage.getItem('requestTimeout') || DEFAULT_CONFIG.requestTimeout);
     setChecked('compressToggle', localStorage.getItem('compress') === 'true');
     setVal('compressThreshold', localStorage.getItem('threshold') || '10');
-    // ★ compressModel 改为只读显示自动选择的模型
+    // ★ compressModel: 手动可选 + 默认自动
     var compressSel = getEl('compressModel');
     if (compressSel) {
-        compressSel.value = 'auto';
-        compressSel.disabled = true;
-        compressSel.title = '自动选择: 当前模型 context ≥ 128K 用自身, 否则用 deepseek-chat';
+        compressSel.disabled = false;
+        var _savedCm = localStorage.getItem('compressModel') || 'auto';
+        compressSel.innerHTML = '<option value="auto">自动选择</option>' +
+            '<option value="deepseek-chat">deepseek-chat</option>' +
+            '<option value="deepseek-v4-flash">deepseek-v4-flash</option>';
+        compressSel.value = _savedCm;
     }
 
     var lh = parseFloat(localStorage.getItem('lineHeight') || DEFAULT_CONFIG.lineHeight);
