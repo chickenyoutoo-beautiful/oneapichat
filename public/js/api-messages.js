@@ -297,7 +297,19 @@ function buildApiMessages(chatId) {
             var _assistantMsg = { role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' };
             // ★ 保留 tool_calls 历史 — 否则模型会忘记之前调用过工具，产生幻觉
             if (msg.tool_calls && msg.tool_calls.length > 0) {
-                _assistantMsg.tool_calls = msg.tool_calls;
+                // ★ 去重: 按 id 去重 tool_calls（引擎可能发送重复条目）
+                var _seenIds = {};
+                var _uniqueCalls = [];
+                for (var _uci = 0; _uci < msg.tool_calls.length; _uci++) {
+                    var _tcId = msg.tool_calls[_uci].id;
+                    if (_tcId && !_seenIds[_tcId]) {
+                        _seenIds[_tcId] = true;
+                        _uniqueCalls.push(msg.tool_calls[_uci]);
+                    } else if (_tcId) {
+                        console.warn('[buildApiMessages] 去重 assistant tool_call id:', _tcId);
+                    }
+                }
+                _assistantMsg.tool_calls = _uniqueCalls;
             }
             // ★ thinking模式: reasoning内容必须传回API(空字符串也不行,需保留原值)
             // DeepSeek要求: 若对话中任何assistant有过reasoning,后续所有assistant都需带回
@@ -438,6 +450,20 @@ function buildApiMessages(chatId) {
         }
     }
     if (_removedToolMsgCount > 0) {
+        // ★ 同步清理源消息中的孤立 tool 消息，防止下轮重复出现
+        var _orphanIds = {};
+        for (var _oi = 0; _oi < apiMessagesUnfiltered.length; _oi++) {
+            if (apiMessagesUnfiltered[_oi]._removeOrphan && apiMessagesUnfiltered[_oi].tool_call_id) {
+                _orphanIds[apiMessagesUnfiltered[_oi].tool_call_id] = true;
+            }
+        }
+        // 从源 msgs 删除
+        for (var _si = msgs.length - 1; _si >= 0; _si--) {
+            if (msgs[_si].role === 'tool' && _orphanIds[msgs[_si].tool_call_id]) {
+                console.log('[buildApiMessages] 从源删除孤 tool 消息:', msgs[_si].tool_call_id);
+                msgs.splice(_si, 1);
+            }
+        }
         apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
     }
     if (_removedTcCount > 0 || _removedToolMsgCount > 0) {
@@ -487,6 +513,32 @@ function buildApiMessages(chatId) {
             }
         }
         apiMessages.push(_m);
+    }
+    // ★ 诊断: 打印最终消息摘要检测重复 tool_call_id
+    var _tcDiag = {};
+    for (var _di = 0; _di < apiMessages.length; _di++) {
+        var _dm = apiMessages[_di];
+        var _tcIds = [];
+        if (_dm.role === 'assistant' && _dm.tool_calls && _dm.tool_calls.length > 0) {
+            _tcIds = _dm.tool_calls.map(function(tc) { return tc.id || '?'; });
+        } else if (_dm.role === 'tool' && _dm.tool_call_id) {
+            _tcIds = [_dm.tool_call_id];
+        }
+        if (_tcIds.length > 0) {
+            for (var _tci = 0; _tci < _tcIds.length; _tci++) {
+                var _tid = _tcIds[_tci];
+                if (_tid && _tcDiag[_tid] !== undefined) {
+                    console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiag[_tid] + '])');
+                } else if (_tid) {
+                    _tcDiag[_tid] = _di;
+                }
+            }
+        }
+        var _cp = '';
+        if (typeof _dm.content === 'string') {
+            _cp = _dm.content.length > 60 ? _dm.content.substring(0, 60) + '...' : _dm.content;
+        }
+        console.log('[buildApiMessages] msg[' + _di + '] role=' + _dm.role + ' tc_ids=' + JSON.stringify(_tcIds) + ' content=' + _cp);
     }
     return apiMessages;
 }

@@ -4,6 +4,7 @@
 
 ## 最近变更
 
+- **2026-06-13**: 🐛 DeepSeek/MiniMax duplicate tool_call_id 400修复 — 根因: ①`buildApiMessages`双向配对清理孤立tool消息时只从API消息数组移除,不删源(`chats[id].messages`),导致孤tool消息逐轮累积 ②引擎`_generate_resumable`只去重assistant `tool_calls[].id`,不去重tool消息的`tool_call_id` ③`_stream_openai_to_sse`完全无去重。修复: ①`buildApiMessages`检测到孤tool消息时同步从源数组`splice`删除 ②引擎双侧新增assistant+tool全量去重 ③前端+引擎新增诊断日志(每次打印消息摘要含tool_call_id+重复⚠️标记)
 - **2026-06-13**: 🐛 MiniMax RS思考不进入代码块根因修复 — 根因: MiniMax API将思考内联在`delta.content`作为`(think)...(endthink)`标签,而非`delta.reasoning_content`字段。引擎`_generate_resumable`和`_stream_openai_to_sse`只读`reasoning_content`,导致`done`事件`reasoning_text`为空+`full_text`含原始标签。RS JSON快路径直接返回未处理数据。修复: ①引擎双侧新增流式状态机提取内联`(think)`标签→路由到`reasoning`事件(含跨chunk边界保护) ②引擎`done`前安全网正则清理残留标签 ③前端`_readSSE` JSON快路径新增标签提取+去重 ④流式路径闭标签处理器新增去重防unclosed→closed二重提取
 - **2026-06-12**: 🔒 强制认证 — `chat.php`和`engine_api.php`未登录时fallback到`device_id`/`default` namespace导致无需登录即可使用。修复: 两文件新增auth中间件,非public action直接返回401
 - **2026-06-12**: 🐛 MiniMax思考重复显示+输入框溢出 — ①MiniMax: `_backendSSEHandler`(SSE路径)缺少`(think)...(endthink)`标签提取+综合去重,修复3条路径 ②输入框: 新增`.input-clip`裁剪容器+`background-color:inherit`

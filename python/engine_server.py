@@ -1653,6 +1653,32 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
                         http_client=_httpc)
         model = request_data.get('model', 'deepseek-chat')
         messages = request_data.get('messages', [])
+        # ★ 去重 tool_call_id: MiniMax/DeepSeek 拒绝同一请求中重复的 tool_call id
+        seen_tc_ids_s2 = set()
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
+                unique_calls = []
+                for tc in m['tool_calls']:
+                    tc_id = tc.get('id', '') if isinstance(tc, dict) else ''
+                    if tc_id and tc_id not in seen_tc_ids_s2:
+                        seen_tc_ids_s2.add(tc_id)
+                        unique_calls.append(tc)
+                if unique_calls:
+                    m['tool_calls'] = unique_calls
+                else:
+                    del m['tool_calls']
+        _dup_tool_msgs_s2 = 0
+        _seen_tool_ids_s2 = set()
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'tool' and m.get('tool_call_id'):
+                _tid = m['tool_call_id']
+                if _tid in _seen_tool_ids_s2:
+                    m['_remove'] = True
+                    _dup_tool_msgs_s2 += 1
+                else:
+                    _seen_tool_ids_s2.add(_tid)
+        if _dup_tool_msgs_s2 > 0:
+            messages[:] = [m for m in messages if not m.get('_remove')]
         # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
         for m in messages:
             if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
@@ -1943,6 +1969,7 @@ def _generate_resumable(request: dict, stream_id: str):
         )
         messages = request.get('messages', [])
         # ★ 去重 tool_call_id: MiniMax/DeepSeek 拒绝同一请求中重复的 tool_call id
+        #  检查范围: 1) assistant 消息的 tool_calls[].id  2) tool 消息的 tool_call_id
         seen_tc_ids = set()
         for m in messages:
             if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
@@ -1953,11 +1980,26 @@ def _generate_resumable(request: dict, stream_id: str):
                         seen_tc_ids.add(tc_id)
                         unique_calls.append(tc)
                     elif tc_id:
-                        print(f"[_generate_resumable] 去重 tool_call_id: {tc_id}", flush=True)
+                        print(f"[_generate_resumable] 去重 assistant tool_call id: {tc_id}", flush=True)
                 if unique_calls:
                     m['tool_calls'] = unique_calls
                 else:
                     del m['tool_calls']
+        # ★ 去重 tool 消息的 tool_call_id（MiniMax 也检查 tool 消息中的重复）
+        _dup_tool_msgs = 0
+        _seen_tool_ids = set()
+        for m in messages:
+            if isinstance(m, dict) and m.get('role') == 'tool' and m.get('tool_call_id'):
+                _tid = m['tool_call_id']
+                if _tid in _seen_tool_ids:
+                    m['_remove'] = True
+                    _dup_tool_msgs += 1
+                    print(f"[_generate_resumable] 去重 tool 消息 tool_call_id: {_tid}", flush=True)
+                else:
+                    _seen_tool_ids.add(_tid)
+        if _dup_tool_msgs > 0:
+            messages[:] = [m for m in messages if not m.get('_remove')]
+            print(f"[_generate_resumable] 移除 {_dup_tool_msgs} 条重复 tool 消息", flush=True)
         # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
         # ★ 确保 reasoning_content 传递给后续请求(DeepSeek thinking模式要求)
         _has_any_reasoning = any(
@@ -1983,6 +2025,26 @@ def _generate_resumable(request: dict, stream_id: str):
             params['tools'] = request['tools']
 
         print(f"[_generate_resumable] Calling API...", flush=True)
+        # ★ 诊断: 打印消息摘要检测重复 tool_call_id
+        _tc_diag = {}
+        for _mi, _mm in enumerate(messages):
+            _tc_ids = []
+            if isinstance(_mm, dict) and _mm.get('role') == 'assistant' and 'tool_calls' in _mm:
+                _tc_ids = [tc.get('id','?') for tc in _mm['tool_calls'] if isinstance(tc, dict)]
+            elif isinstance(_mm, dict) and _mm.get('role') == 'tool' and _mm.get('tool_call_id'):
+                _tc_ids = [_mm['tool_call_id']]
+            if _tc_ids:
+                for _tid in _tc_ids:
+                    if _tid in _tc_diag:
+                        print(f"[_generate_resumable] ⚠️ DUPLICATE tool_call_id '{_tid}' at msg[{_mi}] (first at msg[{_tc_diag[_tid]}])", flush=True)
+                    else:
+                        _tc_diag[_tid] = _mi
+            _role = _mm.get('role','?') if isinstance(_mm, dict) else '?'
+            _content_preview = ''
+            if isinstance(_mm, dict) and _mm.get('content'):
+                _c = _mm['content']
+                _content_preview = (str(_c)[:60] + '...') if len(str(_c)) > 60 else str(_c)[:60]
+            print(f"[_generate_resumable] msg[{_mi}] role={_role} tc_ids={_tc_ids} content={_content_preview}", flush=True)
         _tc_by_index = {}  # ★ 按index合并增量tool_call delta
         _tc_order = []     # 保持顺序
         # ★ MiniMax/DeepSeek 内联思考标签提取状态机（流式分块处理，含跨chunk边界保护）
@@ -2075,8 +2137,23 @@ def _generate_resumable(request: dict, stream_id: str):
                 try: usage = chunk.usage.model_dump()
                 except Exception: pass
 
-        # ★ 最终合并的tool_calls
-        tool_calls = [_tc_by_index[i] for i in _tc_order]
+        # ★ 最终合并的tool_calls（去重: 按id去重，保留首次出现）
+        _seen_tc_order_ids = set()
+        _unique_tool_calls = []
+        _tc_dup_count = 0
+        for i in _tc_order:
+            tc = _tc_by_index.get(i)
+            if not tc: continue
+            tc_id = tc.get('id', '')
+            if tc_id and tc_id not in _seen_tc_order_ids:
+                _seen_tc_order_ids.add(tc_id)
+                _unique_tool_calls.append(tc)
+            elif tc_id:
+                _tc_dup_count += 1
+                print(f"[_generate_resumable] 去重 done tool_call id: {tc_id} (index={i})", flush=True)
+        tool_calls = _unique_tool_calls
+        if _tc_dup_count > 0:
+            print(f"[_generate_resumable] 移除 {_tc_dup_count} 个重复 tool_call", flush=True)
         # 确保每个有id
         for i, tc in enumerate(tool_calls):
             if not tc['id']:
@@ -3047,29 +3124,172 @@ async def skills_run(request: Request, user_id: str = Query("")):
 
 
 # ═══════════════════════════════════════════════════════════════
-# SRC (StarRailCopilot) REST API — 最小可用端点
-# 当 StarRailCopilot 未安装时返回降级状态，防止前端 404
+# ═══════════════════════════════════════════════════════════════
+# SRC (StarRailCopilot) REST API — 完整集成端点
+# 前端 src-manager.js → /engine/src/* → 控制 StarRailCopilot
 # ═══════════════════════════════════════════════════════════════
 
-SRC_INSTALLED = False
 SRC_DIR = "/home/naujtrats/StarRailCopilot"
-try:
-    if os.path.isdir(SRC_DIR):
-        SRC_INSTALLED = True
-except Exception:
-    pass
+SRC_INSTALLED = os.path.isdir(SRC_DIR)
 
+if SRC_INSTALLED and SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+# Patch SRC config path resolution (SRC resolves ./config/ relative to cwd, not SRC_DIR)
+def _patch_src_path():
+    try:
+        from module.config import utils as _src_cfg_utils
+        _orig_filepath = _src_cfg_utils.filepath_config
+        def _patched_filepath(filename, mod_name='alas'):
+            if mod_name == 'alas':
+                return os.path.join(SRC_DIR, 'config', f'{filename}.json')
+            return os.path.join(SRC_DIR, 'config', f'{filename}.{mod_name}.json')
+        _src_cfg_utils.filepath_config = _patched_filepath
+    except Exception:
+        pass
+
+_patch_src_path()
+
+# Thread-safe ProcessManager cache
+_src_lock = threading.Lock()
+_src_pm_cache = {}
+
+# Task descriptions
+SRC_TASK_DESCRIPTIONS = {
+    'Alas': '完整调度器，按优先级依次执行所有已启用的任务',
+    'Restart': '重启游戏客户端',
+    'Dungeon': '刷副本：拟造花萼、侵蚀隧洞、凝滞虚影等，消耗开拓力',
+    'Ornament': '刷内圈遗器：差分宇宙·千面xx，消耗开拓力或沉浸器',
+    'DailyQuest': '完成每日实训任务，领取活跃度奖励',
+    'BattlePass': '领取无名勋礼（大月卡）奖励',
+    'Assignment': '收派委托（派遣角色获取材料）',
+    'DataUpdate': '更新游戏内数据：信用点、星琼、燃料等资源统计',
+    'Freebies': '领取免费奖励：邮件、兑换码、助战奖励',
+    'Weekly': '刷历战余响（周本），消耗开拓力',
+    'Rogue': '刷模拟宇宙（差分宇宙），可设置祝福/奇物/事件策略',
+    'Daemon': '后台托管模式：自动启停模拟器+游戏，循环清体力',
+    'PlannerScan': '角色养成规划扫描：读取角色/光锥材料需求',
+}
+
+SRC_TASK_GROUPS = [
+    {'name': 'Main', 'label': '基础', 'tasks': ['Alas', 'Restart']},
+    {'name': 'Daily', 'label': '日常', 'tasks': ['Dungeon', 'Ornament', 'DailyQuest', 'BattlePass', 'Assignment', 'DataUpdate', 'Freebies']},
+    {'name': 'Weekly', 'label': '周常', 'tasks': ['Weekly', 'Rogue']},
+    {'name': 'Tool', 'label': '工具', 'tasks': ['Daemon', 'PlannerScan']},
+]
+
+SRC_DEFAULT_CONFIG = 'src'
+
+
+def _src_get_config(config_name=None):
+    """Lazy-load AzurLaneConfig for a given instance name."""
+    if not SRC_INSTALLED:
+        return None
+    name = config_name or SRC_DEFAULT_CONFIG
+    try:
+        from module.config.config import AzurLaneConfig
+        return AzurLaneConfig(name)
+    except Exception:
+        return None
+
+
+def _src_ensure_state():
+    """Initialize SRC State multiprocessing.Manager."""
+    if not SRC_INSTALLED:
+        return
+    try:
+        from module.webui.setting import State
+        if State.manager is None:
+            State.init()
+    except Exception:
+        pass
+
+
+def _src_have_pm(config_name=None):
+    name = config_name or SRC_DEFAULT_CONFIG
+    return name in _src_pm_cache
+
+
+def _src_get_pm(config_name=None):
+    """Get or create ProcessManager. Returns None if unavailable."""
+    if not SRC_INSTALLED:
+        return None
+    name = config_name or SRC_DEFAULT_CONFIG
+    with _src_lock:
+        if name not in _src_pm_cache:
+            try:
+                _src_ensure_state()
+                from module.webui.process_manager import ProcessManager
+                _src_pm_cache[name] = ProcessManager.get_manager(name)
+            except Exception:
+                return None
+        return _src_pm_cache.get(name)
+
+
+def _src_config_dict(config):
+    """Extract safe dict from AzurLaneConfig."""
+    if config is None:
+        return {}
+    try:
+        return config.data if hasattr(config, 'data') else {}
+    except Exception:
+        return {}
+
+
+def _src_task_status(config, task_name):
+    """Extract task scheduler status from config data."""
+    data = _src_config_dict(config)
+    task_data = data.get(task_name, {})
+    scheduler = task_data.get('Scheduler', {})
+    return {
+        'name': task_name,
+        'enable': scheduler.get('Enable', False),
+        'command': scheduler.get('Command', task_name),
+        'next_run': str(scheduler.get('NextRun', '')),
+        'description': SRC_TASK_DESCRIPTIONS.get(task_name, ''),
+    }
+
+
+def _src_safe_int(v, default=0):
+    try: return int(v)
+    except (TypeError, ValueError): return default
+
+
+def _src_stored_value(config, path_key, default=0):
+    """Safe read from config stored data."""
+    if config is None:
+        return default
+    try:
+        from module.config.deep import deep_get
+        return deep_get(config.data, keys=path_key, default=default)
+    except Exception:
+        return default
+
+
+# ── Endpoints ──
 
 @app.get("/engine/src/status")
 async def src_status(config_name: str = Query("src")):
     if not SRC_INSTALLED:
-        return {
-            "ok": True, "status": "not_installed",
-            "message": "StarRailCopilot 未安装。请 clone 到 " + SRC_DIR,
-            "install_guide": "git clone https://github.com/LmeSzinc/StarRailCopilot.git " + SRC_DIR,
-            "config_name": config_name
-        }
-    return {"ok": True, "status": "unknown", "config_name": config_name}
+        return {"ok": True, "status": "not_installed", "alive": False, "state": 0,
+                "state_label": "not_installed", "config_name": config_name,
+                "message": f"StarRailCopilot 未安装。git clone 到 {SRC_DIR}"}
+    try:
+        if not _src_have_pm(config_name):
+            return {"ok": True, "config_name": config_name,
+                    "alive": False, "state": 2, "state_label": "stopped"}
+        pm = _src_get_pm(config_name)
+        if pm is None:
+            return {"ok": True, "config_name": config_name,
+                    "alive": False, "state": 0, "state_label": "unavailable"}
+        alive = pm.alive
+        state = pm.state
+        labels = {1: 'running', 2: 'stopped', 3: 'error', 4: 'updating'}
+        return {"ok": True, "config_name": config_name,
+                "alive": alive, "state": state,
+                "state_label": labels.get(state, 'unknown')}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "alive": False, "state": 0, "state_label": "error"}
 
 
 @app.get("/engine/src/ping")
@@ -3080,55 +3300,205 @@ async def src_ping():
 @app.get("/engine/src/dashboard")
 async def src_dashboard(config_name: str = Query("src")):
     if not SRC_INSTALLED:
-        return {
-            "ok": True,
-            "resources": {"stamina": 0, "jade": 0, "credit": 0, "fuel": 0},
-            "message": "SRC 未安装，显示占位数据"
+        return {"ok": True, "resources": {}, "message": "SRC 未安装"}
+    try:
+        config = _src_get_config(config_name)
+        resources = {}
+        stored_paths = {
+            'trailblaze_power': ('Dungeon.DungeonStorage.TrailblazePower',),
+            'daily_activity': ('DailyQuest.DailyStorage.DailyActivity',),
+            'credit': ('DataUpdate.DataUpdateStorage.Credit',),
+            'stellar_jade': ('DataUpdate.DataUpdateStorage.StallerJade',),
+            'fuel': ('Dungeon.DungeonStorage.Fuel',),
+            'reserved_power': ('Dungeon.DungeonStorage.Reserved',),
+            'immersifier': ('Dungeon.DungeonStorage.Immersifier',),
+            'echo_of_war': ('Weekly.WeeklyStorage.EchoOfWar',),
+            'simulated_universe': ('Rogue.RogueStorage.SimulatedUniverse',),
+            'battle_pass_level': ('BattlePass.BattlePassStorage.BattlePassLevel',),
         }
-    return {"ok": True, "resources": {}, "message": "SRC 已安装但未运行"}
+        for key, path in stored_paths.items():
+            val = _src_stored_value(config, list(path) + ['value'], None)
+            total = _src_stored_value(config, list(path) + ['total'], None)
+            t = _src_stored_value(config, list(path) + ['time'], '')
+            resources[key] = {
+                'value': _src_safe_int(val) if val is not None else 0,
+                'total': _src_safe_int(total) if total is not None else None,
+                'time': str(t) if t else '',
+            }
+        return {"ok": True, "resources": resources, "updated_at": str(datetime.now())}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "resources": {}}
 
 
 @app.get("/engine/src/tasks")
 async def src_tasks(config_name: str = Query("src")):
     if not SRC_INSTALLED:
-        return {"ok": True, "tasks": [], "message": "SRC 未安装"}
-    return {"ok": True, "tasks": [], "message": "SRC 已安装但无运行中任务"}
+        return {"ok": True, "groups": [], "tasks": [], "message": "SRC 未安装"}
+    try:
+        config = _src_get_config(config_name)
+        groups_out = []
+        all_tasks = []
+        for group in SRC_TASK_GROUPS:
+            tasks = [_src_task_status(config, t) for t in group['tasks']]
+            groups_out.append({'name': group['name'], 'label': group['label'], 'tasks': tasks})
+            all_tasks.extend(tasks)
+        return {"ok": True, "groups": groups_out, "tasks": all_tasks}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "groups": [], "tasks": []}
 
 
 @app.post("/engine/src/run")
 async def src_run(request: Request):
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装，无法启动"}
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
-    return {"ok": False, "error": "SRC 引擎未初始化"}
+    try:
+        data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception:
+        data = {}
+    config_name = data.get('config_name', SRC_DEFAULT_CONFIG)
+    task = data.get('task', 'Alas')
+    valid_tasks = [t for g in SRC_TASK_GROUPS for t in g['tasks']]
+    if task not in valid_tasks:
+        return {"ok": False, "error": f"未知任务: {task}", "valid_tasks": valid_tasks}
+    try:
+        pm = _src_get_pm(config_name)
+        if pm is None:
+            return {"ok": False, "error": "SRC 后端不可用（ProcessManager 初始化失败）"}
+        if pm.alive:
+            return {"ok": False, "error": "已有任务在运行，请先停止"}
+        import inflection
+        func = inflection.underscore(task) if task != 'Alas' else 'alas'
+        pm.start(func)
+        return {"ok": True, "config_name": config_name, "task": task, "func": func}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/engine/src/stop")
 async def src_stop(request: Request):
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装"}
-    return {"ok": True, "message": "SRC 未在运行"}
+    try:
+        data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception:
+        data = {}
+    config_name = data.get('config_name', SRC_DEFAULT_CONFIG)
+    try:
+        if not _src_have_pm(config_name):
+            return {"ok": False, "error": "没有运行中的任务"}
+        pm = _src_get_pm(config_name)
+        if pm is None or not pm.alive:
+            return {"ok": False, "error": "没有运行中的任务"}
+        pm.stop()
+        return {"ok": True, "config_name": config_name, "message": "已停止"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/engine/src/config/{config_name}")
 async def src_get_config(config_name: str):
     if not SRC_INSTALLED:
-        return {"ok": True, "data": {"_notice": "SRC 未安装，返回空配置"}, "config_name": config_name}
-    return {"ok": True, "data": {}, "config_name": config_name}
+        return {"ok": True, "data": {}, "config_name": config_name, "message": "SRC 未安装"}
+    try:
+        config = _src_get_config(config_name)
+        if config is None:
+            try:
+                from module.config.utils import read_file, filepath_config
+                raw = read_file(filepath_config(config_name))
+                if raw:
+                    return {"ok": True, "config_name": config_name, "data": raw}
+            except Exception:
+                pass
+            return {"ok": False, "error": "配置不存在", "config_name": config_name}
+        return {"ok": True, "config_name": config_name, "data": _src_config_dict(config)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "config_name": config_name}
 
 
 @app.put("/engine/src/config/{config_name}")
 async def src_set_config(config_name: str, request: Request):
     if not SRC_INSTALLED:
-        return {"ok": False, "error": "SRC 未安装，无法保存配置"}
-    return {"ok": False, "error": "SRC 引擎未初始化"}
+        return {"ok": False, "error": "SRC 未安装"}
+    try:
+        data = await request.json()
+    except Exception:
+        return {"ok": False, "error": "Invalid JSON body"}
+    updates = data.get('updates', [])
+    if not updates and 'path' in data:
+        updates = [{'path': data['path'], 'value': data['value']}]
+    if not updates:
+        return {"ok": False, "error": "Missing path/value or updates"}
+    try:
+        config = _src_get_config(config_name)
+        if config is None:
+            return {"ok": False, "error": "配置不存在"}
+        from module.config.deep import deep_set
+        applied = []
+        for upd in updates:
+            path = upd['path']
+            value = upd['value']
+            deep_set(config.data, keys=path, value=value)
+            config.modified[path] = value
+            applied.append({'path': path, 'value': value})
+        config.save()
+        return {"ok": True, "applied": applied}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/engine/src/logs")
 async def src_logs(config_name: str = Query("src"), limit: int = Query(50)):
     if not SRC_INSTALLED:
-        return {"ok": True, "lines": ["[SRC] StarRailCopilot 未安装"], "message": "SRC 未安装"}
-    return {"ok": True, "lines": ["[SRC] 无日志"], "message": "SRC 已安装但无日志"}
+        return {"ok": True, "lines": ["[SRC] StarRailCopilot 未安装"], "count": 1}
+    try:
+        if not _src_have_pm(config_name):
+            return {"ok": True, "lines": [], "count": 0, "note": "未启动"}
+        pm = _src_get_pm(config_name)
+        if pm is None:
+            return {"ok": True, "lines": [], "count": 0}
+        renderables = getattr(pm, 'renderables', []) or []
+        entries = []
+        for r in renderables[-limit:]:
+            try:
+                if hasattr(r, 'markup'): entries.append(str(r.markup))
+                elif hasattr(r, 'text'): entries.append(r.text)
+                else: entries.append(str(r))
+            except Exception:
+                entries.append(str(r))
+        return {"ok": True, "lines": entries, "count": len(entries)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "lines": []}
+
+
+@app.get("/engine/src/configs")
+async def src_configs():
+    """List available SRC config instances."""
+    if not SRC_INSTALLED:
+        return {"ok": True, "instances": []}
+    try:
+        from module.config.utils import alas_instance
+        return {"ok": True, "instances": alas_instance()}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "instances": []}
+
+
+@app.get("/engine/src/args/{task_name}")
+async def src_args(task_name: str):
+    """Get argument schema for a task."""
+    if not SRC_INSTALLED:
+        return {"ok": False, "error": "SRC 未安装"}
+    try:
+        from module.config.utils import read_file
+        args_file = os.path.join(SRC_DIR, 'module', 'config', 'argument', 'args.json')
+        all_args = read_file(args_file)
+        if isinstance(all_args, str):
+            all_args = json.loads(all_args)
+        task_args = all_args.get(task_name, {})
+        if not task_args:
+            return {"ok": False, "error": f'任务 "{task_name}" 不存在'}
+        return {"ok": True, "task": task_name, "args": task_args}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "args": {}}
 
 
 if __name__ == "__main__":

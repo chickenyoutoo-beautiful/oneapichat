@@ -87,7 +87,6 @@ window.pushToMsgQueue = function() {
     clearAllFiles();
     window._saveQueue();
     window._updateQueueUI();
-    showToast('📥 已加入消息队列 (共' + window._messageQueue.length + '条)', 'info', 2000);
 
     if (!isTypingMap[currentChatId]) {
         window._drainQueue();
@@ -131,10 +130,16 @@ window._drainQueue = async function() {
     }) : [];
 
     window._isQueueMessage = true;
+    // ★ 保存当前输入框内容，队列消息发送后恢复（防止 sendMessage 清空用户正在编辑的文字）
+    var _savedInput = $.userInput ? $.userInput.value : '';
     try {
         await window.sendMessage(true, item.text, queueFiles);
     } catch(e) {
         console.warn('[Queue] sendMessage error:', e);
+    }
+    if ($.userInput && _savedInput) {
+        $.userInput.value = _savedInput;
+        window.autoResize($.userInput);
     }
     window._isQueueMessage = false;
     window._isQueueProcessing = false;
