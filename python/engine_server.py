@@ -887,6 +887,19 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             except Exception as _e:
                 return f"视频剪辑失败: {str(_e)}"
 
+        elif tool_name == "generate_ppt":
+            try:
+                title = args.get("title", "Presentation")
+                pages = args.get("pages", [])
+                theme_name = args.get("theme", "default")
+                filename = args.get("filename", "")
+                if not pages:
+                    return "错误: 需要 pages 参数"
+                from ppt_engine.build import build_pptx
+                output = build_pptx(f"/tmp/ppt_{filename or 'output'}.pptx", title, pages, theme_name)
+                return f"✅ PPT已生成: {output}"
+            except Exception as e:
+                return f"PPT生成失败: {str(e)}"
         # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
         elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
             try:
