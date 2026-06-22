@@ -990,6 +990,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
         tools.push(SERVER_FILE_GREP_TOOL);
+        // PPT生成 — 始终可用
+        if (typeof GENERATE_PPT_TOOL !== 'undefined') tools.push(GENERATE_PPT_TOOL);
         // ask_agent: 仅在普通模式且当前对话无临时授权时注册
         // Agent模式/yolo模式/当前对话已有临时授权时无需此工具
         var _hasTempForThisChat = !!(window._tempAgentGranted && window._tempAgentChatId === chatId);

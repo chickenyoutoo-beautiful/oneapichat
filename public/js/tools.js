@@ -772,6 +772,48 @@ const IMAGE_I2I_TOOL_DEFINITION = {
     }
 };
 
+const GENERATE_PPT_TOOL = {
+    type: "function",
+    function: {
+        name: "generate_ppt",
+        description: "生成专业PPT演示文稿。支持封面页(cove)/分隔页(divider)/卡片网格(card_grid)布局。图片支持本地路径和HTTP URL(自动下载+等比裁切,零变形)。每页自动注入放映过渡动画。适合汇报、方案展示、项目总结等场景。",
+        parameters: {
+            type: "object",
+            properties: {
+                title: { type: "string", description: "PPT标题" },
+                filename: { type: "string", description: "输出文件名(不含扩展名)" },
+                theme: { type: "string", enum: ["default","dark"], description: "配色主题" },
+                pages: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            type: { type: "string", enum: ["cover","divider","card_grid"] },
+                            title: { type: "string" },
+                            subtitle: { type: "string" },
+                            rows: { type: "integer", description: "卡片网格行数(默认2)" },
+                            cols: { type: "integer", description: "卡片网格列数(默认2)" },
+                            cards: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        title: { type: "string" },
+                                        bullets: { type: "array", items: { type: "string" } },
+                                        img: { type: "string", description: "本地图片路径" },
+                                        img_url: { type: "string", description: "图片HTTP URL(自动下载+预处理)" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            required: ["title", "pages"]
+        }
+    }
+};
+
 const ANALYZE_IMAGE_TOOL = {
     type: "function",
     function: {
@@ -1426,6 +1468,7 @@ window.setToolEnabled = function(toolKey, enabled) {
 const _TOOL_CATEGORIES = [
     { label: '🔍 搜索与获取', keys: ['web_search','web_fetch','platform_extract','rag_search'] },
     { label: '🎨 图像',       keys: ['generate_image','analyze_image'] },
+    { label: '📊 PPT',         keys: ['generate_ppt'] },
     { label: '🎬 视频',       keys: ['video_understanding','video_edit'] },
     { label: '📚 刷课',       keys: ['chaoxing_login','chaoxing_list_courses','chaoxing_auto','chaoxing_status','chaoxing_stop','chaoxing_stats','chaoxing_overview'] },
     { label: '📝 考试',       keys: ['chaoxing_auth','chaoxing_exam_list','chaoxing_exam_start','chaoxing_exam_status','chaoxing_exam_stop'] },
@@ -1442,7 +1485,7 @@ const _TOOL_CATEGORIES = [
 // ── 工具中文标签 ──
 const _TOOL_LABELS = {
     'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索',
-    'generate_image':'图片生成','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑',
+    'generate_image':'图片生成','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑','generate_ppt':'PPT生成',
     'chaoxing_login':'超星登录','chaoxing_list_courses':'课程列表','chaoxing_auto':'刷课执行','chaoxing_status':'刷课状态','chaoxing_stop':'停止刷课','chaoxing_stats':'刷课统计','chaoxing_overview':'超星总览',
     'chaoxing_auth':'考试登录','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',
     'server_exec':'命令执行','server_python':'Python执行','server_file_read':'文件读取','server_file_write':'文件写入','server_file_edit':'精确编辑','server_file_grep':'内容搜索','server_sys_info':'系统信息','server_ps':'进程列表','server_disk':'磁盘信息','server_network':'网络状态','server_docker':'Docker','server_db_query':'数据库','server_file_search':'文件搜索','server_file_op':'文件操作',
