@@ -2310,7 +2310,7 @@ window.useAlternativeVisionModel = function() {
                                 }
                             }
                             // ★ 追加可折叠工具调用详情卡片（必须在 for 循环内, currentBubble 块内）
-                            if (typeof appendToolCallMessage === 'function') {
+                            if (typeof appendToolCallMessage === 'function' && localStorage.getItem('toolCards') !== '0') {
                                 var _cardDur = Date.now() - (_toolStartTime || Date.now());
                                 var _cardArgs = {};
                                 try { _cardArgs = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}

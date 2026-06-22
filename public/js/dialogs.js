@@ -889,14 +889,10 @@ window.loadChat = async function (id) {
                 m.content = '';
             }
             if (m.role === 'tool_card') {
-                // ★ 工具调用卡片: 渲染为可折叠的详情卡
-                if (typeof appendToolCallMessage === 'function') {
+                // ★ 工具调用卡片: 受 toggle 控制
+                if (typeof appendToolCallMessage === 'function' && localStorage.getItem('toolCards') !== '0') {
                     appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {},
                         m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
-                }
-            } else if (m.role === 'tool_card') {
-                if (typeof appendToolCallMessage === 'function') {
-                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {}, m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
                 }
             } else if (m.role === 'user') {
                 appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx);

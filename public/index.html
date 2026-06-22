@@ -55,7 +55,7 @@
     <script defer src="./js/agent.js?v=7"></script>
     <script defer src="./js/storage.js?v=14"></script>
     <script defer src="./js/config.js?v=11"></script>
-    <script defer src="./js/dialogs.js?v=18"></script>
+    <script defer src="./js/dialogs.js?v=19"></script>
     <script defer src="./js/cloudreve.js?v=8"></script>
     <script defer src="./js/rag-system.js?v=3"></script>
     <script defer src="./js/chaoxing-tools.js?v=6"></script>
@@ -883,6 +883,10 @@ window.VISION_API_KEY = '';
                 <div class="config-toggle-row">
                     <span class="config-label">Markdown 换行</span>
                     <input type="checkbox" id="markdownBreaks" class="config-toggle" checked onchange="window.updateMarkdownConfig()">
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label">工具调用详情卡片</span>
+                    <label class="switch small"><input type="checkbox" id="toolCardToggle" checked onchange="localStorage.setItem('toolCards', this.checked?'1':'0')"><span class="slider"></span></label>
                 </div>
             </div>
         </details>
