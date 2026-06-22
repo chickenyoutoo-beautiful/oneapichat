@@ -2,7 +2,7 @@
 import os
 
 class LayoutGrid:
-    def __init__(self, page_w=10, page_h=7.5, title_h=0.85, nav_h=0.4):
+    def __init__(self, page_w=13.333, page_h=7.5, title_h=0.85, nav_h=0.4):
         self.usable_x = 0.6
         self.usable_y = title_h + 0.15
         self.usable_w = page_w - 1.2

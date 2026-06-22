@@ -66,17 +66,17 @@ class CardRenderer:
 
 def render_cover(slide, theme, title, subtitle="", bg_color=None):
     bg = bg_color or theme.accent
-    _add_bg(slide, 0, 0, 10, 7.5, bg)
-    _add_textbox(slide, 0.8, 2.5, 8.4, 1.2, title, size=32,
+    _add_bg(slide, 0, 0, 13.333, 7.5, bg)
+    _add_textbox(slide, 1.2, 2.5, 11, 1.2, title, size=36,
                  color=theme.text_inverse, bold=True, align=PP_ALIGN.LEFT)
     if subtitle:
-        _add_textbox(slide, 0.8, 3.8, 8.4, 0.6, subtitle, size=14,
+        _add_textbox(slide, 1.2, 3.8, 11, 0.6, subtitle, size=14,
                      color=RGBColor(0xCC, 0xCC, 0xEE))
 
 
 def render_divider(slide, theme, title):
-    _add_bg(slide, 0, 0, 10, 7.5, theme.dark_bg)
-    _add_textbox(slide, 0.8, 3.2, 8.4, 0.8, title, size=24,
+    _add_bg(slide, 0, 0, 13.333, 7.5, theme.dark_bg)
+    _add_textbox(slide, 1.2, 3.2, 11, 0.8, title, size=28,
                  color=theme.text_inverse, bold=True, align=PP_ALIGN.CENTER)
 
 

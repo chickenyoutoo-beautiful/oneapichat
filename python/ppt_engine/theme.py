@@ -2,15 +2,16 @@
 from pptx.util import Pt
 from pptx.dml.color import RGBColor
 
+
 class Theme:
     def __init__(self, name="default"):
         themes = {
             "default": {
                 "bg":           RGBColor(0xFA, 0xFA, 0xFA),
-                "card_bg":      RGBColor(0xFF, 0xFF, 0xFF),
+                "card_bg":      RGBColor(0xFF, 0xFF, 0xFD),
                 "dark_bg":      RGBColor(0x1A, 0x1A, 0x2E),
-                "accent":       RGBColor(0x63, 0x66, 0xF1),
-                "accent2":      RGBColor(0x8B, 0x5C, 0xF6),
+                "accent":       RGBColor(0x05, 0x96, 0x69),
+                "accent2":      RGBColor(0x04, 0x7C, 0x57),
                 "text":         RGBColor(0x1F, 0x29, 0x37),
                 "text_light":   RGBColor(0x6B, 0x72, 0x80),
                 "text_inverse":  RGBColor(0xFF, 0xFF, 0xFF),
@@ -23,8 +24,8 @@ class Theme:
                 "bg":           RGBColor(0x0F, 0x0F, 0x1A),
                 "card_bg":      RGBColor(0x1F, 0x1F, 0x35),
                 "dark_bg":      RGBColor(0x0A, 0x0A, 0x14),
-                "accent":       RGBColor(0x81, 0x8C, 0xF8),
-                "accent2":      RGBColor(0xA7, 0x8B, 0xFA),
+                "accent":       RGBColor(0x34, 0xD3, 0x99),
+                "accent2":      RGBColor(0x10, 0xB9, 0x81),
                 "text":         RGBColor(0xE5, 0xE7, 0xEB),
                 "text_light":   RGBColor(0x9C, 0xA3, 0xAF),
                 "text_inverse":  RGBColor(0xFF, 0xFF, 0xFF),
@@ -40,10 +41,17 @@ class Theme:
             setattr(self, k, v)
 
     @property
-    def title_size(self): return Pt(28)
+    def title_size(self):
+        return Pt(28)
+
     @property
-    def subtitle_size(self): return Pt(14)
+    def subtitle_size(self):
+        return Pt(14)
+
     @property
-    def body_size(self): return Pt(11)
+    def body_size(self):
+        return Pt(11)
+
     @property
-    def small_size(self): return Pt(9)
+    def small_size(self):
+        return Pt(9)

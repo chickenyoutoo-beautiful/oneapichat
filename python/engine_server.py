@@ -624,12 +624,40 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             except Exception as e:
                 return f"platform_extract 错误: {str(e)}"
         elif tool_name == "engine_push":
+            import re, hashlib, shutil as _shutil
             msg = args.get("msg", "")
+            file_path = args.get("file", "")
+
+            # Step 1: clean Markdown pollution from URLs in msg
+            def _clean_url(u):
+                u = re.sub(r'[*_~`]+$', '', u)
+                u = re.sub(r'^[)\]]+', '', u)
+                m = re.search(r'\]\(\s*(https?://\S+?)\s*\)', u)
+                if m:
+                    u = m.group(1)
+                return u
+
+            if msg:
+                msg = re.sub(r'https?://\S+', lambda m: _clean_url(m.group(0)), msg)
+
+            # Step 2: handle file parameter — copy to shared dir, generate download URL
+            if file_path and os.path.isfile(file_path):
+                shared_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+                os.makedirs(shared_dir, exist_ok=True)
+                fname = os.path.basename(file_path)
+                shared_name = f"push_{hashlib.md5(fname.encode()).hexdigest()[:8]}.pptx"
+                shared_path = os.path.join(shared_dir, shared_name)
+                _shutil.copy2(file_path, shared_path)
+                dl_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{shared_name}"
+                msg = (msg + "\n\n" + dl_url) if msg else dl_url
+
             if msg:
                 push_store = get_ns("heartbeat", user_id)
                 data = push_store.get()
-                pending = data.get("pending_messages", [])
+                pending = data.get("pending_messages", []) if data else []
                 pending.append({"msg": msg, "time": datetime.now().isoformat()})
+                if data is None:
+                    data = {}
                 data["pending_messages"] = pending
                 push_store.set(data)
             return "消息已推送到用户"

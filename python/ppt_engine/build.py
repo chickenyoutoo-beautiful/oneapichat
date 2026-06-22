@@ -25,7 +25,7 @@ def build_pptx(output_path, title, pages, theme_name="default"):
     """
     theme = Theme(theme_name)
     prs = Presentation()
-    prs.slide_width = Inches(10)
+    prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
 
     for page in pages:
