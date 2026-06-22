@@ -38,9 +38,9 @@ class CardRenderer:
         _add_bg(self.slide, r['card_x'], r['card_y'], r['card_w'], r['card_h'], self.theme.card_bg)
 
         # Image
-        if 'img' in r and r.get('img_path'):
+        if 'img' in r and r.get('img_src'):
             x, y, w, h = r['img']
-            processed = _ip.process(r['img_path'], w, h)
+            processed = _ip.process(r['img_src'], w, h)  # accepts local path or URL
             if processed:
                 self.slide.shapes.add_picture(processed, Inches(x), Inches(y), Inches(w), Inches(h))
 
@@ -90,5 +90,7 @@ def render_card_grid(slide, theme, grid_cells, cards_data):
         data = cards_data[i]
         x, y, w, h = cell
         result = layout.compute(x, y, w, h, data.get('title', ''),
-                                data.get('bullets', []), data.get('img'))
+                                data.get('bullets', []),
+                                img_path=data.get('img'),
+                                img_url=data.get('img_url'))
         renderer.render(result)

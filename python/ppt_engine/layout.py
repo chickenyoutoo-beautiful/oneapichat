@@ -33,18 +33,19 @@ class CardLayout:
     GAP = 0.06
     PAD = 0.12
 
-    def compute(self, x, y, w, h, title, bullets, img_path=None):
+    def compute(self, x, y, w, h, title, bullets, img_path=None, img_url=None):
         self.card_x, self.card_y, self.card_w, self.card_h = x, y, w, h
         inner_x = x + self.PAD
         inner_w = w - 2 * self.PAD
         result = {'card_x': x, 'card_y': y, 'card_w': w, 'card_h': h,
                   'title_text': title}
 
+        _img_src = img_path or img_url
         # Image area (0%~38% of card height)
-        if img_path and os.path.exists(img_path) and os.path.getsize(img_path) > 100:
+        if _img_src:
             img_h = min(h * self.IMG_MAX_RATIO, 1.8)
             result['img'] = (inner_x, y + self.PAD, inner_w, img_h)
-            result['img_path'] = img_path
+            result['img_src'] = _img_src
             content_y = y + self.PAD + img_h + self.GAP
         else:
             content_y = y + self.PAD
