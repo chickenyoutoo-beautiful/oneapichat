@@ -1617,6 +1617,13 @@
                             toolResult = { error: '视频剪辑请求超时或失败: ' + (_veditErr.message || '未知错误') + '。请尝试缩小视频或降低分辨率后重试。' };
                         }
                     }
+                    // ★ 反截断: 结果含长URL时追加提示
+                    if (toolResult && toolResult.result) {
+                        var _rt = String(toolResult.result);
+                        if (/https?:\/\/[^\s]{30,}/.test(_rt) && _rt.length > 200) {
+                            toolResult.result = _rt + '\n\n🔗 请使用完整链接，不要省略或截断。';
+                        }
+                    }
                     return toolResult;
                 }
 
