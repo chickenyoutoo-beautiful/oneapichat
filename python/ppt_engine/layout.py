@@ -70,7 +70,11 @@ class CardLayout:
 
     def _validate(self, result):
         for key, rect in result.items():
-            if key in ('bullet_lines', 'bullet_line_h', 'title_text', 'img_path', 'card_x', 'card_y', 'card_w', 'card_h'):
+            if key in ('bullet_lines', 'bullet_line_h', 'title_text',
+                       'img_path', 'img_src',
+                       'card_x', 'card_y', 'card_w', 'card_h'):
+                continue
+            if not isinstance(rect, tuple) or len(rect) != 4:
                 continue
             rx, ry, rw, rh = rect
             ok = (rx >= self.card_x - 0.5 and ry >= self.card_y - 0.5 and

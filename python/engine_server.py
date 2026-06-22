@@ -896,10 +896,23 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if not pages:
                     return "错误: 需要 pages 参数"
                 from ppt_engine.build import build_pptx
-                output = build_pptx(f"/tmp/ppt_{filename or 'output'}.pptx", title, pages, theme_name)
-                return f"✅ PPT已生成: {output}"
-            except Exception as e:
-                return f"PPT生成失败: {str(e)}"
+                import shutil
+                safe_name = (filename or 'output').replace('/', '_').replace('\\', '_')
+                tmp_path = f"/tmp/ppt_{safe_name}.pptx"
+                output = build_pptx(tmp_path, title, pages, theme_name)
+                # Copy to web-accessible uploads dir
+                web_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+                os.makedirs(web_dir, exist_ok=True)
+                web_path = os.path.join(web_dir, f"ppt_{safe_name}.pptx")
+                shutil.copy2(output, web_path)
+                file_size_kb = os.path.getsize(web_path) // 1024
+                web_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/ppt_{safe_name}.pptx"
+                return (
+                    f"✅ PPT已生成\n"
+                    f"📥 下载链接: {web_url}\n"
+                    f"📦 大小: {file_size_kb} KB | 页数: {len(pages)}\n"
+                    f"⚠️ 请直接复制上面的完整链接给用户，不要截断或省略。"
+                )
         # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
         elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
             try:
