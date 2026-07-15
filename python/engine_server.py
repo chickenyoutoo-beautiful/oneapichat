@@ -407,6 +407,10 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         decrypted = _decrypt_xor(stored)
                         if decrypted:
                             search_api_key = decrypted
+                        else:
+                            print(f"[web_search] {search_provider} API Key 解密失败, 尝试明文", flush=True)
+                            search_api_key = stored  # 可能是明文存储
+                    print(f"[web_search] provider={search_provider} key_len={len(search_api_key) if search_api_key else 0}", flush=True)
                 except Exception:
                     pass
 
@@ -437,22 +441,29 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     if not search_api_key:
                         return None
                     try:
+                        # ★ 免费 key (tvly-dev-/tvly-free-) 仅支持 basic, 付费 key 可用 advanced
+                        _depth = "basic"
+                        if search_api_key.startswith("tvly-") and not search_api_key.startswith("tvly-dev-") and not search_api_key.startswith("tvly-free-"):
+                            _depth = "advanced"
                         r = _http_session.post(
                             "https://api.tavily.com/search",
                             json={
                                 "api_key": search_api_key,
                                 "query": q,
-                                "search_depth": "advanced",
+                                "search_depth": _depth,
                                 "max_results": 10,
                                 "include_answer": True
                             },
                             timeout=20
                         )
+                        print(f"[tavily] status={r.status_code} depth={_depth} query={q[:50]}", flush=True)
                         if r.status_code != 200:
+                            print(f"[tavily] non-200 response: {r.text[:200]}", flush=True)
                             return None  # 401/429/500 → 回退
                         data = r.json()
                         results = data.get("results", [])
                         answer = data.get("answer", "") or ""
+                        print(f"[tavily] results_count={len(results)} answer_len={len(answer) if answer else 0}", flush=True)
                         if not results:
                             if answer:
                                 return f"搜索结果 (query: {q}):\n[摘要] {answer[:500]}\n\n注: 未搜索到具体网页结果,以上为 AI 摘要。"
@@ -630,26 +641,44 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
 
             # Step 1: clean Markdown pollution from URLs in msg
             def _clean_url(u):
+                # strip leading/trailing markdown bold/italic/strikethrough markers
+                u = re.sub(r'^[*_~`]+', '', u)
                 u = re.sub(r'[*_~`]+$', '', u)
                 u = re.sub(r'^[)\]]+', '', u)
+                # extract URL from markdown link syntax [text](url)
                 m = re.search(r'\]\(\s*(https?://\S+?)\s*\)', u)
                 if m:
                     u = m.group(1)
                 return u
 
             if msg:
+                # ★ strip ** wrapped around URL: **https://...** → https://...
+                msg = re.sub(r'\*{1,2}(https?://\S+?)\*{1,2}', r'\1', msg)
+                # ★ strip trailing ** after URL: https://...** text → https://... text
+                msg = re.sub(r'(https?://\S+?)\*{1,2}(\s|$)', r'\1\2', msg)
+                # generic URL-level cleanup
                 msg = re.sub(r'https?://\S+', lambda m: _clean_url(m.group(0)), msg)
 
             # Step 2: handle file parameter — copy to shared dir, generate download URL
             if file_path and os.path.isfile(file_path):
+                import pwd, grp
                 shared_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
                 os.makedirs(shared_dir, exist_ok=True)
                 fname = os.path.basename(file_path)
-                shared_name = f"push_{hashlib.md5(fname.encode()).hexdigest()[:8]}.pptx"
+                # ★ include mtime in hash so re-pushes of same-named file get unique URLs
+                h = hashlib.md5((fname + str(os.path.getmtime(file_path))).encode()).hexdigest()[:12]
+                ext = os.path.splitext(fname)[1] or '.bin'
+                shared_name = f"push_{h}{ext}"
                 shared_path = os.path.join(shared_dir, shared_name)
                 _shutil.copy2(file_path, shared_path)
+                # ★ chown to www-data so nginx can serve the file
+                try:
+                    os.chown(shared_path, pwd.getpwnam('www-data').pw_uid, grp.getgrnam('www-data').gr_gid)
+                except Exception:
+                    pass  # non-fatal if running as non-root
                 dl_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{shared_name}"
-                msg = (msg + "\n\n" + dl_url) if msg else dl_url
+                if dl_url not in msg:
+                    msg = (msg + "\n\n" + dl_url).strip()
 
             if msg:
                 push_store = get_ns("heartbeat", user_id)
@@ -941,6 +970,11 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     f"📦 大小: {file_size_kb} KB | 页数: {len(pages)}\n"
                     f"⚠️ 请直接复制上面的完整链接给用户，不要截断或省略。"
                 )
+            except ImportError as _e:
+                return f"PPT生成缺少依赖: {str(_e)}"
+            except Exception as _e:
+                return f"PPT生成失败: {str(_e)}"
+
         # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
         elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
             try:
@@ -1028,11 +1062,27 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if rc_val:
                     # DeepSeek 要求传回 reasoning_content(但不显示给用户)
                     asst_msg["reasoning_content"] = rc_val
-                # 构建 tool_calls
+                # 构建 tool_calls — ★ 保留 provider 特定字段(如 Gemini thought_signature)
                 if hasattr(msg.tool_calls, 'model_dump'):
                     asst_msg["tool_calls"] = msg.tool_calls.model_dump()
+                    # ★ model_dump() 可能不包含 extra 字段,手动补充 thought_signature
+                    for _i, _tc in enumerate(asst_msg["tool_calls"]):
+                        _src_tc = msg.tool_calls[_i]
+                        if hasattr(_src_tc, 'thought_signature') and _src_tc.thought_signature:
+                            _tc["thought_signature"] = _src_tc.thought_signature
+                        if hasattr(_src_tc.function, 'thought_signature') and _src_tc.function.thought_signature:
+                            _tc["function"]["thought_signature"] = _src_tc.function.thought_signature
                 else:
-                    asst_msg["tool_calls"] = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
+                    _normalized = []
+                    for tc in msg.tool_calls:
+                        _tc = {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                        # ★ 保留 Gemini thought_signature (Google API 要求回传)
+                        if hasattr(tc, 'thought_signature') and tc.thought_signature:
+                            _tc["thought_signature"] = tc.thought_signature
+                        if hasattr(tc.function, 'thought_signature') and tc.function.thought_signature:
+                            _tc["function"]["thought_signature"] = tc.function.thought_signature
+                        _normalized.append(_tc)
+                    asst_msg["tool_calls"] = _normalized
                 messages.append(asst_msg)
 
                 for tc in msg.tool_calls:
@@ -1818,6 +1868,11 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
                     tc_dict = {'id': tc.id, 'type': tc.type,
                                 'function': {'name': tc.function.name,
                                              'arguments': tc.function.arguments or ''}}
+                    # ★ 保留 Gemini thought_signature (Google API 要求回传,否则 400)
+                    if hasattr(tc, 'thought_signature') and tc.thought_signature:
+                        tc_dict['thought_signature'] = tc.thought_signature
+                    if hasattr(tc.function, 'thought_signature') and tc.function.thought_signature:
+                        tc_dict['function']['thought_signature'] = tc.function.thought_signature
                     tool_calls.append(tc_dict)
                     yield sse_event(json.dumps({'type': 'tool_call', 'delta': tc_dict, 'seq': seq}))
 
@@ -2165,6 +2220,11 @@ def _generate_resumable(request: dict, stream_id: str):
                             'type': 'function',
                             'function': {'name': '', 'arguments': ''}
                         }
+                        # ★ 保留 Gemini thought_signature (Google API 要求回传,否则 400)
+                        if hasattr(tc, 'thought_signature') and tc.thought_signature:
+                            _tc['thought_signature'] = tc.thought_signature
+                        if hasattr(tc.function, 'thought_signature') and tc.function.thought_signature:
+                            _tc['function']['thought_signature'] = tc.function.thought_signature
                         _tc_by_index[idx] = _tc
                         _tc_order.append(idx)
                     else:
@@ -2184,6 +2244,11 @@ def _generate_resumable(request: dict, stream_id: str):
                         elif arg != cur and not cur.endswith(arg):
                             # ★ 去重: 避免重复拼接相同片段
                             _tc['function']['arguments'] = cur + arg
+                    # ★ 合并: thought_signature 取第一次非空值
+                    if not _tc.get('thought_signature') and hasattr(tc, 'thought_signature') and tc.thought_signature:
+                        _tc['thought_signature'] = tc.thought_signature
+                    if not _tc['function'].get('thought_signature') and hasattr(tc.function, 'thought_signature') and tc.function.thought_signature:
+                        _tc['function']['thought_signature'] = tc.function.thought_signature
                 # ★ 发出合并后的快照(前端实时展示)
                 _merged = [_tc_by_index[i] for i in _tc_order]
                 _emit('tool_call', {'partial': True, 'tools': _merged})

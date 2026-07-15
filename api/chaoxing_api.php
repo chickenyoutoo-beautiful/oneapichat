@@ -122,7 +122,8 @@ function userCoursesCachePath($userId) {
  */
 function ensureUserConfig($userId) {
     $path = userConfigPath($userId);
-    if (!file_exists($path)) {
+    // ★ 文件不存在或为空时，从模板重新创建
+    if (!file_exists($path) || filesize($path) === 0) {
         $template = APP_ROOT . '/config.ini.template';
         if (!file_exists($template)) {
             $template = APP_ROOT . '/config.ini';
@@ -725,8 +726,14 @@ switch ($action) {
         // 使用独立 config
         $config_path = ensureUserConfig($userId);
         $ini = file_get_contents($config_path);
-        $ini = preg_replace('/^username\s*=\s*.*/m', 'username = ' . $user, $ini);
-        $ini = preg_replace('/^password\s*=\s*.*/m', 'password = ' . $pass, $ini);
+        // ★ 使用占位符避免密码中的 $ \ 等特殊字符被 preg_replace 当作正则元字符
+        $ini = preg_replace('/^username\s*=\s*.*/m', 'username = @@@USER@@@', $ini);
+        $ini = preg_replace('/^password\s*=\s*.*/m', 'password = @@@PASS@@@', $ini);
+        $ini = str_replace(['@@@USER@@@', '@@@PASS@@@'], [$user, $pass], $ini);
+        if ($ini === null || $ini === false || trim($ini) === '') {
+            echo json_encode(['success' => false, 'error' => '配置文件异常，请刷新页面后重试']);
+            exit;
+        }
         file_put_contents($config_path, $ini);
 
         $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));

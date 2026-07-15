@@ -4,6 +4,15 @@
 
 ## 最近变更
 
+- **2026-07-15**: 🔍 Tavily搜索引擎修复 — ①**引擎侧**: `_try_tavily`的`search_depth`从`advanced`改为带key前缀检测(`tvly-dev-`/`tvly-free-`→basic,付费→advanced),添加API Key解密诊断日志和请求状态日志,解密失败时尝试明文存储 ②**前端侧**: Tavily路径改为统一走`fetchWithRetry`(与其他引擎一致),无结果时自动回退MiniMax CLI,出错时通过catch回退 ③`parseSearchResults`新增Tavily特有`detail.error`格式检测(之前只检查`error`字段,导致API错误被静默吞掉返回空结果)
+- **2026-07-16**: 🔧 Gemini 根因修复 + 超星修复 — ①**Gemini**: 确诊Google API被GFW封锁导致直连503; `proxyFetch`新增Google域名自动跳直连走中继; 用户proxyUrl改为`proxy.naujtrats.xyz:8888`(proxy.php映射→192.168.195.213:10808); API可用但key配额耗尽(429) ②**超星登录**: `ensureUserConfig`检测0字节重建; `api_get_courses.py`全链路try/except; `cookies.py`返回空CookieJar ③**刷题DB**: `learning_records.db` chown www-data; `tracker.py`权限自修复
+- **2026-07-15**: 🔍 Tavily搜索引擎修复 — ①`_try_tavily`:`search_depth`→`basic`+key前缀检测+诊断日志 ②前端统一`fetchWithRetry`+无结果回退MiniMax CLI ③`parseSearchResults`新增`detail.error`检测
+- **2026-07-15**: 🔧 Gemini thought_signature修复 + Anthropic格式支持 — ①**Gemini思考模型工具调用修复**: `stream-handler.js`的`streamResponse`和`_backendSSEHandler`、`engine_server.py`的`_stream_openai_to_sse`和`_generate_resumable`和`_run_agent`三处全链路保留`thought_signature`,解决Gemini thinking模型工具调用HTTP 400错误 ②**Anthropic API格式支持**: 新增`useAnthropicFormat`设置开关,消息格式/工具定义/响应解析全链路支持Anthropic Messages API;Claude模型自动启用;Anthropic格式时禁用RS ③HTML新增`anthropicFormatToggle`复选框,`init.js`+`config.js`双路径恢复开关状态
+- **2026-06-22**: 🔍 fetch.php代理+429重试+Gemini流修复 — ①`fetch.php`支持`?proxy=`参数,curl走代理穿透GFW ②`proxyFetch` 429指数退避重试(2s/4s/8s,读Retry-After头) ③`fetchModels`扩展过滤`-preview`/`experimental`/`gemini-3.1-*`等限频模型 ④`stream-handler`兼容Gemini流式`[DONE]`/`)]}'`/前导`]`格式
+- **2026-06-22**: 🔧 配置跨设备同步修复 — ①新增`_scheduleConfigSync`防抖函数(2秒延迟自动推送配置到服务器) ②接入所有内联handler: 温度/Token滑块、行高/段落间距/字号、Markdown开关、Provider切换、Agent模式、可恢复流/代理/ToolCard开关 ③修复滑块仅更新UI不写localStorage的问题(温度/Token/显示参数)
+- **2026-06-22**: 🔧 Agent聊天跨设备同步修复 — `restoreUserData`中`_agent_main`合并逻辑从"本地有任何消息就拒绝服务器"改为"服务器消息更多时使用服务器",与普通聊天合并逻辑一致,解决新设备登录后Agent聊天为空的问题
+- **2026-06-22**: 🔧 工具调用详情卡片修复 + engine_push URL净化 — ①卡片开关从`switch.small`改为`config-toggle`统一样式 ②`init.js`+`config.js`双路径恢复开关状态,修复刷新后开关ON但功能不生效的localStorage/checkbox不同步 ③`engine_push` URL净化三层增强: 剥离`**URL**`双侧包裹+末尾`**`附着+generic Markdown污染清洗
+- **2026-06-22**: 🔧 engine_push修复 + buildApiMessages诊断修复 — ①`engine_push` file参数完善: 添加`os.chown`到www-data、mtime参与hash保证唯一性、保留原始扩展名 ②`generate_ppt`补充缺失的except块(SyntaxError修复) ③`buildApiMessages`诊断分离assistant/tool命名空间消除误报+源数组去重清理 ④`/tmp/docx_env`重装python-pptx
 - **2026-06-13**: 🔧 综合修复轮次 — ①RS+代理引擎侧URL映射 ②duplicate tool_call_id全局去重 ③MiniMax思考`(think)`标签大小写不敏感提取 ④max_tokens自动减小regex补充 ⑤`_engine_get` POST支持修复 ⑥`_generate_resumable`代理URL映射 ⑦`buildApiMessages`孤tool_call同步清理源消息
 - **2026-06-12**: 🔒 强制认证 — `chat.php`+`engine_api.php`新增auth中间件,非public action返回401
 - **2026-06-12**: 🔧 输入框溢出+MiniMax思考 — ①`.input-clip`裁剪容器+`background-color:inherit` ②`_backendSSEHandler`+RS双路径`(think)`提取+去重

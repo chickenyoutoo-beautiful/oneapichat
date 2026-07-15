@@ -635,6 +635,43 @@
                         }
                         toolResult = { result: '✅ ' + _pushMsg };
                     }
+                    // ===== toggle_proxy — AI 自主控制代理开关(弹窗确认) =====
+                     else if (func.name === 'toggle_proxy') {
+                        var _action = (args.action || 'on').toLowerCase();
+                        if (_action === 'on') {
+                            if (window.isProxyEnabled && window.isProxyEnabled()) {
+                                toolResult = { result: '⚠️ 代理已经是开启状态' };
+                            } else {
+                                // ★ 必须先设置 localStorage, 弹窗确认后再同步 UI
+                                var _confirmed = confirm('🤖 AI 请求开启网络代理\n\n' +
+                                    '原因: 访问境外网站遇到网络限制,需要开启代理穿透。\n' +
+                                    '代理 URL: ' + (window.getProxyUrl ? window.getProxyUrl() : '未配置') + '\n\n' +
+                                    '点击 "确定" 开启代理, "取消" 拒绝。');
+                                if (_confirmed) {
+                                    localStorage.setItem('proxyEnabled', '1');
+                                    if (typeof setChecked === 'function') setChecked('proxyToggle', true);
+                                    if (typeof window.saveConfig === 'function') window.saveConfig(false);
+                                    if (typeof window.toggleProxy === 'function') {
+                                        // toggleProxy 会清空 CORS 缓存并保存
+                                        setChecked('proxyToggle', true);
+                                        window.toggleProxy();
+                                    }
+                                    toolResult = { result: '✅ 代理已开启。后续网络请求将通过代理转发。' };
+                                } else {
+                                    toolResult = { result: '❌ 用户拒绝了开启代理的请求。' };
+                                }
+                            }
+                        } else if (_action === 'off') {
+                            localStorage.setItem('proxyEnabled', '0');
+                            if (typeof setChecked === 'function') setChecked('proxyToggle', false);
+                            if (typeof window.saveConfig === 'function') window.saveConfig(false);
+                            // ★ 清空 CORS 缓存, 下次可重新尝试直连
+                            window._corsBlockedDomains = {};
+                            toolResult = { result: '✅ 代理已关闭。已恢复直连模式。' };
+                        } else {
+                            toolResult = { result: '❌ 无效的操作: ' + _action + ', 必须是 on 或 off' };
+                        }
+                    }
                     // ===== Cloudreve 云盘工具 =====
                      else if (func.name === 'cr_login') {
                         toolResult = await cloudreveApiHandler('login', args);

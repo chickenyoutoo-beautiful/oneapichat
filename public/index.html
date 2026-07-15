@@ -33,9 +33,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./src/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="256x256" href="./src/favicon.png">
     <!-- KaTeX 数学公式渲染 -->
-    <link rel="stylesheet" href="./lib/katex/katex.min.css">
-    <script src="./lib/katex/katex.min.js"></script>
-    <script src="./lib/katex/auto-render.min.js"></script>
+    <link rel="stylesheet" href="./lib/katex/katex.min.css?v=2">
+    <script src="./lib/katex/katex.min.js?v=2"></script>
+    <script src="./lib/katex/auto-render.min.js?v=2"></script>
     <!-- 艺术字体 -->
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
@@ -692,7 +692,7 @@ window.VISION_API_KEY = '';
             </div>
             <div class="config-toggle-row">
                 <span class="config-label">🧪 可恢复流式传输 <span style="font-size:10px;color:#999">(实验性)</span></span>
-                <label class="switch small"><input type="checkbox" id="resumeStreamToggle" checked onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0')"><span class="slider"></span></label>
+                <label class="switch small"><input type="checkbox" id="resumeStreamToggle" checked onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0');window._scheduleConfigSync()"><span class="slider"></span></label>
             </div>
             <div class="config-toggle-row">
                 <span class="config-label">🔗 链式输出 <span style="font-size:10px;color:#999">(实验性)</span></span>
@@ -784,7 +784,7 @@ window.VISION_API_KEY = '';
                 <div id="proxyConfigDetails" style="display:none;margin-top:8px;">
                     <div class="config-field">
                         <label class="config-label">代理 URL</label>
-                        <input type="text" id="proxyUrl" autocomplete="off" class="config-input" placeholder="如: socks5://192.168.1.1:10808 或 http://127.0.0.1:7890" onchange="localStorage.setItem('proxyUrl', this.value)">
+                        <input type="text" id="proxyUrl" autocomplete="off" class="config-input" placeholder="如: socks5://192.168.1.1:10808 或 http://127.0.0.1:7890" onchange="localStorage.setItem('proxyUrl', this.value);window._scheduleConfigSync()">
                     </div>
                     <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
                         支持 HTTP/HTTPS/SOCKS5 代理。所有 API 请求将通过代理转发。
@@ -886,7 +886,11 @@ window.VISION_API_KEY = '';
                 </div>
                 <div class="config-toggle-row">
                     <span class="config-label">工具调用详情卡片</span>
-                    <label class="switch small"><input type="checkbox" id="toolCardToggle" checked onchange="localStorage.setItem('toolCards', this.checked?'1':'0')"><span class="slider"></span></label>
+                    <input type="checkbox" id="toolCardToggle" class="config-toggle" checked onchange="localStorage.setItem('toolCards', this.checked?'1':'0');window._scheduleConfigSync()">
+                </div>
+                <div class="config-toggle-row">
+                    <span class="config-label" title="使用 Anthropic Messages API 格式 (支持 Claude/部分MiniMax/OpenRouter 等)">🔷 Anthropic API 格式</span>
+                    <input type="checkbox" id="anthropicFormatToggle" class="config-toggle" onchange="localStorage.setItem('useAnthropicFormat', this.checked?'1':'0');window._scheduleConfigSync()">
                 </div>
             </div>
         </details>

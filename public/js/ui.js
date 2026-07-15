@@ -124,13 +124,23 @@ window.showToolStatus = function(toolName, argPreview, status, chatId) {
         return;
     }
 
-    // ★ 旧行推出动画后移除
-    tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
-        old.style.transition = 'all 0.15s ease';
-        old.style.opacity = '0';
-        old.style.marginTop = '-28px';
-        setTimeout(function() { if (old.parentNode) old.remove(); }, 180);
-    });
+    // ★ 新工具启动: 灵动挤掉所有旧行(running + 已完成), 同名 running→success 替换
+    if (status === 'running') {
+        // ★ 所有旧行(含已完成) 灵动滑出
+        tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
+            if (old.classList.contains('tc-exit')) return;  // 已在退出动画中
+            old.classList.add('tc-exit');
+            setTimeout(function() { if (old.parentNode) old.remove(); }, 280);
+        });
+    } else {
+        // ★ 成功/失败: 先移出同名的 running 行(running→success 转换)
+        tcContainer.querySelectorAll('.tool-call-line.tool-call-running').forEach(function(old) {
+            if (old.dataset.tcName === toolName && !old.classList.contains('tc-exit')) {
+                old.classList.add('tc-exit');
+                setTimeout(function() { if (old.parentNode) old.remove(); }, 280);
+            }
+        });
+    }
 
     var line = document.createElement('div');
 
@@ -177,14 +187,13 @@ window.showToolStatus = function(toolName, argPreview, status, chatId) {
         });
     }
 
-    // 完成后 3 秒淡出
+    // 完成后 3 秒灵动淡出(可被新工具调用提前挤掉)
     if (status === 'success' || status === 'error') {
         var self = line;
         setTimeout(function() {
-            if (!self.parentNode) return;
-            self.style.transition = 'all 0.35s ease';
-            self.style.maxHeight = '0'; self.style.opacity = '0'; self.style.padding = '0'; self.style.margin = '0'; self.style.borderWidth = '0';
-            setTimeout(function() { if (self.parentNode) self.remove(); }, 400);
+            if (!self.parentNode || self.classList.contains('tc-exit')) return;
+            self.classList.add('tc-exit');
+            setTimeout(function() { if (self.parentNode) self.remove(); }, 300);
         }, 3000);
     }
 };

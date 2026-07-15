@@ -31,10 +31,9 @@ function applyStreamRender(chatId, fullText) {
         st.rafId = requestAnimationFrame(function _streamLoop(now) {
             var st2 = _streamState[chatId];
             if (!st2) return;
-            // ★ 自适应帧率: 快速阶段(前100 tokens) 16ms/帧, 稳定后 33ms/帧
-            var interval = st2.tickCount < 100 ? 16 : 33;
-            if (now - st2.lastTime < interval && st2.text.length - st2.lastRenderLen < 40) {
-                // 数据量不够一帧,继续等待
+            // ★ 平滑帧率: 16ms对齐60fps, 积累8字符或超30ms即刷新
+            var bytesPending = st2.text.length - st2.lastRenderLen;
+            if (bytesPending < 8 && (now - st2.lastTime) < 30) {
                 st2.rafId = requestAnimationFrame(_streamLoop);
                 return;
             }

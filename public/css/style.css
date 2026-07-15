@@ -117,7 +117,13 @@ body {
 .dark .bubble.assistant { background: #1f2937 !important; color: #f3f4f6 !important; }
 
 /* 气泡内容变化过渡(防止图表渲染时突然撑大) */
-.markdown-body { transition: min-height 0.15s ease; }
+.markdown-body {
+    transition: min-height 0.08s linear;
+}
+/* ★ 聊天区域平滑滚动 */
+#chatBox {
+    scroll-behavior: smooth;
+}
 .markdown-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; cursor: pointer; }
 .markdown-body img:hover { opacity: 0.9; }
 .mermaid svg { max-width: 100%; height: auto; display: block; }
@@ -2660,24 +2666,23 @@ html.dark #sunPath { display: block !important; }
 
 /* ===== 助手气泡等待动画（调大三个点）===== */
 .bubble.assistant.typing .markdown-body {
-    min-height: 1.5em;
-    position: relative;
+    min-height: 1.6em;
 }
+/* ★ 等待中三点脉动 */
 .bubble.assistant.typing .markdown-body::after {
     content: '...';
-    display: inline-block;
-    animation: typing-dots 1.2s steps(4, end) infinite;
-    width: 1.5em;
-    text-align: left;
-    font-size: 2.5em; /* 调大至2.5em */
-    line-height: 1;
-    opacity: 0.7;
+    font-size: 0.85em;
+    letter-spacing: 1px;
+    color: #94a3b8;
+    vertical-align: baseline;
+    animation: typing-pulse 1.2s ease-in-out infinite;
 }
-@keyframes typing-dots {
-    0%, 20% { content: ''; }
-    40% { content: '.'; }
-    60% { content: '..'; }
-    80%, 100% { content: '...'; }
+.dark .bubble.assistant.typing .markdown-body::after {
+    color: #64748b;
+}
+@keyframes typing-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.85; }
 }
 .bubble.assistant {
     padding: 12px 16px;
@@ -4649,22 +4654,30 @@ html:not(.dark) #userInput {
 /* ================================================================
    🔄 工具调用 — 勾叉动效+光效闪烁
    ================================================================ */
-.tool-call-lines { margin: 4px 0; overflow: hidden; max-height: 34px; }
+.tool-call-lines { margin: 3px 0; overflow: hidden; }
 .tool-call-line {
-    display: flex; align-items: center; gap: 5px;
-    padding: 4px 8px; border-radius: 6px; border: 1px solid transparent;
-    font-size: 12px; font-weight: 500; font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-    line-height: 1; max-height: 26px; margin-top: 0;
-    will-change: transform;
-    transition: margin-top 0.15s ease, opacity 0.15s ease, background 0.2s ease, border-color 0.2s ease;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 6px; border-radius: 4px; border: 1px solid transparent;
+    font-size: 11px; font-weight: 500; font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.2; max-height: 22px; margin-top: 2px;
+    will-change: transform, opacity;
     animation: tc-in 0.2s ease-out;
 }
-@keyframes tc-in { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.tool-call-line.tc-exit {
+    animation: tc-out 0.25s ease-in forwards;
+    pointer-events: none;
+}
+@keyframes tc-in { from{opacity:0;transform:translateY(-8px) scale(0.95)} to{opacity:1;transform:translateY(0) scale(1)} }
+@keyframes tc-out { to{opacity:0;transform:translateY(-12px) scale(0.9);max-height:0;padding:0 6px;margin-top:0;border-width:0} }
 
 .tool-c…wrap { display: flex; align-items: center; flex-shrink: 0; width: 16px; height: 16px; }
 
 .tool-call-running { background: #eef2ff; color: #4f46e5; border-color: #c7d2fe; }
 .dark .tool-call-running { background: #1e1b4b; color: #a5b4fc; border-color: #3730a3; }
+@keyframes tc-shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
 
 .tool-call-success {
     background: #f0fdf4; color: #059669; border-color: #4ade80;
@@ -4695,7 +4708,7 @@ html:not(.dark) #userInput {
 
 /* ── 历史工具调用展示（dialogs.js 渲染的 tool-calls-history）── */
 .tool-calls-history {
-    font-size: 12px; padding: 8px 10px; margin-bottom: 8px;
+    font-size: 12px; padding: 6px 10px; margin-bottom: 6px;
     background: #f0f4ff; border-radius: 8px;
     border-left: 3px solid #6366f1; color: #374151;
 }

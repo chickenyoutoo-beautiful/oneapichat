@@ -56,6 +56,7 @@ function setAgentMode(mode) {
     }
 
     localStorage.setItem('agentMode', mode);  // ★ 必须在后续 loadChat 之前设置
+    window._scheduleConfigSync();
 
     // ★ 重置队列状态（loadChat 会根据新 currentChatId 加载正确队列）
     if (_newIsAgent !== _prevIsAgent) {
@@ -612,6 +613,8 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     var baseUrl = localStorage.getItem('baseUrl') || (typeof DEFAULT_CONFIG !== 'undefined' ? DEFAULT_CONFIG.url : 'https://api.deepseek.com');
     if (!key || !baseUrl) return;
     var _provider = localStorage.getItem('baseUrlProvider') || 'custom';
+    // ★ Gemini 免费层速率限制极低(2-3 RPM), 记忆提取额外请求必然触发429，直接跳过
+    if (_provider === 'gemini' || baseUrl.indexOf('generativelanguage.googleapis.com') >= 0) return;
     // 本地模型通常兼容deepseek-chat,直接用; 其他provider用当前模型
     var model = (_provider === 'llamacpp') ? 'deepseek-chat'
         : (localStorage.getItem('model') || localStorage.getItem('model_' + _provider) || 'deepseek-chat');
@@ -2583,7 +2586,8 @@ window.refreshEngineStatus = async function() {
 
 window.syncTokenFromRange = function () {
     setVal('maxTokensInput', getVal('maxTokens'));
-    // 不自动保存,滑动时只同步数值
+    localStorage.setItem('tokens', getVal('maxTokens'));
+    window._scheduleConfigSync();
 };
 
 window.syncTokenFromInput = function () {
@@ -2619,6 +2623,8 @@ window.updateParam = (type, val) => {
     if (type === 'temp') {
         var span = getEl('tempValue');
         if (span) span.innerText = val;
+        localStorage.setItem('temp', val);
+        window._scheduleConfigSync();
     }
     // 不自动保存,滑动时只更新显示
 };

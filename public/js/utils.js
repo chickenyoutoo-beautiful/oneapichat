@@ -63,6 +63,9 @@ window.onProviderChange = async function() {
     console.log('[PROVIDER] localStorage apiKey:', localStorage.getItem('apiKey') ? 'SET' : 'EMPTY');
     console.log('[PROVIDER] input apiKey.value:', getEl('apiKey')?.value ? 'SET' : 'EMPTY');
 
+    // ★ 切换厂商后立即同步到服务器
+    window._scheduleConfigSync();
+
     // ★ 切换厂商后自动刷新模型列表(延迟让 UI 先更新)
     setTimeout(function() {
         if (typeof window.fetchModels === 'function') {
@@ -359,7 +362,7 @@ window.fetchWithRetry = async function(url, options, maxRetries, retryDelay) {
     retryDelay = retryDelay || 1000;
     var lastError;
     // ★ 同步网络代理: 代理开启时使用 proxyFetch 路由
-    var _fetchFn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+    var _fetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
 
     for (var attempt = 1; attempt <= maxRetries; attempt++) {
         try {

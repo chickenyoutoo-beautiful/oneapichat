@@ -85,6 +85,8 @@ async function loadSearchConfig() {
     // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
     setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') !== '0');
     setChecked('proxyToggle', localStorage.getItem('proxyEnabled') === '1');
+    setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
+    setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
     setVal('proxyUrl', localStorage.getItem('proxyUrl') || '');
     var _proxyDetails = document.getElementById('proxyConfigDetails');
     if (_proxyDetails) _proxyDetails.style.display = localStorage.getItem('proxyEnabled') === '1' ? 'block' : 'none';
@@ -151,6 +153,7 @@ window.updateFontSize = function(val) {
     if (span) span.innerText = val;
     document.documentElement.style.setProperty('--chat-font-size', val + 'px');
     localStorage.setItem('fontSize', val);
+    window._scheduleConfigSync();
 };
 
 
@@ -767,9 +770,10 @@ async function saveConfig(showFeedback = false) {
         configSnapshot = null;
         configPanelWasOpen = false;
     }
-    // ★ 保存后延迟刷新模型列表(避免和保存 toast 冲突)
+    // ★ 保存后延迟刷新模型列表(避免和保存 toast 冲突),去重重复调用
     if (getVal('baseUrl') && getVal('apiKey')) {
-        setTimeout(function() { fetchModels(true).catch(function(){}); }, 1500);
+        if (window.__fetchModelsTimer) clearTimeout(window.__fetchModelsTimer);
+        window.__fetchModelsTimer = setTimeout(function() { fetchModels(true).catch(function(){}); }, 1500);
     }
     // ★ 配置变更后立即同步到服务器(按用户隔离)
     if (localStorage.getItem('authToken')) {
@@ -786,6 +790,8 @@ window.toggleProxy = function() {
     localStorage.setItem('proxyUrl', getVal('proxyUrl') || '');
     var details = document.getElementById('proxyConfigDetails');
     if (details) details.style.display = enabled ? 'block' : 'none';
+    // ★ 清空 CORS 域名缓存: 代理开关变化后重新尝试直连
+    window._corsBlockedDomains = {};
     window.saveConfig();
 };
 
@@ -821,10 +827,76 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     if (_isLocal || targetUrl.startsWith(window.location.origin)) {
         return fetch(targetUrl, options);
     }
-    // ★ 外部API: 始终通过proxy.php中继避免CORS
-    //    代理启用时走代理, 未启用时proxy.php纯CURL中继
-    if (!enabled || !proxyUrl) {
+
+    // ★ 统一 429/5xx 重试(指数退避,最多3次) — 适用于直连和中继两条路径
+    async function _fetchWithRetry(_fetchPromise, _label) {
+        var _maxRetries = 3;
+        var _retryable = [429, 502, 503, 504];  // 速率限制 + 临时服务端错误
+        for (var _retry = 0; _retry <= _maxRetries; _retry++) {
+            var _resp;
+            try { _resp = await _fetchPromise; } catch(_e) {
+                if (_retry >= _maxRetries) throw _e;
+                await new Promise(function(r){setTimeout(r, 2000)}); continue;
+            }
+            if ((_retryable.indexOf(_resp.status) === -1) || _retry >= _maxRetries) {
+                // ★ 503 重试耗尽: 弹窗询问是否开启代理(每会话仅一次)
+                if (_resp.status === 503 && !window.__proxy503Prompted && !(window.isProxyEnabled && window.isProxyEnabled())) {
+                    window.__proxy503Prompted = true;
+                    setTimeout(function() {
+                        if (confirm('🌐 网络请求失败 (503)\n\n服务器不可达,可能是网络限制。\n是否开启代理穿透?\n\n代理 URL: ' + (window.getProxyUrl ? window.getProxyUrl() : '未配置(需先在代理设置中填写)') + '\n\n提示: 模型也可以调用 "toggle_proxy" 工具来开启代理。')) {
+                            if (typeof window.toggleProxy === 'function') {
+                                setChecked('proxyToggle', true);
+                                window.toggleProxy();
+                            }
+                        }
+                    }, 500);
+                }
+                return _resp;
+            }
+            var _retryAfter = parseInt(_resp.headers.get('Retry-After') || _resp.headers.get('retry-after')) || (Math.pow(2, _retry) * 2);
+            console.warn('[Proxy] ' + _resp.status + ' 错误(' + _label + '), ' + _retryAfter + 's 后重试 (' + (_retry+1) + '/' + _maxRetries + ')');
+            await new Promise(function(r) { setTimeout(r, _retryAfter * 1000); });
+        }
+    }
+
+    // ★ 代理未启用: 优先直连(走浏览器本地网络栈,支持系统代理/VPN)
+    //    失败时 fallback 到 proxy.php 中继(绕过CORS)
+    // ★ Google API 域名直接走中继 (GFW封锁, 直连必然失败, 节省重试时间)
+    var _host = '';
+    try { _host = new URL(targetUrl).host; } catch(e) {}
+    var _isGoogleAPI = _host && (_host.indexOf('generativelanguage.googleapis.com') >= 0 || _host.indexOf('googleapis.com') >= 0);
+    if (_isGoogleAPI && !enabled) {
+        window._corsBlockedDomains = window._corsBlockedDomains || {};
+        console.log('[Proxy] Google API 域名, 跳過直连走中继 (' + _host + ')');
+        window._corsBlockedDomains[_host] = true;
         proxyUrl = '__relay_only__';
+    } else if (!enabled || !proxyUrl) {
+        // ★ 缓存已知的CORS拦截域名,避免重复直连失败(减少控制台红色错误)
+        window._corsBlockedDomains = window._corsBlockedDomains || {};
+        if (_host && window._corsBlockedDomains[_host]) {
+            // 已知此域名不支持CORS,直接走中继
+            proxyUrl = '__relay_only__';
+        } else {
+            console.log('[Proxy] →', targetUrl.substring(0, 80), '(direct, local proxy)');
+            try {
+                var _directResp = await _fetchWithRetry(fetch(targetUrl, options), 'direct');
+                // ★ 503/502 服务不可达 → 不返回, 走 relay 重试
+                if (_directResp.status === 503 || _directResp.status === 502) {
+                    console.warn('[Proxy] 直连 ' + _directResp.status + ', 走服务器中继重试');
+                    proxyUrl = '__relay_only__';
+                    _host && (window._corsBlockedDomains[_host] = true);
+                    // fall through to relay below
+                } else {
+                    return _directResp;
+                }
+            } catch(_directErr) {
+                // ★ 静默处理: CORS/网络错误是预期行为,记录域名避免下次重试
+                if (_host) window._corsBlockedDomains[_host] = true;
+                console.log('[Proxy] 直连不可用(' + (_host || '?') + '), 走服务器中继');
+                // fall through to proxy.php relay
+            }
+            proxyUrl = '__relay_only__';
+        }
     } else if (!/^https?:\/\//.test(proxyUrl) && !/^socks[45]?:\/\//.test(proxyUrl)) {
         proxyUrl = 'http://' + proxyUrl;  // ★ 自动补全协议前缀
     }
@@ -855,12 +927,13 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         proxy: proxyUrl
     };
 
-    return fetch(SERVER_API_BASE + '/proxy.php', {
+    return _fetchWithRetry(fetch(SERVER_API_BASE + '/proxy.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(relayBody),
         signal: options.signal
-    });
+    }), 'relay');
+    return _resp;  // fallthrough
 };
 
 window.updateDisplayParam = (type, val) => {
@@ -868,12 +941,14 @@ window.updateDisplayParam = (type, val) => {
         var span = getEl('lineHeightValue');
         if (span) span.innerText = parseFloat(val).toFixed(2);
         document.documentElement.style.setProperty('--chat-line-height', val);
+        localStorage.setItem('lineHeight', val);
     } else if (type === 'paragraphMargin') {
         var span = getEl('paragraphMarginValue');
         if (span) span.innerText = parseFloat(val).toFixed(2);
         document.documentElement.style.setProperty('--chat-paragraph-margin', val + 'rem');
+        localStorage.setItem('paragraphMargin', val);
     }
-    // 不自动保存,滑动时只更新显示
+    window._scheduleConfigSync();
 };
 
 function applyParagraphPrefix(prefix) {
@@ -888,6 +963,8 @@ window.updateParagraphPrefix = () => {
 };
 
 window.updateMarkdownConfig = () => {
+    localStorage.setItem('markdownGFM', getChecked('markdownGFM'));
+    localStorage.setItem('markdownBreaks', getChecked('markdownBreaks'));
     if (window.marked) {
         marked.setOptions({
             gfm: getChecked('markdownGFM'),
@@ -899,6 +976,7 @@ window.updateMarkdownConfig = () => {
     // 清空 Markdown 缓存使新配置生效
     if (MarkdownRenderer) MarkdownRenderer.clearCache();
     if (currentChatId) loadChat(currentChatId);
+    window._scheduleConfigSync();
 };
 
 // ==================== 模型管理 ====================
@@ -932,6 +1010,33 @@ window.fetchModels = async function (silent) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         var data = await res.json();
         var models = data.data || [];
+        // ★ 过滤不可通过 REST /chat/completions 调用的模型
+        var _badSuffixes = ['live-preview', '-preview', 'bidi', 'realtime', 'generateVideo', 'imagen',
+            'embedding', 'text-embedding', 'aqa', 'chirp', 'speech',
+            'tts-', '-tts', '-audio-', 'audio-', '-asr', '-stt',
+            'music-', '-music', 'whisper', 'dall-e', '-latest', 'experimental'];
+        var _badPrefixes = ['embedding-', 'text-embedding-', 'ft:'];
+        var _badExact = ['gemini-3.1-flash-live-preview', 'gemini-3.1-pro-live-preview',
+            'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
+        function _isCallableModel(m) {
+            var id = (m.id || '').toLowerCase();
+            if (_badExact.indexOf(id) >= 0) return false;
+            for (var si = 0; si < _badSuffixes.length; si++) {
+                if (id.indexOf(_badSuffixes[si]) >= 0) return false;
+            }
+            for (var pi = 0; pi < _badPrefixes.length; pi++) {
+                if (id.indexOf(_badPrefixes[pi]) === 0) return false;
+            }
+            // 过滤纯数字ID或空ID（通常不是有效聊天模型）
+            if (!id || /^\d+$/.test(id)) return false;
+            return true;
+        }
+        models = models.filter(_isCallableModel);
+        // ★ 清理模型 ID: 去除 Google API 的 "models/" 前缀, 其他平台的 "publishers/" 等前缀
+        models = models.map(function(m) {
+            var cleanId = (m.id || '').replace(/^(models|publishers)\//, '');
+            return { id: cleanId, label: m.id || cleanId, ...m };
+        });
         var modelOptions = models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
 
         var mainSelect = getEl('modelSelect');

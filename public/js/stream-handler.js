@@ -107,6 +107,9 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                         if (_existingTC) {
                             if (_tcFunc.name) _existingTC.function.name = _tcFunc.name;
                             if (_tcFunc.arguments) _existingTC.function.arguments += _tcFunc.arguments;
+                            // ★ 保留 Gemini thought_signature (Google API 要求回传,否则 400)
+                            if (event.delta.thought_signature && !_existingTC.thought_signature) _existingTC.thought_signature = event.delta.thought_signature;
+                            if (_tcFunc.thought_signature && !_existingTC.function.thought_signature) _existingTC.function.thought_signature = _tcFunc.thought_signature;
                         } else {
                             toolCalls.push(event.delta);
                         }
@@ -353,16 +356,21 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             break;
         }
         var decoded = decoder.decode(value, { stream: true });
+        // ★ 过滤 Google Gemini 流式响应中的非标准前缀（如 ")]}'\n" 或前导 "]"）
+        decoded = decoded.replace(/^\)\]\}'\n?/, '').replace(/^\s*\]\s*\n?/, '');
         buffer += decoded;
         var lines = buffer.split('\n');
         buffer = lines.pop() || '';
         for (const line of lines) {
             // 支持两种格式: SSE (data: {...}) 和 裸JSON ({...})
             var jsonStr = '';
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            var _trimmed = line.trim();
+            if (line.startsWith('data: ') && !line.includes('[DONE]')) {
                 jsonStr = line.substring(6);
-            } else if (line.trim().startsWith('{')) {
-                jsonStr = line.trim();
+            } else if (_trimmed === '[DONE]' || _trimmed === 'data:[DONE]' || _trimmed === 'data: [DONE]') {
+                continue;  // ★ 跳过 Google/OpenAI 流式结束标记
+            } else if (_trimmed.startsWith('{')) {
+                jsonStr = _trimmed;
             }
             if (jsonStr) {
                 try {
@@ -449,6 +457,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                         arguments: tc.function?.arguments === undefined ? '' : tc.function.arguments
                                     }
                                 };
+                                // ★ 保留 Gemini thought_signature (Google API 要求回传,否则 400)
+                                if (tc.thought_signature) currentToolCall.thought_signature = tc.thought_signature;
+                                if (tc.function?.thought_signature) currentToolCall.function.thought_signature = tc.function.thought_signature;
                             } else if (tc.function?.name) {
                                 currentToolCall.function.name = tc.function.name;
                             }

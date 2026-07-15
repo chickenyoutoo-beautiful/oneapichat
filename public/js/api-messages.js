@@ -473,10 +473,12 @@ function buildApiMessages(chatId) {
     // ★ 去重 tool_call_id: 删除旧轮次的重复 tool 结果(DeepSeek 拒绝 duplicate tool_call_id)
     var _seenTcIds = {};
     var _dupRemoved = 0;
+    var _dupTcIds = {};  // ★ 记录被去重的 tool_call_id，用于源清理
     for (var _dfi = apiMessagesUnfiltered.length - 1; _dfi >= 0; _dfi--) {
         var _dm = apiMessagesUnfiltered[_dfi];
         if (_dm.role === 'tool' && _dm.tool_call_id) {
             if (_seenTcIds[_dm.tool_call_id]) {
+                _dupTcIds[_dm.tool_call_id] = true;
                 apiMessagesUnfiltered.splice(_dfi, 1);
                 _dupRemoved++;
             } else {
@@ -484,7 +486,22 @@ function buildApiMessages(chatId) {
             }
         }
     }
-    if (_dupRemoved > 0) console.log('[buildApiMessages] 去重 ' + _dupRemoved + ' 条重复 tool_call_id');
+    if (_dupRemoved > 0) {
+        console.log('[buildApiMessages] 去重 ' + _dupRemoved + ' 条重复 tool_call_id');
+        // ★ 同步清理源消息中的重复 tool 消息，防止下轮重新出现
+        for (var _si = msgs.length - 1; _si >= 0; _si--) {
+            if (msgs[_si].role === 'tool' && _dupTcIds[msgs[_si].tool_call_id]) {
+                // 只删除旧的那条（保留最后一个），通过从后往前扫描实现
+                // 先记录已清理的ID，再次遇到则跳过（保留该条）
+                if (_dupTcIds[msgs[_si].tool_call_id] === true) {
+                    _dupTcIds[msgs[_si].tool_call_id] = 'kept';  // 标记：下次遇到删除
+                } else if (_dupTcIds[msgs[_si].tool_call_id] === 'kept') {
+                    console.log('[buildApiMessages] 从源删除重复 tool 消息:', msgs[_si].tool_call_id);
+                    msgs.splice(_si, 1);
+                }
+            }
+        }
+    }
 
     // ★ 清理空 tool_calls:[] — 部分 API (DeepSeek) 拒绝 empty array
     for (var _efi = 0; _efi < apiMessagesUnfiltered.length; _efi++) {
@@ -515,22 +532,36 @@ function buildApiMessages(chatId) {
         apiMessages.push(_m);
     }
     // ★ 诊断: 打印最终消息摘要检测重复 tool_call_id
-    var _tcDiag = {};
+    // ★ 分开跟踪: assistant.tool_calls[].id 和 tool.tool_call_id 是配对的(正常),不应视为重复
+    var _tcDiagAssistant = {};  // tool_call_id from assistant.tool_calls[]
+    var _tcDiagTool = {};       // tool_call_id from tool messages
     for (var _di = 0; _di < apiMessages.length; _di++) {
         var _dm = apiMessages[_di];
         var _tcIds = [];
+        var _tcRole = null;  // 'assistant' or 'tool' — which namespace this ID belongs to
         if (_dm.role === 'assistant' && _dm.tool_calls && _dm.tool_calls.length > 0) {
             _tcIds = _dm.tool_calls.map(function(tc) { return tc.id || '?'; });
+            _tcRole = 'assistant';
         } else if (_dm.role === 'tool' && _dm.tool_call_id) {
             _tcIds = [_dm.tool_call_id];
+            _tcRole = 'tool';
         }
         if (_tcIds.length > 0) {
             for (var _tci = 0; _tci < _tcIds.length; _tci++) {
                 var _tid = _tcIds[_tci];
-                if (_tid && _tcDiag[_tid] !== undefined) {
-                    console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiag[_tid] + '])');
-                } else if (_tid) {
-                    _tcDiag[_tid] = _di;
+                if (!_tid) continue;
+                if (_tcRole === 'assistant') {
+                    if (_tcDiagAssistant[_tid] !== undefined) {
+                        console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id in assistant:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagAssistant[_tid] + '])');
+                    } else {
+                        _tcDiagAssistant[_tid] = _di;
+                    }
+                } else if (_tcRole === 'tool') {
+                    if (_tcDiagTool[_tid] !== undefined) {
+                        console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id in tool:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagTool[_tid] + '])');
+                    } else {
+                        _tcDiagTool[_tid] = _di;
+                    }
                 }
             }
         }

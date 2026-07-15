@@ -835,8 +835,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     let requestedTokens = parseInt(getVal('maxTokens')) || 4096;
 
     // 构建请求体
-    // ★ MiniMax M3 Anthropic 兼容（暂时禁用，OpenAI 端点已稳定）
-    var _useAnthropicFormat = false; // (getVal('modelSelect') || '').toLowerCase().includes('minimax-m3');
+    // ★ Anthropic API 格式开关: 用户可通过设置启用(全局或per-provider)
+    // 支持 Anthropic Messages API 格式的提供商: Anthropic, MiniMax M3, OpenRouter, 自定义端点等
+    var _useAnthropicFormat = localStorage.getItem('useAnthropicFormat') === '1'
+        || (getVal('modelSelect') || '').toLowerCase().includes('claude');  // Claude 模型自动启用 Anthropic 格式
     let _aSysContent = '';
     if (_useAnthropicFormat) {
         // 提取 system 消息
@@ -908,7 +910,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 统一获取模型选择并转小写
-    var currentModel = getVal('modelSelect') || '';
+    var currentModel = (getVal('modelSelect') || '').replace(/^(models|publishers)\//, '');  // ★ 去除 Google API 等前缀
     var modelLower = currentModel.toLowerCase();
 
     var body = {
@@ -992,6 +994,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push(SERVER_FILE_GREP_TOOL);
         // PPT生成 — 始终可用
         if (typeof GENERATE_PPT_TOOL !== 'undefined') tools.push(GENERATE_PPT_TOOL);
+        // toggle_proxy — 始终可用(非Agent也可用，弹窗确认)
+        if (typeof TOGGLE_PROXY_TOOL !== 'undefined') tools.push(TOGGLE_PROXY_TOOL);
         // ask_agent: 仅在普通模式且当前对话无临时授权时注册
         // Agent模式/yolo模式/当前对话已有临时授权时无需此工具
         var _hasTempForThisChat = !!(window._tempAgentGranted && window._tempAgentChatId === chatId);
@@ -1256,10 +1260,31 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (_aSysContent) body.system = _aSysContent;
         delete body.tool_choice;
         delete body.stream_options;
-        body._anthropicUrl = getVal('baseUrl').replace(/\/v1$/, '') + '/anthropic/v1/messages';
+        // ★ 智能 URL 构建: 不同提供商的 Anthropic 端点路径不同
+        var _baseUrl = getVal('baseUrl');
+        var _baseClean = _baseUrl.replace(/\/+$/, '');
+        if (_baseClean.indexOf('api.anthropic.com') >= 0) {
+            // 原生 Anthropic API: /v1/messages
+            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/v1/messages';
+        } else if (_baseClean.indexOf('api.minimaxi.com') >= 0) {
+            // MiniMax Anthropic 兼容: /v1/messages
+            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/v1/messages';
+        } else {
+            // 泛用 Anthropic 兼容端点 (OpenRouter/自定义等)
+            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/anthropic/v1/messages';
+        }
         // ★ 预检清除空 tool_use_id 的 tool_result（防止 400）
+        // ★ 清理 OpenAI-specific 字段 (Anthropic API 不接受)
         for (var _prei = 0; _prei < body.messages.length; _prei++) {
             var _prem = body.messages[_prei];
+            // 移除 OpenAI 特有字段
+            delete _prem.reasoning_content;
+            delete _prem.reasoning_details;
+            delete _prem.tool_call_id;
+            if (_prem.role === 'assistant') {
+                delete _prem.tool_calls;  // 已转为 tool_use 块
+                delete _prem.refusal;
+            }
             if (_prem.role === 'user' && Array.isArray(_prem.content)) {
                 _prem.content = _prem.content.filter(function(c) {
                     if (c.type === 'tool_result' && (!c.tool_use_id || c.tool_use_id === '')) {
@@ -1673,7 +1698,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
             // ★ 工具续接也走RS: 每轮独立stream_id不嵌套,前8轮走RS超8轮退直连
             var _isContinuation = (toolCallCount > 8);
-            var _useRS = _rsEnabled && !_isContinuation;
+            // ★ Anthropic 格式不支持 RS (引擎用 OpenAI SDK), 强制直连
+            var _useRS = _rsEnabled && !_isContinuation && !_useAnthropicFormat;
             if (_useRS) {
                 // ★ 先持久化用户消息到服务器，防止刷新丢失
                 saveChats();
@@ -1758,9 +1784,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }, 1000);
             }
 
-            var _fetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+            // ★ 统一走 proxyFetch: 代理OFF直连(走系统代理)→失败回退proxy.php中继; 代理ON走proxy.php+外部代理
             var _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getVal('apiKey') };
-            var res = await _fetchFn(_reqUrl, {
+            var res = await window.proxyFetch(_reqUrl, {
                 method: 'POST',
                 headers: _headers,
                 body: JSON.stringify(body),
@@ -1822,7 +1848,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         // 重新构造非流式请求体(清除stream标记)
                         var _nsBody = JSON.parse(JSON.stringify(body));
                         if (_nsBody.stream !== undefined) _nsBody.stream = false;
-                        var _nsFetchFn = window.isProxyEnabled() ? window.proxyFetch : fetch;
+                        var _nsFetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
                         var _nsRes = await _nsFetchFn(_reqUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
@@ -2117,14 +2143,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     tcId = tcId.replace(/[^a-zA-Z0-9_\-]/g, '');
                     if (!tcId || tcId.length > 64) tcId = 'tc_' + Date.now();
 
-                    return {
+                    var _normalized = {
                         id: tcId,
-                        type: 'function',
+                        type: tc.type || 'function',
                         function: {
                             name: tc.function.name,
                             arguments: argStr
                         }
                     };
+                    // ★ 保留 Gemini thought_signature (Google API 要求回传，否则 400)
+                    if (tc.thought_signature) _normalized.thought_signature = tc.thought_signature;
+                    if (tc.function.thought_signature) _normalized.function.thought_signature = tc.function.thought_signature;
+                    return _normalized;
                 });
                 var assistantMsg = {
                     role: 'assistant',
@@ -2336,8 +2366,7 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ 工具执行循环结束,隐藏状态浮条（指定 chatId 避免误关其他会话的状态）
-                if (typeof showToolStatus === 'function') showToolStatus(null, null, null, chatId);
+                // ★ 工具执行循环结束 — 状态行各自有3秒定时器, 不强制清除
                 // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
                 if (_allWebFetchUrls.length > 0) {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
@@ -2469,9 +2498,7 @@ window.useAlternativeVisionModel = function() {
                 var _bubble = activeBubbleMap[chatId];
                 console.log('[ImageModel] completion: chatId match=', (currentChatId === chatId), 'bubble exists=', !!_bubble, 'hasImages=', !!(pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0));
                 if (_bubble) {
-                    // ★ 清理工具调用状态残留（tool-call-lines 在 markdown-body 外面）
-                    var _tcLines = _bubble.querySelector('.tool-call-lines');
-                    if (_tcLines) _tcLines.remove();
+                    // ★ 工具状态行各自有3秒定时器, 不强制移除
                     var _md = _bubble.querySelector('.markdown-body');
                     // ★ 流式已完成, 不再重复全局渲染(避免覆盖流式结果)
                     if (_md) {
@@ -3212,13 +3239,13 @@ window.useAlternativeVisionModel = function() {
             console.log('[FlowPanel] 响应结束,清理已完成计划面板');
             window.dismissFlowPanel();
         }
-        // ★ AI 自主记忆: 对话结束后自动提取重要信息
+        // ★ AI 自主记忆: 对话结束后延迟提取(避开主请求避免抢额度→429)
         if (!window.__autoMemoryPending) {
             window.__autoMemoryPending = true;
             setTimeout(function() {
-                window._autoSaveMemoriesFromChat(chatId);
+                window._autoSaveMemoriesFromChat(chatId).catch(function(){});
                 window.__autoMemoryPending = false;
-            }, 2000);
+            }, 5000);  // ★ 5秒延迟,避免与下一轮主请求同时到达API
         }
         if (Object.keys(isTypingMap).length === 0) localStorage.removeItem('ongoingChats');
         else saveOngoingChatsSnapshot();

@@ -179,54 +179,98 @@ function extractTextFromHTML($html, $baseUrl = '') {
 }
 
 function fetchSingleURL($url, $uaIndex = 0) {
-    global $USER_AGENTS, $GLOBAL_FAILURES;
+    global $USER_AGENTS, $GLOBAL_FAILURES, $proxyUrl;
     $host = parse_url($url, PHP_URL_HOST);
 
-    // 熔断器检查
-    if (isBreakerOpen($host)) {
+    // 熔断器检查 — ★ 有代理时跳过(代理可能是新路径, 不应被旧失败阻止)
+    if (isBreakerOpen($host) && !$proxyUrl) {
         return ['error' => "Circuit breaker open (host: $host)", 'status' => 503];
+    }
+    // ★ 有代理时重置熔断器, 给代理一次机会
+    if (isBreakerOpen($host) && $proxyUrl) {
+        $key = _breakerKey($host);
+        $GLOBAL_FAILURES[$key] = [0, 0];
     }
 
     $ua = $USER_AGENTS[$uaIndex % count($USER_AGENTS)];
 
-    // 使用 curl（命令行方式，不依赖 php-curl 扩展）
-    $cmd = 'curl -s -L ' .
-        '--tlsv1.2 ' .
-        '--connect-timeout 5 ' .
-        '--max-time ' . FETCH_TIMEOUT . ' ' .
-        '--max-redirs ' . MAX_REDIRECTS . ' ' .
-        '-H ' . escapeshellarg("User-Agent: $ua") . ' ' .
-        '-H ' . escapeshellarg('Accept: text/html,application/xhtml+xml,text/plain;q=0.9') . ' ' .
-        '-H ' . escapeshellarg('Accept-Language: zh-CN,zh;q=0.9,en;q=0.8') . ' ' .
-        '-H ' . escapeshellarg('Accept-Encoding: identity') . ' ' .
-        '-H ' . escapeshellarg('Cache-Control: no-cache') . ' ' .
-        '-k ' .  // 跳过 SSL 验证（与原有行为一致）
-        escapeshellarg($url) . ' 2>/dev/null';
-
-    $content = shell_exec($cmd);
-    $exitCode = 0;
-
-    // 提取 HTTP 状态码（通过额外请求）
-    $statusCode = 200;
-    $statusCmd = 'curl -s -o /dev/null -w "%{http_code}" -L ' .
-        '--connect-timeout 5 --max-time ' . FETCH_TIMEOUT . ' ' .
-        '-k ' .
-        escapeshellarg($url) . ' 2>/dev/null';
-    $statusStr = trim(shell_exec($statusCmd) ?? '');
-    if (is_numeric($statusStr)) $statusCode = (int)$statusStr;
-
-    // 判断错误
-    if ($content === null || $exitCode !== 0) {
-        $failures = $GLOBAL_FAILURES[_breakerKey($host)][0] ?? 0;
-        // 502/503/504 或 curl 失败 → 记录熔断 + 重试
-        if (in_array($statusCode, [502, 503, 504]) || $content === null) {
-            recordFailure($host, $statusCode);
-            // 重试一次，换 UA
-            if ($uaIndex < count($USER_AGENTS) - 1) {
-                return fetchSingleURL($url, $uaIndex + 1);
+    // ★ 使用 PHP curl（与 proxy.php 一致的代理处理）
+    $doRequest = function($useProxy) use ($url, $ua, $proxyUrl) {
+        $ch = curl_init();
+        $opts = [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => MAX_REDIRECTS,
+            CURLOPT_TIMEOUT => FETCH_TIMEOUT,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,  // ★ HTTP/2 更像浏览器
+            CURLOPT_USERAGENT => $ua,
+            CURLOPT_HTTPHEADER => [
+                'Accept: text/html,application/xhtml+xml,text/plain;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding: gzip, deflate, br',
+                'Cache-Control: no-cache',
+                'Sec-Fetch-Dest: document',
+                'Sec-Fetch-Mode: navigate',
+                'Sec-Fetch-Site: none',
+                'Upgrade-Insecure-Requests: 1',
+                'DNT: 1'
+            ],
+            CURLOPT_ENCODING => 'gzip, deflate, br',  // ★ 接受压缩
+            CURLOPT_COOKIEFILE => '',   // ★ 启用 cookie 引擎(内存)
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_WHATEVER,
+            CURLOPT_TCP_FASTOPEN => 1
+        ];
+        // ★ 代理设置（与 proxy.php 一致）
+        if ($useProxy && $proxyUrl) {
+            $opts[CURLOPT_PROXY] = $proxyUrl;
+            if (strpos($proxyUrl, 'socks5://') === 0) {
+                $opts[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS5;
+            } elseif (strpos($proxyUrl, 'socks4://') === 0) {
+                $opts[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS4;
             }
         }
-        return ['error' => $content === null ? 'curl failed' : "HTTP $statusCode", 'status' => $statusCode ?: 502];
+        curl_setopt_array($ch, $opts);
+        $content = curl_exec($ch);
+        $info = [
+            'status' => (int)curl_getinfo($ch, CURLINFO_HTTP_CODE),
+            'error' => curl_error($ch),
+            'errno' => curl_errno($ch)
+        ];
+        curl_close($ch);
+        return [$content, $info];
+    };
+
+    // ★ 有代理时先走代理,代理失败回退直连
+    if ($proxyUrl) {
+        list($content, $info) = $doRequest(true);
+        if ($content === false || $info['errno'] !== 0 || $info['status'] >= 500) {
+            // ★ 代理失败,回退直连
+            list($content, $info) = $doRequest(false);
+        }
+    } else {
+        list($content, $info) = $doRequest(false);
+    }
+    $statusCode = $info['status'];
+    $curlError = $info['error'];
+    $curlErrno = $info['errno'];
+
+    // 判断错误 — ★ 502/503 等可能是反爬, 等待后换 UA 重试
+    if ($content === false || $curlErrno !== 0 || $statusCode >= 500) {
+        $errMsg = $curlError ?: 'curl failed';
+        $failures = $GLOBAL_FAILURES[_breakerKey($host)][0] ?? 0;
+        if (in_array($statusCode, [502, 503, 504]) || $content === false || $statusCode >= 500) {
+            if ($uaIndex < min(count($USER_AGENTS) - 1, 2)) {  // ★ 最多重试2次
+                // ★ 反爬: 随机延迟 1-3 秒后换 UA 重试
+                usleep(rand(1000000, 3000000));
+                return fetchSingleURL($url, $uaIndex + 1);
+            }
+            recordFailure($host, $statusCode ?: 502);
+        }
+        return ['error' => $errMsg, 'status' => $statusCode ?: 502];
     }
 
     if (strlen($content) > MAX_CONTENT_SIZE) {
@@ -295,6 +339,7 @@ if ($method === 'POST') {
             '--connect-timeout 5 ' .
             '--max-time ' . FETCH_TIMEOUT . ' ' .
             '--max-redirs ' . MAX_REDIRECTS . ' ' .
+            $proxyFlag . ' ' .
             '-H ' . escapeshellarg("User-Agent: $ua") . ' ' .
             '-H ' . escapeshellarg('Accept: text/html,text/plain;q=0.9') . ' ' .
             '-H ' . escapeshellarg('Accept-Language: zh-CN,zh;q=0.9,en;q=0.8') . ' ' .
@@ -362,6 +407,22 @@ if ($method === 'POST') {
 
     echo json_encode(['results' => $results]);
     exit;
+}
+
+// ------ 代理配置（前端传入） ------
+$proxyUrl = isset($_GET['proxy']) ? trim($_GET['proxy']) : '';
+if ($proxyUrl === '__relay_only__' || $proxyUrl === '') $proxyUrl = '';
+// ★ 内部代理映射（与 proxy.php 一致）
+if (strpos($proxyUrl, 'proxy.naujtrats.xyz:8888') !== false) $proxyUrl = 'http://192.168.195.213:10808';
+if (strpos($proxyUrl, 'proxy.naujtrats.xyz:8889') !== false) $proxyUrl = 'http://192.168.195.22:10808';
+$proxyFlag = '';
+if ($proxyUrl) {
+    $proxyType = CURLPROXY_HTTP;
+    if (strpos($proxyUrl, 'socks5://') === 0) $proxyType = CURLPROXY_SOCKS5;
+    elseif (strpos($proxyUrl, 'socks4://') === 0) $proxyType = CURLPROXY_SOCKS4;
+    // ★ 构建 curl 代理参数
+    $proxyFlag = ' --proxy ' . escapeshellarg($proxyUrl);
+    if ($proxyType === CURLPROXY_SOCKS5) $proxyFlag .= ' --socks5 ' . escapeshellarg($proxyUrl);
 }
 
 // ------ GET: 单页面抓取 ------

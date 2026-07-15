@@ -452,7 +452,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         // 默认折叠,如果推理内容较短(<200字)则展开
         var reasoningLen = (reasoning || '').length;
         details.open = reasoningLen < 200;
-        var summaryText = '🤔 推理过程' + (reasoningLen >= 200 ? ' (' + reasoningLen + '字符)' : '');
+        var summaryText = '🤔 推理过程';
         details.innerHTML = `<summary>${summaryText}</summary><div class="reasoning-content">${compressNewlines(reasoning, 2)}</div>`;
         bubble.appendChild(details);
     }
@@ -793,7 +793,6 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         let foot = '';
         if (_validTime) {
             foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg> ' + (time / 1000).toFixed(1) + 's';
-            if (usage) foot += ' <span class="msg-foot-sep"></span> ';
         }
         if (usage) {
             var ct = Number(usage.completion_tokens) || 0; var pt = Number(usage.prompt_tokens) || 0; var tokens = Number(usage.total_tokens) || (ct + pt) || 0;

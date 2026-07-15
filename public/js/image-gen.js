@@ -28,7 +28,7 @@ window.analyzeImage = async function(imageInput, focus) {
         if (isDirectApi) {
             // 直连模式: URL 图片需要先下载为 base64,因为 MiniMax API 不接受外链
             try {
-                var _fetchFn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+                var _fetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
                 var _dlResp = await _fetchFn(imageInput);
                 var _dlBlob = await _dlResp.blob();
                 var _dlB64 = await new Promise(function(r) {
@@ -132,7 +132,7 @@ window.analyzeImage = async function(imageInput, focus) {
             }
         }
 
-        var _afn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+        var _afn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
         var response = await _afn(mcpEndpoint, {
             method: 'POST',
             headers: _fetchHeaders,
@@ -803,7 +803,7 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         // ★ i2i失败(failed_count>0): 自动降级为文生图重试
         if (!imageResult && data.metadata && parseInt(data.metadata.failed_count) > 0 && requestBody.subject_reference) {
             delete requestBody.subject_reference;
-            var _rfn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
+            var _rfn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
             var retryResp = await _rfn(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },

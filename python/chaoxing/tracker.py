@@ -10,7 +10,24 @@ class LearningTracker:
         # 优先用 phone（学习通账号）作为 user_id，实现跨聊天账号共享数据
         self.user_id = phone if phone else user_id
         self.phone = phone
-        self.conn = sqlite3.connect(str(self.DB_PATH))
+        # ★ 确保 DB 文件和目录可写（以防 owner 不匹配导致 readonly 错误）
+        self.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.conn = sqlite3.connect(str(self.DB_PATH))
+        except sqlite3.OperationalError as e:
+            if "readonly" in str(e).lower() or "permission" in str(e).lower():
+                # 尝试修复权限后重试
+                import os, pwd, grp
+                try:
+                    www_uid = pwd.getpwnam('www-data').pw_uid
+                    www_gid = grp.getgrnam('www-data').gr_gid
+                    os.chown(str(self.DB_PATH), www_uid, www_gid)
+                    os.chmod(str(self.DB_PATH), 0o664)
+                except Exception:
+                    pass
+                self.conn = sqlite3.connect(str(self.DB_PATH))
+            else:
+                raise
         self._init_db()
 
     def _init_db(self):

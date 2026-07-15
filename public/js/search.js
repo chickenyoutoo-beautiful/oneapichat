@@ -73,18 +73,9 @@ async function performWebSearch(query, signal, type = 'web') {
         url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(query)}&num=${max}&_t=${t}${country ? '&gl=' + country : ''}`;
         url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url);
     } else if (provider === 'tavily') {
-        // Tavily 搜索通过服务器端代理（绕过浏览器CORS + proxy.php 401）
+        // Tavily 搜索通过服务器端代理（绕过浏览器CORS）
         url = SERVER_API_BASE + '/engine_api.php?action=tavily_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(apiKey);
-        try {
-            var _tvCtrl = new AbortController();
-            var _tvTid = setTimeout(() => _tvCtrl.abort(), timeout);
-            var _tvRes = await fetch(url, { signal: _tvCtrl.signal });
-            clearTimeout(_tvTid);
-            if (!_tvRes.ok) throw new Error('Tavily搜索失败: ' + _tvRes.status);
-            var _tvData = await _tvRes.json();
-            if (_tvData.error) throw new Error(_tvData.error);
-            return parseSearchResults(_tvData, provider, type);
-        } catch (e) { throw e; }
+        console.log('[Search-Tavily] provider=tavily apiKey_len=' + (apiKey ? apiKey.length : 0) + ' url=' + url.substring(0, 100));
     } else if (provider === 'minimax') {
         // MiniMax 搜索通过服务器端 CLI 调用
         // MiniMax 搜索通过服务器端 CLI 调用,传 API Key(从聊天模型配置复用)
@@ -110,11 +101,30 @@ async function performWebSearch(query, signal, type = 'web') {
             throw new Error('搜索API返回HTML(可能被限流), 尝试回退...');
         }
         var data = JSON.parse(rawText);
-        return parseSearchResults(data, provider, type);
+        var results = parseSearchResults(data, provider, type);
+        // ★ Tavily 无结果时自动回退 MiniMax CLI
+        if (provider === 'tavily' && (!results || results.length === 0)) {
+            console.warn('[Search-Tavily] 无结果, 回退 MiniMax CLI...');
+            try {
+                var _tvFbRes = await fetchWithRetry(
+                    SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max,
+                    { method: 'GET', signal: combinedSignal }
+                );
+                if (_tvFbRes.ok) {
+                    var _tvFbData = await _tvFbRes.json();
+                    if (_tvFbData.results && _tvFbData.results.length > 0) {
+                        return _tvFbData.results.map(function(r) { return { title: r.title || '', url: r.url || r.link || '', snippet: r.snippet || r.body || '' }; });
+                    }
+                }
+            } catch (_tvFbErr) {
+                console.warn('[Search-Tavily] 回退也失败:', _tvFbErr.message);
+            }
+        }
+        return results;
     } catch (e) {
         clearTimeout(timeoutId);
         // 回退: 通过服务器端引擎搜索
-        if (provider === 'duckduckgo' || provider === 'brave' || e.message.includes('HTML')) {
+        if (provider === 'duckduckgo' || provider === 'brave' || provider === 'tavily' || e.message.includes('HTML')) {
             try {
                 console.warn('[Search] 直接API失败(' + e.message + '), 回退到服务端搜索...');
                 var fbRes = await fetchWithRetry(
@@ -166,7 +176,16 @@ function parseSearchResults(data, provider, type = 'web') {
             if (t.Text) results.push({ title: t.Text.split('.')[0] || '相关', url: '', snippet: t.Text });
         });
     } else if (provider === 'tavily') {
-        // Tavily response: { results: [{ title, url, raw_content }] }
+        // Tavily response: { results: [{ title, url, content }] }
+        // ★ 检测 Tavily 错误响应 (detail.error 格式, 而不是直接的 error 字段)
+        if (data.detail && data.detail.error) {
+            console.warn('[Search-Tavily] API错误:', data.detail.error);
+            return results;  // 返回空 → 触发 fallback
+        }
+        if (data.error) {
+            console.warn('[Search-Tavily] 错误:', data.error);
+            return results;
+        }
         if (data.results) {
             results.push(...data.results.slice(0, 5).map(r => ({
                 title: r.title || '无标题',
@@ -222,20 +241,63 @@ async function performWebFetch(urls) {
         try {
             var ctrl = new AbortController();
             var tid = setTimeout(function() { ctrl.abort(); }, TIMEOUT_MS);
-            // ★ 同步网络代理
-            var _ffn = (window.isProxyEnabled && window.isProxyEnabled()) ? window.proxyFetch : fetch;
-            var r = await _ffn(
-                FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1',
-                { signal: ctrl.signal }
-            );
-            clearTimeout(tid);
-            if (!r.ok) {
-                var errMap = { 502: '抓取失败(可能反爬)', 403: '网站反爬保护', 404: '页面不存在', 429: '请求过于频繁' };
-                var msg = errMap[r.status] || 'HTTP ' + r.status;
-                return { url: url, content: '', error: msg };
+            var r, d;
+            // ★ 优先尝试浏览器直连(走系统代理), 已知CORS拦截的域名直接走服务器
+            var _host2 = '';
+            try { _host2 = new URL(url).host; } catch(e) {}
+            var _corsBlocked = window._corsBlockedDomains && window._corsBlockedDomains[_host2];
+            if (!_corsBlocked) {
+                try {
+                    var _directCtrl = new AbortController();
+                    var _directTid = setTimeout(function() { _directCtrl.abort(); }, 5000);  // 5s 超时
+                    r = await fetch(url, { signal: _directCtrl.signal });
+                    clearTimeout(_directTid);
+                    if (r.ok) {
+                        var _text = await r.text();
+                        d = { content: _text.substring(0, 50000), error: '' };
+                        return { url: url, content: d.content, error: '' };
+                    }
+                } catch(_directErr) {
+                    // ★ CORS/网络错误 → 记录域名, 下次直接走 fetch.php
+                    if (_host2) {
+                        window._corsBlockedDomains = window._corsBlockedDomains || {};
+                        window._corsBlockedDomains[_host2] = true;
+                    }
+                }
             }
-            var d = await r.json();
-            return { url: url, content: d.content || '', error: d.error || '' };
+            // ★ 传递代理配置到 fetch.php
+            async function _tryFetchWithProxy(_proxyUrl) {
+                var _pp = _proxyUrl ? '&proxy=' + encodeURIComponent(_proxyUrl) : '';
+                var _ffn = window.proxyFetch;
+                var _r = await _ffn(
+                    FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1' + _pp,
+                    { signal: ctrl.signal }
+                );
+                if (_r.ok) {
+                    var _d = await _r.json();
+                    return { url: url, content: _d.content || '', error: '' };
+                }
+                return null;  // 失败
+            }
+            // 第一优先: 当前代理设置
+            var _curProxy = '';
+            if (window.isProxyEnabled && window.isProxyEnabled()) {
+                _curProxy = (window.getProxyUrl && window.getProxyUrl()) || '';
+            }
+            var _result = await _tryFetchWithProxy(_curProxy);
+            // ★ 失败时自动尝试系统代理(如果配置了代理URL但未开启)
+            if (!_result && !_curProxy) {
+                var _savedProxy = localStorage.getItem('proxyUrl') || '';
+                if (_savedProxy) {
+                    _result = await _tryFetchWithProxy(_savedProxy);
+                }
+            }
+            if (_result) { clearTimeout(tid); return _result; }
+
+            clearTimeout(tid);
+            var errMap = { 502: '抓取失败(可能反爬)', 403: '网站反爬保护', 404: '页面不存在', 429: '请求过于频繁', 503: '服务器不可达(境外网站需开代理)' };
+            var msg = errMap[r ? r.status : 502] || (r ? 'HTTP ' + r.status : '网络错误');
+            return { url: url, content: '', error: msg };
         } catch (e) {
             return { url: url, content: '', error: e.name === 'AbortError' ? '请求超时' : e.message };
         }

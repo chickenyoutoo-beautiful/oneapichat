@@ -560,6 +560,20 @@ const ENGINE_PUSH_TOOL = {
         }
     }
 };
+const TOGGLE_PROXY_TOOL = {
+    type: "function",
+    function: {
+        name: "toggle_proxy",
+        description: "【⚠️ 需用户确认】开启或关闭网络代理。当访问境外网站返回503/连接超时/服务器不可达时，调用此工具请求开启代理穿透网络限制。用户会看到弹窗确认。action: 'on'=开启代理, 'off'=关闭代理。",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", enum: ["on", "off"], description: "on=开启代理, off=关闭代理" }
+            },
+            required: ["action"]
+        }
+    }
+};
 const PLAN_UPDATE_TOOL = {
     type: "function",
     function: {
@@ -1432,6 +1446,15 @@ const toolRegistry = (function() {
     searchHint: '创建工作流代理',
   }));
 
+  // ★ toggle_proxy — AI 自主控制代理开关(需弹窗确认)
+  toolRegistry.register('toggle_proxy', buildToolMeta('toggle_proxy', {
+    capabilities: [ToolCapability.SYSTEM],
+    approval: ApprovalLevel.MUST_CONFIRM,  // ★ 始终弹窗确认
+    isReadOnly: false,
+    isAgentOnly: false,
+    searchHint: '开启/关闭网络代理',
+  }));
+
   console.log('[ToolRegistry] 已注册', Object.keys(toolRegistry.getAllToolNames()).length, '个工具');
 })();
 const _DANGEROUS_TOOLS = [
@@ -1474,7 +1497,7 @@ const _TOOL_CATEGORIES = [
     { label: '📝 考试',       keys: ['chaoxing_auth','chaoxing_exam_list','chaoxing_exam_start','chaoxing_exam_status','chaoxing_exam_stop'] },
     { label: '💻 服务器操控 ⚠️', keys: ['server_exec','server_python','server_file_read','server_file_write','server_file_edit','server_file_grep','server_sys_info','server_ps','server_disk','server_network','server_docker','server_db_query','server_file_search','server_file_op'], agentOnly: true },
     { label: '🤖 引擎/Agent', keys: ['engine_cron_list','engine_cron_create','engine_cron_delete','delegate_task','engine_agent_status','engine_agent_list','engine_agent_delete','engine_agent_ask','engine_agent_stop','engine_push','plan_update','delegate_workflow','run_skill'], agentOnly: true },
-    { label: '🧠 AI 自主控制', keys: ['ask_agent','autonomous_mode'] },
+    { label: '🧠 AI 自主控制', keys: ['ask_agent','autonomous_mode','toggle_proxy'] },
     { label: '🎮 SRC 星穹铁道', keys: ['src_status','src_dashboard','src_start','src_stop','src_get_tasks','src_toggle_task','src_get_config','src_set_config','src_get_logs','src_check_upgrade','src_do_upgrade'] },
     { label: '🪟 Windows 本机', keys: ['win_info','win_processes','win_kill','win_start','win_restart','win_file','win_screenshot'], agentOnly: true },
     { label: '☁️ Cloudreve 云盘', keys: ['cr_login','cr_user_info','cr_list_files','cr_search_files','cr_create_folder','cr_rename','cr_move','cr_copy','cr_delete','cr_list_shares','cr_create_share','cr_delete_share','cr_storage_info','cr_overview'] },

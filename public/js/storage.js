@@ -63,6 +63,16 @@ function beaconSaveConfig() {
     } catch(e) {}
 }
 
+// ★ 防抖配置同步: 配置变更后 2 秒自动推送到服务器,避免每次滑动都发请求
+window._scheduleConfigSync = function() {
+    if (window.__configSyncTimer) clearTimeout(window.__configSyncTimer);
+    window.__configSyncTimer = setTimeout(function() {
+        if (localStorage.getItem('authToken') && typeof saveConfigToServer === 'function') {
+            saveConfigToServer();
+        }
+    }, 2000);
+};
+
 async function saveChatsToServer(force) {
     try {
         var now = Date.now();
@@ -266,7 +276,12 @@ async function loadConfigFromServer() {
                 continue;
             }
             if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') {
-                try { localStorage.setItem(k, config[k]); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
+                var _val = config[k];
+                // ★ 清理模型名中的 "models/" / "publishers/" 前缀 (Google API 等返回的格式)
+                if ((k === 'model' || k.indexOf('model_') === 0) && typeof _val === 'string') {
+                    _val = _val.replace(/^(models|publishers)\//, '');
+                }
+                try { localStorage.setItem(k, _val); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
         }
         console.log('[loadConfigFromServer] 写入完成,共', Object.keys(config).length, '项');
@@ -403,9 +418,14 @@ async function restoreUserData() {
                     }
                     for (var _scid in _serverChats) {
                         if (_scid === AGENT_CHAT_ID || _scid === '_agent_main') {
-                            // Agent 主聊:从服务器补充(如果本地没有或本地没有 system)
-                            if (!merged[_scid] || !merged[_scid].messages || merged[_scid].messages.length === 0) {
+                            var _sc = _serverChats[_scid];
+                            // Agent 主聊: 与普通聊天相同逻辑 — 服务器消息更多时同步
+                            if (!merged[_scid]) {
                                 merged[_scid] = JSON.parse(JSON.stringify(_serverChats[_scid]));
+                            } else if (_sc && _sc.messages && merged[_scid].messages && _sc.messages.length > merged[_scid].messages.length) {
+                                // ★ 服务器有更多消息 → 使用服务器版本（跨设备同步）
+                                merged[_scid].messages = JSON.parse(JSON.stringify(_sc.messages));
+                                merged[_scid].updated_at = _sc.updated_at || Date.now();
                             }
                             continue;
                         }
@@ -486,9 +506,16 @@ async function restoreUserData() {
                                 // ★ 隐形截断检测: 无partial + 无tool_calls + 无_internal
                                 // ★ 关键: 不检查!time(旧消息可能被_savedPartial恢复时加了time),
                                 //   而是检查usage是否有效对象(正常完成必有API返回的usage)
-                                var _hasValidUsage = _dm.usage && typeof _dm.usage === 'object' && (!!_dm.usage.prompt_tokens || !!_dm.usage.completion_tokens || !!_dm.usage.total_tokens);
-                                // ★ reasoning消息(MiniMax等)必然是真实回复, 即使usage格式不标准也不应删除
-                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_hasValidUsage && !_dm.tool_calls && !_dm._internal && !_dm._recovered && !_dm._archivedCleaned && !_dm.reasoning) {
+                                // ★ usage 校验: 支持 OpenAI 格式(prompt_tokens)和 Google 格式(promptTokens/prompt_token_count)
+                                var _hasValidUsage = _dm.usage && typeof _dm.usage === 'object' && (
+                                    !!_dm.usage.prompt_tokens || !!_dm.usage.completion_tokens || !!_dm.usage.total_tokens ||
+                                    !!_dm.usage.promptTokens || !!_dm.usage.completionTokens || !!_dm.usage.totalTokens ||
+                                    !!_dm.usage.prompt_token_count || !!_dm.usage.candidates_token_count || !!_dm.usage.total_token_count
+                                );
+                                // ★ 隐形截断检测: 无partial + 无tool_calls + 无_internal
+                                // ★ 关键修正: 有 time 字段的消息是已保存的完整回复,不应删除
+                                //    (部分 API 如 Google Gemini 的 usage 格式不标准,不能仅凭 usage 判断)
+                                if (_dm.role === 'assistant' && !_dm.partial && _dm.content && !_dm.time && !_hasValidUsage && !_dm.tool_calls && !_dm._internal && !_dm._recovered && !_dm._archivedCleaned && !_dm.reasoning) {
                                     // ★ 已归档的聊天(_agent_old_*): 自动补全 time 避免反复告警
                                     if (_cid.indexOf('_agent_old_') === 0) {
                                         _dm.time = chats[_cid].messages[Math.min(_di + 1, chats[_cid].messages.length - 1)]?.time || (chats[_cid].updated_at || Date.now());
