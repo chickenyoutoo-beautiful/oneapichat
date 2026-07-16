@@ -47,6 +47,18 @@ async function performWebSearch(query, signal, type = 'web') {
     var region = getVal('searchRegion') || '';
     var t = Date.now();
 
+    // ★ 自动追加当前日期到搜索词，提升新闻/实时类搜索的时效性
+    var _newsKeywords = ['新闻', '最新', '今日', '今天', '现在', '当前', '实时', '最近', '刚刚', 'news', 'latest', 'today'];
+    var _needDate = _newsKeywords.some(function(k) { return query.toLowerCase().indexOf(k) >= 0; });
+    if (_needDate) {
+        var _now = new Date();
+        var _dateTag = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日';
+        // 避免重复追加
+        if (query.indexOf(_dateTag) === -1) {
+            query = query + ' ' + _dateTag;
+        }
+    }
+
     // 获取对应引擎的API Key
     var providerKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
     var apiKey = '';
@@ -241,62 +253,39 @@ async function performWebFetch(urls) {
         try {
             var ctrl = new AbortController();
             var tid = setTimeout(function() { ctrl.abort(); }, TIMEOUT_MS);
-            var r, d;
-            // ★ 优先尝试浏览器直连(走系统代理), 已知CORS拦截的域名直接走服务器
+            // ★ 统一走服务器端 fetch.php 抓取(绕过 CORS + 反爬 User-Agent 轮换)
             var _host2 = '';
             try { _host2 = new URL(url).host; } catch(e) {}
-            var _corsBlocked = window._corsBlockedDomains && window._corsBlockedDomains[_host2];
-            if (!_corsBlocked) {
-                try {
-                    var _directCtrl = new AbortController();
-                    var _directTid = setTimeout(function() { _directCtrl.abort(); }, 5000);  // 5s 超时
-                    r = await fetch(url, { signal: _directCtrl.signal });
-                    clearTimeout(_directTid);
-                    if (r.ok) {
-                        var _text = await r.text();
-                        d = { content: _text.substring(0, 50000), error: '' };
-                        return { url: url, content: d.content, error: '' };
-                    }
-                } catch(_directErr) {
-                    // ★ CORS/网络错误 → 记录域名, 下次直接走 fetch.php
-                    if (_host2) {
-                        window._corsBlockedDomains = window._corsBlockedDomains || {};
-                        window._corsBlockedDomains[_host2] = true;
-                    }
-                }
-            }
-            // ★ 传递代理配置到 fetch.php
             async function _tryFetchWithProxy(_proxyUrl) {
                 var _pp = _proxyUrl ? '&proxy=' + encodeURIComponent(_proxyUrl) : '';
-                var _ffn = window.proxyFetch;
-                var _r = await _ffn(
-                    FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1' + _pp,
+                // ★ 传递 referer 帮助绕过反爬检测
+                var _ref = '&ref=' + encodeURIComponent(url);
+                var _r = await window.proxyFetch(
+                    FETCH_PROXY + '?url=' + encodeURIComponent(url) + '&extract=1' + _pp + _ref,
                     { signal: ctrl.signal }
                 );
                 if (_r.ok) {
                     var _d = await _r.json();
-                    return { url: url, content: _d.content || '', error: '' };
+                    if (_d.content) {
+                        return { url: url, content: _d.content.substring(0, 100000), error: '' };
+                    }
                 }
-                return null;  // 失败
+                return null;
             }
-            // 第一优先: 当前代理设置
-            var _curProxy = '';
-            if (window.isProxyEnabled && window.isProxyEnabled()) {
-                _curProxy = (window.getProxyUrl && window.getProxyUrl()) || '';
-            }
+            // 优先用当前代理, 失败用已保存代理, 再失败用直连fallback
+            var _curProxy = (window.isProxyEnabled && window.isProxyEnabled()) ? (window.getProxyUrl && window.getProxyUrl() || '') : '';
             var _result = await _tryFetchWithProxy(_curProxy);
-            // ★ 失败时自动尝试系统代理(如果配置了代理URL但未开启)
             if (!_result && !_curProxy) {
                 var _savedProxy = localStorage.getItem('proxyUrl') || '';
-                if (_savedProxy) {
-                    _result = await _tryFetchWithProxy(_savedProxy);
-                }
+                if (_savedProxy) _result = await _tryFetchWithProxy(_savedProxy);
             }
+            // ★ 最后尝试无代理直连(服务器curl可能不需要代理)
+            if (!_result) _result = await _tryFetchWithProxy('');
             if (_result) { clearTimeout(tid); return _result; }
 
             clearTimeout(tid);
             var errMap = { 502: '抓取失败(可能反爬)', 403: '网站反爬保护', 404: '页面不存在', 429: '请求过于频繁', 503: '服务器不可达(境外网站需开代理)' };
-            var msg = errMap[r ? r.status : 502] || (r ? 'HTTP ' + r.status : '网络错误');
+            var msg = '网络错误(已通过服务器尝试抓取)';
             return { url: url, content: '', error: msg };
         } catch (e) {
             return { url: url, content: '', error: e.name === 'AbortError' ? '请求超时' : e.message };

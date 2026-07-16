@@ -195,8 +195,23 @@ function fetchSingleURL($url, $uaIndex = 0) {
     $ua = $USER_AGENTS[$uaIndex % count($USER_AGENTS)];
 
     // ★ 使用 PHP curl（与 proxy.php 一致的代理处理）
-    $doRequest = function($useProxy) use ($url, $ua, $proxyUrl) {
+    $doRequest = function($useProxy) use ($url, $ua, $proxyUrl, $referer) {
         $ch = curl_init();
+        $curlHeaders = [
+            'Accept: text/html,application/xhtml+xml,text/plain;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding: gzip, deflate, br',
+            'Cache-Control: no-cache',
+            'Sec-Fetch-Dest: document',
+            'Sec-Fetch-Mode: navigate',
+            'Sec-Fetch-Site: none',
+            'Upgrade-Insecure-Requests: 1',
+            'DNT: 1'
+        ];
+        // ★ 反爬: 添加 Referer 头
+        if ($referer) {
+            $curlHeaders[] = 'Referer: ' . $referer;
+        }
         $opts = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
@@ -206,19 +221,9 @@ function fetchSingleURL($url, $uaIndex = 0) {
             CURLOPT_CONNECTTIMEOUT => 8,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,  // ★ HTTP/2 更像浏览器
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,
             CURLOPT_USERAGENT => $ua,
-            CURLOPT_HTTPHEADER => [
-                'Accept: text/html,application/xhtml+xml,text/plain;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
-                'Accept-Encoding: gzip, deflate, br',
-                'Cache-Control: no-cache',
-                'Sec-Fetch-Dest: document',
-                'Sec-Fetch-Mode: navigate',
-                'Sec-Fetch-Site: none',
-                'Upgrade-Insecure-Requests: 1',
-                'DNT: 1'
-            ],
+            CURLOPT_HTTPHEADER => $curlHeaders,
             CURLOPT_ENCODING => 'gzip, deflate, br',  // ★ 接受压缩
             CURLOPT_COOKIEFILE => '',   // ★ 启用 cookie 引擎(内存)
             CURLOPT_IPRESOLVE => CURL_IPRESOLVE_WHATEVER,
@@ -429,6 +434,7 @@ if ($proxyUrl) {
 $url = isset($_GET['url']) ? trim($_GET['url']) : '';
 $doExtract = isset($_GET['extract']) ? ($_GET['extract'] !== '0' && $_GET['extract'] !== 'false') : true;
 $raw = isset($_GET['raw']) ? ($_GET['raw'] === '1' || $_GET['raw'] === 'true') : false;
+$referer = isset($_GET['ref']) ? trim($_GET['ref']) : '';  // ★ 反爬: 传递 Referer 头绕过机器人检测
 
 if (empty($url)) {
     http_response_code(400);

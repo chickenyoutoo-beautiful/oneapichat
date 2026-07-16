@@ -508,7 +508,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 图片会作为附件发送给AI,AI可以自主选择是否使用 analyze_image 工具
 
     if (!skipUserAdd) {
-        chats[chatId].messages.push({ role: 'user', text, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
+        // ★ 始终注入当前日期时间到用户消息中(不破坏系统提示缓存,不在气泡显示)
+        var _now = new Date();
+        var _tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+        var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' +
+            _now.getHours().toString().padStart(2,'0') + ':' + _now.getMinutes().toString().padStart(2,'0') + ':' + _now.getSeconds().toString().padStart(2,'0') + ' ' + _tz;
+        var _datePrefix = '[系统时间: ' + _dateStr + '] ';
+        chats[chatId].messages.push({ role: 'user', text: text, _datePrefix: _datePrefix, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
         // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
         // ★ 多端同步: 广播用户消息已添加到其他设备
@@ -839,6 +845,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 支持 Anthropic Messages API 格式的提供商: Anthropic, MiniMax M3, OpenRouter, 自定义端点等
     var _useAnthropicFormat = localStorage.getItem('useAnthropicFormat') === '1'
         || (getVal('modelSelect') || '').toLowerCase().includes('claude');  // Claude 模型自动启用 Anthropic 格式
+    var _isNativeAnthropic = (getVal('baseUrl') || '').indexOf('api.anthropic.com') >= 0;
     let _aSysContent = '';
     if (_useAnthropicFormat) {
         // 提取 system 消息
@@ -871,6 +878,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             } else if (_am2.role === 'assistant' && _am2.tool_calls) {
                 var _blocks = [];
+                // ★ DeepSeek thinking: reasoning_content → thinking 块
+                var _rc = _am2.reasoning_content || _am2.reasoning || '';
+                if (_rc && _rc.trim()) _blocks.push({ type: 'thinking', thinking: _rc });
                 if (typeof _am2.content === 'string' && _am2.content.trim()) {
                     _blocks.push({ type: 'text', text: _am2.content });
                 }
@@ -882,6 +892,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
                 _am2.content = _blocks;
                 delete _am2.tool_calls;
+                delete _am2.reasoning_content;
+                delete _am2.reasoning;
+            } else if (_am2.role === 'assistant') {
+                // ★ 无 tool_calls 的 assistant: reasoning_content → thinking 块
+                var _rc2 = _am2.reasoning_content || _am2.reasoning || '';
+                if (_rc2 && _rc2.trim()) {
+                    if (typeof _am2.content === 'string') {
+                        _am2.content = [{ type: 'thinking', thinking: _rc2 }, { type: 'text', text: _am2.content || '' }];
+                    }
+                }
+                delete _am2.reasoning_content;
+                delete _am2.reasoning;
             } else if (_am2.role === 'tool') {
                 _am2.role = 'user';
                 var _tid = _am2.tool_call_id || '';
@@ -906,7 +928,36 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 delete _am2.tool_call_id;
             }
         }
-        apiMessages = _nonSysMsgs;
+        // ★ 合并连续的 tool_result 消息 (Anthropic 要求同一 assistant 的所有 tool_result 在同一 user 消息中)
+        var _merged = [];
+        for (var _mmi = 0; _mmi < _nonSysMsgs.length; _mmi++) {
+            var _mm = _nonSysMsgs[_mmi];
+            if (_mm.role === 'user' && Array.isArray(_mm.content) && _mm.content.some(function(c){return c.type==='tool_result';})) {
+                while (_mmi + 1 < _nonSysMsgs.length) {
+                    var _nxt = _nonSysMsgs[_mmi + 1];
+                    if (_nxt.role === 'user' && Array.isArray(_nxt.content) && _nxt.content.some(function(c){return c.type==='tool_result';})) {
+                        _mm.content = _mm.content.concat(_nxt.content);
+                        _mmi++;
+                    } else { break; }
+                }
+            }
+            _merged.push(_mm);
+        }
+        _nonSysMsgs = _merged;
+        // ★ 校验: 孤 tool_use/tool_result 清理 (Anthropic 要求 tool_use 必须紧跟 tool_result)
+        var _validated = [];
+        for (var _vmi = 0; _vmi < _nonSysMsgs.length; _vmi++) {
+            var _vm = _nonSysMsgs[_vmi];
+            if (_vm.role === 'assistant' && Array.isArray(_vm.content) && _vm.content.some(function(c){return c.type==='tool_use';})) {
+                var _nxt2 = _nonSysMsgs[_vmi + 1];
+                if (!_nxt2 || _nxt2.role !== 'user' || !Array.isArray(_nxt2.content) || !_nxt2.content.some(function(c){return c.type==='tool_result';})) {
+                    _vm.content = _vm.content.filter(function(c){return c.type!=='tool_use';});
+                    if (!_vm.content.length) _vm.content = [{type:'text',text:'(工具调用)'}];
+                }
+            }
+            _validated.push(_vm);
+        }
+        apiMessages = _validated;
     }
 
     // 统一获取模型选择并转小写
@@ -1237,8 +1288,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     tools = tools.slice(0, 100);
                 }
             }
-            // ★ Anthropic 格式需要转换 tools
-            if (_useAnthropicFormat) {
+            // ★ Anthropic 格式工具转换: 仅原生 Anthropic API 支持 Anthropic-format tools
+            if (_useAnthropicFormat && _isNativeAnthropic) {
                 body.tools = tools.map(function(t) {
                     return {
                         name: t.function.name,
@@ -1258,21 +1309,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ Anthropic 格式最终处理
     if (_useAnthropicFormat) {
         if (_aSysContent) body.system = _aSysContent;
-        delete body.tool_choice;
-        delete body.stream_options;
-        // ★ 智能 URL 构建: 不同提供商的 Anthropic 端点路径不同
+        // ★ 仅原生 Anthropic API 使用 /v1/messages + 删除 tool_choice + 转换工具格式
+        //   MiniMax/DeepSeek 等: /v1/chat/completions + OpenAI 格式 tools
         var _baseUrl = getVal('baseUrl');
         var _baseClean = _baseUrl.replace(/\/+$/, '');
-        if (_baseClean.indexOf('api.anthropic.com') >= 0) {
-            // 原生 Anthropic API: /v1/messages
-            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/v1/messages';
-        } else if (_baseClean.indexOf('api.minimaxi.com') >= 0) {
-            // MiniMax Anthropic 兼容: /v1/messages
+        if (_isNativeAnthropic) {
+            delete body.tool_choice;
             body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/v1/messages';
         } else {
-            // 泛用 Anthropic 兼容端点 (OpenRouter/自定义等)
-            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/anthropic/v1/messages';
+            body._anthropicUrl = _baseClean + '/chat/completions';
         }
+        delete body.stream_options;
         // ★ 预检清除空 tool_use_id 的 tool_result（防止 400）
         // ★ 清理 OpenAI-specific 字段 (Anthropic API 不接受)
         for (var _prei = 0; _prei < body.messages.length; _prei++) {

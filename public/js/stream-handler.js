@@ -134,7 +134,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     if (fullText && pendingMsg) {
                         pendingMsg.content = fullText;
                         pendingMsg.reasoning = reasoningText;
-                        delete pendingMsg.partial;
+                        if (!window._chainMode) delete pendingMsg.partial;
                     }
                 } else if (currentEventType === 'start') {
                     console.log('[SSE] stream started, msg_id:', event.msg_id);
@@ -854,7 +854,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     if (!fullText && !reasoningText && !toolCalls.length && parseErrors > 0) {
         var currentBubble = activeBubbleMap[chatId];
         if (currentBubble && document.body.contains(currentBubble)) {
-            currentBubble.querySelector('.markdown-body').innerHTML = `<span style="color:#ef4444">⚠️ 部分响应解析失败,可能是 API 返回格式不兼容。</span>`;
+            // ★ 链式模式不清空气泡
+            if (!window._chainMode) currentBubble.querySelector('.markdown-body').innerHTML = `<span style="color:#ef4444">⚠️ 部分响应解析失败,可能是 API 返回格式不兼容。</span>`;
             currentBubble.classList.remove('typing', 'gen-active');
         }
     }
@@ -1220,14 +1221,15 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 
     pendingMsg.content = fullText.replace(/\[object Object\]/g, '');
     pendingMsg.reasoning = reasoningText;
-    delete pendingMsg.partial;  // ★ 标记消息已完成,防止被下次 sendMessage 清理
+    if (!window._chainMode) delete pendingMsg.partial;  // ★ 链式模式保留 partial
 
     if (currentChatId === chatId && currentBubble) {
         try {
         currentBubble.classList.remove('typing', 'gen-active');
         var markdownBody = currentBubble.querySelector('.markdown-body');
         if (markdownBody) {
-            markdownBody.innerHTML = '';
+            // ★ 链式模式不清空气泡(保留历史链段)
+            if (!window._chainMode) markdownBody.innerHTML = '';
             if (reasoningText) {
                 var _det = document.createElement('details');
                 _det.className = 'reasoning-details';
@@ -1297,7 +1299,7 @@ function handleError(e, chatId, pendingMsg, currentBubble) {
         }
     } else {
         if (pendingMsg) {
-            delete pendingMsg.partial;
+            if (!window._chainMode) delete pendingMsg.partial;
             try { localStorage.removeItem('_savedPartial'); } catch(e) {}
             pendingMsg.content = pendingMsg.content || '';
             pendingMsg.reasoning = pendingMsg.reasoning || '';
@@ -1309,9 +1311,10 @@ function handleError(e, chatId, pendingMsg, currentBubble) {
         // 配置面板编辑时不显示错误,避免频繁报错
         if (!configPanelInteracting) {
             var errorMsg = e.name === 'AbortError' ? '⚠️ 请求已停止或超时。' : ('❌ 错误: ' + escapeHtml(e.message || ''));
-            currentBubble.querySelector('.markdown-body').innerHTML = errorMsg;
+            // ★ 链式模式不清空气泡内容
+            if (!window._chainMode) currentBubble.querySelector('.markdown-body').innerHTML = errorMsg;
         } else {
-            currentBubble.querySelector('.markdown-body').innerHTML = '';
+            if (!window._chainMode) currentBubble.querySelector('.markdown-body').innerHTML = '';
         }
     } else if (currentChatId === chatId) {
         loadChat(chatId);

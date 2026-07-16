@@ -291,7 +291,9 @@ function buildApiMessages(chatId) {
             if (msgHasImage || (i === msgs.length - 1 && currentHasImage)) {
                 window._forceVisionFormat = true;
             }
-            apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(msg.text, files) });
+            // ★ 系统时间前缀仅在 API 消息中拼接，不在气泡中显示
+            var _userText = (msg._datePrefix || '') + (msg.text || '');
+            apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(_userText, files) });
             window._forceVisionFormat = prev;
         } else if (msg.role === 'assistant' && !msg.partial) {
             var _assistantMsg = { role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' };
