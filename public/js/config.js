@@ -831,7 +831,7 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     // ★ 统一 429/5xx 重试(指数退避,最多3次) — 适用于直连和中继两条路径
     async function _fetchWithRetry(_fetchPromise, _label) {
         var _maxRetries = 3;
-        var _retryable = [429, 502, 503, 504];  // 速率限制 + 临时服务端错误
+        var _retryable = [422, 429, 502, 503, 504];  // 参数错误/速率限制/临时服务端错误
         for (var _retry = 0; _retry <= _maxRetries; _retry++) {
             var _resp;
             try { _resp = await _fetchPromise; } catch(_e) {
@@ -1005,7 +1005,9 @@ window.fetchModels = async function (silent) {
         var _headers = _isLocalModel ? {} : { Authorization: `Bearer ${key}` };
         var _ctrl = new AbortController();
         var _tid = setTimeout(() => _ctrl.abort(), 8000);  // 8s 超时
-        var res = await window.proxyFetch(`${url}/models`, { headers: _headers, signal: _ctrl.signal });
+        // ★ 非原生 Anthropic URL (如 api.deepseek.com/anthropic) 没有 /models, 用 OpenAI 端点
+        var _modelsUrl = url.replace(/\/anthropic\/?$/, '') + '/models';
+        var res = await window.proxyFetch(_modelsUrl, { headers: _headers, signal: _ctrl.signal });
         clearTimeout(_tid);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         var data = await res.json();

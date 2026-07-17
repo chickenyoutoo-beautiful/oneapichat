@@ -357,6 +357,37 @@ function appendToolCallMessage(toolName, args, result, durationMs, chatId, execD
     row.appendChild(avatar);
     row.appendChild(wrapper);
     container.appendChild(row);
+    // ★ 标记相邻工具调用行属于同一批次
+    row.setAttribute('data-tool-batch', '1');
+    var _prev = row.previousElementSibling;
+    if (_prev && _prev.hasAttribute('data-tool-batch')) {
+        row.setAttribute('data-tool-idx', (parseInt(_prev.getAttribute('data-tool-idx') || '0') + 1).toString());
+    } else {
+        row.setAttribute('data-tool-idx', '0');
+    }
+    // 添加展开/折叠按钮到第一个气泡
+    if (row.getAttribute('data-tool-idx') === '0') {
+        var _bubble = row.querySelector('.tool-call-bubble');
+        if (_bubble) {
+            var _btn = document.createElement('button');
+            _btn.className = 'tool-toggle-btn';
+            _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+            _btn.title = '展开/折叠';
+            _btn.onclick = function(e) {
+                e.stopPropagation();
+                // 找到同一个批次所有后续行并展开/折叠
+                var _next = row.nextElementSibling; var _expanded = false;
+                while (_next && _next.hasAttribute('data-tool-batch')) {
+                    _expanded = !_next.classList.contains('force-show');
+                    if (_expanded) _next.classList.add('force-show');
+                    else _next.classList.remove('force-show');
+                    _next = _next.nextElementSibling;
+                }
+                _btn.style.transform = _expanded ? 'rotate(180deg)' : '';
+            };
+            _bubble.appendChild(_btn);
+        }
+    }
 
     // 自动滚动
     if (isAutoScrolling) scrollToBottom();
@@ -904,3 +935,58 @@ function applySyntaxHighlighting(container) {
     }
 }
 
+
+
+// ★ 页面加载后为历史工具调用创建摘要栏
+window._renderAllToolStacks = function() {
+    var _container = $.chatMessagesContainer;
+    if (!_container) return;
+    var _allRows = _container.querySelectorAll('.tool-call-row');
+    if (_allRows.length < 2) return;
+    var _batches = []; var _current = [];
+    _allRows.forEach(function(r) {
+        var _prev = r.previousElementSibling;
+        if (_prev && _prev.classList.contains('tool-call-row')) {
+            _current.push(r);
+        } else {
+            if (_current.length > 0) _batches.push(_current);
+            _current = [r];
+        }
+    });
+    if (_current.length > 0) _batches.push(_current);
+    _batches.forEach(function(_batch) {
+        if (_batch.length < 2) return;
+        if (_batch[0].previousElementSibling && _batch[0].previousElementSibling.classList.contains('tool-stack-summary')) return;
+        var _names = []; _batch.forEach(function(r) {
+            var _spans = r.querySelectorAll('.tool-call-card-header span');
+            for (var s = 0; s < _spans.length; s++) {
+                if (_spans[s].style && _spans[s].style.fontWeight === '600') { _names.push(_spans[s].textContent); break; }
+            }
+        });
+        if (_names.length < 2) return;
+        if (window._toolStackCollapsed == null) window._toolStackCollapsed = true;
+        var _summary = document.createElement('div');
+        _summary.className = 'tool-stack-summary';
+        _summary.innerHTML = '<span class="tool-stack-icon">🔧</span>' +
+            '<span class="tool-stack-count">' + _names.length + ' 次工具调用</span>' +
+            '<span class="tool-stack-names">' + _names.map(function(n){return '<span class="tool-stack-tag">'+escapeHtml(n)+'</span>';}).join('') + '</span>' +
+            '<button class="tool-stack-expand-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>';
+        _batch[0].before(_summary);
+        function _apply() {
+            _batch.forEach(function(r, i) {
+                if (i === 0) { r.classList.toggle('tool-stacked', false); return; }
+                r.classList.toggle('tool-stacked', window._toolStackCollapsed);
+            });
+            var _b = _summary.querySelector('.tool-stack-expand-btn');
+            if (_b) _b.innerHTML = window._toolStackCollapsed
+                ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>'
+                : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 15 12 9 18 15"/></svg>';
+        }
+        _apply();
+        _summary.querySelector('.tool-stack-expand-btn').onclick = function(e) {
+            e.stopPropagation();
+            window._toolStackCollapsed = !window._toolStackCollapsed;
+            _apply();
+        };
+    });
+};

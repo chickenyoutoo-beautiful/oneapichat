@@ -978,6 +978,40 @@ window.loadChat = async function (id) {
 
     // 加载完成后自动滚动(loadChat 模式不受距离限制)
     autoScrollToBottom('loadChat');
+    // ★ 标记历史工具调用行的批次关系
+    setTimeout(function() {
+        var _rows = $.chatMessagesContainer?.querySelectorAll('.tool-call-row');
+        if (!_rows || _rows.length < 2) return;
+        var _batchIdx = 0;
+        _rows.forEach(function(r, i) {
+            var _prev = i > 0 ? _rows[i-1] : null;
+            var _isNew = !_prev || _prev.nextElementSibling !== r || !_prev.hasAttribute('data-tool-batch');
+            if (_isNew) { _batchIdx++; r.setAttribute('data-tool-idx', '0'); }
+            else { r.setAttribute('data-tool-idx', (parseInt(_prev.getAttribute('data-tool-idx')||'0')+1).toString()); }
+            r.setAttribute('data-tool-batch', _batchIdx.toString());
+            // 给批次第一条加按钮
+            if (r.getAttribute('data-tool-idx') === '0' && !r.querySelector('.tool-toggle-btn')) {
+                var _bub = r.querySelector('.tool-call-bubble');
+                if (_bub) {
+                    var _btn = document.createElement('button');
+                    _btn.className = 'tool-toggle-btn';
+                    _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+                    _btn.title = '展开/折叠';
+                    _btn.onclick = function(e2) {
+                        e2.stopPropagation();
+                        var _exp = false; var _n2 = r.nextElementSibling;
+                        while (_n2 && _n2.getAttribute('data-tool-batch') === r.getAttribute('data-tool-batch')) {
+                            _exp = !_n2.classList.contains('force-show');
+                            if (_exp) _n2.classList.add('force-show'); else _n2.classList.remove('force-show');
+                            _n2 = _n2.nextElementSibling;
+                        }
+                        this.style.transform = _exp ? 'rotate(180deg)' : '';
+                    };
+                    _bub.appendChild(_btn);
+                }
+            }
+        });
+    }, 500);
     } catch(e) {
         console.error('[loadChat] 加载聊天失败:', id, e.message);
         showWelcome();

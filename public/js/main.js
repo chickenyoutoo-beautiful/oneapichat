@@ -843,121 +843,102 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 构建请求体
     // ★ Anthropic API 格式开关: 用户可通过设置启用(全局或per-provider)
     // 支持 Anthropic Messages API 格式的提供商: Anthropic, MiniMax M3, OpenRouter, 自定义端点等
-    var _useAnthropicFormat = localStorage.getItem('useAnthropicFormat') === '1'
-        || (getVal('modelSelect') || '').toLowerCase().includes('claude');  // Claude 模型自动启用 Anthropic 格式
-    var _isNativeAnthropic = (getVal('baseUrl') || '').indexOf('api.anthropic.com') >= 0;
+    // ★ Anthropic 格式判断:
+    //   api.anthropic.com → 自动启用
+    //   api.deepseek.com / api.minimaxi.com → 开开关后启用
+    //   其他 (Grok/OpenAI 等) → 不支持，始终 OpenAI 格式
+    var _baseUrl = getVal('baseUrl') || '';
+    var _isNativeAnthropic = _baseUrl.indexOf('api.anthropic.com') >= 0;
+    var _supportsAnthropic = _isNativeAnthropic || _baseUrl.indexOf('api.deepseek.com') >= 0 || _baseUrl.indexOf('api.minimaxi.com') >= 0 || _baseUrl.indexOf('api.minimax.io') >= 0;
+    var _useAnthropicFormat = _isNativeAnthropic || (_supportsAnthropic && localStorage.getItem('useAnthropicFormat') === '1');
     let _aSysContent = '';
-    if (_useAnthropicFormat) {
-        // 提取 system 消息
-        var _nonSysMsgs = [];
-        for (var _ami = 0; _ami < apiMessages.length; _ami++) {
-            var _am = apiMessages[_ami];
-            if (_am.role === 'system') {
-                _aSysContent += (_aSysContent ? '\n\n' : '') + (typeof _am.content === 'string' ? _am.content : '');
-            } else {
-                _nonSysMsgs.push(JSON.parse(JSON.stringify(_am))); // 深拷贝避免修改原数据
-            }
-        }
-        // 转换消息格式
-        for (var _ami2 = 0; _ami2 < _nonSysMsgs.length; _ami2++) {
-            var _am2 = _nonSysMsgs[_ami2];
-            if (_am2.role === 'user') {
-                // ★ 跳过已转换的 Anthropic 格式消息（含 tool_result 或 tool_use 块）
-                var _alreadyAnthropic = Array.isArray(_am2.content) && _am2.content.some(function(c) { return c.type === 'tool_result' || c.type === 'tool_use'; });
-                if (_alreadyAnthropic) continue; // 已经是 Anthropic 格式，跳过
-                if (typeof _am2.content === 'string') {
-                    _am2.content = [{ type: 'text', text: _am2.content }];
-                } else if (Array.isArray(_am2.content)) {
-                    _am2.content = _am2.content.map(function(c) {
-                        if (c.type === 'image_url') {
-                            return { type: 'image', source: { type: 'url', url: c.image_url.url } };
-                        }
-                        if (c.type === 'video_url') return { type: 'video', source: { type: 'url', url: c.video_url.url } };
-                        return c;
-                    });
-                }
-            } else if (_am2.role === 'assistant' && _am2.tool_calls) {
+    // ★ Anthropic 消息转换 (可复用, 供初始构建和工具循环重建调用)
+    function _convertAnthropicMessages(_msgs) {
+        var _out = [];
+        for (var _i = 0; _i < _msgs.length; _i++) {
+            var _m = JSON.parse(JSON.stringify(_msgs[_i])); // deep copy
+            if (_m.role === 'user') {
+                var _alreadyAnthropic = Array.isArray(_m.content) && _m.content.some(function(c){return c.type==='tool_result'||c.type==='tool_use';});
+                if (_alreadyAnthropic) { _out.push(_m); continue; }
+                if (typeof _m.content === 'string') _m.content = [{type:'text',text:_m.content}];
+                else if (Array.isArray(_m.content)) _m.content = _m.content.map(function(c){
+                    if (c.type==='image_url') return {type:'image',source:{type:'url',url:c.image_url.url}};
+                    if (c.type==='video_url') return {type:'video',source:{type:'url',url:c.video_url.url}};
+                    return c;
+                });
+            } else if (_m.role === 'assistant' && _m.tool_calls) {
                 var _blocks = [];
-                // ★ DeepSeek thinking: reasoning_content → thinking 块
-                var _rc = _am2.reasoning_content || _am2.reasoning || '';
-                if (_rc && _rc.trim()) _blocks.push({ type: 'thinking', thinking: _rc });
-                if (typeof _am2.content === 'string' && _am2.content.trim()) {
-                    _blocks.push({ type: 'text', text: _am2.content });
-                }
-                for (var _tci = 0; _tci < _am2.tool_calls.length; _tci++) {
-                    var _tc = _am2.tool_calls[_tci];
+                var _rc = _m.reasoning_content || _m.reasoning || '';
+                if (_rc && _rc.trim()) _blocks.push({type:'thinking',thinking:_rc});
+                if (typeof _m.content === 'string' && _m.content.trim()) _blocks.push({type:'text',text:_m.content});
+                for (var _ti = 0; _ti < _m.tool_calls.length; _ti++) {
+                    var _tc = _m.tool_calls[_ti];
                     var _input = {};
-                    try { _input = JSON.parse(_tc.function.arguments || '{}'); } catch(e) {}
-                    _blocks.push({ type: 'tool_use', id: _tc.id || 'toolu_' + Date.now(), name: _tc.function.name, input: _input });
+                    try { _input = JSON.parse(_tc.function.arguments||'{}'); } catch(e) {}
+                    _blocks.push({type:'tool_use',id:_tc.id||('toolu_'+Date.now()),name:_tc.function.name,input:_input});
                 }
-                _am2.content = _blocks;
-                delete _am2.tool_calls;
-                delete _am2.reasoning_content;
-                delete _am2.reasoning;
-            } else if (_am2.role === 'assistant') {
-                // ★ 无 tool_calls 的 assistant: reasoning_content → thinking 块
-                var _rc2 = _am2.reasoning_content || _am2.reasoning || '';
-                if (_rc2 && _rc2.trim()) {
-                    if (typeof _am2.content === 'string') {
-                        _am2.content = [{ type: 'thinking', thinking: _rc2 }, { type: 'text', text: _am2.content || '' }];
-                    }
-                }
-                delete _am2.reasoning_content;
-                delete _am2.reasoning;
-            } else if (_am2.role === 'tool') {
-                _am2.role = 'user';
-                var _tid = _am2.tool_call_id || '';
-                // ★ 修复空 tool_call_id: 从前面最近的 assistant tool_use 中查找
+                _m.content = _blocks;
+                delete _m.tool_calls; delete _m.reasoning_content; delete _m.reasoning;
+            } else if (_m.role === 'assistant') {
+                var _rc2 = _m.reasoning_content || _m.reasoning || '';
+                if (_rc2 && _rc2.trim() && typeof _m.content === 'string')
+                    _m.content = [{type:'thinking',thinking:_rc2},{type:'text',text:_m.content||''}];
+                delete _m.reasoning_content; delete _m.reasoning;
+            } else if (_m.role === 'tool') {
+                _m.role = 'user';
+                var _tid = _m.tool_call_id || '';
                 if (!_tid) {
-                    for (var _tli = _ami2 - 1; _tli >= 0; _tli--) {
-                        var _prev = _nonSysMsgs[_tli];
-                        if (_prev.role === 'assistant' && _prev.content && Array.isArray(_prev.content)) {
-                            for (var _pci = _prev.content.length - 1; _pci >= 0; _pci--) {
-                                if (_prev.content[_pci].type === 'tool_use' && _prev.content[_pci].id) {
-                                    _tid = _prev.content[_pci].id;
-                                    break;
-                                }
-                            }
-                            if (_tid) break;
-                        }
+                    for (var _tli = _out.length-1; _tli >= 0; _tli--) {
+                        var _prev = _out[_tli];
+                        if (_prev.role==='assistant' && Array.isArray(_prev.content))
+                            for (var _pci = _prev.content.length-1; _pci >= 0; _pci--)
+                                if (_prev.content[_pci].type==='tool_use' && _prev.content[_pci].id) {_tid=_prev.content[_pci].id; break;}
+                        if (_tid) break;
                     }
                 }
-                // 终极兜底：生成唯一 ID
-                if (!_tid) _tid = 'toolu_fallback_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                _am2.content = [{ type: 'tool_result', tool_use_id: _tid, content: typeof _am2.content === 'string' ? _am2.content : JSON.stringify(_am2.content) }];
-                delete _am2.tool_call_id;
+                if (!_tid) _tid = 'toolu_fallback_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+                _m.content = [{type:'tool_result',tool_use_id:_tid,content:typeof _m.content==='string'?_m.content:JSON.stringify(_m.content)}];
+                delete _m.tool_call_id; delete _m._datePrefix;
             }
+            _out.push(_m);
         }
-        // ★ 合并连续的 tool_result 消息 (Anthropic 要求同一 assistant 的所有 tool_result 在同一 user 消息中)
+        // merge consecutive tool_result messages
         var _merged = [];
-        for (var _mmi = 0; _mmi < _nonSysMsgs.length; _mmi++) {
-            var _mm = _nonSysMsgs[_mmi];
-            if (_mm.role === 'user' && Array.isArray(_mm.content) && _mm.content.some(function(c){return c.type==='tool_result';})) {
-                while (_mmi + 1 < _nonSysMsgs.length) {
-                    var _nxt = _nonSysMsgs[_mmi + 1];
-                    if (_nxt.role === 'user' && Array.isArray(_nxt.content) && _nxt.content.some(function(c){return c.type==='tool_result';})) {
-                        _mm.content = _mm.content.concat(_nxt.content);
-                        _mmi++;
-                    } else { break; }
+        for (var _mi = 0; _mi < _out.length; _mi++) {
+            var _mm = _out[_mi];
+            if (_mm.role==='user' && Array.isArray(_mm.content) && _mm.content.some(function(c){return c.type==='tool_result';})) {
+                while (_mi+1 < _out.length) {
+                    var _nxt = _out[_mi+1];
+                    if (_nxt.role==='user' && Array.isArray(_nxt.content) && _nxt.content.some(function(c){return c.type==='tool_result';})) {
+                        _mm.content = _mm.content.concat(_nxt.content); _mi++;
+                    } else break;
                 }
             }
             _merged.push(_mm);
         }
-        _nonSysMsgs = _merged;
-        // ★ 校验: 孤 tool_use/tool_result 清理 (Anthropic 要求 tool_use 必须紧跟 tool_result)
-        var _validated = [];
-        for (var _vmi = 0; _vmi < _nonSysMsgs.length; _vmi++) {
-            var _vm = _nonSysMsgs[_vmi];
-            if (_vm.role === 'assistant' && Array.isArray(_vm.content) && _vm.content.some(function(c){return c.type==='tool_use';})) {
-                var _nxt2 = _nonSysMsgs[_vmi + 1];
-                if (!_nxt2 || _nxt2.role !== 'user' || !Array.isArray(_nxt2.content) || !_nxt2.content.some(function(c){return c.type==='tool_result';})) {
+        // validate tool_use↔tool_result
+        var _valid = [];
+        for (var _vi = 0; _vi < _merged.length; _vi++) {
+            var _vm = _merged[_vi];
+            if (_vm.role==='assistant' && Array.isArray(_vm.content) && _vm.content.some(function(c){return c.type==='tool_use';})) {
+                var _n2 = _merged[_vi+1];
+                if (!_n2 || _n2.role!=='user' || !Array.isArray(_n2.content) || !_n2.content.some(function(c){return c.type==='tool_result';}))
                     _vm.content = _vm.content.filter(function(c){return c.type!=='tool_use';});
-                    if (!_vm.content.length) _vm.content = [{type:'text',text:'(工具调用)'}];
-                }
             }
-            _validated.push(_vm);
+            _valid.push(_vm);
         }
-        apiMessages = _validated;
+        return _valid;
+    }
+
+    if (_useAnthropicFormat) {
+        // 提取 system 消息
+        for (var _ami = 0; _ami < apiMessages.length; _ami++) {
+            var _am = apiMessages[_ami];
+            if (_am.role === 'system') {
+                _aSysContent += (_aSysContent ? '\n\n' : '') + (typeof _am.content === 'string' ? _am.content : '');
+            }
+        }
+        apiMessages = _convertAnthropicMessages(apiMessages);
     }
 
     // 统一获取模型选择并转小写
@@ -1280,16 +1261,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         try { _cfgBuiltinNoTool = _getModelCfg().isNoToolsBuiltin(currentModel); } catch(e) {}
         var _isInNoToolList = _matchedLocal || _cfgBuiltinNoTool;
         if (!_isInNoToolList) {
-            // ★ MiniMax M3: 限制工具数量避免 400
+            // ★ MiniMax M3: 限制工具数量避免 422 (MiniMax 支持 ~50 个工具)
             if (modelLower.includes('m3') || modelLower.includes('minimax-m3')) {
-                // ★ MiniMax 工具数上限 100（避免请求体过大），超过时保留最常用的前100个
-                if (tools.length > 100) {
-                    console.warn('[M3] 工具数 ' + tools.length + ' > 100, 截断前100');
-                    tools = tools.slice(0, 100);
+                if (tools.length > 50) {
+                    console.warn('[M3] 工具数 ' + tools.length + ' > 50, 截断前50');
+                    tools = tools.slice(0, 50);
                 }
             }
-            // ★ Anthropic 格式工具转换: 仅原生 Anthropic API 支持 Anthropic-format tools
-            if (_useAnthropicFormat && _isNativeAnthropic) {
+            // ★ Anthropic 格式工具转换: 所有 Anthropic Messages API 统一用 Anthropic-format tools
+            if (_useAnthropicFormat) {
                 body.tools = tools.map(function(t) {
                     return {
                         name: t.function.name,
@@ -1309,15 +1289,18 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ Anthropic 格式最终处理
     if (_useAnthropicFormat) {
         if (_aSysContent) body.system = _aSysContent;
-        // ★ 仅原生 Anthropic API 使用 /v1/messages + 删除 tool_choice + 转换工具格式
-        //   MiniMax/DeepSeek 等: /v1/chat/completions + OpenAI 格式 tools
-        var _baseUrl = getVal('baseUrl');
-        var _baseClean = _baseUrl.replace(/\/+$/, '');
+        // ★ Anthropic Messages API 端点:
+        //   原生 Anthropic: baseUrl + /messages
+        //   其他 (DeepSeek等): baseUrl + /anthropic/v1/messages (自动拼接)
+        var _baseUrl2 = getVal('baseUrl');
+        var _baseClean = _baseUrl2.replace(/\/+$/, '');
         if (_isNativeAnthropic) {
             delete body.tool_choice;
-            body._anthropicUrl = _baseClean.replace(/\/v1$/, '') + '/v1/messages';
+            body._anthropicUrl = _baseClean.replace(/\/v1\/?$/, '') + '/v1/messages';
         } else {
-            body._anthropicUrl = _baseClean + '/chat/completions';
+            // DeepSeek/MiniMax 等: 去 /v1, 拼 /anthropic/v1/messages
+            delete body.tool_choice;
+            body._anthropicUrl = _baseClean.replace(/\/v1\/?$/, '').replace(/\/anthropic\/?$/, '') + '/anthropic/v1/messages';
         }
         delete body.stream_options;
         // ★ 预检清除空 tool_use_id 的 tool_result（防止 400）
@@ -1432,6 +1415,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     if (modelLower.includes('minimax-m3') || modelLower.includes('minimax')) _timeoutSec = Math.max(_timeoutSec, 180);
     var timeout = _isImageModel ? 900000 : _timeoutSec * 1000;
     var timeoutId = setTimeout(() => abortMain.abort(), timeout);
+    window._activeRequestTimeoutId = timeoutId;  // ★ 供审批弹窗暂停用
     var startTime = Date.now();
 
     // 网络错误重试配置
@@ -1502,10 +1486,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         let _reasoningText = '';
         var _toolCalls = [];
         var _usage = null;
+        console.log('[A-Stream] status=' + res.status + ' content-type=' + (res.headers.get('content-type') || '?'));
 
-        // ★ 流式 SSE 解析
+        // ★ 流式 SSE 解析 (Anthropic API 默认流式，非流式极少用)
         var _contentType = res.headers.get('content-type') || '';
-        if (_contentType.includes('text/event-stream') || _contentType.includes('stream')) {
+        if (!_contentType.includes('application/json') || _contentType.includes('stream')) {
             var _reader = res.body.getReader();
             var _decoder = new TextDecoder();
             var _buf = '';
@@ -1543,6 +1528,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 _currentBlockType = _cb.type;
                                 if (_cb.type === 'tool_use') {
                                     _toolUseIdx = _d.index;
+                                    console.log('[A-Tool] tool_use block_start index=' + _d.index + ' cb.id=' + _cb.id + ' cb.name=' + _cb.name);
                                     _toolUseMap[_d.index] = { id: _cb.id || ('toolu_' + Date.now() + '_' + _d.index), name: _cb.name, input_json: '' };
                                 }
                             }
@@ -1661,8 +1647,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
 
             // ★ MiniMax 直连: 自定义 URL 和 API Key
-            var _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || (getVal('baseUrl').replace(/\/v1$/, '') + '/anthropic/v1/messages')) : getVal('baseUrl') + '/chat/completions';
-            if (_useAnthropicFormat) delete body._anthropicUrl;
+            var _fallbackAUrl = getVal('baseUrl').replace(/\/+$/, '').replace(/\/v1\/?$/, '').replace(/\/anthropic\/?$/, '') + '/anthropic/v1/messages';
+            var _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || _fallbackAUrl) : getVal('baseUrl') + '/chat/completions';
+            // ★ 保留 body._anthropicUrl 供重试使用
             var _reqBody = JSON.parse(JSON.stringify(body));
             // 统一声明,后续两个分支都会赋值
             let usage = null;
@@ -2519,11 +2506,16 @@ window.useAlternativeVisionModel = function() {
                 clearTimeout(timeoutId);
                 var newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
                 var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
+                window._activeRequestTimeoutId = newTimeoutId;
 
                 // ★ 清除 partial 标记(工具调用循环中 assistant 消息已完成)
                 delete pendingMsg.partial;
                 // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
                 body.messages = buildApiMessages(chatId);
+                // ★ Anthropic 格式: 重建后需重新转换 tool→user+tool_result
+                if (_useAnthropicFormat) {
+                    body.messages = _convertAnthropicMessages(body.messages);
+                }
                 console.log('[RS-TOOLS] rebuild body.messages for next round, msgs:', body.messages.length);
                 // 继续循环获取下一个响应
                 return attemptRequestWithFreshAbort(attempt, newAbortCtrl, newTimeoutId);
@@ -2723,12 +2715,12 @@ window.useAlternativeVisionModel = function() {
             var isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError || isHTTP2Error;
 
             // ★ 400/404 错误智能重试: 解析错误原因，尝试修复后重试
-            var is400Error = e.message && (e.message.startsWith('HTTP 400') || e.message.includes('HTTP 400:') || e.message.startsWith('HTTP 404') || e.message.includes('HTTP 404:'));
+            var is400Error = e.message && (e.message.startsWith('HTTP 400') || e.message.includes('HTTP 400:') || e.message.startsWith('HTTP 404') || e.message.includes('HTTP 404:') || e.message.startsWith('HTTP 422') || e.message.includes('HTTP 422:'));
             if (is400Error && attempt < maxRetries) {
                 var _errBody = '';
                 var _errJson = null;
                 try {
-                    _errBody = e.message.replace(/^HTTP 40[04]:\s*/, '');
+                    _errBody = e.message.replace(/^HTTP (40[04]|422):\s*/, '');
                     _errJson = JSON.parse(_errBody);
                 } catch(_parseErr) { /* ignore parse errors */ }
 
@@ -2739,7 +2731,8 @@ window.useAlternativeVisionModel = function() {
 
                 // ★ 持久化 400 错误详情到气泡，便于用户查看
                 if (_errMsg && pendingMsg && currentBubble) {
-                    var _errDetail = '🔴 **HTTP ' + (e.message.includes('404') ? '404' : '400') + ' 错误**\n```\n' + _errMsg.substring(0, 500) + '\n```';
+                    var _errCode = e.message.includes('404') ? '404' : (e.message.includes('422') ? '422' : '400');
+                    var _errDetail = '🔴 **HTTP ' + _errCode + ' 错误**\n```\n' + _errMsg.substring(0, 500) + '\n```';
                     if (!pendingMsg._400errors) pendingMsg._400errors = [];
                     pendingMsg._400errors.push({ time: Date.now(), msg: _errMsg, action: 'analyzing' });
                     // 在气泡底部追加错误详情（最多保留最近3条）
@@ -2815,10 +2808,10 @@ window.useAlternativeVisionModel = function() {
                             _retryAction = 'safety_filter';
                         }
                     }
-                } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error') {
-                    // 通用参数错误 → 尝试清理 body 重试
+                } else if (_errMsg.includes('parameter') || _errType === 'invalid_request_error' || e.message.includes('422')) {
+                    // 通用参数错误 / 422 Unprocessable → 清理参数 + 减半工具重试
                     _shouldRetry = true;
-                    _retryAction = 'clean_params';
+                    _retryAction = (_errMsg.includes('tool') || e.message.includes('422')) ? 'remove_tools' : 'clean_params';
                 } else if (attempt === 0) {
                     // 第一次遇到未知 400 → 重试一次（可能临时故障）
                     _shouldRetry = true;

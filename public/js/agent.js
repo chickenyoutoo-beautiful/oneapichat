@@ -1707,6 +1707,18 @@ function requestToolApproval(toolName, args) {
             '</div>';
         document.body.appendChild(overlay);
 
+        // ★ 暂停请求超时计时器 (避免等待审批时超时)
+        if (window._activeRequestTimeoutId) { clearTimeout(window._activeRequestTimeoutId); }
+        window._approvalPending = true;
+        // ★ 审批弹窗自身超时: 2 分钟后自动拒绝
+        var _approvalTimeout = setTimeout(function() {
+            if (document.body.contains(overlay)) {
+                sessionUsage.approvalsRejected++;
+                _resolveApproval(false);
+                showToast('⚠️ 审批超时，已自动拒绝', 'warning', 3000);
+            }
+        }, 120000);
+
         // 弹窗动画: 先出场再交互
         requestAnimationFrame(function() { overlay.classList.add('active'); });
         // ★ 点击遮罩层忽略 — 必须通过明确点击「批准」或「拒绝」按钮来做出决定
@@ -1728,20 +1740,30 @@ function requestToolApproval(toolName, args) {
         var confirmBtn = overlay.querySelector('#approvalConfirmBtn');
         var rejectBtn = overlay.querySelector('#approvalRejectBtn');
 
+        var _resolveApproval = function(approved) {
+            clearTimeout(_approvalTimeout);
+            window._approvalPending = false;
+            overlay.remove();
+            // ★ 恢复请求超时 (5 分钟，给后续操作足够时间)
+            if (window._activeRequestTimeoutId) clearTimeout(window._activeRequestTimeoutId);
+            window._activeRequestTimeoutId = setTimeout(function() {
+                try { abortControllerMap[currentChatId]?.abort(); } catch(e) {}
+            }, 300000);
+            resolve(approved);
+        };
+
         confirmBtn.onclick = function() {
             var remember = overlay.querySelector('#approvalRememberCheck');
             if (remember && remember.checked) {
                 remembered[rememberKey] = true;
                 try { sessionStorage.setItem('approvalRemembered', JSON.stringify(remembered)); } catch(e) {}
             }
-            // Feature 2: 始终允许此类型
             var alwaysAllow = overlay.querySelector('#approvalAlwaysAllowCheck');
             if (alwaysAllow && alwaysAllow.checked) {
                 addAlwaysAllowRule(toolName);
             }
             sessionUsage.approvalsGranted++;
-            overlay.remove();
-            resolve(true);
+            _resolveApproval(true);
         };
 
         rejectBtn.onclick = function() {
@@ -1751,8 +1773,7 @@ function requestToolApproval(toolName, args) {
                 try { sessionStorage.setItem('approvalRemembered', JSON.stringify(remembered)); } catch(e) {}
             }
             sessionUsage.approvalsRejected++;
-            overlay.remove();
-            resolve(false);
+            _resolveApproval(false);
         };
     });
 }

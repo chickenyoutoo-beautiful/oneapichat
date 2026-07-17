@@ -219,8 +219,8 @@ function _renderMarkdownWithMath_cached(text, st) {
     // ★ 隐藏未闭合公式: 流式时截断末尾不完整的 $...$ 避免 raw LaTeX 闪烁
     text = _hideIncompleteMath(text);
 
-    // ★ 增量公式缓存: st._mathCache = { formulaText: renderedHtml }
-    if (!st._mathCache) st._mathCache = {};
+    // ★ 全局公式缓存: 跨流/跨消息共享，避免同一公式反复渲染
+    if (!window.__globalMathCache) window.__globalMathCache = {};
     if (!st._lastFormulaCount) st._lastFormulaCount = 0;
 
     // 提取所有公式及其位置
@@ -262,7 +262,7 @@ function _renderMarkdownWithMath_cached(text, st) {
     for (var i = 0; i < formulas.length; i++) {
         var fInfo = formulas[i];
         var cacheKey = fInfo.type + ':' + fInfo.formula;
-        var rendered = st._mathCache[cacheKey];
+        var rendered = window.__globalMathCache[cacheKey];
         if (!rendered) {
             try {
                 if (window.katex) {
@@ -281,7 +281,7 @@ function _renderMarkdownWithMath_cached(text, st) {
                     ? '<p style="text-align:center">$$' + fInfo.formula + '$$</p>'
                     : '$' + fInfo.formula + '$';
             }
-            st._mathCache[cacheKey] = rendered;
+            window.__globalMathCache[cacheKey] = rendered;
         }
         html = html.split(fInfo.id).join(rendered);
     }
@@ -309,7 +309,7 @@ function cleanupStreamState(chatId) {
 // ==================== Markdown 实时渲染优化 (v2 - 增强版) ====================
 const MarkdownRenderer = {
     cache: new Map(),
-    cacheSize: 30,
+    cacheSize: 200,
     renderTimer: null,
     lastText: '',
     lastContainer: null,

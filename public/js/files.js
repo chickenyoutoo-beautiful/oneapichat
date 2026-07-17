@@ -574,13 +574,26 @@ function setupPasteImageSupport() {
 }
 
 function addPastedImage(dataUrl, name, size) {
-    pendingFiles.push({
+    var _fileObj = {
         name: name,
         content: dataUrl,
         size: size,
         isImage: true,
-        type: 'image/png'
-    });
+        type: 'image/png',
+        serverUrl: ''
+    };
+    pendingFiles.push(_fileObj);
+    // ★ 立即上传到服务器, 确保刷新后图片不消失
+    if (typeof uploadImageToServer === 'function') {
+        uploadImageToServer(dataUrl).then(function(srvUrl) {
+            if (srvUrl) {
+                _fileObj.serverUrl = srvUrl;
+                updateFilePreviewUI();
+            }
+        }).catch(function(e) {
+            console.warn('[Paste] 图片上传服务器失败:', e.message);
+        });
+    }
 }
 
 // ★ 在光标位置插入文字(支持拖拽文字)

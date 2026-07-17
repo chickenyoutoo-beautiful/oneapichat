@@ -577,7 +577,7 @@ function setupEventListeners() {
             }
         });
         window.autoResize($.userInput);
-        $.userInput.addEventListener('input', function () { window.autoResize(this); handleSlashInput(this); });
+        $.userInput.addEventListener('input', function () { window.autoResize(this); try { handleSlashInput(this); } catch(e) { console.error('[Slash] error:', e); } });
         window.addEventListener('resize', debounce(() => window.autoResize($.userInput), 100));
     }
 
@@ -1142,6 +1142,21 @@ function initializeApp() {
 }
 
 
+
+// ★ Service Worker: Cache-First 静态资源 + 更新通知
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/oneapichat/sw.js', { scope: '/oneapichat/' }).catch(function(){});
+    navigator.serviceWorker.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'SW_UPDATED') {
+            var _b = document.createElement('div');
+            _b.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#667eea;color:#fff;padding:10px 18px;border-radius:8px;cursor:pointer;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);font-size:14px;';
+            _b.textContent = '🔄 有新版本可用，点击刷新';
+            _b.onclick = function() { location.reload(); };
+            document.body.appendChild(_b);
+            setTimeout(function() { _b.style.opacity = '0'; _b.style.transition = 'opacity .5s'; }, 8000);
+        }
+    });
+}
 
 // ★ 注册初始化 — 等待 DOMContentLoaded 确保 main.js 已加载
 initializeApp();

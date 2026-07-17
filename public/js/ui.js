@@ -256,10 +256,22 @@ const SLASH_COMMANDS = [
 window._slashIdx = -1;
 window._slashVisible = false;
 
+function _positionSlashPopup() {
+    var popup = getEl('slashPopup');
+    var inp = document.getElementById('userInput');
+    if (!popup || !inp) return;
+    var rect = inp.getBoundingClientRect();
+    popup.style.position = 'fixed';
+    popup.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+    popup.style.left = rect.left + 'px';
+    popup.style.width = rect.width + 'px';
+}
+
 function handleSlashInput(el) {
     var val = el.value;
-    if (!val.startsWith('/')) { hideSlashPopup(); return; }
+    if (!val || !val.startsWith('/')) { hideSlashPopup(); return; }
     var query = val.slice(1);
+    console.log('[Slash] input="/' + query + '" len=' + query.length);
     if (query.includes(' ')) { hideSlashPopup(); return; }
     updateSlashPopup(query.toLowerCase());
 }
@@ -272,11 +284,18 @@ function updateSlashPopup(query) {
         popup.className = 'slash-popup';
         popup.style.opacity = '0';
         popup.style.transform = 'translateY(8px)';
-        var wrap = document.getElementById('userInput')?.closest('.input-wrapper') || document.querySelector('.input-wrapper');
-        if (wrap) wrap.appendChild(popup);
-        else document.body.appendChild(popup);
+        // ★ 挂到 body (Input-wrapper 有 overflow:hidden 会裁剪)
+        if (!popup.parentNode) document.body.appendChild(popup);
+    }
+    _positionSlashPopup();
+    // ★ 监听 resize/scroll 自动跟随
+    if (!window.__slashResizeBound) {
+        window.__slashResizeBound = true;
+        window.addEventListener('resize', function() { if (window._slashVisible) _positionSlashPopup(); });
+        window.addEventListener('scroll', function() { if (window._slashVisible) _positionSlashPopup(); }, true);
     }
     var matches = SLASH_COMMANDS.filter(function(c) { return !query || c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
+    console.log('[Slash] matches:', matches.length, 'query:', query);
     if (matches.length === 0) { hideSlashPopup(); return; }
     var groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
