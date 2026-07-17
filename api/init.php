@@ -89,6 +89,15 @@ function setCorsHeaders(): void {
 }
 
 // ════════════════════════════════════════════════════
+// API CORS（第三方客户端接入 — 允许任意 Origin）
+// ════════════════════════════════════════════════════
+function setApiCorsHeaders(): void {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+}
+
+// ════════════════════════════════════════════════════
 // AES-256-GCM 加密密钥 (从 config.ini 读取，不在源码中硬编码)
 // ════════════════════════════════════════════════════
 function getEncryptionKey(): string {

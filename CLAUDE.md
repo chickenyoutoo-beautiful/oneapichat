@@ -4,6 +4,8 @@
 
 ## 最近变更
 
+- **2026-07-17**: 🔧 工具执行+MCP全量适配 — ①`api/v1/tools/call.php`: 支持全部27个工具(引擎18+特殊4+文件5),所有API Key解密(v2 AES-GCM+XOR),搜索三级降级 ②MCP: `mcp-server/api-tools.js` v2动态加载引擎工具+3个内置,通过HTTP代理路由18个引擎工具 ③所有API端点统一解密: `chat/completions.php`+`models.php`+`tools/call.php`的`_decrypt_config_key()`
+- **2026-07-17**: 🌐 公共 REST API — ①**API Key系统**: `auth_helpers.php`新增`verifyApiKey()`/`extractBearerToken()`/`generateApiKey()`,API Key格式`oac-<48hex>`,SHA-256哈希存储 ②**OpenAI兼容端点**: `api/v1/chat/completions.php`支持流式SSE+非流式JSON+函数调用,`api/v1/models.php`返回模型列表 ③**Key管理**: `api/api_keys.php`支持list/create/revoke,前端设置面板新增API密钥管理UI ④**文档**: `API.md`包含完整API参考+curl/Python/JS示例+第三方客户端配置指南 ⑤`init.php`新增`setApiCorsHeaders()`允许跨域访问
 - **2026-07-15**: 🔍 Tavily搜索引擎修复 — ①**引擎侧**: `_try_tavily`的`search_depth`从`advanced`改为带key前缀检测(`tvly-dev-`/`tvly-free-`→basic,付费→advanced),添加API Key解密诊断日志和请求状态日志,解密失败时尝试明文存储 ②**前端侧**: Tavily路径改为统一走`fetchWithRetry`(与其他引擎一致),无结果时自动回退MiniMax CLI,出错时通过catch回退 ③`parseSearchResults`新增Tavily特有`detail.error`格式检测(之前只检查`error`字段,导致API错误被静默吞掉返回空结果)
 - **2026-07-16**: 🔧 Gemini 根因修复 + 超星修复 — ①**Gemini**: 确诊Google API被GFW封锁导致直连503; `proxyFetch`新增Google域名自动跳直连走中继; 用户proxyUrl改为`proxy.naujtrats.xyz:8888`(proxy.php映射→192.168.195.213:10808); API可用但key配额耗尽(429) ②**超星登录**: `ensureUserConfig`检测0字节重建; `api_get_courses.py`全链路try/except; `cookies.py`返回空CookieJar ③**刷题DB**: `learning_records.db` chown www-data; `tracker.py`权限自修复
 - **2026-07-15**: 🔍 Tavily搜索引擎修复 — ①`_try_tavily`:`search_depth`→`basic`+key前缀检测+诊断日志 ②前端统一`fetchWithRetry`+无结果回退MiniMax CLI ③`parseSearchResults`新增`detail.error`检测

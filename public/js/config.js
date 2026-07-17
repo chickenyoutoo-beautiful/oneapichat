@@ -1166,4 +1166,258 @@ window.refreshModels = async function (e) {
     }
 };
 
+// ═══════════════════════════════════════════════════════
+// API Key 管理
+// ═══════════════════════════════════════════════════════
+
+window._apiKeysServerBase = (typeof SERVER_API_BASE !== 'undefined') ? SERVER_API_BASE : '/oneapichat/api';
+
+window.loadApiKeys = function() {
+    var token = localStorage.getItem('authToken');
+    var listEl = document.getElementById('apiKeysList');
+    var countEl = document.getElementById('apiKeysCount');
+    if (!listEl || !countEl) return;
+
+    if (!token) {
+        listEl.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">登录后可管理 API 密钥</div>';
+        countEl.textContent = '';
+        return;
+    }
+
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=list&auth_token=' + encodeURIComponent(token))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                listEl.innerHTML = '<div style="font-size:11px;color:#ef4444;padding:4px;">加载失败: ' + (data.error || '未知错误') + '</div>';
+                return;
+            }
+            var keys = data.keys || [];
+            countEl.textContent = keys.length ? '(' + keys.length + ')' : '';
+            if (keys.length === 0) {
+                listEl.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">暂无 API 密钥</div>';
+                return;
+            }
+            var html = '';
+            keys.forEach(function(k) {
+                var lastUsed = k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '从未使用';
+                html += '<div class="api-key-item" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin:4px 0;background:#f9fafb;border-radius:6px;font-size:12px;">' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (k.name || '未命名') + '</div>' +
+                        '<div style="color:#9ca3af;font-family:monospace;font-size:10px;">' + (k.key_prefix || '') + '...' + '</div>' +
+                        '<div style="color:#9ca3af;font-size:10px;">创建: ' + new Date(k.created_at).toLocaleDateString() + ' | 最后使用: ' + lastUsed + '</div>' +
+                    '</div>' +
+                    '<button onclick="window.revokeApiKey(\'' + k.id + '\')" title="撤销此密钥" style="flex-shrink:0;margin-left:8px;padding:3px 8px;font-size:11px;color:#ef4444;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;cursor:pointer;white-space:nowrap;">撤销</button>' +
+                '</div>';
+            });
+            listEl.innerHTML = html;
+        })
+        .catch(function(e) {
+            listEl.innerHTML = '<div style="font-size:11px;color:#ef4444;padding:4px;">加载失败</div>';
+        });
+};
+
+window.showCreateApiKeyDialog = function() {
+    var token = localStorage.getItem('authToken');
+    if (!token) { showToast('请先登录', 'error'); return; }
+
+    var name = prompt('请输入 API 密钥名称（用于识别用途，如 "ChatBox" 或 "My App"）:', '');
+    if (name === null) return;
+    if (!name.trim()) { showToast('名称不能为空', 'error'); return; }
+
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=create&auth_token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.success) {
+            showToast('创建失败: ' + (data.error || '未知错误'), 'error');
+            return;
+        }
+        window._pendingApiKey = data.key;
+        window._showApiKeyModal(data.key);
+        window.loadApiKeys();
+    })
+    .catch(function(e) {
+        showToast('创建失败: 网络错误', 'error');
+    });
+};
+
+// 动态创建 API Key 弹窗（附加到 body，类似工具审批弹窗）
+window._showApiKeyModal = function(key) {
+    // 移除旧弹窗
+    var old = document.getElementById('apiKeyDialogOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'apiKeyDialogOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);';
+    overlay.onclick = function(e) { if (e.target === overlay) window.closeApiKeyDialog(); };
+
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;box-shadow:0 25px 50px rgba(0,0,0,0.25);width:100%;max-width:420px;padding:24px;margin:16px;max-height:90vh;overflow-y:auto;border:1px solid #e5e7eb;';
+    // 暗色模式检测
+    if (document.documentElement.classList.contains('dark')) {
+        card.style.background = '#1f2937';
+        card.style.borderColor = '#374151';
+    }
+
+    card.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">' +
+            '<h3 style="font-size:18px;font-weight:700;margin:0;display:flex;align-items:center;gap:8px;color:' + (document.documentElement.classList.contains('dark') ? '#f3f4f6' : '#1f2937') + ';">' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>' +
+                '🔑 API 密钥已创建' +
+            '</h3>' +
+            '<button id="apiKeyCloseBtn" style="background:none;border:none;cursor:pointer;padding:4px;border-radius:50%;display:flex;align-items:center;color:#9ca3af;">' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>' +
+            '</button>' +
+        '</div>' +
+        '<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px;margin-bottom:16px;">' +
+            '<p style="font-size:13px;color:#92400e;font-weight:600;margin:0 0 4px;">⚠️ 请立即复制并保存此密钥</p>' +
+            '<p style="font-size:12px;color:#b45309;margin:0;">关闭此窗口后将无法再次查看完整密钥。</p>' +
+        '</div>' +
+        '<div style="margin-bottom:12px;">' +
+            '<label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">密钥名称</label>' +
+            '<p style="font-size:14px;font-weight:500;margin:2px 0 0;color:' + (document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#374151') + ';">' + (key.name || '-') + '</p>' +
+        '</div>' +
+        '<div style="margin-bottom:16px;">' +
+            '<label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">完整密钥</label>' +
+            '<div style="margin-top:4px;display:flex;align-items:center;gap:8px;background:#f9fafb;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;">' +
+                '<code style="flex:1;font-size:12px;font-family:monospace;word-break:break-all;user-select:all;color:' + (document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#1f2937') + ';background:transparent;">' + key.full_key + '</code>' +
+                '<button id="apiKeyCopyBtn" style="flex-shrink:0;padding:6px 12px;font-size:12px;font-weight:500;color:#fff;background:#6366f1;border:none;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;">' +
+                    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+                    '复制' +
+                '</button>' +
+            '</div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#9ca3af;margin-bottom:16px;">密钥前缀: <code style="font-family:monospace;">' + (key.key_prefix || '') + '...</code></div>' +
+        '<button id="apiKeyDoneBtn" style="width:100%;padding:10px 16px;font-size:14px;font-weight:500;color:#374151;background:#f3f4f6;border:1px solid #d1d5db;border-radius:12px;cursor:pointer;">我已保存，关闭</button>';
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    // 事件绑定
+    document.getElementById('apiKeyCloseBtn').onclick = window.closeApiKeyDialog;
+    document.getElementById('apiKeyDoneBtn').onclick = window.closeApiKeyDialog;
+    document.getElementById('apiKeyCopyBtn').onclick = function() {
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(key.full_key).then(function() {
+                showToast('✅ 已复制到剪贴板', 'success');
+            }).catch(function() {
+                var ta = document.createElement('textarea'); ta.value = key.full_key;
+                ta.style.position = 'fixed'; ta.style.left = '-9999px';
+                document.body.appendChild(ta); ta.select();
+                document.execCommand('copy'); document.body.removeChild(ta);
+                showToast('✅ 已复制到剪贴板', 'success');
+            });
+        } else {
+            var ta = document.createElement('textarea'); ta.value = key.full_key;
+            ta.style.position = 'fixed'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
+            showToast('✅ 已复制到剪贴板', 'success');
+        }
+    };
+};
+
+window.closeApiKeyDialog = function() {
+    var overlay = document.getElementById('apiKeyDialogOverlay');
+    if (overlay) overlay.remove();
+    window._pendingApiKey = null;
+};
+
+window.copyApiKeyDialogKey = function() {
+    var overlay = document.getElementById('apiKeyDialogOverlay');
+    if (!overlay) return;
+    var codeEl = overlay.querySelector('code');
+    var key = codeEl ? codeEl.textContent : '';
+    if (!key) return;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(key).then(function() {
+            showToast('✅ 已复制到剪贴板', 'success');
+        }).catch(function() { showToast('复制失败', 'error'); });
+    } else {
+        var ta = document.createElement('textarea'); ta.value = key;
+        ta.style.position = 'fixed'; ta.style.left = '-9999px';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        showToast('✅ 已复制到剪贴板', 'success');
+    }
+};
+
+window.revokeApiKey = function(keyId) {
+    var token = localStorage.getItem('authToken');
+    if (!token) return;
+    if (!confirm('确定要撤销此 API 密钥吗？使用该密钥的所有应用将立即无法连接。')) return;
+
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=revoke&auth_token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key_id: keyId })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            showToast('API 密钥已撤销', 'success');
+            window.loadApiKeys();
+        } else {
+            showToast('撤销失败: ' + (data.error || '未知错误'), 'error');
+        }
+    })
+    .catch(function(e) {
+        showToast('撤销失败: 网络错误', 'error');
+    });
+};
+
+window.copyApiKeyToClipboard = function(key) {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(key).then(function() {
+            showToast('✅ 已复制到剪贴板', 'success');
+        }).catch(function() {
+            fallbackCopy(key);
+        });
+    } else {
+        fallbackCopy(key);
+    }
+    function fallbackCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast('✅ 已复制到剪贴板', 'success'); }
+        catch(e) { showToast('复制失败，请手动复制', 'error'); }
+        document.body.removeChild(ta);
+    }
+};
+
+// 页面加载后自动加载 API Keys（延迟等待登录状态就绪）
+setTimeout(function() { window.loadApiKeys(); }, 2000);
+
+// 监控设置面板打开状态，刷新 API Keys
+document.addEventListener('DOMContentLoaded', function() {
+    var apiSection = document.getElementById('apiKeysSection');
+    if (apiSection) {
+        apiSection.addEventListener('toggle', function() {
+            if (apiSection.open) window.loadApiKeys();
+        });
+    }
+    // 也监听整个面板的显示
+    var cp = document.getElementById('configPanel');
+    if (cp) {
+        var observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                if (m.type === 'attributes' && m.attributeName === 'class') {
+                    if (!cp.classList.contains('hidden-panel')) {
+                        window.loadApiKeys();
+                    }
+                }
+            });
+        });
+        observer.observe(cp, { attributes: true, attributeFilter: ['class'] });
+    }
+});
+
 

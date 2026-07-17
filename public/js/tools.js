@@ -1620,6 +1620,8 @@ const SRC_TOOLS = [
     });
 })();
 
+console.log('[ToolRegistry] 全部注册完成, 共', Object.keys(toolRegistry.getAllToolNames()).length, '个工具');
+
 // ==================== Cloudreve 工具注册 ====================
 (function() {
     CLOUDREVE_TOOLS.forEach(function(t) {
