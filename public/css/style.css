@@ -4082,10 +4082,25 @@ html:not(.dark) #userInput {
 .tool-stack-expand-btn:hover { background: #f3f4f6; color: #6366f1; }
 .dark .tool-stack-expand-btn:hover { background: #1e293b; color: #818cf8; }
 
-/* ── 工具调用批次: 默认折叠, 展开时显示全部 ── */
-.tool-call-row[data-tool-idx="0"] { }
-.tool-call-row[data-tool-idx]:not([data-tool-idx="0"]) { display: none !important; }
-.tool-call-row[data-tool-idx]:not([data-tool-idx="0"]).force-show { display: flex !important; }
+/* ── 堆叠卡片: 折叠行以左下角为锚点向右上偏移 ── */
+.tool-call-row[data-tool-idx="0"] .tool-call-bubble { position: relative; z-index: 1; }
+.tool-call-row[data-tool-idx]:not([data-tool-idx="0"]) {
+    transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.tool-call-row[data-tool-idx]:not([data-tool-idx="0"]).tool-collapsing {
+    opacity: 0; transform: translate(8px, -6px) scale(0.95);
+    pointer-events: none;
+}
+
+/* ── 展开/收起动画 ── */
+@keyframes toolExpandIn {
+    from { opacity: 0; transform: translate(12px, -8px) scale(0.92); }
+    to { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes toolCollapseOut {
+    from { opacity: 1; transform: translate(0, 0) scale(1); }
+    to { opacity: 0; transform: translate(12px, -8px) scale(0.92); }
+}
 
 .tool-call-row .avatar { display: none !important; }
 

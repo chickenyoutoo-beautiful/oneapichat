@@ -359,33 +359,57 @@ function appendToolCallMessage(toolName, args, result, durationMs, chatId, execD
     container.appendChild(row);
     // ★ 标记相邻工具调用行属于同一批次
     row.setAttribute('data-tool-batch', '1');
-    var _prev = row.previousElementSibling;
-    if (_prev && _prev.hasAttribute('data-tool-batch')) {
-        row.setAttribute('data-tool-idx', (parseInt(_prev.getAttribute('data-tool-idx') || '0') + 1).toString());
+    var _prevRow = row.previousElementSibling;
+    if (_prevRow && _prevRow.hasAttribute('data-tool-batch')) {
+        row.setAttribute('data-tool-idx', (parseInt(_prevRow.getAttribute('data-tool-idx') || '0') + 1).toString());
+        row.style.display = 'none'; // 默认折叠
     } else {
         row.setAttribute('data-tool-idx', '0');
     }
-    // 添加展开/折叠按钮到第一个气泡
+    // 第一条: 添加按钮
     if (row.getAttribute('data-tool-idx') === '0') {
-        var _bubble = row.querySelector('.tool-call-bubble');
-        if (_bubble) {
-            var _btn = document.createElement('button');
-            _btn.className = 'tool-toggle-btn';
-            _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
-            _btn.title = '展开/折叠';
-            _btn.onclick = function(e) {
-                e.stopPropagation();
-                // 找到同一个批次所有后续行并展开/折叠
-                var _next = row.nextElementSibling; var _expanded = false;
-                while (_next && _next.hasAttribute('data-tool-batch')) {
-                    _expanded = !_next.classList.contains('force-show');
-                    if (_expanded) _next.classList.add('force-show');
-                    else _next.classList.remove('force-show');
-                    _next = _next.nextElementSibling;
-                }
-                _btn.style.transform = _expanded ? 'rotate(180deg)' : '';
-            };
-            _bubble.appendChild(_btn);
+        var _batchRows = [row];
+        var _n = row.nextElementSibling;
+        while (_n && _n.hasAttribute('data-tool-batch')) { _batchRows.push(_n); _n = _n.nextElementSibling; }
+        if (_batchRows.length >= 2) {
+            var _bubble = row.querySelector('.tool-call-bubble');
+            if (_bubble) {
+                var _btn = document.createElement('button');
+                _btn.className = 'tool-toggle-btn';
+                _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+                _btn.title = '展开全部 (' + (_batchRows.length-1) + ' more)';
+                _btn.onclick = function(e) {
+                    e.stopPropagation();
+                    var _anyHidden = false;
+                    for (var _bi = 1; _bi < _batchRows.length; _bi++) {
+                        if (_batchRows[_bi].style.display === 'none') { _anyHidden = true; break; }
+                    }
+                    for (var _bi = 1; _bi < _batchRows.length; _bi++) {
+                        var _r = _batchRows[_bi];
+                        if (_anyHidden) {
+                            // 展开
+                            _r.style.display = '';
+                            _r.style.animation = 'toolExpandIn 0.35s cubic-bezier(0.4,0,0.2,1) forwards';
+                        } else {
+                            // 收起: 先加 collapse 类，动画结束后隐藏
+                            _r.classList.add('tool-collapsing');
+                            _r.style.animation = 'toolCollapseOut 0.3s ease forwards';
+                            (function(_rr) {
+                                _rr.addEventListener('animationend', function _h() {
+                                    _rr.removeEventListener('animationend', _h);
+                                    _rr.style.display = 'none';
+                                    _rr.classList.remove('tool-collapsing');
+                                    _rr.style.animation = '';
+                                });
+                            })(_r);
+                        }
+                    }
+                    _btn.style.transform = _anyHidden ? 'rotate(180deg)' : '';
+                    _btn.title = _anyHidden ? '折叠' : '展开全部 (' + (_batchRows.length-1) + ' more)';
+                    if (_anyHidden && $.chatBox) { $.chatBox.scrollTop = $.chatBox.scrollHeight; }
+                };
+                _bubble.appendChild(_btn);
+            }
         }
     }
 

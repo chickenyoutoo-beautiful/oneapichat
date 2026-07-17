@@ -978,38 +978,47 @@ window.loadChat = async function (id) {
 
     // 加载完成后自动滚动(loadChat 模式不受距离限制)
     autoScrollToBottom('loadChat');
-    // ★ 标记历史工具调用行的批次关系
+    // ★ 标记历史工具调用行的批次 + 折叠
     setTimeout(function() {
         var _rows = $.chatMessagesContainer?.querySelectorAll('.tool-call-row');
         if (!_rows || _rows.length < 2) return;
         var _batchIdx = 0;
         _rows.forEach(function(r, i) {
             var _prev = i > 0 ? _rows[i-1] : null;
-            var _isNew = !_prev || _prev.nextElementSibling !== r || !_prev.hasAttribute('data-tool-batch');
-            if (_isNew) { _batchIdx++; r.setAttribute('data-tool-idx', '0'); }
-            else { r.setAttribute('data-tool-idx', (parseInt(_prev.getAttribute('data-tool-idx')||'0')+1).toString()); }
-            r.setAttribute('data-tool-batch', _batchIdx.toString());
-            // 给批次第一条加按钮
-            if (r.getAttribute('data-tool-idx') === '0' && !r.querySelector('.tool-toggle-btn')) {
-                var _bub = r.querySelector('.tool-call-bubble');
-                if (_bub) {
-                    var _btn = document.createElement('button');
-                    _btn.className = 'tool-toggle-btn';
-                    _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
-                    _btn.title = '展开/折叠';
-                    _btn.onclick = function(e2) {
-                        e2.stopPropagation();
-                        var _exp = false; var _n2 = r.nextElementSibling;
-                        while (_n2 && _n2.getAttribute('data-tool-batch') === r.getAttribute('data-tool-batch')) {
-                            _exp = !_n2.classList.contains('force-show');
-                            if (_exp) _n2.classList.add('force-show'); else _n2.classList.remove('force-show');
-                            _n2 = _n2.nextElementSibling;
-                        }
-                        this.style.transform = _exp ? 'rotate(180deg)' : '';
-                    };
-                    _bub.appendChild(_btn);
-                }
+            var _isNew = !_prev || !_prev.hasAttribute('data-tool-batch') || _prev.getAttribute('data-tool-batch') !== r.parentNode?.getAttribute?.('data-batch') || !_prev.nextElementSibling?.isSameNode?.(r);
+            if (!_prev || !_prev.hasAttribute('data-tool-batch') || _prev.nextElementSibling !== r) {
+                _batchIdx++;
+                r.setAttribute('data-tool-idx', '0');
+            } else {
+                r.setAttribute('data-tool-idx', (parseInt(_prev.getAttribute('data-tool-idx')||'0')+1).toString());
+                r.style.display = 'none';
             }
+            r.setAttribute('data-tool-batch', _batchIdx.toString());
+        });
+        // 给每个批次第一条加按钮
+        _rows.forEach(function(r) {
+            if (r.getAttribute('data-tool-idx') !== '0' || r.querySelector('.tool-toggle-btn')) return;
+            var _batch = [r]; var _n2 = r.nextElementSibling;
+            while (_n2 && _n2.getAttribute('data-tool-batch') === r.getAttribute('data-tool-batch')) { _batch.push(_n2); _n2 = _n2.nextElementSibling; }
+            if (_batch.length < 2) return;
+            var _bub = r.querySelector('.tool-call-bubble');
+            if (!_bub) return;
+            var _btn = document.createElement('button');
+            _btn.className = 'tool-toggle-btn';
+            _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+            _btn.title = '展开全部 (' + (_batch.length-1) + ' more)';
+            _btn.onclick = function(e2) {
+                e2.stopPropagation();
+                var _anyHidden = _batch[1].style.display === 'none';
+                for (var _bi = 1; _bi < _batch.length; _bi++) {
+                    _batch[_bi].style.display = _anyHidden ? '' : 'none';
+                    if (_anyHidden) _batch[_bi].style.animation = 'toolFadeIn 0.3s ease';
+                }
+                this.style.transform = _anyHidden ? 'rotate(180deg)' : '';
+                this.title = _anyHidden ? '折叠' : '展开全部 (' + (_batch.length-1) + ' more)';
+                if (_anyHidden && $.chatBox) { $.chatBox.scrollTop = $.chatBox.scrollHeight; }
+            };
+            _bub.appendChild(_btn);
         });
     }, 500);
     } catch(e) {
