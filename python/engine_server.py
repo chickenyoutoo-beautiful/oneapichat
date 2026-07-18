@@ -2803,6 +2803,198 @@ threading.Thread(target=_cleanup_old_streams, daemon=True).start()
 
 # ★ Agent 端点 + 浏览器工具 → engine/agent_endpoints.py
 register_agent_endpoints(app, ENGINE_DIR, tool_registry)
+
+@app.get("/engine/ppt/generate")
+def ppt_generate(user_id: str = Query(""), title: str = Query(""), pages: str = Query("[]"), theme: str = Query("default"), filename: str = Query("")):
+    """PPT 生成 HTTP 端点"""
+    import json as _ppt_json, shutil as _ppt_shutil, os as _ppt_os
+    try:
+        _ppt_pages = _ppt_json.loads(pages)
+    except Exception:
+        _ppt_pages = []
+    if not _ppt_pages:
+        return JSONResponse({"ok": False, "error": "pages 参数为空或格式错误"}, status_code=400)
+    try:
+        from ppt_engine.build import build_pptx
+        _ppt_safe = (filename or 'output').replace('/', '_').replace('\\', '_')
+        _ppt_tmp = f"/tmp/ppt_{_ppt_safe}.pptx"
+        _ppt_output = build_pptx(_ppt_tmp, title, _ppt_pages, theme)
+        _ppt_web_dir = _ppt_os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+        _ppt_os.makedirs(_ppt_web_dir, exist_ok=True)
+        _ppt_web_path = _ppt_os.path.join(_ppt_web_dir, f"ppt_{_ppt_safe}.pptx")
+        _ppt_shutil.copy2(_ppt_output, _ppt_web_path)
+        _ppt_size_kb = _ppt_os.path.getsize(_ppt_web_path) // 1024
+        _ppt_web_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/ppt_{_ppt_safe}.pptx"
+        return {
+            "ok": True,
+            "download_url": _ppt_web_url,
+            "file_size_kb": _ppt_size_kb,
+            "pages": len(_ppt_pages),
+            "result": f"✅ PPT已生成\\n📥 下载链接: {_ppt_web_url}\\n📦 大小: {_ppt_size_kb} KB | 页数: {len(_ppt_pages)}\\n⚠️ 请直接复制上面的完整链接给用户，不要截断或省略。"
+        }
+    except ImportError as _ppt_e:
+        return JSONResponse({"ok": False, "error": f"PPT生成缺少依赖: {_ppt_e}"}, status_code=500)
+    except Exception as _ppt_e:
+        return JSONResponse({"ok": False, "error": f"PPT生成失败: {_ppt_e}"}, status_code=500)
+
+
+# ── 文档生成工具 (Word/Excel/PDF) ──
+
+def _doc_output(safe_name, ext):
+    """Copy generated file to web-accessible dir and return download URL."""
+    import shutil, os
+    web_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
+    os.makedirs(web_dir, exist_ok=True)
+    tmp_path = f"/tmp/{safe_name}.{ext}"
+    web_path = os.path.join(web_dir, f"{safe_name}.{ext}")
+    shutil.copy2(tmp_path, web_path)
+    os.chmod(web_path, 0o644)
+    size_kb = os.path.getsize(web_path) // 1024
+    url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{safe_name}.{ext}"
+    return url, size_kb
+
+
+@app.get("/engine/docx/generate")
+def docx_generate(user_id: str = Query(""), title: str = Query(""), content: str = Query("[]"), filename: str = Query("")):
+    """Word 文档生成 — content 为 JSON 数组 [{type:'h1'|'h2'|'p'|'bullet', text:''}]"""
+    import json as _j, os as _os
+    try:
+        sections = _j.loads(content)
+    except Exception:
+        sections = []
+    if not sections and title:
+        sections = [{"type": "h1", "text": title}, {"type": "p", "text": ""}]
+    try:
+        from docx import Document
+        from docx.shared import Inches, Pt
+        doc = Document()
+        doc.styles['Normal'].font.size = Pt(11)
+        for sec in sections:
+            t = sec.get('text', '') if isinstance(sec, dict) else str(sec)
+            typ = sec.get('type', 'p') if isinstance(sec, dict) else 'p'
+            if typ in ('h1', 'heading1'): doc.add_heading(t, level=1)
+            elif typ in ('h2', 'heading2'): doc.add_heading(t, level=2)
+            elif typ in ('h3', 'heading3'): doc.add_heading(t, level=3)
+            elif typ == 'bullet':
+                for line in t.split('\n') if isinstance(t, str) else [t]:
+                    doc.add_paragraph(line, style='List Bullet')
+            else:
+                para = doc.add_paragraph(t)
+                if 'bold' in sec and sec['bold']:
+                    for run in para.runs: run.bold = True
+        safe = (filename or title or 'document').replace('/', '_').replace('\\', '_')[:60]
+        tmp = f"/tmp/{safe}.docx"
+        doc.save(tmp)
+        url, size = _doc_output(safe, 'docx')
+        return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ Word文档已生成\\n📥 {url}\\n📦 {size} KB"}
+    except ImportError as e:
+        return JSONResponse({"ok": False, "error": f"Word生成缺少依赖: {e}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Word生成失败: {e}"}, status_code=500)
+
+
+@app.get("/engine/xlsx/generate")
+def xlsx_generate(user_id: str = Query(""), title: str = Query("Sheet1"), rows: str = Query("[]"), headers: str = Query("[]"), filename: str = Query("")):
+    """Excel 表格生成 — rows 为 JSON 二维数组, headers 为 JSON 字符串数组"""
+    import json as _j, os as _os
+    try:
+        _rows = _j.loads(rows)
+        _headers = _j.loads(headers)
+    except Exception:
+        _rows, _headers = [], []
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        wb = Workbook()
+        ws = wb.active
+        ws.title = title or "Sheet1"
+        if _headers:
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF", size=11)
+            for ci, h in enumerate(_headers, 1):
+                cell = ws.cell(row=1, column=ci, value=h)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal='center')
+            start_row = 2
+        else:
+            start_row = 1
+        for ri, row in enumerate(_rows, start_row):
+            for ci, val in enumerate(row if isinstance(row, (list, tuple)) else [row], 1):
+                ws.cell(row=ri, column=ci, value=val)
+        # Auto-width
+        for col in ws.columns:
+            max_len = 0
+            for cell in col:
+                try: max_len = max(max_len, len(str(cell.value or '')))
+                except: pass
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 50)
+        safe = (filename or title or 'spreadsheet').replace('/', '_').replace('\\', '_')[:60]
+        tmp = f"/tmp/{safe}.xlsx"
+        wb.save(tmp)
+        url, size = _doc_output(safe, 'xlsx')
+        return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ Excel表格已生成\\n📥 {url}\\n📦 {size} KB | 行数: {len(_rows)}"}
+    except ImportError as e:
+        return JSONResponse({"ok": False, "error": f"Excel生成缺少依赖: {e}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Excel生成失败: {e}"}, status_code=500)
+
+
+@app.get("/engine/pdf/generate")
+def pdf_generate(user_id: str = Query(""), title: str = Query(""), content: str = Query("[]"), filename: str = Query("")):
+    """PDF 文档生成 — content 为 JSON 数组 [{type:'h1'|'p'|'bullet', text:''}]"""
+    import json as _j, os as _os
+    try:
+        sections = _j.loads(content)
+    except Exception:
+        sections = []
+    if not sections and title:
+        sections = [{"type": "h1", "text": title}, {"type": "p", "text": ""}]
+    try:
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        # Register Chinese font if available
+        _cn_fonts = {}
+        for _fp in ['/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+                     '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/truetype/arphic/uming.ttc']:
+            if _os.path.exists(_fp):
+                pdf.add_font('CN', '', _fp, uni=True)
+                pdf.add_font('CNB', '', _fp, uni=True)
+                _cn_fonts = {'': 'CN', 'B': 'CN'}
+                break
+        def _set_font(style='', size=10):
+            if _cn_fonts:
+                pdf.set_font('CN', style, size)
+            else:
+                pdf.set_font('Helvetica', style, size)
+        for sec in sections:
+            t = sec.get('text', '') if isinstance(sec, dict) else str(sec)
+            typ = sec.get('type', 'p') if isinstance(sec, dict) else 'p'
+            if typ in ('h1', 'heading1'):
+                _set_font('B', 18)
+                pdf.cell(0, 12, t, ln=True); pdf.ln(4)
+            elif typ in ('h2', 'heading2'):
+                _set_font('B', 14)
+                pdf.cell(0, 10, t, ln=True); pdf.ln(3)
+            elif typ == 'bullet':
+                _set_font('', 10)
+                for line in t.split('\n') if isinstance(t, str) else [t]:
+                    pdf.cell(8, 7, '•', ln=0)
+                    pdf.multi_cell(0, 7, line)
+            else:
+                _set_font('', 10)
+                pdf.multi_cell(0, 7, t); pdf.ln(2)
+        safe = (filename or title or 'document').replace('/', '_').replace('\\', '_')[:60]
+        tmp = f"/tmp/{safe}.pdf"
+        pdf.output(tmp)
+        url, size = _doc_output(safe, 'pdf')
+        return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ PDF文档已生成\\n📥 {url}\\n📦 {size} KB"}
+    except ImportError as e:
+        return JSONResponse({"ok": False, "error": f"PDF生成缺少依赖: {e}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"PDF生成失败: {e}"}, status_code=500)
+
 @app.post("/engine/video_edit")
 async def video_edit_endpoint(request: Request):
     """视频剪辑 HTTP 端点"""

@@ -1143,6 +1143,41 @@
                     }
                 }
                 // ★ 图片已添加到消息,立即保存到 localStorage 防止刷新丢失
+
+                // ★ 立即渲染图片为独立消息（不等完整回复结束）
+                try {
+                    var _imgContainer = document.querySelector('#chat-messages') || (typeof $ !== 'undefined' && $.chatMessagesContainer);
+                    if (_imgContainer && _imgUrlsFinal.length > 0) {
+                        _imgUrlsFinal.forEach(function(_imgSrc, _imgIdx) {
+                            var _imgRow = document.createElement('div');
+                            _imgRow.className = 'message-row assistant';
+                            _imgRow.setAttribute('data-gen-image', '1');
+                            var _imgBub = document.createElement('div');
+                            _imgBub.className = 'bubble assistant';
+                            _imgBub.style.cssText = 'text-align:center;padding:8px;';
+                            var _imgEl = document.createElement('img');
+                            _imgEl.src = _imgSrc;
+                            _imgEl.decoding = 'async';
+                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto;cursor:pointer;';
+                            _imgEl.onclick = function() { if (typeof showImageLightbox === 'function') showImageLightbox(_imgUrlsFinal, _imgIdx); };
+                            _imgEl.onerror = function() { this.style.display = 'none'; };
+                            _imgBub.appendChild(_imgEl);
+                            _imgRow.appendChild(_imgBub);
+                            _imgContainer.appendChild(_imgRow);
+                        });
+                        if (typeof $ !== 'undefined' && $.chatBox) { $.chatBox.scrollTop = $.chatBox.scrollHeight; }
+                    }
+                } catch(_giDomErr) { console.warn('[Image] standalone render failed:', _giDomErr.message); }
+
+                // ★ 立即清除图片生成占位蒙版和 loading 指示器
+                try {
+                    var _giBub = activeBubbleMap[chatId];
+                    if (_giBub) {
+                        var _giPh = _giBub.querySelector('#image-placeholder');
+                        if (_giPh) _giPh.remove();
+                        _giBub.classList.remove('typing');
+                    }
+                } catch(_giPhErr) {}
                 slimSaveChats();
                 toolResult = { result: '\u2705 ' + _imgUrlsFinal.length + '\u5f20\u56fe\u7247\u5df2\u751f\u6210' };
             } else {
@@ -1491,11 +1526,48 @@
                             if (func.name === 'bilibili_qr_login') {
                                 var _qrImg = res.qr_image_base64 || res.success_image || null;
                                 if (_qrImg) {
-                                    pendingMsg.generatedImage = _qrImg;
-                                    if (chats[chatId]) {
-                                        var _biliMI = chats[chatId].messages.findIndex(m => m === pendingMsg);
-                                        if (_biliMI !== -1) chats[chatId].messages[_biliMI].generatedImage = _qrImg;
+                                    // ★ base64不入pendingMsg(会被buildApiMessages塞进API请求, 浪费token)
+                                    // 仅存短URL供持久化
+                                    var _qrShort = res.qr_image_url || (res.qrcode_key ? 'bili_qr:' + res.qrcode_key : null);
+                                    if (_qrShort) {
+                                        pendingMsg._qrRef = _qrShort;
+                                        if (chats[chatId]) {
+                                            var _biliMI = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                            if (_biliMI !== -1) chats[chatId].messages[_biliMI]._qrRef = _qrShort;
+                                        }
                                     }
+                                    // ★ 立即渲染二维码为独立消息（不依赖气泡生命周期）
+                                    try {
+                                        // 直接在聊天容器中创建独立 QR 消息行
+                                        var _qrContainer = document.querySelector('#chat-messages') || (typeof $ !== 'undefined' && $.chatMessagesContainer);
+                                        if (_qrContainer) {
+                                            var _qrRow = document.createElement('div');
+                                            _qrRow.className = 'message-row assistant';
+                                            _qrRow.setAttribute('data-qr-login', '1');
+                                            // 移除旧 QR 消息
+                                            _qrContainer.querySelectorAll('[data-qr-login]').forEach(function(el) { el.remove(); });
+                                            var _qrBubbleWrap = document.createElement('div');
+                                            _qrBubbleWrap.className = 'bubble assistant';
+                                            _qrBubbleWrap.style.cssText = 'text-align:center;padding:12px;';
+                                            var _qrLabel = document.createElement('div');
+                                            _qrLabel.style.cssText = 'margin-bottom:8px;font-size:13px;color:var(--text-secondary,#666);';
+                                            _qrLabel.textContent = '📷 请用哔哩哔哩客户端扫描二维码登录';
+                                            var _qrImgEl = document.createElement('img');
+                                            _qrImgEl.src = _qrImg;
+                                            _qrImgEl.style.cssText = 'max-width:220px;width:100%;border-radius:10px;display:block;margin:0 auto;';
+                                            _qrImgEl.onclick = function() {
+                                                if (typeof showImageLightbox === 'function') showImageLightbox([_qrImg], 0);
+                                            };
+                                            _qrBubbleWrap.appendChild(_qrLabel);
+                                            _qrBubbleWrap.appendChild(_qrImgEl);
+                                            _qrRow.appendChild(_qrBubbleWrap);
+                                            _qrContainer.appendChild(_qrRow);
+                                            // 滚动到底部
+                                            if (typeof $ !== 'undefined' && $.chatBox) {
+                                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                            }
+                                        }
+                                    } catch(_qrDomErr2) { console.warn('[QR] 独立消息渲染失败:', _qrDomErr2.message); }
                                 }
                             }
                         });
@@ -1668,6 +1740,10 @@
                             toolResult = { error: '视频剪辑请求超时或失败: ' + (_veditErr.message || '未知错误') + '。请尝试缩小视频或降低分辨率后重试。' };
                         }
                     }
+                    // ★ 办公文档工具: 直接走 MCP
+                    if (/^generate_(ppt|docx|xlsx|pdf)$/.test(func.name) || /^cr_/.test(func.name) || func.name === 'video_understanding' || func.name === 'analyze_image' || func.name === 'rag_search' || func.name === 'plan_update' || func.name === 'delegate_task' || func.name === 'delegate_workflow' || func.name === 'ask_agent' || func.name === 'autonomous_mode' || func.name === 'toggle_proxy') {
+                        toolResult = await _mcpExecute(func.name, args);
+                    }
                     // ★ 通用 MCP fallback: 前端未知的工具统统转发到 MCP 服务器
                     if (!toolResult && func.name && !func.name.startsWith('mmx_')) {
                         toolResult = await _mcpExecute(func.name, args);
@@ -1685,11 +1761,13 @@
                 // ★ MCP 统一执行代理 — 通用 PHP→MCP 转发
                 async function _mcpExecute(toolName, args, onResult) {
                     var _mcpUrl = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat/api') + '/engine_api.php?action=mcp_proxy';
+                    // ★ 使用调用方传入的 abortSignal（如果存在），否则 120s 超时
+                    var _signal = (typeof abortSignal !== 'undefined' && abortSignal) ? abortSignal : AbortSignal.timeout(120000);
                     var _resp = await fetch(_mcpUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: toolName, arguments: args }),
-                        signal: AbortSignal.timeout(120000),
+                        signal: _signal,
                     });
                     var _data = await _resp.json();
                     if (_data.error) return { error: _data.error };

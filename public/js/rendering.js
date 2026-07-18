@@ -815,6 +815,19 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
                     if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
                 };
                 actions.appendChild(regenBtn);
+
+                // ★ "继续生成"按钮 — 让模型展开详述 (参考 desktop deepseek-chat)
+                var continueBtn = document.createElement('div');
+                continueBtn.className = 'msg-action-btn continue-btn';
+                continueBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/><line x1="12" y1="15" x2="12" y2="21"/></svg>';
+                continueBtn.title = '继续展开详述';
+                continueBtn.onclick = async (e) => {
+                    e.stopPropagation();
+                    if (typeof window.sendMessage === 'function') {
+                        await window.sendMessage(true, '请继续展开，提供更详细、更全面的回答。');
+                    }
+                };
+                actions.appendChild(continueBtn);
             } else {
                 // ★ 旧回复: 还原按钮 — 回到此位置，忽略之后的内容
                 var restoreBtn = document.createElement('div');

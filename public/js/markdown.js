@@ -89,15 +89,7 @@ function _flushStreamRender_batched(chatId, st) {
     try {
         // ★ 渲染 + 高亮: hljs.highlight() 字符串 API 不受 detached DOM 影响
         var _html = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
-        // ★ 链式输出：前置拼接已保存的 HTML（含分隔线）
-        var _chainMsg = chats[chatId] && chats[chatId].messages.find(function(m) { return m.partial && m._chainSavedHtml; });
-        if (_chainMsg && _chainMsg._chainSavedHtml) {
-            _html = _chainMsg._chainSavedHtml + _html;
-            if (st.lastRenderLen > 0 && _chainMsg._chainSegment > (st._chainRenderedSegment || 0)) {
-                st._chainRenderedSegment = _chainMsg._chainSegment;
-                st.lastRenderLen = 0;
-            }
-        }
+        // ★ 链式输出: 每轮独立气泡, 无需拼接旧 HTML
         mb.innerHTML = _html;
         // ★ 流式过程中不渲染 Mermaid — 保留为代码块，避免渲染中 SVG 突然撑大气泡导致页面抖动
         // 代码高亮正常执行，mermaid 块已被 :not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"]) 排除

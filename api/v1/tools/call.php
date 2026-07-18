@@ -117,7 +117,7 @@ switch ($toolName) {
             _exec_engine_proxy($engineToolMap[$toolName], $args, $engine_url, $userIdSafe);
         }
         // ★ B站工具 + 通用 MCP 代理: 转发到 MCP Server
-        elseif (str_starts_with($toolName, 'bilibili_') || str_starts_with($toolName, 'mmx_') || str_starts_with($toolName, 'win_') || str_starts_with($toolName, 'cr_') || str_starts_with($toolName, 'src_') || str_starts_with($toolName, 'chaoxing_') || in_array($toolName, ['generate_ppt','video_understanding','analyze_image','rag_search','plan_update','delegate_task','delegate_workflow','ask_agent','autonomous_mode','toggle_proxy'])) {
+        elseif (str_starts_with($toolName, 'bilibili_') || str_starts_with($toolName, 'mmx_') || str_starts_with($toolName, 'win_') || str_starts_with($toolName, 'cr_') || str_starts_with($toolName, 'src_') || str_starts_with($toolName, 'chaoxing_') || in_array($toolName, ['generate_ppt','generate_docx','generate_xlsx','generate_pdf','video_understanding','analyze_image','rag_search','plan_update','delegate_task','delegate_workflow','ask_agent','autonomous_mode','toggle_proxy'])) {
             $mcpEndpoint = str_starts_with($toolName, 'bilibili_') ? '/mcp/bilibili/tools/call' : '/mcp/api/tools/call';
             $mcpCtx = stream_context_create(['http' => [
                 'method' => 'POST',

@@ -307,6 +307,57 @@ setTimeout(function() {
     if (_toggle) _toggle.checked = window._chainMode;
 }, 500);
 
+// ★ 链式输出思考步骤可视化（参考 desktop deepseek-chat）
+window._showChainSteps = function(chatId, steps) {
+    // steps: [{text: '分析请求...', status: 'done'|'active'|'pending'}]
+    var bubble = activeBubbleMap[chatId];
+    if (!bubble) return;
+    var container = bubble.querySelector('.thinking-steps');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'thinking-steps';
+        var md = bubble.querySelector('.markdown-body');
+        if (md) md.insertBefore(container, md.firstChild);
+        else bubble.appendChild(container);
+    }
+    container.innerHTML = '';
+    steps.forEach(function(s) {
+        var step = document.createElement('div');
+        step.className = 'thinking-step ' + (s.status || 'pending');
+        var icon = s.status === 'done' ? '✅' : (s.status === 'active' ? '\u{1F504}' : '⏳');
+        step.innerHTML = '<span class="step-icon">' + icon + '</span>' + escapeHtml(s.text);
+        container.appendChild(step);
+    });
+    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
+};
+window._addChainStep = function(chatId, text) {
+    var bubble = activeBubbleMap[chatId];
+    if (!bubble) return;
+    var container = bubble.querySelector('.thinking-steps');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'thinking-steps';
+        var md = bubble.querySelector('.markdown-body');
+        if (md) md.insertBefore(container, md.firstChild);
+        else bubble.appendChild(container);
+    }
+    // 上一个 active → done
+    var steps = container.querySelectorAll('.thinking-step');
+    steps.forEach(function(s) { s.classList.remove('active'); s.classList.add('done'); s.querySelector('.step-icon').textContent = '✅'; });
+    // 新增 active 步骤
+    var newStep = document.createElement('div');
+    newStep.className = 'thinking-step active';
+    newStep.innerHTML = '<span class="step-icon">\u{1F504}</span>' + escapeHtml(text);
+    container.appendChild(newStep);
+    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
+};
+window._clearChainSteps = function(chatId) {
+    var bubble = activeBubbleMap[chatId];
+    if (!bubble) return;
+    var container = bubble.querySelector('.thinking-steps');
+    if (container) container.remove();
+};
+
 window.stopGeneration = function () {
     if (currentChatId) {
         stopGenerationForChat(currentChatId);
@@ -2431,27 +2482,52 @@ window.useAlternativeVisionModel = function() {
                                     } catch(e) {}
                                 }
                             }
-                            // 如果生成了图片,确保存入消息对象
+                            // ★ 如果生成了图片，立即渲染到当前气泡（不等回复结束）
                             if ((tc.function.name === 'generate_image' || tc.function.name === 'generate_image_i2i') && (pendingMsg.generatedImage || pendingMsg.generatedImages)) {
                                 var msgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
                                 if (msgIdx !== -1) {
                                     if (pendingMsg.generatedImage) chats[chatId].messages[msgIdx].generatedImage = pendingMsg.generatedImage;
-                                    if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages;
+                                    if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages.slice();
                                 }
-                            }
-                            // ★ B站扫码登录: 将QR图/成功反馈图注入消息末尾显示
-                            if (tc.function.name === 'bilibili_qr_login') {
-                                var _biliRes = null;
-                                try { _biliRes = typeof toolResult.result === 'string' ? JSON.parse(toolResult.result) : toolResult.result; } catch(e) {}
-                                if (_biliRes) {
-                                    var _qrImg = _biliRes.qr_image_base64 || _biliRes.success_image || null;
-                                    if (_qrImg) {
-                                        pendingMsg.generatedImage = _qrImg;
-                                        var _biliMsgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
-                                        if (_biliMsgIdx !== -1) chats[chatId].messages[_biliMsgIdx].generatedImage = _qrImg;
+                                // ★ 立即 DOM 渲染：链式模式下不等完整回复
+                                var _imgBubble = currentBubble || activeBubbleMap[chatId];
+                                if (_imgBubble && currentChatId === chatId) {
+                                    var _imgCont = _imgBubble.querySelector('.generated-images-container');
+                                    if (!_imgCont) {
+                                        _imgCont = document.createElement('div');
+                                        _imgCont.className = 'generated-images-container';
+                                        _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+                                        _imgBubble.appendChild(_imgCont);
                                     }
+                                    var _imgs = pendingMsg.generatedImages || (pendingMsg.generatedImage ? [pendingMsg.generatedImage] : []);
+                                    // 去重 DOM
+                                    var _domSrcs = new Set();
+                                    _imgCont.querySelectorAll('img').forEach(function(el) { _domSrcs.add(el.src); });
+                                    _imgs.forEach(function(_imgSrc, _idx) {
+                                        if (_domSrcs.has(_imgSrc)) return;
+                                        _domSrcs.add(_imgSrc);
+                                        setTimeout(function() {
+                                            var _wrap = document.createElement('div');
+                                            _wrap.style.cssText = 'position:relative;cursor:pointer;';
+                                            var _imgEl = document.createElement('img');
+                                            _imgEl.src = _imgSrc;
+                                            _imgEl.decoding = 'async';
+                                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:8px;display:block;';
+                                            _imgEl.setAttribute('loading', 'lazy');
+                                            _imgEl.addEventListener('click', function() {
+                                                var _allImgs = _imgs.map(function(s) { return s; });
+                                                if (typeof showImageLightbox === 'function') showImageLightbox(_allImgs, _idx);
+                                            });
+                                            _imgEl.onerror = function() { this.style.display = 'none'; };
+                                            _wrap.appendChild(_imgEl);
+                                            _imgCont.appendChild(_wrap);
+                                        }, _idx * 50);
+                                    });
+                                    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
                                 }
                             }
+                            // ★ B站扫码登录: QR已由tools-exec.js渲染为独立消息, 这里不重复处理
+                            // base64不入pendingMsg(避免被buildApiMessages塞进API请求浪费token)
                             // ★ 如果生成了音频/音乐,确保存入消息对象（持久化 & 刷新不丢）
                             if ((tc.function.name === 'mmx_speech' || tc.function.name === 'mmx_music') && pendingMsg._audioResults && pendingMsg._audioResults.length > 0) {
                                 var _aMsgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
@@ -2551,38 +2627,34 @@ window.useAlternativeVisionModel = function() {
                     }
                 }
 
-                // ★ 链式输出: 保留旧内容, 新内容追加到同一气泡(竖线分隔)
+                // ★ 链式输出: 每轮独立气泡（参考 desktop deepseek-chat）
                 if (window._chainMode && pendingMsg && (pendingMsg.content || pendingMsg.reasoning)) {
-                    // 1. 最终化当前渲染 → 插入分隔线 → 保存完整 HTML
+                    // 1. 最终化本轮消息 — 标记完成，保存内容
+                    delete pendingMsg.partial;
+                    pendingMsg._chainRound = (pendingMsg._chainRound || 1);
+                    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+
+                    // 2. 最终化当前气泡（不再追加内容）
                     if (currentChatId === chatId) {
                         var _bub = activeBubbleMap[chatId];
                         if (_bub) {
+                            _bub.classList.remove('typing');
                             var _md = _bub.querySelector('.markdown-body');
-                            if (_md) {
-                                // ★ 流式已完成, 直接保存当前innerHTML(不再重复全局渲染)
-                                // 追加链式分隔线
-                                var _sep = document.createElement('div');
-                                _sep.className = 'chain-separator';
-                                _md.appendChild(_sep);
-                                // 保存累积 HTML（旧内容 + 分隔线），后续流式渲染前置拼接
-                                pendingMsg._chainSavedHtml = _md.innerHTML;
-                            }
+                            if (_md) _triggerPostRender(_md);
                         }
+                        // ★ 创建新气泡用于下一轮流式输出
+                        var _newBubble = appendMessage('assistant', '', null, null, null, 0, false);
+                        if (_newBubble) _newBubble.classList.add('typing');
+                        activeBubbleMap[chatId] = _newBubble;
+                        setTimeout(function() { autoScrollToBottom('chain'); }, 30);
                     }
-                    // 2. 保存本轮内容，清空准备下一轮
-                    if (!pendingMsg._chainContents) pendingMsg._chainContents = [];
-                    pendingMsg._chainContents.push(pendingMsg.content || '');
-                    pendingMsg.content = '';
-                    pendingMsg.reasoning = '';
-                    // ★ 清除旧 tool_calls — 新轮次不应继承上一轮的 tool_calls
-                    // 但保留 _savedToolCalls 在对象上供 buildApiMessages 配对，仅标记为已处理
-                    if (pendingMsg.tool_calls) {
-                        pendingMsg._chainCompletedToolCalls = pendingMsg.tool_calls;
-                    }
-                    delete pendingMsg.tool_calls;
-                    pendingMsg._chainSegment = (pendingMsg._chainSegment || 0) + 1;
-                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
-                    if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
+
+                    // 3. 创建新的 pendingMsg 用于下一轮
+                    var _nextRound = (pendingMsg._chainRound || 1) + 1;
+                    var _newPending = { role: 'assistant', content: '', reasoning: '', partial: true, _chainRound: _nextRound };
+                    chats[chatId].messages.push(_newPending);
+                    pendingMsg = _newPending;
                 }
 
                 // ★ 重置前先杀死旧的 AbortController
@@ -2595,7 +2667,8 @@ window.useAlternativeVisionModel = function() {
                 window._activeRequestTimeoutId = newTimeoutId;
 
                 // ★ 清除 partial 标记(工具调用循环中 assistant 消息已完成)
-                delete pendingMsg.partial;
+                // 链式模式已在上面 block 中处理完毕，跳过避免破坏新 pendingMsg
+                if (!window._chainMode) delete pendingMsg.partial;
                 // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
                 body.messages = buildApiMessages(chatId);
                 // ★ Anthropic 格式: 重建后需重新转换 tool→user+tool_result
@@ -2608,6 +2681,10 @@ window.useAlternativeVisionModel = function() {
             }
 
             // 无工具调用,正常完成
+            // ★ 清除链式思考步骤
+            if (window._chainMode && currentChatId === chatId) {
+                window._clearChainSteps(chatId);
+            }
             delete pendingMsg.partial;
             // ★ 流结束释放滚动锁定
             streamingScrollLock = false;

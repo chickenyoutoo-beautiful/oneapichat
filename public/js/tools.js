@@ -1455,6 +1455,64 @@ const toolRegistry = (function() {
     searchHint: '开启/关闭网络代理',
   }));
 
+  // 图像
+  toolRegistry.register('generate_image', buildToolMeta('generate_image', {
+    capabilities: [ToolCapability.IMAGE_GENERATE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: 'AI图片生成',
+  }));
+  toolRegistry.register('generate_image_i2i', buildToolMeta('generate_image_i2i', {
+    capabilities: [ToolCapability.IMAGE_GENERATE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '图生图(参考图变体)',
+  }));
+  toolRegistry.register('analyze_image', buildToolMeta('analyze_image', {
+    capabilities: [ToolCapability.IMAGE_ANALYZE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '分析图片内容',
+  }));
+  // 视频
+  toolRegistry.register('video_understanding', buildToolMeta('video_understanding', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '分析视频内容',
+  }));
+  toolRegistry.register('video_edit', buildToolMeta('video_edit', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '视频剪辑处理',
+  }));
+  // 办公文档
+  toolRegistry.register('generate_ppt', buildToolMeta('generate_ppt', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '生成PPT演示文稿',
+  }));
+  toolRegistry.register('generate_docx', buildToolMeta('generate_docx', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '生成Word文档',
+  }));
+  toolRegistry.register('generate_xlsx', buildToolMeta('generate_xlsx', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '生成Excel表格',
+  }));
+  toolRegistry.register('generate_pdf', buildToolMeta('generate_pdf', {
+    capabilities: [],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '生成PDF文档',
+  }));
+
   console.log('[ToolRegistry] 已注册', Object.keys(toolRegistry.getAllToolNames()).length, '个工具');
 })();
 // ★ 高危工具(默认关闭) — 使用实际 toolName
@@ -1499,9 +1557,9 @@ window.setToolEnabled = function(toolKey, enabled) {
 // 渲染时从 toolRegistry.getAllToolNames() 动态拉取, 首个匹配的分类即为工具所属分类
 const _TOOL_CATEGORIES = [
     { label: '🔍 搜索与获取', match: n => /^(web_search|web_fetch|platform_extract|rag_search)$/.test(n) },
-    { label: '🎨 图像',       match: n => /^(generate_image|analyze_image)/.test(n) },
+    { label: '🎨 图像',       match: n => /^(generate_image|generate_image_i2i|analyze_image)/.test(n) },
     { label: '📺 B站',        match: n => n.startsWith('bilibili_') },
-    { label: '📊 PPT',        match: n => n === 'generate_ppt' },
+    { label: '📊 办公文档',    match: n => /^generate_(ppt|docx|xlsx|pdf)$/.test(n) },
     { label: '🎬 视频',       match: n => /^(video_understanding|video_edit)$/.test(n) },
     { label: '📚 刷课',       match: n => n.startsWith('chaoxing_') && !n.includes('exam') },
     { label: '📝 考试',       match: n => n.startsWith('chaoxing_exam') },
@@ -1542,7 +1600,7 @@ window.resolveToolCategories = function() {
 // ── 工具中文标签 ──
 const _TOOL_LABELS = {
     'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索',
-    'generate_image':'图片生成','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑','generate_ppt':'PPT生成',
+    'generate_image':'图片生成','generate_image_i2i':'图生图','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑','generate_ppt':'PPT生成','generate_docx':'Word文档','generate_xlsx':'Excel表格','generate_pdf':'PDF文档',
     'chaoxing_login':'超星登录','chaoxing_list_courses':'课程列表','chaoxing_auto':'刷课执行','chaoxing_status':'刷课状态','chaoxing_stop':'停止刷课','chaoxing_stats':'刷课统计','chaoxing_overview':'超星总览',
     'chaoxing_auth':'考试登录','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',
     'server_exec':'命令执行','server_python':'Python执行','server_file_read':'文件读取','server_file_write':'文件写入','server_file_edit':'精确编辑','server_file_grep':'内容搜索','server_sys_info':'系统信息','server_ps':'进程列表','server_disk':'磁盘信息','server_network':'网络状态','server_docker':'Docker','server_db_query':'数据库','server_file_search':'文件搜索','server_file_op':'文件操作',
