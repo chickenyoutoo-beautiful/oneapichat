@@ -293,10 +293,10 @@ def agent_create(
     # 验证角色名
     if role not in AGENT_ROLES:
         role = "general"
-    # ★ 注入当前时间到 prompt,让子代理知道真实时间,避免搜出过时信息
-    now_cn = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    # ★ 注入当前日期到 prompt,让子代理知道真实时间,避免搜出过时信息
+    now_cn = datetime.now().strftime("%Y年%m月%d日")
     tz_str = "Asia/Shanghai (UTC+8)"
-    time_tag = f"\n\n[系统] 当前真实时间: {now_cn} (时区: {tz_str}), 所有搜索关键词应包含最新年份日期。"
+    time_tag = f"\n\n[系统] 当前日期: {now_cn} (时区: {tz_str}), 所有搜索关键词应包含最新年份日期。"
     agent_data = {
         "name": name,
         "prompt": prompt + time_tag,

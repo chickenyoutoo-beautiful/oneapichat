@@ -871,6 +871,11 @@ function initializeApp() {
         // ★ 从服务器恢复当前账号的配置和聊天记录(登录用户专用)
         await restoreUserData();
 
+        // ★ 预加载技能列表
+        if (typeof window.loadSkills === 'function') {
+            window.loadSkills().catch(function() {});
+        }
+
         // ★ 初始化 _currentProvider (页面加载时不会触发 onProviderChange)
         _currentProvider = localStorage.getItem('baseUrlProvider') || 'custom';
 

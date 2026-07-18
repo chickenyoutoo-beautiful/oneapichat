@@ -131,6 +131,16 @@ $stream = !empty($body['stream']);
 $tools = $body['tools'] ?? null;
 $toolChoice = $body['tool_choice'] ?? null;
 
+// ★ 过滤客户端传入的 tools（也防止 schema 问题导致 Provider 拒绝）
+if ($tools) {
+    $tools = array_values(array_filter($tools, function($t) {
+        $fn = $t['function'] ?? $t;
+        $params = $fn['parameters'] ?? null;
+        return is_array($params) && !empty($params['type']) && $params['type'] === 'object';
+    }));
+    if (empty($tools)) $tools = null;
+}
+
 // ★ 自动注入工具：如果客户端没传 tools，从引擎加载全部可用工具
 if (empty($tools) && !isset($body['tools'])) {
     $engineToolsJson = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, stream_context_create(['http' => ['timeout' => 3, 'ignore_errors' => true]]));
@@ -143,15 +153,10 @@ if (empty($tools) && !isset($body['tools'])) {
                 if (!is_array($t) || empty($t['name'])) continue;
                 // ★ PHP json_decode 把 {} 转成 []，必须检查有效性
                 $schema = $t['input_schema'] ?? $t['parameters'] ?? null;
-                if (!is_array($schema) || empty($schema['type'])) {
-                    $schema = ['type' => 'object', 'properties' => new stdClass(), 'required' => []];
+                if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) {
+                    continue; // 跳过空 schema 的工具（Provider 拒绝 properties: {}）
                 }
-                if (!isset($schema['properties']) || !is_array($schema['properties'])) {
-                    $schema['properties'] = new stdClass();
-                }
-                if (!isset($schema['required'])) {
-                    $schema['required'] = [];
-                }
+                if (empty($schema['required'])) unset($schema['required']);
                 $tools[] = [
                     'type' => 'function',
                     'function' => [
@@ -300,13 +305,25 @@ function _sendNonStream($ch): void {
         exit;
     }
 
-    header('Content-Type: application/json; charset=utf-8');
-    if ($httpCode >= 200 && $httpCode < 300) {
-        echo $resp;
-    } else {
-        http_response_code($httpCode >= 400 ? $httpCode : 500);
-        echo $resp;
+    // ★ 检测 Provider 错误（有些 Provider 用 200 返回错误 JSON）
+    $parsed = json_decode($resp, true);
+    if ($parsed && isset($parsed['error'])) {
+        $errMsg = is_string($parsed['error']) ? $parsed['error'] : ($parsed['error']['message'] ?? 'Provider error');
+        $errType = $parsed['error']['type'] ?? 'server_error';
+        if (stripos($errMsg, 'invalid schema') !== false || $errType === 'invalid_request_error') {
+            http_response_code(400);
+        } elseif (stripos($errMsg, 'auth') !== false || $errType === 'authentication_error') {
+            http_response_code(401);
+        } elseif (stripos($errMsg, 'rate') !== false || $errType === 'rate_limit_error') {
+            http_response_code(429);
+        } else {
+            http_response_code(500);
+        }
+    } elseif ($httpCode >= 400) {
+        http_response_code($httpCode);
     }
+    header('Content-Type: application/json; charset=utf-8');
+    echo $resp;
     exit;
 }
 
@@ -317,6 +334,44 @@ function _sendStream($ch): void {
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
     header('X-Accel-Buffering: no');
+
+    // ★ 缓冲前几字节检测非流式错误
+    $buffer = '';
+    $checked = false;
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => false,
+        CURLOPT_TIMEOUT => 600,
+        CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$buffer, &$checked) {
+            if (!$checked) {
+                $buffer .= $data;
+                // 前 200 字节内检测是否为 SSE 格式
+                if (strlen($buffer) > 200 || str_contains($buffer, "\n\n")) {
+                    $checked = true;
+                    if (!str_starts_with(trim($buffer), 'data:')) {
+                        // 非 SSE — Provider 返回了 JSON 错误
+                        $parsed = json_decode(trim($buffer), true);
+                        if ($parsed && isset($parsed['error'])) {
+                            $errType = $parsed['error']['type'] ?? 'server_error';
+                            if (stripos(json_encode($parsed['error']), 'invalid schema') !== false || $errType === 'invalid_request_error') {
+                                http_response_code(400);
+                            } elseif (stripos(json_encode($parsed['error']), 'auth') !== false || $errType === 'authentication_error') {
+                                http_response_code(401);
+                            }
+                        }
+                        echo $buffer;
+                        return strlen($data);
+                    }
+                    echo $buffer;
+                    ob_flush(); flush();
+                    return strlen($data);
+                }
+                // 还在缓冲中，不输出
+                return strlen($data);
+            }
+            echo $data; ob_flush(); flush();
+            return strlen($data);
+        },
+    ]);
 
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => false,

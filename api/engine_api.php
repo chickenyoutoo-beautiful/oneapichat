@@ -96,7 +96,7 @@ if (!empty($authToken)) {
 $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
 
 // ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开接口）
-if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search' && $action !== 'search_proxy') {
+if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search' && $action !== 'search_proxy' && $action !== 'mcp_proxy') {
     http_response_code(401);
     echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
@@ -755,6 +755,28 @@ switch ($action) {
         $tsResp = file_get_contents('https://api.tavily.com/search', false, $tsCtx);
         if ($tsResp === false) { echo json_encode(['error' => 'Tavily API 请求失败']); exit; }
         echo $tsResp;
+        break;
+
+    case 'mcp_proxy':
+        // ★ 通用 MCP 工具代理 — 所有 MCP 工具统一入口
+        // 浏览器无法直连 127.0.0.1:18788, PHP 内部转发
+        $mp_input = json_decode(file_get_contents('php://input'), true);
+        $mp_name = $mp_input['name'] ?? '';
+        $mp_args = $mp_input['arguments'] ?? (object)[];
+        if (!$mp_name) { echo json_encode(['error' => '缺少 tool name']); exit; }
+        // 按前缀路由到 MCP 子端点
+        $mp_endpoint = str_starts_with($mp_name, 'bilibili_') ? '/mcp/bilibili/tools/call' : '/mcp/api/tools/call';
+        $mp_ctx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => json_encode(['name' => $mp_name, 'arguments' => $mp_args], JSON_UNESCAPED_UNICODE),
+            'timeout' => 120,
+            'ignore_errors' => true,
+        ]]);
+        $mp_resp = file_get_contents('http://127.0.0.1:18788' . $mp_endpoint, false, $mp_ctx);
+        if ($mp_resp === false) { echo json_encode(['error' => 'MCP 服务不可达']); exit; }
+        header('Content-Type: application/json; charset=utf-8');
+        echo $mp_resp;
         break;
 
     case 'push_file':

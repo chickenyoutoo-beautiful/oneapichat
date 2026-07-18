@@ -1485,6 +1485,20 @@
                                 toolResult = { result: r };
                             }
                         }
+                    } else if (func.name.startsWith('bilibili_')) {
+                        // ★ B站工具: 通过 MCP 统一代理
+                        toolResult = await _mcpExecute(func.name, args, function(res) {
+                            if (func.name === 'bilibili_qr_login') {
+                                var _qrImg = res.qr_image_base64 || res.success_image || null;
+                                if (_qrImg) {
+                                    pendingMsg.generatedImage = _qrImg;
+                                    if (chats[chatId]) {
+                                        var _biliMI = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                        if (_biliMI !== -1) chats[chatId].messages[_biliMI].generatedImage = _qrImg;
+                                    }
+                                }
+                            }
+                        });
                     } else if (func.name.startsWith('mmx_')) {
                         // MiniMax CLI 工具：mmx_chat/mmx_image/mmx_video/mmx_speech/mmx_voices/mmx_music/mmx_vision/mmx_quota
                         var _mmxCmd = func.name.replace('mmx_', '');
@@ -1654,6 +1668,10 @@
                             toolResult = { error: '视频剪辑请求超时或失败: ' + (_veditErr.message || '未知错误') + '。请尝试缩小视频或降低分辨率后重试。' };
                         }
                     }
+                    // ★ 通用 MCP fallback: 前端未知的工具统统转发到 MCP 服务器
+                    if (!toolResult && func.name && !func.name.startsWith('mmx_')) {
+                        toolResult = await _mcpExecute(func.name, args);
+                    }
                     // ★ 反截断: 结果含长URL时追加提示
                     if (toolResult && toolResult.result) {
                         var _rt = String(toolResult.result);
@@ -1662,5 +1680,24 @@
                         }
                     }
                     return toolResult;
+                }
+
+                // ★ MCP 统一执行代理 — 通用 PHP→MCP 转发
+                async function _mcpExecute(toolName, args, onResult) {
+                    var _mcpUrl = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat/api') + '/engine_api.php?action=mcp_proxy';
+                    var _resp = await fetch(_mcpUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: toolName, arguments: args }),
+                        signal: AbortSignal.timeout(120000),
+                    });
+                    var _data = await _resp.json();
+                    if (_data.error) return { error: _data.error };
+                    var _res = _data.result;
+                    if (typeof onResult === 'function') onResult(_res);
+                    if (typeof _res === 'object') {
+                        return { result: JSON.stringify(_res, null, 2), _mcpRaw: _res };
+                    }
+                    return { result: String(_res) };
                 }
 

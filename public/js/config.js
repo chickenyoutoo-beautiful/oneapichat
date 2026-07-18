@@ -272,30 +272,121 @@ const usageVisualizer = {
 // ==================== 工具/技能启用开关管理 ====================
 // 默认禁用列表(高危工具默认关)
 
+// ★ SVG 图标工厂 (Feather-style 24x24 stroke)
+function _icon(name, cls) {
+    cls = cls || 'w-4 h-4';
+    var icons = {
+        brain: '<path d="M12 2a4 4 0 0 1 4 4c0 1.1-.4 2.1-1.2 2.8l-.8.8V12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V9.6l-.8-.8A4 4 0 0 1 12 2z"/><path d="M12 2c-2.2 0-4 1.8-4 4 0 .9.3 1.8.9 2.5"/><path d="M8 15v-1a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1"/><path d="M10 19v-2h4v2"/><circle cx="12" cy="6" r="1"/>',
+        wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+        search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+        image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+        tv: '<rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>',
+        book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+        server: '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+        cpu: '<rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>',
+        cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/>',
+        edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+        monitor: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+        globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+        users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+        clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+        file: '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>',
+        play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+        zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+        lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+        folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+        credit: '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
+        gamepad: '<line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/>',
+        chevron: '<polyline points="9 18 15 12 9 6"/>',
+        box: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
+    };
+    return '<svg class="' + cls + '" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (icons[name] || '') + '</svg>';
+}
+
+// Skill → icon mapping
+function _skillIcon(skillName) {
+    var map = {
+        'bilibili-content-discovery': 'tv', 'game-redemption-codes': 'gamepad',
+        'chaoxing-automation': 'book', 'web-research': 'globe', 'deep-search': 'search',
+        'server-management': 'server', 'content-creation': 'image',
+        'cloud-file-manager': 'cloud', 'multi-agent-orchestration': 'users',
+        'windows-automation': 'monitor', 'browser-automation': 'globe',
+    };
+    return _icon(map[skillName] || 'box', 'skill-icon');
+}
+
 // ── 动态渲染工具面板 ──
 window.renderToolPanel = function() {
     var container = document.getElementById('toolToggleContainer');
     if (!container) return;
-    var existingRows = container.querySelectorAll('.tool-toggle-row.dynamic, .tools-category-label.dynamic');
+    var existingRows = container.querySelectorAll('.skill-card, .tools-category-section.dynamic');
     existingRows.forEach(function(r) { r.remove(); });
 
     var customSkillsEl = document.getElementById('customSkillsList');
-    let rendered = ''
     var _agentOn = isAgentToolsActive();
+    var _cats = (typeof window.resolveToolCategories === 'function')
+        ? window.resolveToolCategories()
+        : (typeof _TOOL_CATEGORIES !== 'undefined' ? _TOOL_CATEGORIES : []);
 
-    var _cats = _TOOL_CATEGORIES;
+    var rendered = '';
+    // Track used tool keys (already shown via categories)
+    var _usedKeys = new Set();
 
-    _cats.forEach(function(cat) {
+    // ═══════════════════════════════════════
+    // Section 1: Skills (突出显示)
+    // ═══════════════════════════════════════
+    rendered += '<div class="skills-section-header">' + _icon('brain', 'skill-section-icon') + ' 技能 (Skills)</div>';
+    rendered += '<div class="skills-section-desc">AI 自动匹配并指导何时用何工具</div>';
+
+    if (window._skillsCache && window._skillsCache.length > 0) {
+        window._skillsCache.forEach(function(skill) {
+            var desc = skill.description || '';
+            var key = 'SKILL_' + skill.name;
+            var checked = window.isToolEnabled(key) ? ' checked' : '';
+            rendered += '<div class="skill-card">';
+            rendered += '<div class="skill-card-left">' + _skillIcon(skill.name) + '</div>';
+            rendered += '<div class="skill-card-body">';
+            rendered += '<div class="skill-card-name">' + skill.name.replace(/-/g, ' ') + '</div>';
+            rendered += '<div class="skill-card-desc">' + desc + '</div>';
+            rendered += '</div>';
+            rendered += '<label class="switch small"><input type="checkbox" id="skill_enabled_' + skill.name + '" data-toolkey="' + key + '"' + checked + '><span class="slider"></span></label>';
+            rendered += '</div>';
+        });
+    } else {
+        rendered += '<div class="skill-card muted">加载技能中...</div>';
+    }
+
+    // ═══════════════════════════════════════
+    // Section 2: Tools (分类折叠)
+    // ═══════════════════════════════════════
+    rendered += '<div class="tools-section-header" style="margin-top:16px;">' + _icon('wrench', 'skill-section-icon') + ' 工具 (Tools)</div>';
+
+    _cats.forEach(function(cat, catIdx) {
+        var _keys = cat.keys;
+        if (!_keys || _keys.length === 0) return;
+        _keys.forEach(function(k) { _usedKeys.add(k); });
+
         var _disabled = cat.agentOnly && !_agentOn;
-        if (_disabled) {
-            rendered += '<div class="tools-category-label dynamic" style="opacity:0.4;">' + cat.label + ' <span style="font-size:10px;color:#f59e0b;">🔒Agent</span></div>';
-        } else {
-            rendered += '<div class="tools-category-label dynamic">' + cat.label + '</div>';
-        }
-        cat.keys.forEach(function(key) {
-            // 标签：优先用 _TOOL_LABELS，其次用 key 自身
-            var label = (typeof _TOOL_LABELS !== 'undefined' ? _TOOL_LABELS[key] : null) || key.replace(/_/g, ' ');
-            var isDanger = (key.indexOf('SERVER_EXEC') >= 0 || key.indexOf('SERVER_PYTHON') >= 0 || key.indexOf('SERVER_FILE_WRITE') >= 0 || key.indexOf('SERVER_DOCKER') >= 0 || key.indexOf('SERVER_DB') >= 0 || key.indexOf('SERVER_FILE_OP') >= 0 || key.indexOf('CRON_CREATE') >= 0 || key.indexOf('CRON_DELETE') >= 0 || key.indexOf('AGENT_DELETE') >= 0);
+        var _enabledCount = _keys.filter(function(k) { return window.isToolEnabled(k); }).length;
+        var catId = 'cat_' + catIdx;
+
+        // Category header bar (collapsible)
+        rendered += '<div class="tools-category-section dynamic' + (_disabled ? ' tool-disabled' : '') + '">';
+        rendered += '<div class="tools-cat-header" onclick="var s=document.getElementById(\'' + catId + '\');var a=this.querySelector(\'.cat-arrow\');if(s){s.classList.toggle(\'collapsed\');a.classList.toggle(\'rotated\');}">';
+        rendered += '<span class="cat-arrow">' + _icon('chevron', 'cat-chevron-icon') + '</span> ';
+        rendered += '<span class="tools-cat-label">' + cat.label + '</span>';
+        rendered += '<span class="tools-cat-count">' + _enabledCount + '/' + _keys.length + '</span>';
+        if (_disabled) rendered += ' <span class="cat-lock-icon">' + _icon('lock', '') + '</span>';
+        rendered += '</div>';
+
+        // Tool rows (collapsed by default)
+        rendered += '<div id="' + catId + '" class="tools-cat-body collapsed">';
+        _keys.forEach(function(key) {
+            var label = (typeof _TOOL_LABELS !== 'undefined' ? _TOOL_LABELS[key] : null)
+                || (typeof toolRegistry !== 'undefined' && toolRegistry.getSearchHint ? toolRegistry.getSearchHint(key) : '')
+                || key.replace(/_/g, ' ');
+            var _meta = (typeof toolRegistry !== 'undefined' ? toolRegistry.get(key) : null);
+            var isDanger = _meta ? !_meta.isReadOnly : false;
             var warnClass = isDanger ? ' tool-warn' : '';
             var checked = window.isToolEnabled(key) ? ' checked' : '';
             var disabledAttr = _disabled ? ' disabled' : '';
@@ -304,21 +395,25 @@ window.renderToolPanel = function() {
             rendered += '<label class="switch small"><input type="checkbox" id="tool_enabled_' + key + '" data-toolkey="' + key + '"' + checked + disabledAttr + '><span class="slider"></span></label>';
             rendered += '</div>';
         });
+        rendered += '</div></div>';
     });
 
-    // 插入到自定义技能区域之前
+    // Insert
     if (customSkillsEl) {
         customSkillsEl.insertAdjacentHTML('beforebegin', rendered);
     } else {
         container.insertAdjacentHTML('beforeend', rendered);
     }
 
-    // 绑定事件
     if (typeof bindToolToggleEvents === 'function') bindToolToggleEvents();
     window.updateToolsActiveCount();
 };
 
-window.loadToolToggleStates = function() {
+window.loadToolToggleStates = async function() {
+    // ★ 预加载技能列表后再渲染面板
+    if (typeof window.loadSkills === 'function') {
+        try { await window.loadSkills(); } catch(e) {}
+    }
     // 动态渲染工具面板
     window.renderToolPanel();
     // 自定义技能绑定

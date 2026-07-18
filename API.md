@@ -30,8 +30,10 @@ Authorization: Bearer <your-api-key>
 |------|------|:--:|------|
 | `/chat/completions` | POST | ✅ | 对话补全（流式/非流式/函数调用） |
 | `/models` | GET | ✅ | 可用模型列表 |
-| `/tools` | GET | ✅ | 内置工具定义列表 |
-| `/tools/call` | POST | ✅ | 执行内置工具 |
+| `/tools` | GET | ✅ | 内置工具定义列表（50+ tools） |
+| `/tools/call` | POST | ✅ | 执行工具（B站/搜索/引擎/MMX） |
+| `/conversations` | GET/POST/DELETE | ✅ | 对话历史同步 |
+| `/skills_api.php` | GET | ❌ | 技能系统（match/list/get） |
 
 ---
 
@@ -567,6 +569,66 @@ async function chatWithTools(messages, model = "deepseek-chat") {
 
 ---
 
+## B站工具
+
+所有工具可通过 `POST /tools/call` 调用，也支持通过 MCP 协议（`/mcp/bilibili/tools/call`）：
+
+| 工具名 | 功能 | 参数 |
+|--------|------|------|
+| `bilibili_search` | 综合搜索B站内容 | `keyword`, `search_type`, `limit` |
+| `bilibili_video_info` | 视频详情(标题/UP主/播放/弹幕) | `bvid` |
+| `bilibili_article_read` | 专栏文章全文 | `cvid` |
+| `bilibili_user_profile` | 用户主页(昵称/粉丝/投稿) | `uid` |
+| `bilibili_comment_list` | 视频/专栏评论 | `oid`, `type`, `limit` |
+| `bilibili_dynamic_list` | 动态流(需Cookie登录) | `uid`, `limit` |
+| `bilibili_qr_login` | 扫码登录(获取Cookie) | `action` (check/qr/poll/auto) |
+
+```bash
+# B站搜索示例
+curl -X POST https://naujtrats.xyz/oneapichat/api/v1/tools/call \
+  -H "Authorization: Bearer oac-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"bilibili_search","arguments":{"keyword":"Python教程","limit":3}}'
+```
+
+## 技能系统 (Skills)
+
+系统内置 **11 个 AI 技能**，自动根据用户问题匹配并指导模型调用工具。ClawHub 兼容格式（`skills/<name>/SKILL.md`）。
+
+| 技能 | 触发场景 | 核心工具 |
+|------|---------|----------|
+| `deep-search` | 深度/多源搜索 | web_search, bilibili_search, web_fetch |
+| `multi-agent-orchestration` | 复杂并行任务 | plan_update, delegate_task, engine_agent_* |
+| `chaoxing-automation` | 超星刷课考试 | chaoxing_auto, chaoxing_status 等14个 |
+| `content-creation` | 图片/PPT/视频创作 | generate_image, generate_ppt, video_edit |
+| `server-management` | 服务器运维 | server_exec, server_docker 等15个 |
+| `cloud-file-manager` | 云盘文件管理 | cr_list_files, cr_search_files 等14个 |
+| `bilibili-content-discovery` | B站内容推荐 | bilibili_search, bilibili_video_info |
+| `game-redemption-codes` | 游戏兑换码 | bilibili_search(优先), web_search |
+| `windows-automation` | Windows远程控制 | win_* 7个工具 |
+| `browser-automation` | 浏览器自动操作 | browser_* 6个工具 |
+| `web-research` | 网络调研 | web_search, web_fetch |
+
+```bash
+# 技能匹配
+curl "https://naujtrats.xyz/oneapichat/api/skills_api.php?action=match&query=原神兑换码"
+# → {"matched":[{"name":"game-redemption-codes","score":10,...}]}
+```
+
+## MCP 协议
+
+MCP Server（端口 18788）统一管理 **51 个工具**，REST API 通过 `mcp_proxy` 代理转发。
+
+| MCP 端点 | 功能 |
+|----------|------|
+| `GET /mcp/api/tools` | 全部工具列表（51 tools） |
+| `POST /mcp/api/tools/call` | 通用工具执行 |
+| `GET /mcp/bilibili/tools` | B站工具列表 |
+| `POST /mcp/bilibili/tools/call` | B站工具执行 |
+
+---
+
 ## 更新日志
 
+- **2026-07-19**: 🎯 技能系统（11 skills, ClawHub兼容）+ 📺 B站7工具 + 🔧 MCP统一51工具 + 🎨 SVG图标面板
 - **2026-07-17**: 初始版本 — `/v1/chat/completions`（流式 + 非流式 + 函数调用）、`/v1/models`、`/v1/tools`、`/v1/tools/call`（工具执行）、`/mcp/api/tools`（MCP 适配）、Nginx 清洁 URL

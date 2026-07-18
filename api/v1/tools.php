@@ -163,14 +163,15 @@ if ($engineResp) {
             // ★ 修复空 schema：PHP json_decode('{}') → []，必须检查
             $schema = $t['input_schema'] ?? $t['parameters'] ?? [];
             if (!is_array($schema) || empty($schema['type'])) {
-                $schema = ['type' => 'object', 'properties' => new stdClass(), 'required' => []];
+                // 没有有效 schema 的工具：跳过（Provider 拒绝 properties: {}）
+                continue;
             }
-            if (!isset($schema['properties']) || !is_array($schema['properties'])) {
-                $schema['properties'] = new stdClass();
+            // 确保 properties 存在且非空
+            if (empty($schema['properties']) || !is_array($schema['properties'])) {
+                continue; // 空 schema 的工具跳过
             }
-            if (!isset($schema['required'])) {
-                $schema['required'] = [];
-            }
+            // 清理 required（空数组会被某些 Provider 拒绝）
+            if (empty($schema['required'])) unset($schema['required']);
             $tools[] = [
                 'type' => 'function',
                 'function' => [

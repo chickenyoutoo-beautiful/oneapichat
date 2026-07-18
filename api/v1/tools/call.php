@@ -112,11 +112,34 @@ switch ($toolName) {
         _exec_push_file($args);
         break;
     default:
+        // ★ 先检查引擎工具映射
         if (isset($engineToolMap[$toolName])) {
             _exec_engine_proxy($engineToolMap[$toolName], $args, $engine_url, $userIdSafe);
+        }
+        // ★ B站工具 + 通用 MCP 代理: 转发到 MCP Server
+        elseif (str_starts_with($toolName, 'bilibili_') || str_starts_with($toolName, 'mmx_') || str_starts_with($toolName, 'win_') || str_starts_with($toolName, 'cr_') || str_starts_with($toolName, 'src_') || str_starts_with($toolName, 'chaoxing_') || in_array($toolName, ['generate_ppt','video_understanding','analyze_image','rag_search','plan_update','delegate_task','delegate_workflow','ask_agent','autonomous_mode','toggle_proxy'])) {
+            $mcpEndpoint = str_starts_with($toolName, 'bilibili_') ? '/mcp/bilibili/tools/call' : '/mcp/api/tools/call';
+            $mcpCtx = stream_context_create(['http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => json_encode(['name' => $toolName, 'arguments' => $args], JSON_UNESCAPED_UNICODE),
+                'timeout' => 120,
+                'ignore_errors' => true,
+            ]]);
+            $mcpResp = file_get_contents('http://127.0.0.1:18788' . $mcpEndpoint, false, $mcpCtx);
+            if ($mcpResp === false) {
+                http_response_code(502);
+                echo json_encode(['error' => 'MCP 服务不可达']);
+            } else {
+                $mcpData = json_decode($mcpResp, true);
+                if (isset($mcpData['error'])) {
+                    echo json_encode(['error' => $mcpData['error']]);
+                } else {
+                    echo json_encode(['result' => $mcpData['result'] ?? $mcpData]);
+                }
+            }
         } else {
             http_response_code(400);
-            // List available tools
             $all = array_merge(['web_search','web_fetch','generate_image','engine_push'], array_keys($engineToolMap));
             echo json_encode(['error' => 'Unknown tool: ' . $toolName, 'available' => $all]);
         }
@@ -386,8 +409,7 @@ function _exec_generate_image(array $args, array $config): void {
     $imageBaseUrl = $config['imageBaseUrl'] ?? '';
 
     if ($imageProvider === 'minimax' || empty($imageProvider)) {
-        // Use MiniMax mmx CLI
-        $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
+        // ★ 方案 1: 直接用 MiniMax API（避免 CLI 权限问题）
         $mmxConfig = @json_decode(@file_get_contents(ONECHAT_ROOT . '/config/.mmx_config.json'), true);
         $mmxKey = $imageKey ?: ($mmxConfig['api_key'] ?? '');
         if (empty($mmxKey)) {
@@ -396,29 +418,87 @@ function _exec_generate_image(array $args, array $config): void {
             exit;
         }
 
-        $isolatedHome = sys_get_temp_dir() . '/mmx_img_' . getmypid() . '_' . bin2hex(random_bytes(8));
-        @mkdir($isolatedHome, 0700, true);
-        $cmd = 'HOME=' . escapeshellarg($isolatedHome) . ' ' . escapeshellcmd($mmxBin)
-            . ' image generate --prompt ' . escapeshellarg($prompt)
-            . ' --api-key ' . escapeshellarg($mmxKey)
-            . ' --region cn --non-interactive --output json 2>&1';
+        // 直接调用 MiniMax image generation API
+        $apiBody = json_encode([
+            'model' => 'image-01',
+            'prompt' => $prompt,
+            'n' => 1,
+            'response_format' => 'url',
+        ]);
 
-        $output = shell_exec($cmd);
-        if ($isolatedHome && is_dir($isolatedHome)) {
-            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($isolatedHome, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
-                $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+        $ch = curl_init('https://api.minimaxi.com/v1/image_generation');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $apiBody,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $mmxKey,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 10,
+        ]);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($err || $resp === false) {
+            // 回退到 CLI
+            _exec_generate_image_cli($prompt, $mmxKey);
+            return;
+        }
+
+        $data = json_decode($resp, true);
+        if ($data && !empty($data['data'])) {
+            // MiniMax 返回格式: {"data":{"image_urls":["http://..."]}}
+            $urls = $data['data']['image_urls'] ?? [];
+            if (!empty($urls)) {
+                echo json_encode(['images' => $urls, 'status' => 'ok', 'provider' => 'minimax']);
+                return;
             }
-            @rmdir($isolatedHome);
         }
 
-        $parsed = json_decode($output, true);
-        if ($parsed && !empty($parsed['urls'])) {
-            echo json_encode(['images' => $parsed['urls'], 'status' => 'ok', 'provider' => 'minimax']);
-        } else {
-            echo json_encode(['error' => 'Image generation failed', 'raw' => $output]);
-        }
+        // API 失败，回退到 CLI
+        _exec_generate_image_cli($prompt, $mmxKey);
         return;
     }
 
     echo json_encode(['error' => 'Image provider not supported: ' . $imageProvider]);
+}
+
+// ═══════════════════════════════════════════════════════
+// CLI 回退 — 权限修复版
+// ═══════════════════════════════════════════════════════
+function _exec_generate_image_cli(string $prompt, string $mmxKey): void {
+    $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
+
+    // ★ 使用 uploads/shared 作为工作目录，确保 mmx CLI 有写入权限下载图片
+    $workDir = ONECHAT_ROOT . '/uploads/shared/';
+    if (!is_dir($workDir)) @mkdir($workDir, 0777, true);
+    @chmod($workDir, 0777);
+    $homeDir = $workDir . 'mmx_' . getmypid() . '_' . bin2hex(random_bytes(4));
+    @mkdir($homeDir, 0777, true);
+
+    $cmd = 'cd ' . escapeshellarg($workDir) . ' && HOME=' . escapeshellarg($homeDir) . ' ' . escapeshellcmd($mmxBin)
+        . ' image generate --prompt ' . escapeshellarg($prompt)
+        . ' --api-key ' . escapeshellarg($mmxKey)
+        . ' --region cn --non-interactive --output json 2>&1';
+
+    $output = shell_exec($cmd);
+
+    // 清理 HOME 目录
+    if (is_dir($homeDir)) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($homeDir, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
+            $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+        }
+        @rmdir($homeDir);
+    }
+
+    $parsed = json_decode($output, true);
+    if ($parsed && !empty($parsed['urls'])) {
+        echo json_encode(['images' => $parsed['urls'], 'status' => 'ok', 'provider' => 'minimax']);
+    } else {
+        echo json_encode(['error' => 'Image generation failed', 'raw' => mb_substr($output ?: '', 0, 500)]);
+    }
 }

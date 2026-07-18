@@ -326,21 +326,46 @@ function buildHistorySummary(chatId, maxLength = MAX_HISTORY_LENGTH) {
     return summary.slice(0, maxLength) || '无历史记录';
 }
 
-// 改进:更全面的时间关键词检测,按需返回时间消息(不保存)
+// ★ 三级时间戳注入——平衡缓存命中率与时间精度
+// Tier 1: 明确问几点 → 分钟精度(无秒), 缓存~1分钟(这类请求极少)
+// Tier 2: 时间敏感但不要求精确时刻 → 日期精度, 缓存~24小时
+// 已移除 "时间""动态""最新""date""周" 等高频泛词, 避免无意义缓存击穿
 function createTemporaryTimestampIfNeeded(text) {
-    // 扩展时间关键词列表,覆盖常见时间相关表达
-    var timeKeywords = [
-        '现在时间', '当前时间', '现在几点', '几点钟', '时间', 'date', 'time', 'now',
-        '今天', '明天', '昨天', '星期', '周', '几号', '几月', '哪年', '今年', '去年', '明年',
-        'weather', '天气', '新闻', 'news', '实时', '最新', '动态'
-    ];
     var lowerText = text.toLowerCase();
+
+    // Tier 1: 明确问"现在几点" → 分钟精度 (极少数触发)
+    var exactTimeKeywords = ['现在几点', '几点钟', 'what time', 'clock', '当前确切时间'];
+    if (exactTimeKeywords.some(kw => lowerText.includes(kw))) {
+        var now = new Date();
+        var pad = function(n) { return n < 10 ? '0' + n : n; };
+        var off = -Math.round(now.getTimezoneOffset() / 60);
+        var tz = 'GMT' + (off >= 0 ? '+' : '') + off;
+        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
+        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。', temporary: true };
+    }
+
+    // Tier 2: 时间敏感 → 分钟精度(无秒), 保留针对"time/now/天气"等实时需求
+    var timeKeywords = ['现在时间', '当前时间', 'time', 'now', '天气', 'weather'];
     if (timeKeywords.some(kw => lowerText.includes(kw))) {
         var now = new Date();
-        var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var pad=function(n){return n<10?'0'+n:n};var off=-Math.round(now.getTimezoneOffset()/60);var tz='GMT'+(off>=0?'+':'')+off;var ts=days[now.getDay()]+' '+now.getFullYear()+'-'+months[now.getMonth()]+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())+' '+tz;
-        var timeContent = '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。';
-        return { role: 'system', content: timeContent, temporary: true };
+        var pad = function(n) { return n < 10 ? '0' + n : n; };
+        var off = -Math.round(now.getTimezoneOffset() / 60);
+        var tz = 'GMT' + (off >= 0 ? '+' : '') + off;
+        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
+        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。', temporary: true };
     }
+
+    // Tier 3: 仅需日期感知 → 日期精度, 24小时内缓存不变 (主力命中层)
+    var dateKeywords = ['今天', '明天', '昨天', '星期几', '几号', '几月', '哪年', '今年', '去年', '明年', '新闻', 'news', '实时'];
+    if (dateKeywords.some(kw => lowerText.includes(kw))) {
+        var now = new Date();
+        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()];
+        return { role: 'system', content: '[' + ts + '] 系统当前日期,回答日期相关问题时请以此为准。', temporary: true };
+    }
+
     return null;
 }
 
@@ -508,12 +533,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 图片会作为附件发送给AI,AI可以自主选择是否使用 analyze_image 工具
 
     if (!skipUserAdd) {
-        // ★ 始终注入当前日期时间到用户消息中(不破坏系统提示缓存,不在气泡显示)
+        // ★ 日期前缀(仅日期+周几, 24h稳定 → Provider缓存友好; 时分秒由 createTemporaryTimestampIfNeeded 按需注入)
         var _now = new Date();
-        var _tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
-        var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' +
-            _now.getHours().toString().padStart(2,'0') + ':' + _now.getMinutes().toString().padStart(2,'0') + ':' + _now.getSeconds().toString().padStart(2,'0') + ' ' + _tz;
-        var _datePrefix = '[系统时间: ' + _dateStr + '] ';
+        var _daysZh = ['周日','周一','周二','周三','周四','周五','周六'];
+        var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' + _daysZh[_now.getDay()];
+        var _datePrefix = '[日期: ' + _dateStr + '] ';
         chats[chatId].messages.push({ role: 'user', text: text, _datePrefix: _datePrefix, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
         // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
         slimSaveChats();
@@ -811,6 +835,33 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         }
     }
 
+    // ★ 技能匹配: 根据用户消息匹配相关 Skills, 注入到 system prompt
+    if (typeof window.matchSkills === 'function') {
+        try {
+            var _userText = text || '';
+            var _matchedSkills = await window.matchSkills(_userText);
+            if (_matchedSkills && _matchedSkills.length > 0) {
+                var _skillPrompt = window.getMatchedSkillsPrompt(_matchedSkills);
+                if (_skillPrompt) {
+                    var _sIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+                    if (_sIdx !== -1) {
+                        apiMessages[_sIdx].content += '\n' + _skillPrompt;
+                    } else {
+                        apiMessages.unshift({ role: 'system', content: _skillPrompt });
+                    }
+                }
+            }
+            // 始终注入可用技能列表(简介)
+            var _skillList = window.getSkillsSystemPrompt();
+            if (_skillList) {
+                var _sIdx2 = apiMessages.findIndex(function(m) { return m.role === 'system'; });
+                if (_sIdx2 !== -1 && apiMessages[_sIdx2].content.indexOf('可用技能') === -1) {
+                    apiMessages[_sIdx2].content += '\n' + _skillList;
+                }
+            }
+        } catch(e) {}
+    }
+
     // 选择模型
     let model = getVal('modelSelect') || DEFAULT_CONFIG.model;
     // 图片由 analyze_image 工具处理,不切换模型(analyze_image 会调用 MCP 桥接)
@@ -1024,6 +1075,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push(SERVER_FILE_READ_TOOL);
         tools.push(SERVER_FILE_SEARCH_TOOL);
         tools.push(SERVER_FILE_GREP_TOOL);
+        // ★ B站工具 — 始终可用(只读获取)
+        tools.push({type:'function',function:{name:'bilibili_search',description:'综合搜索B站内容(视频/专栏/用户)',parameters:{type:'object',properties:{keyword:{type:'string',description:'搜索关键词'},search_type:{type:'string',description:'video/article/bili_user,默认video'},limit:{type:'integer',description:'返回条数,默认10'}},required:['keyword']}}});
+        tools.push({type:'function',function:{name:'bilibili_video_info',description:'获取B站视频详情(标题/UP主/播放量/弹幕/分P)',parameters:{type:'object',properties:{bvid:{type:'string',description:'视频BV号或AV号或b23.tv链接'}},required:['bvid']}}});
+        tools.push({type:'function',function:{name:'bilibili_article_read',description:'阅读B站专栏文章全文',parameters:{type:'object',properties:{cvid:{type:'string',description:'专栏cv号或URL'}},required:['cvid']}}});
+        tools.push({type:'function',function:{name:'bilibili_user_profile',description:'获取B站用户主页(昵称/粉丝/投稿)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'}},required:['uid']}}});
+        tools.push({type:'function',function:{name:'bilibili_comment_list',description:'获取B站视频/专栏评论',parameters:{type:'object',properties:{oid:{type:'string',description:'目标ID(视频BV号)'},type:{type:'integer',description:'评论类型:1=视频,12=专栏,默认1'},limit:{type:'integer',description:'条数,默认20'}},required:['oid']}}});
+        tools.push({type:'function',function:{name:'bilibili_dynamic_list',description:'获取B站动态流(需登录)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'},limit:{type:'integer',description:'条数,默认10'}},required:['uid']}}});
+        tools.push({type:'function',function:{name:'bilibili_qr_login',description:'B站扫码登录(cookie失效时使用)',parameters:{type:'object',properties:{action:{type:'string',description:'check=检查登录/qr=生成二维码/poll=检测扫码/auto=自动登录',enum:['check','qr','poll','auto']},qrcode_key:{type:'string',description:'轮询时传入(poll模式)'},timeout:{type:'integer',description:'自动登录超时(秒)'}},required:['action']}}});
         // PPT生成 — 始终可用
         if (typeof GENERATE_PPT_TOOL !== 'undefined') tools.push(GENERATE_PPT_TOOL);
         // toggle_proxy — 始终可用(非Agent也可用，弹窗确认)
@@ -1203,19 +1262,32 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 'cr_move': 'CR_MOVE_TOOL', 'cr_copy': 'CR_COPY_TOOL',
                 'cr_delete': 'CR_DELETE_TOOL', 'cr_list_shares': 'CR_LIST_SHARES_TOOL',
                 'cr_create_share': 'CR_CREATE_SHARE_TOOL', 'cr_delete_share': 'CR_DELETE_SHARE_TOOL',
-                'cr_storage_info': 'CR_STORAGE_INFO_TOOL', 'cr_overview': 'CR_OVERVIEW_TOOL'
+                'cr_storage_info': 'CR_STORAGE_INFO_TOOL', 'cr_overview': 'CR_OVERVIEW_TOOL',
+                // B站工具
+                'bilibili_search': 'BILI_SEARCH_TOOL', 'bilibili_video_info': 'BILI_VIDEO_TOOL',
+                'bilibili_article_read': 'BILI_ARTICLE_TOOL', 'bilibili_user_profile': 'BILI_USER_TOOL',
+                'bilibili_comment_list': 'BILI_COMMENT_TOOL', 'bilibili_dynamic_list': 'BILI_DYNAMIC_TOOL',
+                'bilibili_qr_login': 'BILI_QR_LOGIN_TOOL'
             };
             for (var _fti = 0; _fti < tools.length; _fti++) {
                 var _ft = tools[_fti];
                 var _ftName = _ft.function?.name || '';
-                var _toggleKey = _toolFuncNameToToggleKey[_ftName];
-                if (_toggleKey) {
-                    if (window.isToolEnabled(_toggleKey)) {
-                        // ★ Agent 模式关闭时,过滤掉 Agent 专属工具(除非有当前对话的临时授权 OR ask_agent 也在列表中)
-                        var _agentOn = isAgentToolsActive() || (window._tempAgentGranted && window._tempAgentChatId === chatId);
-                        // ★ ask_agent 存在时,提前放出核心 Agent 工具(避免授权后无工具可用)
-                        var _hasAskAgent = tools.some(function(t) { return t.function?.name === 'ask_agent'; });
-                        if (!_agentOn && AGENT_ONLY_KEYS.indexOf(_toggleKey) >= 0) {
+                // ★ 动态 toggle key 解析: 映射表 > tool name 直接作 key > 默认启用
+                var _toggleKey = _toolFuncNameToToggleKey[_ftName] || _ftName;
+                // 兼容旧 key: 检查 oldKey 的 localStorage
+                var _oldKey = _toolFuncNameToToggleKey[_ftName];
+                var _enabled = window.isToolEnabled(_toggleKey);
+                if (!_enabled && _oldKey && _oldKey !== _toggleKey) {
+                    _enabled = window.isToolEnabled(_oldKey);  // 回退旧格式
+                }
+                if (_enabled) {
+                    // ★ Agent 模式关闭时, 用 toolRegistry.isAgentOnly 判断代理专属工具
+                    var _agentOn = isAgentToolsActive() || (window._tempAgentGranted && window._tempAgentChatId === chatId);
+                    var _hasAskAgent = tools.some(function(t) { return t.function?.name === 'ask_agent'; });
+                    var _isAgentOnly = typeof toolRegistry !== 'undefined' && toolRegistry.isAgentOnly
+                        ? toolRegistry.isAgentOnly(_ftName)
+                        : AGENT_ONLY_KEYS.indexOf(_toggleKey) >= 0 || AGENT_ONLY_KEYS.indexOf(_oldKey || '') >= 0;
+                    if (!_agentOn && _isAgentOnly) {
                             if (_hasAskAgent) {
                                 _filteredTools.push(_ft);  // ask_agent 同行 → 全部 Agent 工具放行
                             }
@@ -1223,15 +1295,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         } else {
                             _filteredTools.push(_ft);
                         }
-                    }
                 } else if (_ftName.startsWith('impl_') || _ftName.startsWith('custom_')) {
                     // 自定义技能: 用 CUSTOM_SKILL_ 前缀检查
                     if (window.isToolEnabled('CUSTOM_SKILL_' + _ftName)) {
                         _filteredTools.push(_ft);
                     }
                 } else {
-                    // 未知工具默认启用
-                    _filteredTools.push(_ft);
+                    // 未知工具: 用 toolName 直接查开关, 未找到时默认启用
+                    if (window.isToolEnabled(_ftName)) {
+                        _filteredTools.push(_ft);
+                    }
                 }
             }
             if (_filteredTools.length < tools.length) {
@@ -2364,6 +2437,19 @@ window.useAlternativeVisionModel = function() {
                                 if (msgIdx !== -1) {
                                     if (pendingMsg.generatedImage) chats[chatId].messages[msgIdx].generatedImage = pendingMsg.generatedImage;
                                     if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages;
+                                }
+                            }
+                            // ★ B站扫码登录: 将QR图/成功反馈图注入消息末尾显示
+                            if (tc.function.name === 'bilibili_qr_login') {
+                                var _biliRes = null;
+                                try { _biliRes = typeof toolResult.result === 'string' ? JSON.parse(toolResult.result) : toolResult.result; } catch(e) {}
+                                if (_biliRes) {
+                                    var _qrImg = _biliRes.qr_image_base64 || _biliRes.success_image || null;
+                                    if (_qrImg) {
+                                        pendingMsg.generatedImage = _qrImg;
+                                        var _biliMsgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                        if (_biliMsgIdx !== -1) chats[chatId].messages[_biliMsgIdx].generatedImage = _qrImg;
+                                    }
                                 }
                             }
                             // ★ 如果生成了音频/音乐,确保存入消息对象（持久化 & 刷新不丢）

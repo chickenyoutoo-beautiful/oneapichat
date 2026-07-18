@@ -1457,11 +1457,12 @@ const toolRegistry = (function() {
 
   console.log('[ToolRegistry] 已注册', Object.keys(toolRegistry.getAllToolNames()).length, '个工具');
 })();
+// ★ 高危工具(默认关闭) — 使用实际 toolName
 const _DANGEROUS_TOOLS = [
-    'SERVER_EXEC_TOOL', 'SERVER_PYTHON_TOOL', 'SERVER_FILE_READ_TOOL', 'SERVER_FILE_WRITE_TOOL',
-    'BROWSER_NAVIGATE_TOOL', 'BROWSER_SCREENSHOT_TOOL', 'BROWSER_CLICK_TOOL', 'BROWSER_TYPE_TOOL', 'BROWSER_GET_CONTENT_TOOL', 'BROWSER_GET_SNAPSHOT_TOOL',
-    'SERVER_DOCKER_TOOL', 'SERVER_DB_QUERY_TOOL', 'SERVER_FILE_OP_TOOL',
-    'ENGINE_CRON_CREATE_TOOL', 'ENGINE_CRON_DELETE_TOOL', 'ENGINE_AGENT_DELETE_TOOL'
+    'server_exec', 'server_python', 'server_file_write',
+    'browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot',
+    'server_docker', 'server_db_query', 'server_file_op',
+    'engine_cron_create', 'engine_cron_delete', 'engine_agent_delete'
 ];
 
 // 工具默认启用状态
@@ -1478,6 +1479,12 @@ window.isToolEnabled = function(toolKey) {
     if (typeof getAgentMode === 'function' && getAgentMode() === 'yolo') return true;
     var stored = localStorage.getItem('tool_enabled_' + toolKey);
     if (stored !== null) return stored === 'true';
+    // ★ 兼容: 检查旧大写 key (如 BILI_SEARCH_TOOL → bilibili_search)
+    var _oldKey = (typeof window._toolToggleMap !== 'undefined' && window._toolToggleMap) ? null : null;
+    if (!_oldKey) {
+        var _oldStored = localStorage.getItem('tool_enabled_' + toolKey.toUpperCase() + '_TOOL');
+        if (_oldStored !== null) return _oldStored === 'true';
+    }
     return window.getToolDefaultEnabled(toolKey);
 };
 
@@ -1488,22 +1495,49 @@ window.setToolEnabled = function(toolKey, enabled) {
 
 // 加载工具开关配置到 UI
 // ── 工具分类定义 ──
+// ── 工具分类: match 函数自动匹配, 新增工具无需手动加 keys ──
+// 渲染时从 toolRegistry.getAllToolNames() 动态拉取, 首个匹配的分类即为工具所属分类
 const _TOOL_CATEGORIES = [
-    { label: '🔍 搜索与获取', keys: ['web_search','web_fetch','platform_extract','rag_search'] },
-    { label: '🎨 图像',       keys: ['generate_image','analyze_image'] },
-    { label: '📊 PPT',         keys: ['generate_ppt'] },
-    { label: '🎬 视频',       keys: ['video_understanding','video_edit'] },
-    { label: '📚 刷课',       keys: ['chaoxing_login','chaoxing_list_courses','chaoxing_auto','chaoxing_status','chaoxing_stop','chaoxing_stats','chaoxing_overview'] },
-    { label: '📝 考试',       keys: ['chaoxing_auth','chaoxing_exam_list','chaoxing_exam_start','chaoxing_exam_status','chaoxing_exam_stop'] },
-    { label: '💻 服务器操控 ⚠️', keys: ['server_exec','server_python','server_file_read','server_file_write','server_file_edit','server_file_grep','server_sys_info','server_ps','server_disk','server_network','server_docker','server_db_query','server_file_search','server_file_op'], agentOnly: true },
-    { label: '🤖 引擎/Agent', keys: ['engine_cron_list','engine_cron_create','engine_cron_delete','delegate_task','engine_agent_status','engine_agent_list','engine_agent_delete','engine_agent_ask','engine_agent_stop','engine_push','plan_update','delegate_workflow','run_skill'], agentOnly: true },
-    { label: '🧠 AI 自主控制', keys: ['ask_agent','autonomous_mode','toggle_proxy'] },
-    { label: '🎮 SRC 星穹铁道', keys: ['src_status','src_dashboard','src_start','src_stop','src_get_tasks','src_toggle_task','src_get_config','src_set_config','src_get_logs','src_check_upgrade','src_do_upgrade'] },
-    { label: '🪟 Windows 本机', keys: ['win_info','win_processes','win_kill','win_start','win_restart','win_file','win_screenshot'], agentOnly: true },
-    { label: '☁️ Cloudreve 云盘', keys: ['cr_login','cr_user_info','cr_list_files','cr_search_files','cr_create_folder','cr_rename','cr_move','cr_copy','cr_delete','cr_list_shares','cr_create_share','cr_delete_share','cr_storage_info','cr_overview'] },
-    { label: '🌐 浏览器',     keys: ['browser_navigate','browser_screenshot','browser_click','browser_type','browser_get_content','browser_get_snapshot'], agentOnly: true },
-    { label: '🎵 MiniMax 工具', keys: ['mmx_chat','mmx_speech','mmx_music','mmx_voices','mmx_quota','mmx_image','mmx_video','mmx_vision'] }
+    { label: '🔍 搜索与获取', match: n => /^(web_search|web_fetch|platform_extract|rag_search)$/.test(n) },
+    { label: '🎨 图像',       match: n => /^(generate_image|analyze_image)/.test(n) },
+    { label: '📺 B站',        match: n => n.startsWith('bilibili_') },
+    { label: '📊 PPT',        match: n => n === 'generate_ppt' },
+    { label: '🎬 视频',       match: n => /^(video_understanding|video_edit)$/.test(n) },
+    { label: '📚 刷课',       match: n => n.startsWith('chaoxing_') && !n.includes('exam') },
+    { label: '📝 考试',       match: n => n.startsWith('chaoxing_exam') },
+    { label: '💻 服务器操控 ⚠️', match: n => n.startsWith('server_'), agentOnly: true },
+    { label: '🤖 引擎/Agent', match: n => /^(engine_|delegate_|plan_update|run_skill)/.test(n), agentOnly: true },
+    { label: '🧠 AI 自主控制', match: n => /^(ask_agent|autonomous_mode|toggle_proxy)$/.test(n) },
+    { label: '🎮 SRC 星穹铁道', match: n => n.startsWith('src_') },
+    { label: '🪟 Windows 本机', match: n => n.startsWith('win_'), agentOnly: true },
+    { label: '☁️ Cloudreve 云盘', match: n => n.startsWith('cr_') },
+    { label: '🌐 浏览器',     match: n => n.startsWith('browser_'), agentOnly: true },
+    { label: '🎵 MiniMax 工具', match: n => n.startsWith('mmx_') },
+    { label: '📦 更多工具',    match: () => true },  // catch-all: 确保所有工具都有归属
 ];
+
+// ★ 从 toolRegistry 动态获取每个分类的 tools
+function getCategoryKeys(cat, _usedSet) {
+    // 兼容旧格式 (keys 数组)
+    if (cat.keys) return cat.keys;
+    // 新格式: match 函数从 registry 过滤, 排除已分配给前面分类的工具
+    var all = (typeof toolRegistry !== 'undefined' ? toolRegistry.getAllToolNames() : []);
+    return all.filter(function(n) {
+        if (_usedSet && _usedSet.has(n)) return false;  // 已归入前面的分类
+        return cat.match(n);
+    });
+}
+
+// ★ 供 renderToolPanel 使用: 确保每个工具只在一个分类出现
+window.resolveToolCategories = function() {
+    var cats = (typeof _TOOL_CATEGORIES !== 'undefined') ? _TOOL_CATEGORIES : [];
+    var used = new Set();
+    return cats.map(function(cat) {
+        var keys = getCategoryKeys(cat, used);
+        keys.forEach(function(k) { used.add(k); });
+        return { label: cat.label, keys: keys, agentOnly: cat.agentOnly };
+    }).filter(function(c) { return c.keys.length > 0; });  // 去掉空分类
+};
 
 // ── 工具中文标签 ──
 const _TOOL_LABELS = {
@@ -1519,6 +1553,7 @@ const _TOOL_LABELS = {
     'cr_login':'云盘登录','cr_user_info':'用户信息','cr_list_files':'文件列表','cr_search_files':'搜索文件','cr_create_folder':'创建文件夹','cr_rename':'重命名','cr_move':'移动','cr_copy':'复制','cr_delete':'删除','cr_list_shares':'分享列表','cr_create_share':'创建分享','cr_delete_share':'删除分享','cr_storage_info':'存储空间','cr_overview':'云盘总览',
     'mmx_chat':'MiniMax对话','mmx_speech':'语音合成','mmx_music':'音乐生成','mmx_voices':'音色列表','mmx_quota':'配额查询','mmx_image':'MiniMax生图','mmx_video':'视频生成','mmx_vision':'图片分析',
     'browser_navigate':'打开网页','browser_screenshot':'页面截图','browser_click':'点击元素','browser_type':'输入文字','browser_get_content':'提取文本','browser_get_snapshot':'DOM快照',
+    'bilibili_search':'B站搜索','bilibili_video_info':'B站视频','bilibili_article_read':'B站专栏','bilibili_user_profile':'B站用户','bilibili_comment_list':'B站评论','bilibili_dynamic_list':'B站动态','bilibili_qr_login':'B站扫码登录',
 };
 
 
@@ -1631,4 +1666,25 @@ console.log('[ToolRegistry] 全部注册完成, 共', Object.keys(toolRegistry.g
         });
     });
 })();
+// ★ B站工具组
+const BILIBILI_TOOLS_FE = [
+    { name: "bilibili_video_info", description: "获取B站视频详情(标题/UP主/播放量/弹幕/分P)", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: '查B站视频信息' },
+    { name: "bilibili_article_read", description: "阅读B站专栏文章全文", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: '读B站专栏' },
+    { name: "bilibili_search", description: "综合搜索B站内容(视频/专栏/用户)", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: '搜索B站' },
+    { name: "bilibili_user_profile", description: "获取B站用户主页(昵称/粉丝/投稿)", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: '查B站用户' },
+    { name: "bilibili_comment_list", description: "获取B站视频/专栏评论", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: '看B站评论' },
+    { name: "bilibili_dynamic_list", description: "获取B站关注动态流", capabilities: ["fetch"], approval: 0, isReadOnly: true, searchHint: 'B站动态' },
+    { name: "bilibili_qr_login", description: "B站扫码登录(生成二维码/检测登录状态)", capabilities: ["fetch"], approval: 0, isReadOnly: false, searchHint: 'B站扫码' },
+];
+BILIBILI_TOOLS_FE.forEach(function(t) {
+    if (!toolRegistry.has(t.name)) {
+        toolRegistry.register(t.name, buildToolMeta(t.name, {
+            capabilities: t.capabilities,
+            approval: t.approval,
+            isReadOnly: t.isReadOnly,
+            searchHint: t.searchHint,
+        }));
+    }
+});
+
 // ★ 所有工具注册完毕后刷新分类和标签
