@@ -14,8 +14,8 @@ window.analyzeImage = async function(imageInput, focus) {
     var storedVisionUrl = localStorage.getItem('visionApiUrl');
     var visionApiUrl = storedVisionUrl || DEFAULT_CONFIG.visionApiUrl || '/mcp';
     // ★ 限流保护: 如果 60 秒内遇到过 Token Plan 限流,直接抛错不请求
-    if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 60000) {
-        throw new Error('⚠️ MiniMax API 限流保护中,请 60 秒后再试');
+    if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 30000) {
+        throw new Error('⚠️ MiniMax API 请求过频,请稍后再试(30秒冷却)');
     }
 
     // ★ 智能判断: 直连模式还是 MCP 代理模式
@@ -205,10 +205,13 @@ window.analyzeImage = async function(imageInput, focus) {
         }
 
         if (error && error instanceof Error) {
-            // ★ MiniMax Token Plan 限流: 设置限流标记 + 友好提示
+            // ★ 区分: 用量上限(不设冷却) vs 实际限流(设30s冷却)
+            if (error.message && error.message.includes('用量上限')) {
+                throw new Error('⚠️ MiniMax Token Plan 用量已耗尽。请升级套餐或购买积分: https://platform.minimaxi.com');
+            }
             if (error.message && error.message.includes('Token Plan')) {
                 window.__minimaxRateLimited = Date.now();
-                throw new Error('⚠️ MiniMax API 限流（Token Plan）。建议: 1) 升级 MiniMax 套餐 2) 切换其他模型 3) 稍后再试');
+                throw new Error('⚠️ MiniMax API 请求过频。建议稍后再试或升级套餐提升 RPM');
             }
             throw error;
         } else {

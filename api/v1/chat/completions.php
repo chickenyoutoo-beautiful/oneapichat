@@ -141,54 +141,50 @@ if ($tools) {
     if (empty($tools)) $tools = null;
 }
 
-// ★ 自动注入工具：如果客户端没传 tools，从引擎加载全部可用工具
+// ★ 自动注入工具：如果客户端没传 tools，从引擎+MCP 加载全部可用工具
 if (empty($tools) && !isset($body['tools'])) {
+    $tools = [];
+
+    // 1. 从引擎加载
     $engineToolsJson = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, stream_context_create(['http' => ['timeout' => 3, 'ignore_errors' => true]]));
     if ($engineToolsJson) {
         $engineToolsData = @json_decode($engineToolsJson, true);
-        $engineToolsList = $engineToolsData['tools'] ?? [];
-        if (!empty($engineToolsList)) {
-            $tools = [];
-            foreach ($engineToolsList as $t) {
-                if (!is_array($t) || empty($t['name'])) continue;
-                // ★ PHP json_decode 把 {} 转成 []，必须检查有效性
-                $schema = $t['input_schema'] ?? $t['parameters'] ?? null;
-                if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) {
-                    continue; // 跳过空 schema 的工具（Provider 拒绝 properties: {}）
-                }
-                if (empty($schema['required'])) unset($schema['required']);
-                $tools[] = [
-                    'type' => 'function',
-                    'function' => [
-                        'name' => $t['name'],
-                        'description' => $t['description'] ?? '',
-                        'parameters' => $schema,
-                    ],
-                ];
-            }
+        foreach (($engineToolsData['tools'] ?? []) as $t) {
+            if (!is_array($t) || empty($t['name'])) continue;
+            $schema = $t['input_schema'] ?? $t['parameters'] ?? null;
+            if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) continue;
+            if (empty($schema['required'])) unset($schema['required']);
+            $tools[] = ['type' => 'function', 'function' => ['name' => $t['name'], 'description' => $t['description'] ?? '', 'parameters' => $schema]];
         }
     }
-    // ★ 过滤非法 schema：parameters 必须是有效对象
-    if ($tools) {
-        $tools = array_values(array_filter($tools, function($t) {
-            $fn = $t['function'] ?? $t;
-            $params = $fn['parameters'] ?? null;
-            return is_array($params) && !empty($params) && isset($params['type']) && $params['type'] === 'object';
-        }));
-        // 没有合法工具时清空，避免 Provider 拒绝
-        if (empty($tools)) $tools = null;
+
+    // 2. 从 MCP Server 加载全部 69 工具 (动态注册, 包括 generate_docx/xlsx/pdf, bilibili_*, cr_*, mmx_*, chaoxing_* 等)
+    $mcpToolsJson = @file_get_contents('http://127.0.0.1:18788/mcp/api/tools', false, stream_context_create([
+        'http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'timeout' => 5, 'ignore_errors' => true],
+    ]));
+    if ($mcpToolsJson) {
+        $mcpToolsData = @json_decode($mcpToolsJson, true);
+        foreach (($mcpToolsData['tools'] ?? []) as $t) {
+            if (!is_array($t) || empty($t['name'])) continue;
+            // 跳过引擎已有的工具
+            $exists = false;
+            foreach ($tools as $existing) {
+                if (($existing['function']['name'] ?? '') === $t['name']) { $exists = true; break; }
+            }
+            if ($exists) continue;
+            $schema = $t['inputSchema'] ?? $t['parameters'] ?? null;
+            if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) continue;
+            if (empty($schema['required'])) unset($schema['required']);
+            $tools[] = ['type' => 'function', 'function' => ['name' => $t['name'], 'description' => $t['description'] ?? '', 'parameters' => $schema]];
+        }
     }
-    // 追加 generate_image（引擎外工具）
-    if ($tools) {
-        $tools[] = [
-            'type' => 'function',
-            'function' => [
-                'name' => 'generate_image',
-                'description' => '使用 AI 生成图片。传入提示词描述想要的图片内容。',
-                'parameters' => ['type' => 'object', 'properties' => ['prompt' => ['type' => 'string', 'description' => '图片生成提示词']], 'required' => ['prompt']],
-            ],
-        ];
-    }
+
+    // 3. 过滤非法 schema
+    $tools = array_values(array_filter($tools, function($t) {
+        $params = ($t['function']['parameters'] ?? null);
+        return is_array($params) && !empty($params['type']) && $params['type'] === 'object';
+    }));
+    if (empty($tools)) $tools = null;
 }
 $stop = $body['stop'] ?? null;
 $topP = $body['top_p'] ?? null;

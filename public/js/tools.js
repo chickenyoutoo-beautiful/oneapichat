@@ -414,6 +414,24 @@ const CHAOXING_AUTH_TOOL = {
     }
 };
 
+const CHAOXING_QR_LOGIN_TOOL = {
+    type: "function",
+    function: {
+        name: "chaoxing_qr_login",
+        description: "超星学习通扫码登录。①action=qr或auto→生成QR(立即返回,非阻塞,获得enc+uuid) ②拿到enc+uuid后立即调action=login(enc, uuid)→阻塞等待用户扫码。login会先用传入的enc/uuid轮询(与显示的QR一致);若QR过期则返回新QR→回到步骤①。不要跳过第①步!",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", description: "check=检查cookie / qr或auto=生成二维码(非阻塞) / login=等待扫码(阻塞,传入enc+uuid)" },
+                enc: { type: "string", description: "login时传入(由qr/auto返回)" },
+                uuid: { type: "string", description: "login时传入(由qr/auto返回)" },
+                timeout: { type: "integer", description: "login超时秒数,默认300" }
+            },
+            required: ["action"]
+        }
+    }
+};
+
 // ==================== 引擎工具 (心跳/Cron/子代理) ====================
 const ENGINE_CRON_LIST_TOOL = {
     type: "function",
@@ -673,13 +691,15 @@ const RAG_SEARCH_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "rag_search",
-        description: "仅在用户明确询问文档/知识库内容时搜索本地知识库。不要对一般性问题调用此工具。",
+        description: "搜索知识库(RAG)获取私有文档信息。仅在用户明确询问文档/知识库内容时使用。",
         parameters: {
             type: "object",
             properties: {
-                question: { type: "string", description: "要查询的问题或关键词" }
+                q: { type: "string", description: "搜索查询" },
+                collection: { type: "string", description: "知识库名称,默认default" },
+                top_k: { type: "integer", description: "返回条数,默认5" }
             },
-            required: ["question"]
+            required: ["q"]
         }
     }
 };
@@ -1412,6 +1432,12 @@ const toolRegistry = (function() {
     isReadOnly: true,
     searchHint: '检测超星登录状态',
   }));
+  toolRegistry.register('chaoxing_qr_login', buildToolMeta('chaoxing_qr_login', {
+    capabilities: [ToolCapability.CHAOXING],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    searchHint: '超星扫码登录',
+  }));
   toolRegistry.register('chaoxing_exam_list', buildToolMeta('chaoxing_exam_list', {
     capabilities: [ToolCapability.CHAOXING],
     approval: ApprovalLevel.AUTO,
@@ -1602,7 +1628,7 @@ const _TOOL_LABELS = {
     'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索',
     'generate_image':'图片生成','generate_image_i2i':'图生图','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑','generate_ppt':'PPT生成','generate_docx':'Word文档','generate_xlsx':'Excel表格','generate_pdf':'PDF文档',
     'chaoxing_login':'超星登录','chaoxing_list_courses':'课程列表','chaoxing_auto':'刷课执行','chaoxing_status':'刷课状态','chaoxing_stop':'停止刷课','chaoxing_stats':'刷课统计','chaoxing_overview':'超星总览',
-    'chaoxing_auth':'考试登录','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',
+    'chaoxing_auth':'考试登录','chaoxing_qr_login':'超星扫码','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',
     'server_exec':'命令执行','server_python':'Python执行','server_file_read':'文件读取','server_file_write':'文件写入','server_file_edit':'精确编辑','server_file_grep':'内容搜索','server_sys_info':'系统信息','server_ps':'进程列表','server_disk':'磁盘信息','server_network':'网络状态','server_docker':'Docker','server_db_query':'数据库','server_file_search':'文件搜索','server_file_op':'文件操作',
     'engine_cron_list':'Cron列表','engine_cron_create':'创建Cron','engine_cron_delete':'删除Cron','delegate_task':'子代理任务','engine_agent_status':'子代理状态','engine_agent_list':'子代理列表','engine_agent_delete':'删除子代理','engine_agent_ask':'子代理对话','engine_agent_stop':'停止子代理','engine_push':'推送通知','plan_update':'计划更新','delegate_workflow':'工作流代理',
     'ask_agent':'请求Agent','autonomous_mode':'自主模式',

@@ -288,7 +288,7 @@ function stopGenerationForChat(chatId) {
 }
 
 // ★ 链式输出模式: 工具调用后保留旧消息,新内容追加为新气泡
-window._chainMode = localStorage.getItem('chainMode') === '1';
+window._chainMode = localStorage.getItem('chainMode') === '1';  // 默认关闭
 window.toggleChainMode = function() {
     window._chainMode = !window._chainMode;
     localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
@@ -1133,7 +1133,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push({type:'function',function:{name:'bilibili_user_profile',description:'获取B站用户主页(昵称/粉丝/投稿)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'}},required:['uid']}}});
         tools.push({type:'function',function:{name:'bilibili_comment_list',description:'获取B站视频/专栏评论',parameters:{type:'object',properties:{oid:{type:'string',description:'目标ID(视频BV号)'},type:{type:'integer',description:'评论类型:1=视频,12=专栏,默认1'},limit:{type:'integer',description:'条数,默认20'}},required:['oid']}}});
         tools.push({type:'function',function:{name:'bilibili_dynamic_list',description:'获取B站动态流(需登录)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'},limit:{type:'integer',description:'条数,默认10'}},required:['uid']}}});
-        tools.push({type:'function',function:{name:'bilibili_qr_login',description:'B站扫码登录(cookie失效时使用)',parameters:{type:'object',properties:{action:{type:'string',description:'check=检查登录/qr=生成二维码/poll=检测扫码/auto=自动登录',enum:['check','qr','poll','auto']},qrcode_key:{type:'string',description:'轮询时传入(poll模式)'},timeout:{type:'integer',description:'自动登录超时(秒)'}},required:['action']}}});
+        tools.push({type:'function',function:{name:'bilibili_qr_login',description:'B站扫码登录。两步流程:①action=qr生成二维码(立即返回)→②action=poll轮询等待扫码(阻塞,拿到结果前不要回复用户)。action=auto一键完成两步。',parameters:{type:'object',properties:{action:{type:'string',description:'qr=生成二维码(返回后必须立即调poll); poll=阻塞等待扫码(不要中断); auto=一键登录',enum:['check','qr','poll','auto']},qrcode_key:{type:'string',description:'poll时传入qr返回的key'},timeout:{type:'integer',description:'超时秒数(默认120)'}},required:['action']}}});
         // PPT生成 — 始终可用
         if (typeof GENERATE_PPT_TOOL !== 'undefined') tools.push(GENERATE_PPT_TOOL);
         // toggle_proxy — 始终可用(非Agent也可用，弹窗确认)
@@ -1199,6 +1199,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         tools.push(CHAOXING_STATS_TOOL_DEFINITION);
         tools.push(CHAOXING_OVERVIEW_TOOL);
         tools.push(CHAOXING_AUTH_TOOL);
+        tools.push(CHAOXING_QR_LOGIN_TOOL);
         tools.push(CHAOXING_EXAM_LIST_TOOL);
         tools.push(CHAOXING_EXAM_START_TOOL);
         tools.push(CHAOXING_EXAM_STATUS_TOOL);

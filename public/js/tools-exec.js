@@ -1142,32 +1142,8 @@
                         })(_imgF, _giF);
                     }
                 }
-                // ★ 图片已添加到消息,立即保存到 localStorage 防止刷新丢失
+                slimSaveChats();
 
-                // ★ 立即渲染图片为独立消息（不等完整回复结束）
-                try {
-                    var _imgContainer = document.querySelector('#chat-messages') || (typeof $ !== 'undefined' && $.chatMessagesContainer);
-                    if (_imgContainer && _imgUrlsFinal.length > 0) {
-                        _imgUrlsFinal.forEach(function(_imgSrc, _imgIdx) {
-                            var _imgRow = document.createElement('div');
-                            _imgRow.className = 'message-row assistant';
-                            _imgRow.setAttribute('data-gen-image', '1');
-                            var _imgBub = document.createElement('div');
-                            _imgBub.className = 'bubble assistant';
-                            _imgBub.style.cssText = 'text-align:center;padding:8px;';
-                            var _imgEl = document.createElement('img');
-                            _imgEl.src = _imgSrc;
-                            _imgEl.decoding = 'async';
-                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto;cursor:pointer;';
-                            _imgEl.onclick = function() { if (typeof showImageLightbox === 'function') showImageLightbox(_imgUrlsFinal, _imgIdx); };
-                            _imgEl.onerror = function() { this.style.display = 'none'; };
-                            _imgBub.appendChild(_imgEl);
-                            _imgRow.appendChild(_imgBub);
-                            _imgContainer.appendChild(_imgRow);
-                        });
-                        if (typeof $ !== 'undefined' && $.chatBox) { $.chatBox.scrollTop = $.chatBox.scrollHeight; }
-                    }
-                } catch(_giDomErr) { console.warn('[Image] standalone render failed:', _giDomErr.message); }
 
                 // ★ 立即清除图片生成占位蒙版和 loading 指示器
                 try {
@@ -1524,51 +1500,91 @@
                         // ★ B站工具: 通过 MCP 统一代理
                         toolResult = await _mcpExecute(func.name, args, function(res) {
                             if (func.name === 'bilibili_qr_login') {
-                                var _qrImg = res.qr_image_base64 || res.success_image || null;
-                                if (_qrImg) {
-                                    // ★ base64不入pendingMsg(会被buildApiMessages塞进API请求, 浪费token)
-                                    // 仅存短URL供持久化
-                                    var _qrShort = res.qr_image_url || (res.qrcode_key ? 'bili_qr:' + res.qrcode_key : null);
-                                    if (_qrShort) {
-                                        pendingMsg._qrRef = _qrShort;
-                                        if (chats[chatId]) {
-                                            var _biliMI = chats[chatId].messages.findIndex(m => m === pendingMsg);
-                                            if (_biliMI !== -1) chats[chatId].messages[_biliMI]._qrRef = _qrShort;
-                                        }
-                                    }
-                                    // ★ 立即渲染二维码为独立消息（不依赖气泡生命周期）
+                                var _qrB64 = res.qr_image_base64 || res.success_image || null;
+                                // ★ 彻底清除气泡内QR: 删generatedImage, 删URL防markdown渲染为图片
+                                delete pendingMsg.generatedImage;
+                                delete pendingMsg.generatedImages;
+                                // 从res和pendingMsg中抹掉QR URL(防止出现在任何文本中被markdown渲染)
+                                if (res.qr_image_url) delete res.qr_image_url;
+                                if (res.qr_image_base64) delete res.qr_image_base64;
+                                if (pendingMsg.content && /bilibili_qr\.png/.test(pendingMsg.content)) {
+                                    pendingMsg.content = pendingMsg.content.replace(/https:\/\/[^\s]*bilibili_qr\.png[^\s]*/g, '[QR码]');
+                                }
+                                if (_qrB64) {
                                     try {
-                                        // 直接在聊天容器中创建独立 QR 消息行
-                                        var _qrContainer = document.querySelector('#chat-messages') || (typeof $ !== 'undefined' && $.chatMessagesContainer);
-                                        if (_qrContainer) {
+                                        var _qrCont = (typeof $ !== 'undefined' && $.chatMessagesContainer) || document.querySelector('#chat-messages');
+                                        if (_qrCont) {
+                                            // 移除旧独立QR行
+                                            _qrCont.querySelectorAll('[data-qr-login]').forEach(function(el) { el.remove(); });
+                                            // 清理所有气泡内可能残留的QR图片
+                                            _qrCont.querySelectorAll('.bubble img[src*="base64"], .bubble img[src*="bilibili_qr"], .generated-images-container img').forEach(function(el) {
+                                                if (el.src && (el.src.includes('base64') || el.src.includes('bilibili_qr'))) {
+                                                    var wrap = el.closest('.generated-images-container') || el.parentElement;
+                                                    if (wrap) wrap.remove();
+                                                }
+                                            });
                                             var _qrRow = document.createElement('div');
                                             _qrRow.className = 'message-row assistant';
                                             _qrRow.setAttribute('data-qr-login', '1');
-                                            // 移除旧 QR 消息
-                                            _qrContainer.querySelectorAll('[data-qr-login]').forEach(function(el) { el.remove(); });
-                                            var _qrBubbleWrap = document.createElement('div');
-                                            _qrBubbleWrap.className = 'bubble assistant';
-                                            _qrBubbleWrap.style.cssText = 'text-align:center;padding:12px;';
-                                            var _qrLabel = document.createElement('div');
-                                            _qrLabel.style.cssText = 'margin-bottom:8px;font-size:13px;color:var(--text-secondary,#666);';
-                                            _qrLabel.textContent = '📷 请用哔哩哔哩客户端扫描二维码登录';
-                                            var _qrImgEl = document.createElement('img');
-                                            _qrImgEl.src = _qrImg;
-                                            _qrImgEl.style.cssText = 'max-width:220px;width:100%;border-radius:10px;display:block;margin:0 auto;';
-                                            _qrImgEl.onclick = function() {
-                                                if (typeof showImageLightbox === 'function') showImageLightbox([_qrImg], 0);
-                                            };
-                                            _qrBubbleWrap.appendChild(_qrLabel);
-                                            _qrBubbleWrap.appendChild(_qrImgEl);
-                                            _qrRow.appendChild(_qrBubbleWrap);
-                                            _qrContainer.appendChild(_qrRow);
-                                            // 滚动到底部
-                                            if (typeof $ !== 'undefined' && $.chatBox) {
-                                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                            var _isSuccess = res.status === 'logged_in' || (res.ok && !res.qr_image_base64);
+                                                _qrRow.innerHTML = '<div class="bubble assistant" style="text-align:center;padding:12px;">' +
+                                                    (_isSuccess ? '<div style="font-size:32px;margin-bottom:8px;">✅</div><div style="font-size:14px;color:var(--text-secondary,#666);">登录成功</div>' :
+                                                     '<div style="margin-bottom:6px;font-size:12px;color:var(--text-secondary,#666);">📷 请用哔哩哔哩客户端扫码</div>') +
+                                                    '<img src="' + _qrB64 + '" style="max-width:220px;border-radius:10px;display:block;margin:0 auto;" />' +
+                                                '</div>';
+                                            _qrCont.appendChild(_qrRow);
+                                            if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                            // ★ 持久化引用(供reload恢复, 注意不含base64避免token浪费)
+                                            pendingMsg._hasQrRow = true;
+                                            if (chats[chatId]) {
+                                                var _bmi2 = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                                if (_bmi2 !== -1) chats[chatId].messages[_bmi2]._hasQrRow = true;
                                             }
                                         }
-                                    } catch(_qrDomErr2) { console.warn('[QR] 独立消息渲染失败:', _qrDomErr2.message); }
+                                    } catch(_qrDomErr3) {}
                                 }
+                            }
+                        });
+                    } else if (func.name === 'chaoxing_qr_login') {
+                        // ★ 超星扫码登录: 通过 MCP 统一代理 + QR独立消息行
+                        toolResult = await _mcpExecute(func.name, args, function(res) {
+                            var _qrB64 = res.qr_image_base64 || res.success_image || null;
+                            delete pendingMsg.generatedImage;
+                            delete pendingMsg.generatedImages;
+                            if (res.qr_image_url) delete res.qr_image_url;
+                            if (res.qr_image_base64) delete res.qr_image_base64;
+                            if (pendingMsg.content && /chaoxing_qr\.png/.test(pendingMsg.content)) {
+                                pendingMsg.content = pendingMsg.content.replace(/https:\/\/[^\s]*chaoxing_qr\.png[^\s]*/g, '[QR码]');
+                            }
+                            if (_qrB64) {
+                                try {
+                                    var _qrCont = (typeof $ !== 'undefined' && $.chatMessagesContainer) || document.querySelector('#chat-messages');
+                                    if (_qrCont) {
+                                        _qrCont.querySelectorAll('[data-qr-login]').forEach(function(el) { el.remove(); });
+                                        _qrCont.querySelectorAll('.bubble img[src*="base64"], .bubble img[src*="chaoxing_qr"], .generated-images-container img').forEach(function(el) {
+                                            if (el.src && (el.src.includes('base64') || el.src.includes('chaoxing_qr'))) {
+                                                var wrap = el.closest('.generated-images-container') || el.parentElement;
+                                                if (wrap) wrap.remove();
+                                            }
+                                        });
+                                        var _qrRow = document.createElement('div');
+                                        _qrRow.className = 'message-row assistant';
+                                        _qrRow.setAttribute('data-qr-login', '1');
+                                        var _isSuccess2 = res.status === 'logged_in' || (res.ok && !res.qr_image_base64);
+                                        _qrRow.innerHTML = '<div class="bubble assistant" style="text-align:center;padding:12px;">' +
+                                            (_isSuccess2 ? '<div style="font-size:32px;margin-bottom:8px;">✅</div><div style="font-size:14px;color:var(--text-secondary,#666);">超星登录成功</div>' :
+                                             '<div style="margin-bottom:6px;font-size:12px;color:var(--text-secondary,#666);">📷 请用学习通APP扫码</div>') +
+                                            '<img src="' + _qrB64 + '" style="max-width:220px;border-radius:10px;display:block;margin:0 auto;" />' +
+                                            '</div>';
+                                        _qrCont.appendChild(_qrRow);
+                                        if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                        pendingMsg._hasQrRow = true;
+                                        if (chats[chatId]) {
+                                            var _bmi3 = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                            if (_bmi3 !== -1) chats[chatId].messages[_bmi3]._hasQrRow = true;
+                                        }
+                                    }
+                                } catch(_qrDomErr4) {}
                             }
                         });
                     } else if (func.name.startsWith('mmx_')) {
@@ -1740,8 +1756,8 @@
                             toolResult = { error: '视频剪辑请求超时或失败: ' + (_veditErr.message || '未知错误') + '。请尝试缩小视频或降低分辨率后重试。' };
                         }
                     }
-                    // ★ 办公文档工具: 直接走 MCP
-                    if (/^generate_(ppt|docx|xlsx|pdf)$/.test(func.name) || /^cr_/.test(func.name) || func.name === 'video_understanding' || func.name === 'analyze_image' || func.name === 'rag_search' || func.name === 'plan_update' || func.name === 'delegate_task' || func.name === 'delegate_workflow' || func.name === 'ask_agent' || func.name === 'autonomous_mode' || func.name === 'toggle_proxy') {
+                    // ★ 办公文档工具: 直接走 MCP（仅当前端未处理时）
+                    if (!toolResult && (/^generate_(ppt|docx|xlsx|pdf)$/.test(func.name) || /^cr_/.test(func.name) || func.name === 'video_understanding' || func.name === 'analyze_image' || func.name === 'rag_search' || func.name === 'plan_update' || func.name === 'delegate_task' || func.name === 'delegate_workflow' || func.name === 'ask_agent' || func.name === 'autonomous_mode' || func.name === 'toggle_proxy')) {
                         toolResult = await _mcpExecute(func.name, args);
                     }
                     // ★ 通用 MCP fallback: 前端未知的工具统统转发到 MCP 服务器
@@ -1762,7 +1778,7 @@
                 async function _mcpExecute(toolName, args, onResult) {
                     var _mcpUrl = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat/api') + '/engine_api.php?action=mcp_proxy';
                     // ★ 使用调用方传入的 abortSignal（如果存在），否则 120s 超时
-                    var _signal = (typeof abortSignal !== 'undefined' && abortSignal) ? abortSignal : AbortSignal.timeout(120000);
+                    var _signal = (typeof abortSignal !== 'undefined' && abortSignal) ? abortSignal : AbortSignal.timeout(300000);
                     var _resp = await fetch(_mcpUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

@@ -67,3 +67,5 @@ debug_*
 config.ini.template
 src_routes_backup_optimize.py
 engine_sub_test*
+chaoxing_qr.png
+bilibili_qr.png
