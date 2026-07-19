@@ -756,12 +756,15 @@ window.loadChat = async function (id) {
     var prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
     applyParagraphPrefix(prefix);
 
-    // ★ 清理chats数据中所有残留 partial 消息
-    // ★ 注意: 隐形截断检测只在restoreUserData中运行(页面加载时),
-    //   不在loadChat中运行(每次切对话/发消息都调用,会误伤正常短回复)
+    // ★ 清理残留 partial 消息 — 但保留当前正在生成中的(后台并行)
     if (chats[id] && chats[id].messages) {
         var _before = chats[id].messages.length;
-        chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
+        chats[id].messages = chats[id].messages.filter(function(m) {
+            if (!m.partial) return true;
+            // ★ 保留正在生成中的 partial (后台并行对话不丢失)
+            if (isTypingMap[id]) return true;
+            return false;
+        });
         if (chats[id].messages.length !== _before) {
             console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');
         }
