@@ -349,7 +349,7 @@ async function initializeConfig() {
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
     if (window.marked) {
-        marked.setOptions({ gfm: getChecked('markdownGFM'), breaks: getChecked('markdownBreaks'), pedantic: false });
+        marked.setOptions({ gfm: getChecked('markdownGFM'), breaks: getChecked('markdownBreaks'), pedantic: false, sanitize: false });
         // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理,自定义 renderer 会导致 [object Object])
     }
 

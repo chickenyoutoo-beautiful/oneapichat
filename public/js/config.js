@@ -1065,6 +1065,7 @@ window.updateMarkdownConfig = () => {
             gfm: getChecked('markdownGFM'),
             breaks: getChecked('markdownBreaks'),
             pedantic: false,
+            sanitize: false,
         });
         // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理)
     }
