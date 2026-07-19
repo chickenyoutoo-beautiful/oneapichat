@@ -402,6 +402,16 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     // ★ 捕获 usage（一些API如Grok在常规chunk中返回usage，不只在最后）
                     if (data.usage) usage = data.usage;
 
+                    // ★ 检测 Provider 错误响应（非标准格式,无 choices 数组）
+                    if (data.error || (data.status && data.status >= 400)) {
+                        var _errDetail = data.detail || data.error || JSON.stringify(data);
+                        var _errMsg = typeof _errDetail === 'string' ? _errDetail : (_errDetail.message || JSON.stringify(_errDetail));
+                        if (data.status === 404 && _errMsg.includes('Not found for account')) {
+                            _errMsg = '模型未激活: 请在 NVIDIA Build 控制台激活此模型,或换用免费模型如 meta/llama-3.1-8b-instruct';
+                        }
+                        throw new Error('[Provider ' + data.status + '] ' + _errMsg);
+                    }
+
                     var delta = data.choices?.[0]?.delta;
                     // 如果 delta 为空,跳过此条数据（但已捕获usage）
                     if (!delta) {
@@ -1029,9 +1039,16 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         throw new Error(`响应格式错误: ${e.message}`);
     }
 
-    // 检查 API 错误信息
+    // 检查 API 错误信息 (含 NVIDIA 格式: {status, detail})
     if (data.error) {
         throw new Error(`API 错误: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+    if (data.status && data.status >= 400) {
+        var _d = data.detail || JSON.stringify(data);
+        if (data.status === 404 && _d.includes('Not found for account')) {
+            _d = '模型未激活: 请在 NVIDIA Build 控制台激活此模型,或换用免费模型如 meta/llama-3.1-8b-instruct';
+        }
+        throw new Error(`[Provider ${data.status}] ${_d}`);
     }
 
     var choice = data.choices?.[0];

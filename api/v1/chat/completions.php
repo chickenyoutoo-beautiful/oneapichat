@@ -271,7 +271,7 @@ $modelProviderKeys = [
     'moonshot'    => ['kimi', 'moonshot'],
     'doubao'      => ['doubao', 'skylark', 'seed'],
     'mimo'        => ['mimo'],
-    'nvidia'      => ['nvidia/', 'meta/', 'mistralai/', 'microsoft/', 'google/', 'qwen/', 'deepseek-ai/', 'ibm/', 'nvidia'],
+    'nvidia'      => ['nvidia/', 'meta/', 'mistralai/', 'microsoft/', 'google/', 'qwen/', 'deepseek-ai/', 'ibm/', 'nvidia', '01-ai/', 'nv-mistralai/', 'bytedance/', 'writer/', 'aisingapore/', 'databricks/', 'snowflake/', 'yentinglin/'],
 ];
 
 // Find which provider this model belongs to
