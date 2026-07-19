@@ -1602,6 +1602,9 @@
                                 } catch(_qrDomErr4) {}
                             }
                         });
+                    } else if (func.name === 'get_current_time') {
+                        // ★ 获取当前精确时间: 直接走 MCP (瞬时返回,无参数)
+                        toolResult = await _mcpExecute(func.name, args);
                     } else if (func.name.startsWith('mmx_')) {
                         // MiniMax CLI 工具：mmx_chat/mmx_image/mmx_video/mmx_speech/mmx_voices/mmx_music/mmx_vision/mmx_quota
                         var _mmxCmd = func.name.replace('mmx_', '');
@@ -1772,7 +1775,7 @@
                         }
                     }
                     // ★ 办公文档工具: 直接走 MCP（仅当前端未处理时）
-                    if (!toolResult && (/^generate_(ppt|docx|xlsx|pdf)$/.test(func.name) || /^cr_/.test(func.name) || func.name === 'video_understanding' || func.name === 'analyze_image' || func.name === 'rag_search' || func.name === 'plan_update' || func.name === 'delegate_task' || func.name === 'delegate_workflow' || func.name === 'ask_agent' || func.name === 'autonomous_mode' || func.name === 'toggle_proxy')) {
+                    if (!toolResult && (/^generate_(ppt|docx|xlsx|pdf)$/.test(func.name) || /^cr_/.test(func.name) || func.name === 'video_understanding' || func.name === 'analyze_image' || func.name === 'rag_search' || func.name === 'plan_update' || func.name === 'delegate_task' || func.name === 'delegate_workflow' || func.name === 'ask_agent' || func.name === 'autonomous_mode' || func.name === 'toggle_proxy' || func.name === 'get_current_time')) {
                         toolResult = await _mcpExecute(func.name, args);
                     }
                     // ★ 通用 MCP fallback: 前端未知的工具统统转发到 MCP 服务器
