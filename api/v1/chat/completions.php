@@ -354,14 +354,10 @@ if (!$hasSystem && !empty($systemPrompt)) {
     array_unshift($messages, ['role' => 'system', 'content' => $systemPrompt]);
 }
 
-// ★ MiniMax: tool_call_id 匹配问题(error 2013) → 临时移除 tools+tool消息
+// ★ MiniMax: 不支持 tool_choice, 需过滤不兼容参数
 $isMiniMax = ($selectedProvider['label'] ?? '') === 'MiniMax' || stripos($providerBaseUrl, 'api.minimaxi.com') !== false;
-if ($isMiniMax && $tools) {
-    $tools = null;
-    $toolChoice = null;
-    $messages = array_values(array_filter($messages, function($m) {
-        return ($m['role'] ?? '') !== 'tool';
-    }));
+if ($isMiniMax) {
+    $toolChoice = null;  // MiniMax 全系不支持 tool_choice
 }
 
 // ── 5. 构建 Provider 请求体 ──
@@ -372,11 +368,15 @@ $providerBody = [
     'temperature' => $finalTemp,
     'max_tokens' => $finalMaxTokens,
 ];
+// ★ MiniMax 不支持的参数 — 静默移除
+if ($isMiniMax) {
+    // presence_penalty/frequency_penalty/logit_bias/user/seed/parallel_tool_calls 在 MiniMax 上会引发错误
+    // 已从上文移除 tool_choice
+}
 if ($tools) $providerBody['tools'] = $tools;
 if ($toolChoice) $providerBody['tool_choice'] = $toolChoice;
 if ($stop) $providerBody['stop'] = $stop;
-if ($topP !== null) $providerBody['top_p'] = $topP;
-
+if ($topP !== null && !$isMiniMax) $providerBody['top_p'] = $topP;
 $targetUrl = $providerBaseUrl . '/chat/completions';
 
 // ── 6. 调用 Provider API ──
