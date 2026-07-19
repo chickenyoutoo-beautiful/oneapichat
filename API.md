@@ -34,7 +34,8 @@ Authorization: Bearer <your-api-key>
 | `/tools` | GET | ✅ | 全部 69 个工具定义（OpenAI function calling 格式） |
 | `/tools/call` | POST | ✅ | 执行任意工具（透明代理到 MCP Server） |
 | `/conversations` | GET/POST/DELETE | ✅ | 对话历史同步 |
-| `/skills` | GET | ✅ | 全部 12 个技能定义（OpenAI function calling 格式） |
+| `/upload` | POST/GET | ⚠️ | 文件上传/图片列表（Auth-Token 认证，非 API Key） |
+| `/skills` | GET | ✅ | 全部 12 个技能定义（run_skill enum 约束） |
 
 ### MCP 协议端点（无需 API Key）
 
@@ -414,9 +415,167 @@ curl "https://naujtrats.xyz/oneapichat/api/skills_api.php?action=match&query=原
 
 ---
 
-## 错误码
+## 8. 文件上传
 
-| HTTP | 类型 | 说明 |
+```
+POST /api/upload.php
+```
+
+多模态对话时上传图片。认证方式不同于 API v1 — 使用 **Auth-Token**（从 Cookie `auth_token` 或 Header `Auth-Token` 获取）。
+
+### 请求
+
+```
+POST /oneapichat/api/upload.php
+Content-Type: multipart/form-data
+
+image=@file.jpg
+```
+
+也可通过 URL query 传 auth：
+```
+POST /oneapichat/api/upload.php?auth_token=<token>
+```
+
+### 响应
+
+```json
+{
+  "url": "/oneapichat/uploads/2026-07/file.jpg",
+  "size": 12345
+}
+```
+
+> 文件保存在 `uploads/` 目录，返回相对路径。完整 URL 需拼接 Base URL。
+
+### 图片列表
+
+```
+GET /oneapichat/api/upload.php?auth_token=<token>
+```
+
+```json
+[
+  {"name": "file.jpg", "url": "/oneapichat/uploads/2026-07/file.jpg", "size": 12345}
+]
+```
+
+---
+
+## 9. SSE 错误格式
+
+Provider 返回错误时，**不会**以标准 HTTP 错误码响应，而是作为 SSE 数据事件返回：
+
+```
+data: {"error":{"message":"Provider error","type":"server_error","code":"UPSTREAM_ERROR"}}
+
+data: [DONE]
+```
+
+**客户端必须**解析 SSE body 中的 `error` 字段，而非仅依赖 HTTP 状态码。
+
+常见错误码：
+
+| code | 说明 |
+|------|------|
+| `PROVIDER_NOT_CONFIGURED` | 账户未配置 API Provider |
+| `UPSTREAM_ERROR` | 上游 API 错误（透传） |
+| `STREAM_ERROR` | 流式传输中断 |
+| `INVALID_API_KEY` | API Key 无效 |
+| `MISSING_MODEL` / `MISSING_MESSAGES` | 缺少必填参数 |
+
+### 错误响应格式
+
+所有 API v1 错误遵循统一格式：
+
+```json
+{
+  "error": {
+    "message": "人类可读描述",
+    "type": "server_error | authentication_error | invalid_request_error",
+    "code": "ERROR_CODE"
+  }
+}
+```
+
+---
+
+## 10. Provider 路由
+
+不同模型通过 `/models` 返回的 `owned_by` 字段区分 Provider：
+
+| owned_by | Provider | 说明 |
+|----------|----------|------|
+| `user` | 账户默认 Provider | DeepSeek / OpenAI 兼容 |
+| `deepseek` | DeepSeek | 独立路由 |
+| `minimax` | MiniMax | Token Plan API |
+| `grok` | Grok | X.AI |
+
+模型 ID 与 Provider 的映射在 OneAPIChat 设置面板中配置。API 调用时无需指定 Provider — 服务端根据模型名自动路由。
+
+---
+
+## 11. 视觉模型
+
+支持图片输入的模型列表通过 `/models` 返回的 `capabilities` 字段标识：
+
+```json
+{
+  "id": "deepseek-chat",
+  "capabilities": ["chat"]
+}
+{
+  "id": "gpt-4o",
+  "capabilities": ["chat", "vision"]
+}
+```
+
+| capability | 说明 |
+|------------|------|
+| `chat` | 纯文本对话 |
+| `vision` | 支持 `image_url` 多模态输入 |
+
+带 `vision` capability 的模型，在 messages 中可通过以下方式传图片：
+
+```json
+{"role": "user", "content": [
+  {"type": "text", "text": "描述这张图片"},
+  {"type": "image_url", "image_url": {"url": "https://..."}}
+]}
+```
+
+非视觉模型需先将图片上传（`/api/upload.php`），再用 `web_fetch` 或 `analyze_image` 工具分析。
+
+---
+
+## 12. Tool Schema 规范
+
+自动注入工具时，以下条件的工具会被**过滤掉**（不发给模型）：
+
+1. `parameters.type` !== `"object"` — 必须是对象
+2. `parameters.properties` 为空或非数组 — 至少有一个属性
+3. `parameters` 整体为空数组 `[]` 或 `null`
+
+**正确示例**：
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "my_tool",
+    "parameters": {
+      "type": "object",
+      "properties": {"query": {"type": "string"}},
+      "required": ["query"]
+    }
+  }
+}
+```
+
+> `required` 为空数组时会被自动移除（部分 Provider 会拒绝）。
+
+---
+
+## 错误码
 |:----:|------|------|
 | 400 | `invalid_request_error` | 缺少必填参数、JSON 格式错误 |
 | 401 | `authentication_error` | API Key 无效或未提供 |
