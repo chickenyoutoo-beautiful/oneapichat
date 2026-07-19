@@ -76,6 +76,7 @@ $providers = [
     'openrouter'=> ['label' => 'OpenRouter',     'baseUrl' => 'https://openrouter.ai/api/v1'],
     'opencode'  => ['label' => 'OpenCode',       'baseUrl' => 'https://api.opencode.ai/v1'],
     'llamacpp'  => ['label' => '本地模型',       'baseUrl' => 'https://localmodels.naujtrats.xyz/v1'],
+    'nvidia'    => ['label' => 'NVIDIA NIM',     'baseUrl' => 'https://integrate.api.nvidia.com/v1'],
     'custom'    => ['label' => '自定义',         'baseUrl' => ''],
 ];
 
@@ -103,6 +104,7 @@ $providerKeyMap = [
     'deepseek' => 'apiKeyDeepseek',   'openai' => 'apiKeyOpenAI',
     'xai' => 'apiKeyXAI',             'antthropic' => 'apiKeyAnth',
     'minimax' => 'apiKeyMiniMax',     'gemini' => 'apiKeyGemini',
+    'nvidia' => 'apiKeyNvidia',
     'zhipu' => 'apiKeyZhipu',         'qwen' => 'apiKeyQwen',
     'moonshot' => 'apiKeyMoonshot',   'doubao' => 'apiKeyDoubao',
     'mimo' => 'apiKeyMiMo',           'openrouter' => 'apiKeyOpenRouter',

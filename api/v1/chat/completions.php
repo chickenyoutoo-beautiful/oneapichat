@@ -85,6 +85,7 @@ $providers = [
     'openrouter'=> ['label' => 'OpenRouter',     'baseUrl' => 'https://openrouter.ai/api/v1',                 'keyName' => 'apiKeyOpenRouter'],
     'opencode'  => ['label' => 'OpenCode',       'baseUrl' => 'https://api.opencode.ai/v1',                     'keyName' => 'apiKeyOpenCode'],
     'llamacpp'  => ['label' => '本地模型',       'baseUrl' => 'https://localmodels.naujtrats.xyz/v1',          'keyName' => 'apiKeyLlamaCpp'],
+    'nvidia'    => ['label' => 'NVIDIA NIM',     'baseUrl' => 'https://integrate.api.nvidia.com/v1',             'keyName' => 'apiKeyNvidia'],
     'custom'    => ['label' => '自定义',         'baseUrl' => '',                                               'keyName' => 'apiKeyCustom'],
 ];
 
@@ -270,6 +271,7 @@ $modelProviderKeys = [
     'moonshot'    => ['kimi', 'moonshot'],
     'doubao'      => ['doubao', 'skylark', 'seed'],
     'mimo'        => ['mimo'],
+    'nvidia'      => ['nvidia/', 'meta/', 'mistralai/', 'microsoft/', 'google/', 'qwen/', 'deepseek-ai/', 'ibm/', 'nvidia'],
 ];
 
 // Find which provider this model belongs to
@@ -333,7 +335,7 @@ function _decrypt_config_key(string $encoded): string {
     if ($decoded !== false && strlen($decoded) > 0) {
         $encKey = getEncryptionKey(); $result = '';
         for ($i = 0; $i < strlen($decoded); $i++) $result .= chr(ord($decoded[$i]) ^ ord($encKey[$i % strlen($encKey)]));
-        if (preg_match('/^(sk-|tvly-|oac-|AIza)/', $result)) return $result;
+        if (preg_match('/^(sk-|tvly-|oac-|AIza|nvapi-)/', $result)) return $result;
     }
     return $encoded;
 }

@@ -96,7 +96,7 @@ function _decrypt_config_key(string $encoded): string {
         for ($i = 0; $i < strlen($decoded); $i++) {
             $result .= chr(ord($decoded[$i]) ^ ord($encKey[$i % strlen($encKey)]));
         }
-        if (preg_match('/^(sk-|tvly-|oac-|AIza)/', $result)) return $result;
+        if (preg_match('/^(sk-|tvly-|oac-|AIza|nvapi-)/', $result)) return $result;
     }
     return $encoded;
 }
