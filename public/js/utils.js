@@ -202,7 +202,7 @@ function buildUserContent(text, files) {
             } else {
                 // 非图片文件: 注入服务器路径元信息
                 var _isVid = f.isVideo || (f.type && f.type.startsWith('video/'));
-                var _info = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+                var _info = `[<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
                 if (f.serverUrl) {
                     _info += `\n服务器路径: ${f.serverUrl}`;
                     if (_isVid) {
@@ -250,7 +250,7 @@ function buildUserContent(text, files) {
         var otherContent = otherFiles.length
             ? otherFiles.map(f => {
                 var _isV = f.isVideo || (f.type && f.type.startsWith('video/'));
-                var _oi = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+                var _oi = `[<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
                 if (f.serverUrl) {
                     _oi += `\n服务器路径: ${f.serverUrl}`;
                     if (_isV) _oi += `\n⚠️ 可直接用此路径调用 video_edit: input_path="${f.serverUrl}"`;
@@ -290,7 +290,7 @@ function buildUserContent(text, files) {
         // ★ 视频/大文件: 不传 base64 内容到模型,而是注入服务器路径元信息
         var isVideo = f.isVideo || (f.type && f.type.startsWith('video/'));
         var c = f.content || '';
-        var info = `[📎 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
+        var info = `[<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)]`;
         if (f.serverUrl) {
             info += `\n服务器路径: ${f.serverUrl}`;
             if (isVideo) {
