@@ -34,7 +34,7 @@ Authorization: Bearer <your-api-key>
 | `/tools` | GET | ✅ | 全部 69 个工具定义（OpenAI function calling 格式） |
 | `/tools/call` | POST | ✅ | 执行任意工具（透明代理到 MCP Server） |
 | `/conversations` | GET/POST/DELETE | ✅ | 对话历史同步 |
-| `/skills_api.php` | GET | ❌ | 技能系统（match/list/get） |
+| `/skills` | GET | ✅ | 全部 12 个技能定义（OpenAI function calling 格式） |
 
 ### MCP 协议端点（无需 API Key）
 
@@ -347,9 +347,48 @@ curl https://naujtrats.xyz/mcp/health
 
 ---
 
-## 6. 技能系统
+## 6. Skills API
 
-11 个 AI 技能（ClawHub 兼容格式），自动根据用户问题匹配。
+```
+GET /skills
+```
+
+返回全部 12 个技能，每个技能以 `run_skill` 工具定义呈现（`skill_name` enum 约束），第三方客户端可直接注入到 tools 数组。
+
+```bash
+curl https://naujtrats.xyz/oneapichat/api/v1/skills \
+  -H "Authorization: Bearer oac-xxxxxxxx..."
+```
+
+```json
+{
+  "object": "list",
+  "count": 13,
+  "data": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_skill",
+        "description": "运行技能「deep-search」: 深度多源搜索...",
+        "parameters": {
+          "properties": {
+            "skill_name": { "type": "string", "enum": ["deep-search"] },
+            "query": { "type": "string", "description": "原始用户问题" }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+> 数据末尾附通用 `run_skill` 定义（`enum` 包含全部技能名），模型可一次调用匹配任意技能。
+
+---
+
+## 7. 技能系统（内部）
+
+12 个 AI 技能（ClawHub 兼容格式），自动根据用户问题匹配。
 
 ### 技能列表
 
