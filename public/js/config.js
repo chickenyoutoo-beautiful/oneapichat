@@ -886,7 +886,9 @@ window.toggleProxy = function() {
     var details = document.getElementById('proxyConfigDetails');
     if (details) details.style.display = enabled ? 'block' : 'none';
     // ★ 清空 CORS 域名缓存: 代理开关变化后重新尝试直连
-    window._corsBlockedDomains = {};
+    window._corsBlockedDomains = {
+        'integrate.api.nvidia.com': true,  // NVIDIA NIM 无CORS头
+    };
     window.saveConfig();
 };
 
