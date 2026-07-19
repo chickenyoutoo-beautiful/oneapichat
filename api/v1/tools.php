@@ -44,7 +44,7 @@ if ($mcpResp) {
         $schema = $t['inputSchema'] ?? $t['parameters'] ?? [];
         if (!is_array($schema) || empty($schema['type'])) continue;
         // 跳过空 schema (Provider 会拒绝)
-        if (empty($schema['properties']) || !is_array($schema['properties'])) continue;
+        if (!isset($schema['properties']) || !is_array($schema['properties'])) continue;
         // 清理空 required
         if (empty($schema['required'])) unset($schema['required']);
 
@@ -75,7 +75,7 @@ if ($engineResp) {
         if ($exists) continue;
         $schema = $t['input_schema'] ?? $t['parameters'] ?? [];
         if (!is_array($schema) || empty($schema['type'])) continue;
-        if (empty($schema['properties']) || !is_array($schema['properties'])) continue;
+        if (!isset($schema['properties']) || !is_array($schema['properties'])) continue;
         if (empty($schema['required'])) unset($schema['required']);
         $tools[] = [
             'type' => 'function',

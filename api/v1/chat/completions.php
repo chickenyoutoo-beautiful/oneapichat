@@ -152,7 +152,7 @@ if (empty($tools) && !isset($body['tools'])) {
         foreach (($engineToolsData['tools'] ?? []) as $t) {
             if (!is_array($t) || empty($t['name'])) continue;
             $schema = $t['input_schema'] ?? $t['parameters'] ?? null;
-            if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) continue;
+            if (!is_array($schema) || empty($schema['type']) || !isset($schema['properties']) || !is_array($schema['properties'])) continue;
             if (empty($schema['required'])) unset($schema['required']);
             $tools[] = ['type' => 'function', 'function' => ['name' => $t['name'], 'description' => $t['description'] ?? '', 'parameters' => $schema]];
         }
@@ -173,7 +173,7 @@ if (empty($tools) && !isset($body['tools'])) {
             }
             if ($exists) continue;
             $schema = $t['inputSchema'] ?? $t['parameters'] ?? null;
-            if (!is_array($schema) || empty($schema['type']) || empty($schema['properties']) || !is_array($schema['properties'])) continue;
+            if (!is_array($schema) || empty($schema['type']) || !isset($schema['properties']) || !is_array($schema['properties'])) continue;
             if (empty($schema['required'])) unset($schema['required']);
             $tools[] = ['type' => 'function', 'function' => ['name' => $t['name'], 'description' => $t['description'] ?? '', 'parameters' => $schema]];
         }
