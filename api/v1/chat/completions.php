@@ -179,7 +179,74 @@ if (empty($tools) && !isset($body['tools'])) {
         }
     }
 
-    // 3. 过滤非法 schema
+    // 3. 注入技能工具定义（替换 engine 的空 schema run_skill）
+    $skillsDir = dirname(__DIR__, 2) . '/skills';
+    if (is_dir($skillsDir)) {
+        // 移除 engine 的空白 run_skill
+        $tools = array_values(array_filter($tools, function($t) {
+            return ($t['function']['name'] ?? '') !== 'run_skill';
+        }));
+
+        $skillNames = [];
+        foreach (scandir($skillsDir) as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $mdFile = $skillsDir . '/' . $entry . '/SKILL.md';
+            if (!file_exists($mdFile)) continue;
+            $content = @file_get_contents($mdFile);
+            if (!$content) continue;
+
+            $name = $entry;
+            $desc = '';
+            $triggers = [];
+            if (preg_match('/^---\s*\n(.*?)\n---/s', $content, $m)) {
+                foreach (explode("\n", $m[1]) as $line) {
+                    if (preg_match('/^description:\s*(.+)$/', $line, $lm)) $desc = trim($lm[1], '"\' ');
+                    if (preg_match('/^\s+-\s*(.+)$/', $line, $lm)) $triggers[] = trim($lm[1], '"\' ');
+                }
+            }
+            if (empty($desc)) $desc = $name;
+            $skillNames[] = $name;
+
+            // 每个技能生成一个独立 tool 定义
+            $triggerHint = empty($triggers) ? '' : ' 触发场景: ' . implode('; ', array_slice($triggers, 0, 5));
+            $tools[] = [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'run_skill',
+                    'description' => "运行技能「{$name}」: {$desc}。{$triggerHint}",
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'skill_name' => ['type' => 'string', 'enum' => [$name]],
+                            'query' => ['type' => 'string', 'description' => '用户原始问题'],
+                        ],
+                        'required' => ['skill_name', 'query'],
+                    ],
+                ],
+            ];
+        }
+
+        // 通用 run_skill（含全部技能列表）
+        if (!empty($skillNames)) {
+            $tools[] = [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'run_skill',
+                    'description' => '运行已注册的AI技能。可用: ' . implode(', ', $skillNames) . '。根据用户需求匹配最合适的技能运行。',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'skill_name' => ['type' => 'string', 'description' => '技能名称', 'enum' => $skillNames],
+                            'query' => ['type' => 'string', 'description' => '用户原始问题'],
+                        ],
+                        'required' => ['skill_name', 'query'],
+                    ],
+                ],
+            ];
+        }
+    }
+
+    // 4. 过滤非法 schema
     $tools = array_values(array_filter($tools, function($t) {
         $params = ($t['function']['parameters'] ?? null);
         return is_array($params) && !empty($params['type']) && $params['type'] === 'object';
