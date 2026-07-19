@@ -197,7 +197,6 @@ const API_PROVIDERS = {
     openrouter:{ label: 'OpenRouter',     baseUrl: 'https://openrouter.ai/api/v1',                  keyLS: 'apiKeyOpenRouter', baseKey: 'apiKeyOpenRouter' },
     opencode:  { label: 'OpenCode',       baseUrl: 'https://api.opencode.ai/v1',                      keyLS: 'apiKeyOpenCode',  baseKey: 'apiKeyOpenCode' },
     llamacpp:  { label: '本地模型 (llama.cpp)', baseUrl: 'https://localmodels.naujtrats.xyz/v1',   keyLS: 'apiKeyLlamaCpp',  baseKey: 'apiKeyLlamaCpp' },
-    nvidia:    { label: 'NVIDIA NIM',     baseUrl: 'https://integrate.api.nvidia.com/v1',              keyLS: 'apiKeyNvidia',   baseKey: 'apiKeyNvidia' },
     custom:    { label: '自定义',         baseUrl: '',                                                 keyLS: 'apiKeyCustom',  baseKey: 'apiKeyCustom' },
 };
 let _currentProvider = '';
