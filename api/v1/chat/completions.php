@@ -257,7 +257,62 @@ $stop = $body['stop'] ?? null;
 $topP = $body['top_p'] ?? null;
 
 // 选择 Provider：优先用第一个（当前激活的），后续可通过 model 匹配优化
-$selectedProvider = $allProviders[0];
+// ★ 模型→Provider 路由: 按模型名前缀匹配正确的 Provider
+$modelProviderKeys = [
+    'minimax'     => ['MiniMax', 'minimax', 'abab'],
+    'deepseek'    => ['deepseek'],
+    'openai'      => ['gpt', 'o1', 'o3', 'o4', 'o1-pro', 'o3-pro'],
+    'xai'         => ['grok'],
+    'antthropic'  => ['claude'],
+    'gemini'      => ['gemini'],
+    'zhipu'       => ['glm', 'chatglm', 'cogview'],
+    'qwen'        => ['qwen', 'tongyi'],
+    'moonshot'    => ['kimi', 'moonshot'],
+    'doubao'      => ['doubao', 'skylark', 'seed'],
+    'mimo'        => ['mimo'],
+];
+
+// Find which provider this model belongs to
+$matchedProviderKey = null;
+$modelLower = strtolower($finalModel);
+foreach ($modelProviderKeys as $pkey => $prefixes) {
+    foreach ($prefixes as $pfx) {
+        if (str_starts_with($modelLower, strtolower($pfx))) {
+            $matchedProviderKey = $pkey;
+            break 2;
+        }
+    }
+}
+
+// Select the matched provider, or fall back to default (active)
+$selectedProvider = $allProviders[0];  // default
+if ($matchedProviderKey) {
+    // Collect all provider baseUrls/keys first
+    $providerPool = [];
+    foreach ($allProviders as $ap) { $providerPool[] = $ap; }
+    // Also try to load the specific provider if configured
+    $pcfg = $providers[$matchedProviderKey] ?? null;
+    if ($pcfg) {
+        $pkey_dec = _decrypt_config_key($userConfig[$pcfg['keyName']] ?? '');
+        if (!empty($pkey_dec) && !empty($pcfg['baseUrl'])) {
+            // Check if this provider is already in the pool
+            $found = false;
+            foreach ($providerPool as $pp) {
+                if (rtrim($pp['baseUrl'], '/') === rtrim($pcfg['baseUrl'], '/')) { $selectedProvider = $pp; $found = true; break; }
+            }
+            if (!$found) {
+                $selectedProvider = ['apiKey' => $pkey_dec, 'baseUrl' => rtrim($pcfg['baseUrl'], '/'), 'label' => $pcfg['label']];
+            }
+        }
+    }
+} else {
+    // 默认: 检查是否有匹配 active provider baseUrl 的
+    $matchedAny = false;
+    if ($matchedProviderKey) {
+        // Already handled above
+    }
+    // 无匹配 → 用 active provider (已是 $allProviders[0])
+}
 $providerApiKey = $selectedProvider['apiKey'];
 $providerBaseUrl = $selectedProvider['baseUrl'];
 
