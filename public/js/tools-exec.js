@@ -1427,16 +1427,31 @@
                                 if (_isDirectVision) {
                                     // 直连模式: 优先 base64 content, HTTP URL 会导致 MiniMax 报错
                                     analyzeInput = imageFile.content || '';
-                                    if ((!analyzeInput || !analyzeInput.startsWith('data:')) && imageFile.serverUrl) {
+                                    if ((!analyzeInput || !analyzeInput.startsWith('data:')) && imageFile.serverUrl && imageFile.serverUrl.length > 3) {
                                         var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
                                         analyzeInput = fullUrl;
+                                    }
+                                    // ★ iPhone等上传文件: serverUrl缺失时从文件名构造URL
+                                    if ((!analyzeInput || analyzeInput.length < 10) && imageFile.name) {
+                                        var _fn2 = imageFile.name;
+                                        if (/^img_[a-f0-9]+\.\w+$/i.test(_fn2) || /^IMG_\d+\.\w+$/i.test(_fn2)) {
+                                            analyzeInput = window.location.origin + '/oneapichat/uploads/anonymous/' + _fn2;
+                                        }
                                     }
                                 } else {
                                     // MCP 代理: 优先服务器 URL
                                     analyzeInput = imageFile.content || '';
-                                    if (imageFile.serverUrl && typeof imageFile.serverUrl === 'string') {
+                                    if (imageFile.serverUrl && typeof imageFile.serverUrl === 'string' && imageFile.serverUrl.length > 3) {
                                         var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
                                         analyzeInput = fullUrl;
+                                    }
+                                    // ★ iPhone上传: serverUrl可能缺失,从文件名构造URL
+                                    if ((!analyzeInput || analyzeInput.length < 10) && imageFile.name) {
+                                        var _fn = imageFile.name;
+                                        // 匹配上传格式: img_<hex>.ext 或 IMG_*.jpeg
+                                        if (/^img_[a-f0-9]+\.\w+$/i.test(_fn) || /^IMG_\d+\.\w+$/i.test(_fn)) {
+                                            analyzeInput = window.location.origin + '/oneapichat/uploads/anonymous/' + _fn;
+                                        }
                                     }
                                 }
                                 var analyzeResult = await window.analyzeImage(analyzeInput, focus);
