@@ -241,6 +241,7 @@ function abortExistingRequest(chatId) {
     }
     cleanupStreamState(chatId);  // ★ 清理RAF渲染循环
     delete isTypingMap[chatId];
+    if (typeof renderChatHistory === 'function') renderChatHistory();
     delete activeBubbleMap[chatId];
     // ★ 主代理空闲了,处理子代理通知队列
     if (window._agentNotifyQueue && window._agentNotifyQueue.length > 0 && typeof window._processAgentNotifyQueue === 'function') {
@@ -542,6 +543,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     searchAbortControllerMap[chatId] = abortSearch;
 
     isTypingMap[chatId] = true;
+    if (typeof renderChatHistory === 'function') renderChatHistory();  // 后台指示器
     // ★ 多端同步: 广播流开始到其他设备(非RS路径,引擎侧也会广播)
     if (typeof window._broadcastEvent === 'function') {
         window._broadcastEvent('chat:stream_started', { chat_id: chatId, ts: Date.now() });
@@ -3383,6 +3385,7 @@ window.useAlternativeVisionModel = function() {
         // 清理临时消息(保留子代理通知)
         chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary || m._agentNotification);
         delete isTypingMap[chatId];
+        if (typeof renderChatHistory === 'function') renderChatHistory();  // 清除后台指示器
         // ★ agent模式:AI生成结束,关闭队列轮询 + 处理下一条
         // AI生成结束:处理队列下一条消息
         if (window._queuePollTimer) {

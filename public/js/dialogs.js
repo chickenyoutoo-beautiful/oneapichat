@@ -581,12 +581,15 @@ function renderChatHistory() {
         // ★ 时间相同时按聊天ID降序稳定排序,避免刷新后乱跳
         return a < b ? 1 : (a > b ? -1 : 0);
     });
-    list.innerHTML = _chatIds.map(id => `
+    list.innerHTML = _chatIds.map(id => {
+        var _isBgRunning = isTypingMap[id] && id !== currentChatId;
+        var _bgDot = _isBgRunning ? '<span class="bg-running-dot" title="后台生成中" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px;animation:bg-pulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>' : '';
+        return `
         <div onclick="window.loadChat('${id}')" class="group flex items-center justify-between p-2 rounded-xl cursor-pointer transition ${id === currentChatId ? 'bg-white dark:bg-gray-800 shadow-sm text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'}">
-            <span class="truncate text-sm">${escapeHtml(chats[id].title)}</span>
+            <span class="truncate text-sm" style="display:flex;align-items:center;">${_bgDot}${escapeHtml(chats[id].title)}</span>
             <button onclick="window.deleteChat(event, '${id}')" class="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 const RAG_ENABLED = localStorage.getItem('ragEnabled') !== 'false';
@@ -728,22 +731,17 @@ window.loadChat = async function (id) {
     } else if (window._tempAgentGranted && window._tempAgentChatId !== id) {
         if (typeof _updateTempGrantBanner === 'function') _updateTempGrantBanner(false);
     }
-    // 加载新会话队列
+    // ★ 并行对话: 保存旧队列→加载新队列, 不阻断旧对话
     if (_oldChatId && _oldChatId !== id) {
+        window._saveQueue();  // 先保存旧会话队列
         window._isQueueProcessing = false;
         window._isQueueMessage = false;
         window._messageQueue = [];
-        var _restored = window._loadQueue();  // _getQueueKey 现在用新的 currentChatId ✅
-        if (!_restored) {
-            window._clearPersistedQueue();
-        }
+        var _restored = window._loadQueue();
+        if (!_restored) window._clearPersistedQueue();
         window._updateQueueUI();
-        if (_restored) {
-            setTimeout(function() {
-                if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
-                    window._drainQueue();
-                }
-            }, 500);
+        if (_restored && !isTypingMap[currentChatId]) {
+            setTimeout(function() { window._drainQueue(); }, 500);
         }
         // ★ setAgentMode 触发的切换：清除标记
         if (window._agentModeSwitching) {

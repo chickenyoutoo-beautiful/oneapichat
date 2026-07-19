@@ -102,6 +102,7 @@ window._drainQueue = async function() {
         window._updateQueueUI();
         return;
     }
+    // ★ 并行对话: 仅当当前会话正在生成时才等待(不阻塞其他会话)
     if (isTypingMap[currentChatId]) return;
 
     window._isQueueProcessing = true;
