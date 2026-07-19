@@ -137,7 +137,10 @@ if ($tools) {
     $tools = array_values(array_filter($tools, function($t) {
         $fn = $t['function'] ?? $t;
         $params = $fn['parameters'] ?? null;
-        return is_array($params) && !empty($params['type']) && $params['type'] === 'object';
+        if (!is_array($params)) return false;
+        if (empty($params['type']) || $params['type'] !== 'object') return false;
+        if (empty($params['properties']) || !is_array($params['properties'])) return false;
+        return true;
     }));
     if (empty($tools)) $tools = null;
 }
@@ -247,10 +250,13 @@ if (empty($tools) && !isset($body['tools'])) {
         }
     }
 
-    // 4. 过滤非法 schema
+    // 4. 过滤非法 schema — [] {} null 无 properties 一律拦截
     $tools = array_values(array_filter($tools, function($t) {
         $params = ($t['function']['parameters'] ?? null);
-        return is_array($params) && !empty($params['type']) && $params['type'] === 'object';
+        if (!is_array($params)) return false;
+        if (empty($params['type']) || $params['type'] !== 'object') return false;
+        if (empty($params['properties']) || !is_array($params['properties'])) return false;
+        return true;
     }));
     if (empty($tools)) $tools = null;
 }
