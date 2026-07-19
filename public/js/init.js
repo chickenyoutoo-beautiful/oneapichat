@@ -249,6 +249,27 @@ function createDataManagementSection() {
     getEl('importChatsBtn')?.addEventListener('click', importChats);
 }
 // ==================== 初始化配置 ====================
+/** 从 API_PROVIDERS 动态生成提供商下拉列表 */
+function populateProviderSelect() {
+    var sel = getEl('baseUrlProvider');
+    if (!sel || typeof API_PROVIDERS === 'undefined') return;
+    var keys = Object.keys(API_PROVIDERS);
+    // custom 放最后, llamacpp 放倒数第二
+    keys.sort(function(a, b) {
+        if (a === 'llamacpp') return 1;
+        if (b === 'llamacpp') return -1;
+        if (a === 'custom') return 1;
+        if (b === 'custom') return -1;
+        return 0;
+    });
+    sel.innerHTML = keys.map(function(k) {
+        var cfg = API_PROVIDERS[k];
+        return '<option value="' + k + '">' + cfg.label + '</option>';
+    }).join('');
+    // 恢复已选值
+    var saved = localStorage.getItem('baseUrlProvider') || 'deepseek';
+    if (API_PROVIDERS[saved]) sel.value = saved;
+}
 async function initializeConfig() {
     var savedProvider = localStorage.getItem('baseUrlProvider') || 'deepseek';
     setVal('baseUrlProvider', savedProvider);
@@ -841,6 +862,7 @@ function initializeApp() {
             })();
         }
 
+        populateProviderSelect();  // ★ 动态生成提供商下拉(从 API_PROVIDERS)
         await initializeConfig();
         setupEventListeners();
 

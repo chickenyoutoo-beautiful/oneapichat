@@ -66,7 +66,7 @@
     <script defer src="./js/utils.js?v=1784472769"></script>
     <script defer src="./js/skills.js?v=2"></script>
     <script defer src="./js/tools-exec.js?v=1784400370"></script>
-    <script defer src="./js/init.js?v=1784472769"></script>
+    <script defer src="./js/init.js?v=1784473762"></script>
     <script defer src="./js/agent-notify.js?v=5"></script>
     <script defer src="./js/models.js?v=10"></script>
     <!-- PPT/PPTX 解析 -->
@@ -546,21 +546,7 @@ window.VISION_API_KEY = '';
             <div class="config-field">
                 <label class="config-label">提供商</label>
                 <select id="baseUrlProvider" class="config-input config-select" onchange="window.onProviderChange()">
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="xai">xAI (Grok)</option>
-                    <option value="antthropic">Anthropic (Claude)</option>
-                    <option value="minimax">MiniMax</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="zhipu">智谱 (GLM)</option>
-                    <option value="qwen">阿里通义千问</option>
-                    <option value="moonshot">月之暗面 (Kimi)</option>
-                    <option value="doubao">字节豆包 (火山引擎)</option>
-                    <option value="mimo">小米 MiMo</option>
-                    <option value="nvidia">NVIDIA NIM</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="opencode">OpenCode</option>
-                    <option value="custom">✎ 自定义</option>
+                    <!-- ★ 动态从 API_PROVIDERS (core.js) 生成, 见 init.js populateProviderSelect() -->
                 </select>
             </div>
             <div class="config-field">
