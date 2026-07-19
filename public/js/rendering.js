@@ -47,11 +47,15 @@ window.regenLastAssistant = async function(text) {
 
 
 function autoLinkURLs(markdownText) {
-    // ★ 统一将所有裸 URL 转为可点击的 markdown 链接,不再区分图片
+    // ★ 图片 URL → ![](url) 渲染为图片; 其他 URL → [label](url) 文本链接
     return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, url, after) => {
         if (/!\[.*?\]\(/.test(match) || /\[.*?\]\(/.test(match)) return match;
         try {
             var u = new URL(url);
+            // ★ 图片扩展名 → 渲染为图片
+            if (/\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)(\?|$)/i.test(u.pathname)) {
+                return before + `![image](${url})` + after;
+            }
             let label = u.hostname;
             if (u.pathname && u.pathname !== '/') {
                 label += u.pathname.slice(0, 20) + (u.pathname.length > 20 ? '...' : '');

@@ -263,6 +263,11 @@ function exec_web_fetch(array $args): void {
             $results[$u] = ['error' => 'Invalid URL'];
             continue;
         }
+        // ★ 跳过图片/视频/二进制文件
+        if (preg_match('/\.(png|jpg|jpeg|gif|webp|svg|bmp|ico|mp4|webm|avi|mov|mp3|wav|pdf|zip|docx?|xlsx?|pptx?)(\?|$)/i', $u)) {
+            $results[$u] = ['error' => 'Binary/image file — use analyze_image for images. URL: ' . $u, 'url' => $u];
+            continue;
+        }
         $resp = @file_get_contents($u, false, stream_context_create(['http' => [
             'timeout' => 15, 'ignore_errors' => true,
             'header' => "User-Agent: Mozilla/5.0 (compatible; OneAPIChat/1.0)\r\nAccept: text/html\r\n",
