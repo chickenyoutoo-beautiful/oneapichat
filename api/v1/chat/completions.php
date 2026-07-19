@@ -378,45 +378,52 @@ curl_setopt_array($ch, [
     CURLOPT_CONNECTTIMEOUT => 10,
 ]);
 
-// 代理配置（Google/被墙域名自动走中继）
+// 代理配置（仅对需要穿透的域名启用; 代理失败自动回退直连）
 $useProxy = false;
 if ($proxyEnabled && $proxyUrl) {
-    $useProxy = true;
+    // ★ 仅以下域名需要代理穿透
+    $needsProxy = stripos($providerBaseUrl, 'api.google') !== false
+        || stripos($providerBaseUrl, 'generativelanguage') !== false
+        || stripos($providerBaseUrl, 'api.openai.com') !== false
+        || stripos($providerBaseUrl, 'api.anthropic.com') !== false;
+    if ($needsProxy) $useProxy = true;
 } elseif (stripos($providerBaseUrl, 'api.google') !== false || stripos($providerBaseUrl, 'generativelanguage') !== false) {
     $useProxy = true;
     $proxyUrl = '__relay_only__';
 }
 
-if ($useProxy) {
-    if ($proxyUrl === '__relay_only__') {
-        // 仅 CORS 中继（通过本地 proxy.php）
-    } else {
-        $proxyParsed = parse_url($proxyUrl);
-        if ($proxyParsed && isset($proxyParsed['host'])) {
-            curl_setopt($ch, CURLOPT_PROXY, $proxyParsed['host']);
-            curl_setopt($ch, CURLOPT_PROXYPORT, $proxyParsed['port'] ?? 1080);
-            if (($proxyParsed['scheme'] ?? '') === 'socks5') {
-                curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
-            }
-        }
+if ($useProxy && $proxyUrl !== '__relay_only__') {
+    $proxyParsed = parse_url($proxyUrl);
+    if ($proxyParsed && isset($proxyParsed['host'])) {
+        curl_setopt($ch, CURLOPT_PROXY, $proxyParsed['host']);
+        curl_setopt($ch, CURLOPT_PROXYPORT, $proxyParsed['port'] ?? 1080);
+        curl_setopt($ch, CURLOPT_PROXYTYPE, ($proxyParsed['scheme'] ?? '') === 'socks5' ? CURLPROXY_SOCKS5 : CURLPROXY_HTTP);
     }
 }
 
-// 流式
+// 流式（代理失败自动直连重试）
 if ($stream) {
-    _sendStream($ch);
+    _sendStream($ch, $useProxy);
 } else {
-    _sendNonStream($ch);
+    _sendNonStream($ch, $useProxy);
 }
 
 
 // ═══════════════════════════════════════════════════════
-function _sendNonStream($ch): void {
+function _sendNonStream($ch, $hadProxy = false): void {
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300]);
     $resp = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
     $err = curl_error($ch);
+
+    // ★ 代理失败 → 自动直连重试
+    if ($err && $hadProxy && (stripos($err, 'proxy') !== false || stripos($err, 'connect') !== false || stripos($err, 'timed out') !== false)) {
+        curl_setopt_array($ch, [CURLOPT_PROXY => null, CURLOPT_PROXYPORT => 0, CURLOPT_PROXYTYPE => CURLPROXY_HTTP]);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+    }
     curl_close($ch);
 
     if ($err) {
@@ -447,7 +454,7 @@ function _sendNonStream($ch): void {
     exit;
 }
 
-function _sendStream($ch): void {
+function _sendStream($ch, $hadProxy = false): void {
     ini_set('output_buffering', 'off');
     ini_set('zlib.output_compression', false);
     while (ob_get_level()) ob_end_clean();
