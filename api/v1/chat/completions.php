@@ -354,10 +354,22 @@ if (!$hasSystem && !empty($systemPrompt)) {
     array_unshift($messages, ['role' => 'system', 'content' => $systemPrompt]);
 }
 
-// ★ MiniMax: 不支持 tool_choice, 需过滤不兼容参数
+// ★ MiniMax: tool_choice不兼容 + tool_call_id跨轮次校验极严(error 2013)
 $isMiniMax = ($selectedProvider['label'] ?? '') === 'MiniMax' || stripos($providerBaseUrl, 'api.minimaxi.com') !== false;
 if ($isMiniMax) {
-    $toolChoice = null;  // MiniMax 全系不支持 tool_choice
+    $toolChoice = null;
+    $tools = null;
+    // ★ 全量清除消息中的 tool 痕迹(历史 tool result MiniMax 不认)
+    $messages = array_values(array_filter($messages, function($m) {
+        return ($m['role'] ?? '') !== 'tool';
+    }));
+    // 清除 assistant 消息中的 tool_calls(否则 MiniMax 要求对应 tool result)
+    foreach ($messages as &$m) {
+        if (($m['role'] ?? '') === 'assistant' && isset($m['tool_calls'])) {
+            unset($m['tool_calls']);
+        }
+    }
+    unset($m);
 }
 
 // ── 5. 构建 Provider 请求体 ──
