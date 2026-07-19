@@ -384,37 +384,58 @@ function buildHistorySummary(chatId, maxLength = MAX_HISTORY_LENGTH) {
 // 已移除 "时间""动态""最新""date""周" 等高频泛词, 避免无意义缓存击穿
 function createTemporaryTimestampIfNeeded(text) {
     var lowerText = text.toLowerCase();
+    var pad = function(n) { return n < 10 ? '0' + n : n; };
+    var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-    // Tier 1: 明确问"现在几点" → 分钟精度 (极少数触发)
-    var exactTimeKeywords = ['现在几点', '几点钟', 'what time', 'clock', '当前确切时间'];
+    function _makeTimeStr(withMinutes) {
+        var now = new Date();
+        var off = -Math.round(now.getTimezoneOffset() / 60);
+        var tz = 'GMT' + (off >= 0 ? '+' : '') + off;
+        var base = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()];
+        if (withMinutes) {
+            base += ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
+        }
+        return base;
+    }
+
+    // Tier 1: 明确问"现在几点" → 分钟+秒精度
+    var exactTimeKeywords = ['现在几点', '几点钟', 'what time', 'clock', '当前确切时间', 'exact time'];
     if (exactTimeKeywords.some(kw => lowerText.includes(kw))) {
         var now = new Date();
-        var pad = function(n) { return n < 10 ? '0' + n : n; };
         var off = -Math.round(now.getTimezoneOffset() / 60);
         var tz = 'GMT' + (off >= 0 ? '+' : '') + off;
-        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
-        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。', temporary: true };
+        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds()) + ' ' + tz;
+        return { role: 'system', content: '[' + ts + '] 系统当前精确时间,回答时间相关问题时请以此为准。', temporary: true };
     }
 
-    // Tier 2: 时间敏感 → 分钟精度(无秒), 保留针对"time/now/天气"等实时需求
-    var timeKeywords = ['现在时间', '当前时间', 'time', 'now', '天气', 'weather'];
-    if (timeKeywords.some(kw => lowerText.includes(kw))) {
-        var now = new Date();
-        var pad = function(n) { return n < 10 ? '0' + n : n; };
-        var off = -Math.round(now.getTimezoneOffset() / 60);
-        var tz = 'GMT' + (off >= 0 ? '+' : '') + off;
-        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
-        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答时间相关问题时请以此为准。', temporary: true };
+    // Tier 2: 事件时间感知 → 分钟精度
+    // 赛事/比赛/直播/活动 — 用户想知道"是否已发生/正在进行/结果"
+    var eventKeywords = ['比赛', '赛事', 'match', 'game', '比分', 'score', '直播', 'live', 'stream',
+        '开始了吗', '结束了吗', '发生了吗', '已经', '结果', 'result', '正在进行', '进行中', 'ongoing',
+        'schedule', '赛程', ' lineup', '首发', '开赛', '开球', 'kickoff', 'tipoff',
+        '决赛', '半决赛', 'final', 'semifinal', '季后赛', 'playoff', '常规赛',
+        'nba', 'nfl', 'mlb', 'nhl', '英超', '西甲', '欧冠', '中超', 'cba', 'csl',
+        'f1', 'tennis', '网球', 'ufc', 'boxing', '拳击', 'esports', '电竞', 'lol', 'dota'];
+    if (eventKeywords.some(kw => lowerText.includes(kw))) {
+        var ts = _makeTimeStr(true);
+        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答事件/赛事相关问题时请以此为准判断是否已发生。', temporary: true };
     }
 
-    // Tier 3: 仅需日期感知 → 日期精度, 24小时内缓存不变 (主力命中层)
+    // Tier 3: 时间段感知 → 分钟精度
+    // 用户提到具体时段 — 需要知道现在是上午/下午/晚上来判断事件过去了没
+    var periodKeywords = ['上午', '下午', '中午', '晚上', '今晚', '今早', '今天上午', '今天下午', '今天晚上',
+        '凌晨', '傍晚', '夜里', '夜间', '早晨', '早上',
+        'morning', 'afternoon', 'evening', 'tonight', 'noon', 'midnight',
+        '现在时间', '当前时间', 'time', 'now', '天气', 'weather'];
+    if (periodKeywords.some(kw => lowerText.includes(kw))) {
+        var ts = _makeTimeStr(true);
+        return { role: 'system', content: '[' + ts + '] 系统当前时间,回答时段相关问题时请以此为准。', temporary: true };
+    }
+
+    // Tier 4: 仅需日期感知 → 日期精度, 24h缓存友好(主力命中层)
     var dateKeywords = ['今天', '明天', '昨天', '星期几', '几号', '几月', '哪年', '今年', '去年', '明年', '新闻', 'news', '实时'];
     if (dateKeywords.some(kw => lowerText.includes(kw))) {
-        var now = new Date();
-        var daysZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-        var ts = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 ' + daysZh[now.getDay()];
+        var ts = _makeTimeStr(false);
         return { role: 'system', content: '[' + ts + '] 系统当前日期,回答日期相关问题时请以此为准。', temporary: true };
     }
 
@@ -1111,6 +1132,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         var tools = [];
 
         // ===== A 类工具: 始终可用(无论是否 Agent 模式) =====
+        // ★ 时间工具: 始终可用(只读,不占缓存,模型按需调用判断事件是否已发生)
+        if (typeof GET_CURRENT_TIME_TOOL !== 'undefined') tools.push(GET_CURRENT_TIME_TOOL);
         // 搜索工具(受搜索开关控制)
         if (searchOn) {
             tools.push(SEARCH_TOOL_DEFINITION);

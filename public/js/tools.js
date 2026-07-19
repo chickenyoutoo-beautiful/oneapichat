@@ -726,6 +726,15 @@ const SEARCH_TOOL_DEFINITION = {
     }
 };
 
+const GET_CURRENT_TIME_TOOL = {
+    type: "function",
+    function: {
+        name: "get_current_time",
+        description: "获取当前精确时间和日期。返回日期时间、星期、时区、时段(凌晨/上午/中午/下午/晚上)和Unix时间戳。用于判断今天某个事件是否已发生、计算时差、确认时区等。",
+        parameters: { type: "object", properties: {}, required: [] }
+    }
+};
+
 const IMAGE_TOOL_DEFINITION = {
     type: "function",
     function: {
@@ -1145,6 +1154,12 @@ const toolRegistry = (function() {
     approval: ApprovalLevel.AUTO,
     isReadOnly: true,
     searchHint: '搜索互联网',
+  }));
+  toolRegistry.register('get_current_time', buildToolMeta('get_current_time', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    searchHint: '获取当前精确时间',
   }));
   toolRegistry.register('web_fetch', buildToolMeta('web_fetch', {
     capabilities: [ToolCapability.NETWORK],
@@ -1582,7 +1597,7 @@ window.setToolEnabled = function(toolKey, enabled) {
 // ── 工具分类: match 函数自动匹配, 新增工具无需手动加 keys ──
 // 渲染时从 toolRegistry.getAllToolNames() 动态拉取, 首个匹配的分类即为工具所属分类
 const _TOOL_CATEGORIES = [
-    { label: '🔍 搜索与获取', match: n => /^(web_search|web_fetch|platform_extract|rag_search)$/.test(n) },
+    { label: '🔍 搜索与获取', match: n => /^(web_search|web_fetch|platform_extract|rag_search|get_current_time)$/.test(n) },
     { label: '🎨 图像',       match: n => /^(generate_image|generate_image_i2i|analyze_image)/.test(n) },
     { label: '📺 B站',        match: n => n.startsWith('bilibili_') },
     { label: '📊 办公文档',    match: n => /^generate_(ppt|docx|xlsx|pdf)$/.test(n) },
@@ -1625,7 +1640,7 @@ window.resolveToolCategories = function() {
 
 // ── 工具中文标签 ──
 const _TOOL_LABELS = {
-    'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索',
+    'web_search':'联网搜索','web_fetch':'网页抓取','platform_extract':'平台提取','run_skill':'运行技能','rag_search':'知识库搜索','get_current_time':'当前时间',
     'generate_image':'图片生成','generate_image_i2i':'图生图','analyze_image':'图片分析','video_understanding':'视频分析','video_edit':'视频剪辑','generate_ppt':'PPT生成','generate_docx':'Word文档','generate_xlsx':'Excel表格','generate_pdf':'PDF文档',
     'chaoxing_login':'超星登录','chaoxing_list_courses':'课程列表','chaoxing_auto':'刷课执行','chaoxing_status':'刷课状态','chaoxing_stop':'停止刷课','chaoxing_stats':'刷课统计','chaoxing_overview':'超星总览',
     'chaoxing_auth':'考试登录','chaoxing_qr_login':'超星扫码','chaoxing_exam_list':'考试列表','chaoxing_exam_start':'开始考试','chaoxing_exam_status':'考试状态','chaoxing_exam_stop':'停止考试',
