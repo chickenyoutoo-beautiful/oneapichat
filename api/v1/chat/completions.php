@@ -85,7 +85,6 @@ $providers = [
     'openrouter'=> ['label' => 'OpenRouter',     'baseUrl' => 'https://openrouter.ai/api/v1',                 'keyName' => 'apiKeyOpenRouter'],
     'opencode'  => ['label' => 'OpenCode',       'baseUrl' => 'https://api.opencode.ai/v1',                     'keyName' => 'apiKeyOpenCode'],
     'llamacpp'  => ['label' => '本地模型',       'baseUrl' => 'https://localmodels.naujtrats.xyz/v1',          'keyName' => 'apiKeyLlamaCpp'],
-    'nvidia'    => ['label' => 'NVIDIA NIM',     'baseUrl' => 'https://integrate.api.nvidia.com/v1',             'keyName' => 'apiKeyNvidia'],
     'custom'    => ['label' => '自定义',         'baseUrl' => '',                                               'keyName' => 'apiKeyCustom'],
 ];
 
@@ -271,7 +270,6 @@ $modelProviderKeys = [
     'moonshot'    => ['kimi', 'moonshot'],
     'doubao'      => ['doubao', 'skylark', 'seed'],
     'mimo'        => ['mimo'],
-    'nvidia'      => ['nvidia/', 'meta/', 'mistralai/', 'microsoft/', 'google/', 'qwen/', 'deepseek-ai/', 'ibm/', 'nvidia', '01-ai/', 'nv-mistralai/', 'bytedance/', 'writer/', 'aisingapore/', 'databricks/', 'snowflake/', 'yentinglin/'],
 ];
 
 // Find which provider this model belongs to
