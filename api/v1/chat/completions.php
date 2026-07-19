@@ -90,10 +90,11 @@ $providers = [
 
 // 收集所有有 API Key + 模型的 Provider
 $allProviders = [];
-// 默认（当前激活的 Provider）
+// 默认（当前激活的 Provider，排除 web-only）
 $activeKey = _decrypt_config_key($userConfig['apiKey'] ?? '');
 $activeBaseUrl = rtrim($userConfig['baseUrl'] ?? '', '/');
-if (!empty($activeKey) && !empty($activeBaseUrl)) {
+$isWebOnly = str_starts_with($activeKey, 'nvapi-') || stripos($activeBaseUrl, 'integrate.api.nvidia.com') !== false;
+if (!empty($activeKey) && !empty($activeBaseUrl) && !$isWebOnly) {
     $allProviders[] = ['apiKey' => $activeKey, 'baseUrl' => $activeBaseUrl, 'label' => 'active'];
 }
 

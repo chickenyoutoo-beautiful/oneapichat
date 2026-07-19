@@ -83,11 +83,20 @@ $providers = [
 $configuredProviders = [];
 $seenModels = [];
 
-// 始终包含当前激活的 Provider
+// ★ Web-only providers: 前端可用但 REST API 不暴露
+$webOnlyPrefixes = ['nvapi-'];
+$webOnlyDomains = ['integrate.api.nvidia.com'];
+
+// 始终包含当前激活的 Provider（排除 web-only）
 $activeKey = $userConfig['apiKey'] ?? '';
 $activeBaseUrl = $userConfig['baseUrl'] ?? '';
 $activeModel = $userConfig['model'] ?? '';
-if (!empty($activeKey) && !empty($activeBaseUrl)) {
+$isWebOnly = false;
+foreach ($webOnlyPrefixes as $pfx) { if (str_starts_with($activeKey, $pfx)) { $isWebOnly = true; break; } }
+if (!$isWebOnly) {
+    foreach ($webOnlyDomains as $dom) { if (stripos($activeBaseUrl, $dom) !== false) { $isWebOnly = true; break; } }
+}
+if (!empty($activeKey) && !empty($activeBaseUrl) && !$isWebOnly) {
     $modelName = !empty($activeModel) ? $activeModel : 'unknown';
     $configuredProviders[] = [
         'apiKey' => _decrypt_config_key($activeKey),
