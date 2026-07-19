@@ -354,6 +354,16 @@ if (!$hasSystem && !empty($systemPrompt)) {
     array_unshift($messages, ['role' => 'system', 'content' => $systemPrompt]);
 }
 
+// ★ MiniMax: tool_call_id 匹配问题(error 2013) → 临时移除 tools+tool消息
+$isMiniMax = ($selectedProvider['label'] ?? '') === 'MiniMax' || stripos($providerBaseUrl, 'api.minimaxi.com') !== false;
+if ($isMiniMax && $tools) {
+    $tools = null;
+    $toolChoice = null;
+    $messages = array_values(array_filter($messages, function($m) {
+        return ($m['role'] ?? '') !== 'tool';
+    }));
+}
+
 // ── 5. 构建 Provider 请求体 ──
 $providerBody = [
     'model' => $finalModel,
