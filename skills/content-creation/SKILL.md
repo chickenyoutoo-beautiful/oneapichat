@@ -4,7 +4,7 @@ description: 内容创作一站式。图片生成/文档/PPT制作/视频剪辑/
 version: 2.0.0
 metadata:
   oneapichat:
-    tools: [generate_image, generate_image_i2i, analyze_image, generate_ppt, generate_docx, generate_xlsx, generate_pdf, video_edit, video_understanding, mmx_image, mmx_video, mmx_speech, mmx_music, mmx_chat, mmx_vision, bilibili_search, web_search]
+    tools: [get_current_time, generate_image, generate_image_i2i, analyze_image, generate_ppt, generate_docx, generate_xlsx, generate_pdf, video_edit, video_understanding, mmx_image, mmx_video, mmx_speech, mmx_music, mmx_chat, mmx_vision, bilibili_search, web_search]
     priority: medium
     emoji: "🎨"
     triggers: [生成图片, 画图, 做PPT, 做文档, 做Word, 做Excel, 生成PDF, 视频剪辑, 语音合成, TTS, 配乐, 音乐, AI绘画, AI视频, 幻灯片, 文生图, 图生图, 海报, 插画, 创作, 生成视频, 做视频, 配音, 字幕, 图转图, 设计, 风格参考]
@@ -24,6 +24,8 @@ AI驱动的多媒体内容创作: 图片/文档/PPT/视频/音频全链路。
 - 用户要分析图片/视频内容
 
 ## 灵感搜集 — B站优先
+
+**先调用 `get_current_time`** 获取当前时间，确保搜索的是最新趋势和风格参考。
 
 创作前先搜参考:
 - `bilibili_search("设计风格 教程")` — 视频教程最直观

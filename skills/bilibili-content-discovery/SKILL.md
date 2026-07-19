@@ -4,7 +4,7 @@ description: B站内容发现与推荐。当用户想找B站上的视频/专栏/
 version: 1.0.0
 metadata:
   oneapichat:
-    tools: [bilibili_search, bilibili_video_info, bilibili_user_profile, bilibili_comment_list]
+    tools: [get_current_time, bilibili_search, bilibili_video_info, bilibili_user_profile, bilibili_comment_list]
     priority: high
     emoji: "📺"
     triggers:
@@ -20,6 +20,10 @@ metadata:
 # B站内容发现
 
 帮助用户在B站上发现和了解内容，包括视频推荐、UP主查询、热门内容搜索。
+
+## ⏰ 时间感知
+
+**先调用 `get_current_time`** 获取当前时间。搜索结果标注视频发布时间，超过1年的视频标注"📅{年份}"。优先推荐最近发布的视频（按发布时间排序，不只看播放量）。搜索时加当前年份关键词确保找到最新内容。
 
 ## 何时使用
 
