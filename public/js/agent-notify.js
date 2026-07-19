@@ -252,7 +252,7 @@ window.connectSSEChannel = function() {
                 if (cid === currentChatId) {
                     loadChat(currentChatId);
                 }
-                updateChatList();
+                renderChatHistory();
             });
         } catch(_sce) {}
     });
@@ -274,7 +274,7 @@ window.connectSSEChannel = function() {
                     console.log('[SSE] Reloading current chat after server sync');
                     loadChat(currentChatId);
                 }
-                updateChatList();
+                renderChatHistory();
             });
         } catch(_sce) {}
     });
@@ -295,7 +295,7 @@ window.connectSSEChannel = function() {
                 if (cid === currentChatId) {
                     loadChat(currentChatId);
                 }
-                updateChatList();
+                renderChatHistory();
             });
         } catch(_sce) {}
     });
