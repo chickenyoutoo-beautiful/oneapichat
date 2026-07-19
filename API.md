@@ -508,7 +508,6 @@ data: [DONE]
 |----------|----------|------|
 | `user` | 账户默认 Provider | DeepSeek / OpenAI 兼容 |
 | `deepseek` | DeepSeek | 独立路由 |
-| `nvidia` | NVIDIA NIM | integrate.api.nvidia.com |
 | `minimax` | MiniMax | Token Plan API |
 | `grok` | Grok | X.AI |
 
