@@ -1,53 +1,53 @@
-name: Release
+name: Build and Release Desktop Client
 
+# 推送 tag (如 v2.5.0) 时触发构建
 on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
-    inputs:
-      version:
-        description: '版本号 (如 v1.2.3)'
-        required: true
-        default: 'v1.0.0'
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create archive
-        run: |
-          VERSION="${{ github.event.inputs.version }}"
-          mkdir -p release
-          # 排除不需要的文件
-          tar --exclude='.git' --exclude='.archive_backups' --exclude='__pycache__' \
-              --exclude='*.pyc' --exclude='.engine' --exclude='node_modules' \
-              --exclude='.claude' -czf "release/oneapichat-${VERSION}.tar.gz" .
-          cd release && sha256sum "oneapichat-${VERSION}.tar.gz" > "oneapichat-${VERSION}.tar.gz.sha256"
-
-      - name: Create Release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: deploy
+        run: npm install
+      - name: Build Windows installer
+        working-directory: deploy
+        run: npm run build:win
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: OneAPIChat ${{ github.event.inputs.version }}
-          body: |
-            ## OneAPIChat ${{ github.event.inputs.version }}
+          files: deploy/release/OneAPIChat-Setup-*-win-x64.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            ### 部署要求
-            - Ubuntu/Debian + Nginx + PHP 8.3 + Python 3.11+
-            - 可选: Chromium (浏览器自动化)、Playwright
-
-            ### 快速部署
-            ```bash
-            tar xzf oneapichat-${VERSION}.tar.gz -C /var/www/html/oneapichat
-            cd /var/www/html/oneapichat/python
-            pip install -r requirements.txt
-            python engine_server.py &
-            ```
-
-            ### 校验
-            SHA256: 见 .sha256 文件
-          files: release/*
-          draft: false
-          prerelease: false
+  build-linux:
+    name: Build Linux (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: deploy
+        run: npm install
+      - name: Build Linux AppImage
+        working-directory: deploy
+        run: npm run build:linux
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: deploy/release/OneAPIChat-*-linux-x64.AppImage
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

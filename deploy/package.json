@@ -1,7 +1,7 @@
 {
-  "name": "oneapichat",
-  "version": "2.4.0",
-  "description": "OneAPIChat - 多模型AI聊天客户端",
+  "name": "oneapichat-client",
+  "version": "2.5.0",
+  "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
   "scripts": {
     "start": "electron .",
@@ -12,39 +12,48 @@
     "pack": "electron-builder --dir"
   },
   "build": {
-    "appId": "com.oneapichat.app",
+    "appId": "com.oneapichat.client",
     "productName": "OneAPIChat",
     "directories": {
       "output": "release"
     },
     "files": [
       "electron_main.js",
-      "../public/index.html",
-      "../public/js/**/*",
-      "../public/css/**/*",
-      "../public/lib/**/*",
-      "../public/src/**/*"
+      "preload.js",
+      "../public/resource/icon-512.png",
+      "!node_modules/**"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "../public/src/favicon-256x256.png",
-      "artifactName": "OneAPIChat-${version}-win-x64.${ext}"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../public/resource/icon-512.png",
+      "artifactName": "OneAPIChat-Setup-${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OneAPIChat",
+      "installerIcon": "../public/resource/icon-512.png",
+      "uninstallerIcon": "../public/resource/icon-512.png"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "../public/src/favicon-256x256.png"
+      "icon": "../public/resource/icon-512.png",
+      "artifactName": "OneAPIChat-${version}-linux-x64.${ext}"
     },
     "mac": {
       "target": "dmg",
-      "icon": "../public/src/favicon-256x256.png"
+      "icon": "../public/resource/icon-512.png",
+      "artifactName": "OneAPIChat-${version}-mac-x64.${ext}"
     }
   },
-  "keywords": ["chat", "ai", "oneapi"],
+  "keywords": ["chat", "ai", "oneapi", "desktop", "electron"],
   "author": "naujtrats",
   "license": "MIT",
   "devDependencies": {
