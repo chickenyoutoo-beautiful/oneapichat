@@ -14,8 +14,13 @@
  */
 
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+
+// ── 自动更新配置 ────────────────────────────────────
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
 
 // ── 路径常量 ────────────────────────────────────────
 const APP_ROOT = path.join(__dirname, '..');
@@ -117,7 +122,7 @@ function createMainWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      spellcheck: false,
+      spellcheck: true,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -146,6 +151,20 @@ function createMainWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.focus();
+  });
+
+  // ★ 修复输入框焦点丢失: 窗口聚焦时恢复 webContents 焦点
+  mainWindow.on('focus', () => {
+    mainWindow.webContents.focus();
+  });
+  mainWindow.on('show', () => {
+    mainWindow.webContents.focus();
+  });
+
+  // 防止页面导航后输入框失焦
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.focus();
   });
 
   // 关闭到托盘（而非退出）
@@ -350,6 +369,64 @@ function setupIPC() {
   });
 }
 
+// ── 自动更新 ────────────────────────────────────────
+function setupAutoUpdater() {
+  // 检查更新事件
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[Updater] 正在检查更新...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox(mainWindow || undefined, {
+      type: 'info',
+      title: '发现新版本',
+      message: `OneAPIChat v${info.version} 可用`,
+      detail: '是否下载并安装更新？\n\n更新将在下次启动时应用。',
+      buttons: ['下载更新', '稍后提醒'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.downloadUpdate();
+      }
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[Updater] 已是最新版本');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow) {
+      mainWindow.setProgressBar(progress.percent / 100);
+    }
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    if (mainWindow) mainWindow.setProgressBar(-1);
+    dialog.showMessageBox(mainWindow || undefined, {
+      type: 'info',
+      title: '更新已下载',
+      message: '更新已下载完成，下次启动时自动安装。',
+      detail: '点击"立即重启"立即应用更新。',
+      buttons: ['立即重启', '稍后'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[Updater] 更新出错:', err.message);
+  });
+
+  // 启动后 5 秒开始检查更新
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 5000);
+}
+
 // ── 应用启动 ────────────────────────────────────────
 app.whenReady().then(() => {
   setupIPC();
@@ -364,6 +441,7 @@ app.whenReady().then(() => {
   createAppMenu();
   createTray();
   createMainWindow();
+  setupAutoUpdater();
 });
 
 // ── 应用退出 ────────────────────────────────────────
