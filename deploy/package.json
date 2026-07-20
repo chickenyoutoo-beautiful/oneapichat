@@ -1,6 +1,6 @@
 {
   "name": "oneapichat-client",
-  "version": "2.5.0",
+  "version": "2.5.5",
   "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
   "scripts": {
@@ -62,9 +62,11 @@
   "keywords": ["chat", "ai", "oneapi", "desktop", "electron"],
   "author": "naujtrats",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
   "devDependencies": {
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
-    "electron-updater": "^6.6.2"
+    "electron-builder": "^25.0.0"
   }
 }
