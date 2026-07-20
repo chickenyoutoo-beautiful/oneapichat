@@ -289,7 +289,7 @@ function stopGenerationForChat(chatId) {
 }
 
 // ★ 链式输出模式: 工具调用后保留旧消息,新内容追加为新气泡
-window._chainMode = localStorage.getItem('chainMode') === '1';  // 默认关闭
+window._chainMode = localStorage.getItem('chainMode') !== '0';  // ★ 默认开启
 window.toggleChainMode = function() {
     window._chainMode = !window._chainMode;
     localStorage.setItem('chainMode', window._chainMode ? '1' : '0');

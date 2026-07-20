@@ -903,15 +903,15 @@ window.loadChat = async function (id) {
                 if (m.tool_calls && m.tool_calls.length > 0) {
                     var _hasToolCards = chats[id].messages.some(function(_cm) { return _cm._toolCard; });
                     toolDisplayHtml = '<details class="tool-calls-history"' + (_hasToolCards ? '' : '') + '>';
-                    toolDisplayHtml += '<summary style="font-size:12px;color:#6b7280;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 0;">' +
-                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>' +
-                        '工具调用 · ' + m.tool_calls.length + ' 次' +
-                        '<span class="tool-calls-chevron" style="margin-left:auto;transition:transform 0.2s;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+                    toolDisplayHtml += '<summary style="font-size:11px;color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:4px;padding:2px 0;line-height:1.2;">' +
+                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>' +
+                        m.tool_calls.length + ' 次工具调用' +
+                        '<span class="tool-calls-chevron" style="margin-left:auto;transition:transform 0.2s;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
                     '</summary>';
-                    toolDisplayHtml += '<div style="display:flex;flex-wrap:wrap;gap:3px 6px;margin-top:4px;">';
+                    toolDisplayHtml += '<div style="display:flex;flex-wrap:wrap;gap:2px 4px;margin-top:2px;">';
                     m.tool_calls.forEach(function(tc) {
                         var _tn = tc.function && tc.function.name ? tc.function.name : 'unknown';
-                        var iconSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">';
+                        var iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">';
                         if (_tn === 'web_search') iconSvg += '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>';
                         else if (_tn === 'web_fetch') iconSvg += '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
                         else if (_tn.indexOf('generate_image') !== -1 || _tn === 'mmx_image') iconSvg += '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
@@ -930,7 +930,7 @@ window.loadChat = async function (id) {
                         else if (_tn.indexOf('agent') !== -1 || _tn === 'delegate_task') _color = '#8b5cf6';
                         else if (_tn.indexOf('cron') !== -1) _color = '#f59e0b';
                         else if (_tn.indexOf('mmx_') !== -1 || _tn.indexOf('generate') !== -1) _color = '#ec4899';
-                        toolDisplayHtml += '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 7px;border-radius:999px;background:#f3f4f6;font-size:11px;color:' + _color + ';">' +
+                        toolDisplayHtml += '<span style="display:inline-flex;align-items:center;gap:1px;padding:0 5px;border-radius:999px;background:#f3f4f6;font-size:10px;color:' + _color + ';line-height:1.6;">' +
                             iconSvg + escapeHtml(_tn) + '</span>';
                     });
                     toolDisplayHtml += '</div></details>';
