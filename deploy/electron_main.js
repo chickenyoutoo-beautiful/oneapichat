@@ -167,6 +167,14 @@ function createMainWindow() {
     mainWindow.webContents.focus();
   });
 
+  // ★ 最小化到托盘（而非任务栏）
+  mainWindow.on('minimize', (event) => {
+    if (tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   // 关闭到托盘（而非退出）
   mainWindow.on('close', (event) => {
     if (tray && !app.isQuitting) {

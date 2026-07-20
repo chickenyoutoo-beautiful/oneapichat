@@ -1,6 +1,6 @@
 {
   "name": "oneapichat-client",
-  "version": "2.5.5",
+  "version": "2.5.6",
   "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
   "scripts": {
@@ -23,12 +23,6 @@
       "repo": "oneapichat",
       "releaseType": "release"
     },
-    "files": [
-      "electron_main.js",
-      "preload.js",
-      "../public/resource/icon-512.png",
-      "!node_modules/**"
-    ],
     "win": {
       "target": [
         {
