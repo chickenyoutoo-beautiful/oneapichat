@@ -39,8 +39,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "OneAPIChat",
-      "installerIcon": "../public/resource/icon-512.png",
-      "uninstallerIcon": "../public/resource/icon-512.png"
+      "installerIcon": "../public/resource/icon-256.ico",
+      "uninstallerIcon": "../public/resource/icon-256.ico"
     },
     "linux": {
       "target": "AppImage",
