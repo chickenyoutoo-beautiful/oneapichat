@@ -1721,6 +1721,9 @@
                             console.error('[mmx] 请求失败:', _mmxErr.message);
                             toolResult = { error: 'MiniMax CLI 调用失败: ' + (_mmxErr.message || '未知错误') };
                         }
+                    } else if (func.name === 'generate_ppt' || func.name === 'generate_docx' || func.name === 'generate_xlsx' || func.name === 'generate_pdf') {
+                        // ★ 文档生成工具: 透传 MCP Server (PPT/Word/Excel/PDF)
+                        toolResult = await _mcpExecute(func.name, args);
                     } else if (func.name === 'video_edit') {
                         // ★ STT action: 特殊处理
                         if (args.action === 'stt') {
