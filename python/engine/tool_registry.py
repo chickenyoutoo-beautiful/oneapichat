@@ -227,6 +227,24 @@ def _default_tools() -> list[ToolDef]:
             tags=["文件", "写入"],
         ),
         ToolDef(
+            name="server_file_write_chunked",
+            description="★ 分块写入超大文件(>20KB推荐)。多次调用拼接,最后atomic rename防止半成品。\n\n使用流程:\n① server_file_write_chunked(path='文件', chunk_index=0, total_chunks=3, content='块0')\n② server_file_write_chunked(path='文件', chunk_index=1, content='块1')\n③ server_file_write_chunked(path='文件', chunk_index=2, content='块2', final=true)\n→ 自动拼接所有块+校验+原子rename到目标文件\n\n★ 每块≤8000字符,大文件必须分块避免超时。",
+            capabilities={Capability.WritesFiles, Capability.Sandboxable, Capability.RequiresApproval},
+            approval=ApprovalKind.SUGGEST,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "目标文件完整路径"},
+                    "chunk_index": {"type": "integer", "description": "块序号(从0开始)"},
+                    "total_chunks": {"type": "integer", "description": "总块数(仅首块需要)"},
+                    "content": {"type": "string", "description": "本块文本内容"},
+                    "final": {"type": "boolean", "description": "true=最后一块,触发拼接写入"},
+                },
+                "required": ["path", "content"],
+            },
+            tags=["文件", "写入", "分块"],
+        ),
+        ToolDef(
             name="server_file_append",
             description="向已存在的文件追加内容（末尾换行追加）。如果文件不存在则自动创建。",
             capabilities={Capability.WritesFiles, Capability.Sandboxable, Capability.RequiresApproval},

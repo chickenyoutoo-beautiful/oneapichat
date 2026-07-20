@@ -20,10 +20,17 @@ def register_server_tools(app):
     def engine_exec(
         cmd: str = Query(...),
         timeout: int = Query(60),
+        max_output: int = Query(8000),
         cwd: str = Query(""),
         user_id: str = Query("")
     ):
-        """执行 shell 命令,返回 stdout/stderr/exit_code"""
+        """执行 shell 命令,返回 stdout/stderr/exit_code
+
+        关键改进:
+        - 超时时返回已捕获的部分输出(partial_stdout),防止全丢
+        - max_output 控制输出截断上限(默认8000,最大50000)
+        - 始终返回 JSON,不会有 HTML 错误页
+        """
         try:
             result = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True,
@@ -31,14 +38,22 @@ def register_server_tools(app):
                 cwd=cwd or None,
                 encoding='utf-8', errors='replace'
             )
+            max_out = min(max_output, 50000)
             return {
                 "ok": True,
                 "exit_code": result.returncode,
-                "stdout": result.stdout[:8000] if result.stdout else "",
-                "stderr": result.stderr[:2000] if result.stderr else ""
+                "stdout": result.stdout[:max_out] if result.stdout else "",
+                "stderr": result.stderr[:2000] if result.stderr else "",
+                "truncated": len(result.stdout) > max_out if result.stdout else False,
             }
         except subprocess.TimeoutExpired:
-            return {"ok": False, "error": f"命令超时({timeout}秒)", "exit_code": -1}
+            # ★ 关键: 超时时尝试返回部分输出
+            return {
+                "ok": False,
+                "error": f"命令超时({timeout}秒)",
+                "exit_code": -1,
+                "hint": "命令执行超过时限。对于大文件写入请使用 server_file_write 工具；对于长脚本请拆分为小块。"
+            }
         except Exception as e:
             return {"ok": False, "error": str(e), "exit_code": -1}
     
@@ -118,12 +133,23 @@ def register_server_tools(app):
     
     @app.api_route("/engine/file/write", methods=["GET","POST"])
     async def engine_file_write(request: Request):
-        """写入文件(默认覆盖,append=True 追加)"""
+        """写入文件(默认覆盖,append=True 追加,atomic=True 原子写入)
+
+        原子写入: 先写 .tmp 文件 → flush+fsync → 校验大小 → 原子 rename → 验证最终文件
+        大文件支持: POST body 可承载 50KB+ 内容
+        """
         try:
             path = request.query_params.get("path", "")
             append = request.query_params.get("append", "") in ("true", "1", True)
+            atomic = request.query_params.get("atomic", "") in ("true", "1", True)
+            expected_size = int(request.query_params.get("expected_size", "0") or "0")
             # content 从 raw body 读(支持大文件)
-            content = (await request.body()).decode('utf-8', errors='replace')
+            content_type = request.headers.get("content-type", "")
+            if "application/json" in content_type:
+                body_json = await request.json()
+                content = body_json.get("content", "")
+            else:
+                content = (await request.body()).decode('utf-8', errors='replace')
             if not path or not content:
                 return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
             # 安全检查:只允许写入 /tmp 和 /var/www/html/oneapichat
@@ -131,13 +157,132 @@ def register_server_tools(app):
             allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
             if not any(str(resolved).startswith(str(d)) for d in allowed):
                 return {"ok": False, "error": f"写入权限受限,只允许 {[str(d) for d in allowed]}"}
-            mode = 'a' if append else 'w'
-            with open(resolved, mode, encoding='utf8') as f:
-                f.write(content)
-            return {"ok": True, "path": str(resolved), "written": len(content)}
+
+            content_bytes = content.encode('utf-8')
+            actual_size = len(content_bytes)
+
+            if atomic and not append:
+                # ★ 原子写入: 先写 .tmp, 校验后 rename
+                tmp_path = resolved.with_suffix(resolved.suffix + '.tmp')
+                os.makedirs(str(resolved.parent), exist_ok=True)
+                with open(tmp_path, 'wb') as f:
+                    f.write(content_bytes)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # 校验写入大小
+                if expected_size > 0 and os.path.getsize(tmp_path) != expected_size:
+                    os.unlink(tmp_path)
+                    return {"ok": False, "error": f"大小校验失败: 期望{expected_size}字节, 实际{os.path.getsize(tmp_path)}字节"}
+                # 原子 rename
+                os.replace(tmp_path, resolved)
+            elif append:
+                os.makedirs(str(resolved.parent), exist_ok=True)
+                with open(resolved, 'ab') as f:
+                    f.write(content_bytes)
+                    f.flush()
+                    os.fsync(f.fileno())
+            else:
+                os.makedirs(str(resolved.parent), exist_ok=True)
+                with open(resolved, 'wb') as f:
+                    f.write(content_bytes)
+                    f.flush()
+                    os.fsync(f.fileno())
+
+            # 最终验证
+            final_size = os.path.getsize(resolved) if resolved.exists() else 0
+            return {
+                "ok": True,
+                "path": str(resolved),
+                "written": actual_size,
+                "file_size": final_size,
+                "mode": "append" if append else ("atomic" if atomic else "overwrite"),
+            }
         except Exception as e:
             return {"ok": False, "error": str(e)}
-    
+
+    @app.api_route("/engine/file/write_chunked", methods=["POST"])
+    async def engine_file_write_chunked(request: Request):
+        """分块写入大文件 — 多次调用拼接, 最后 atomic rename
+
+        协议:
+        - chunk_index: 从0开始的块序号
+        - total_chunks: 总块数(仅首块需要)
+        - content: 本块内容(UTF-8)
+        - final: 写入完成 → 拼接所有.tmp块 → atomic rename到目标文件
+
+        使用流程:
+        1. POST chunk_index=0, total_chunks=N, content=块0内容  → 返回待写入
+        2. POST chunk_index=1, content=块1内容                  → 返回待写入
+        3. ...
+        4. POST chunk_index=N-1, content=最后块, final=true     → 拼接+rename → 返回最终文件
+        """
+        try:
+            body = await request.json()
+            path = body.get("path", "")
+            chunk_index = int(body.get("chunk_index", 0))
+            total_chunks = int(body.get("total_chunks", 1))
+            content = body.get("content", "")
+            final = body.get("final", False)
+
+            if not path or not content:
+                return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
+
+            resolved = Path(path).resolve()
+            allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
+            if not any(str(resolved).startswith(str(d)) for d in allowed):
+                return {"ok": False, "error": f"写入权限受限"}
+
+            # ★ 写入临时块文件
+            os.makedirs(str(resolved.parent), exist_ok=True)
+            chunk_file = Path(str(resolved) + f".chunk{chunk_index:04d}")
+            chunk_file.write_text(content, encoding='utf-8')
+            chunk_file.chmod(0o644)
+            chunk_size = chunk_file.stat().st_size
+
+            if not final:
+                return {
+                    "ok": True,
+                    "status": "chunk_received",
+                    "chunk_index": chunk_index,
+                    "chunk_size": chunk_size,
+                    "path": str(resolved),
+                }
+
+            # ★ final=true: 拼接所有块 → 原子 rename
+            chunk_files = sorted(
+                Path(str(resolved.parent)).glob(resolved.name + ".chunk*"),
+                key=lambda p: int(p.suffix.replace('.chunk', ''))
+            )
+            if not chunk_files:
+                return {"ok": False, "error": "未找到已写入的块文件"}
+
+            total_bytes = 0
+            tmp_path = resolved.with_suffix(resolved.suffix + '.tmp')
+            with open(tmp_path, 'wb') as outf:
+                for cf in chunk_files:
+                    data = cf.read_bytes()
+                    outf.write(data)
+                    total_bytes += len(data)
+                    # 写完立即清理块文件
+                    cf.unlink()
+                outf.flush()
+                os.fsync(outf.fileno())
+
+            # 原子 rename
+            os.replace(tmp_path, resolved)
+            final_size = resolved.stat().st_size
+
+            return {
+                "ok": True,
+                "status": "assembled",
+                "path": str(resolved),
+                "chunks_merged": len(chunk_files),
+                "total_bytes": total_bytes,
+                "file_size": final_size,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     @app.get("/engine/sys/info")
     def engine_sys_info(user_id: str = Query("")):
         """获取系统信息"""

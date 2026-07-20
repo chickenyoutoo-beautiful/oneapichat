@@ -980,7 +980,8 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             try:
                 _engine_url = "http://127.0.0.1:8766/engine/" + {
                     "server_exec": "exec", "server_python": "python", "server_file_read": "file/read",
-                    "server_file_write": "file/write", "server_file_search": "file_search",
+                    "server_file_write": "file/write", "server_file_write_chunked": "file/write_chunked",
+                "server_file_search": "file_search",
                     "server_sys_info": "sys/info", "server_ps": "ps", "server_disk": "disk",
                     "server_network": "network", "server_docker": "docker", "server_db_query": "db_query",
                     "server_file_op": "file_op", "server_file_append": "file_append",

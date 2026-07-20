@@ -387,6 +387,12 @@
                             if (!approved) { toolResult = { error: '用户拒绝了此操作' }; } else { toolResult = await engineApiHandler('file_write', args); }
                         } else { toolResult = await engineApiHandler('file_write', args); }
                     }
+                     else if (func.name === 'server_file_write_chunked') {
+                        // ★ 分块写入大文件: 直接走 MCP (引擎新端点)
+                        if (!args.path) { toolResult = { error: '缺少 path 参数' }; }
+                        else if (!args.content && args.content !== '') { toolResult = { error: '缺少 content 参数' }; }
+                        else { toolResult = await _mcpExecute(func.name, args); }
+                    }
                      else if (func.name === 'server_file_edit') {
                         // ★ 参数别名容错
                         if (!args.path && args.file_path) args.path = args.file_path;
