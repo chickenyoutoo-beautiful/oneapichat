@@ -289,7 +289,7 @@ function stopGenerationForChat(chatId) {
 }
 
 // ★ 链式输出模式: 工具调用后保留旧消息,新内容追加为新气泡
-window._chainMode = localStorage.getItem('chainMode') !== '0';  // ★ 默认开启
+window._chainMode = localStorage.getItem('chainMode') === '1';  // 默认关闭
 window.toggleChainMode = function() {
     window._chainMode = !window._chainMode;
     localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
@@ -2395,10 +2395,9 @@ window.useAlternativeVisionModel = function() {
 // 快速测试 MCP
 ;
 
-// ★ 并行执行工具调用 (同一批次工具通过 Promise.all 并行, 大幅提升多工具场景响应速度)
+// 执行每个工具调用并添加结果(只对有有效内容的tool call执行)
                 var _allWebFetchUrls = [];
-                // Phase 1: 所有工具并行发起
-                var _toolPromises = normalizedToolCalls.map(async function(tc) {
+                for (const tc of normalizedToolCalls) {
                     // ★ 实时显示工具执行状态
                     var _argPreview = '';
                     try {
@@ -2408,11 +2407,19 @@ window.useAlternativeVisionModel = function() {
                             _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
                         }
                     } catch(e) {}
-                    // ★ 用户停止检测: 并行模式下改为返回 null 跳过
+                    // ★ 用户停止检测: 每次工具调用前检查
                     if (userAbortMap[chatId]) {
                         console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
                         if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId);
-                        return { tc: tc, aborted: true, contentStr: '[用户已中断操作]', toolResult: {}, _toolStartTime: Date.now() };
+                        var _abortMsg = {
+                            role: 'tool',
+                            tool_call_id: tc.id || '',
+                            content: '[用户已中断操作]'
+                        };
+                        body.messages.push(_abortMsg);
+                        // ★ 同时持久化到 chat 历史，防止下次发送时出现孤 tool_call 导致 400
+                        chats[chatId].messages.push(Object.assign({}, _abortMsg, { _toolResult: true }));
+                        continue;
                     }
 
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId);
@@ -2432,7 +2439,7 @@ window.useAlternativeVisionModel = function() {
                     }
                     
                     var toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
-
+                    
                     // 清理控制器
                     delete window.__toolAbortControllers[_toolAbortKey];
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId);
@@ -2441,6 +2448,13 @@ window.useAlternativeVisionModel = function() {
                     // ★ 收集 web_fetch 访问的 URL
                     if (tc.function && tc.function.name === 'web_fetch' && toolResult._webFetchUrls && toolResult._webFetchUrls.length > 0) {
                         _allWebFetchUrls = _allWebFetchUrls.concat(toolResult._webFetchUrls);
+                        // 去重
+                        var _seenUrls = new Set();
+                        _allWebFetchUrls = _allWebFetchUrls.filter(function(u) {
+                            if (_seenUrls.has(u)) return false;
+                            _seenUrls.add(u);
+                            return true;
+                        });
                     }
                     var resultContent = toolResult.error || toolResult.result || '(empty)';
 
@@ -2448,24 +2462,6 @@ window.useAlternativeVisionModel = function() {
                     var contentStr = typeof resultContent === 'string'
                         ? resultContent
                         : (resultContent ? JSON.stringify(resultContent) : '(empty)');
-
-                    // ★ 返回结果给外部循环处理 (保持 body.messages 推送顺序)
-                    return { tc: tc, contentStr: contentStr, toolResult: toolResult, _toolStartTime: _toolStartTime, _toolAbortKey: _toolAbortKey };
-                }}); // end async function
-                // Phase 2: 等待所有工具并行执行完毕, 然后按顺序推入消息
-                var _toolResults = await Promise.all(_toolPromises);
-                for (var _ri = 0; _ri < _toolResults.length; _ri++) {
-                    var _r = _toolResults[_ri];
-                    var tc = _r.tc, contentStr = _r.contentStr, toolResult = _r.toolResult, _toolStartTime = _r._toolStartTime;
-                    // ★ 跳过已中止的工具
-                    if (_r.aborted) {
-                        body.messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr });
-                        chats[chatId].messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr, _toolResult: true });
-                        continue;
-                    }
-                    // 去重 web_fetch URLs
-                    var _seenUrls = new Set();
-                    _allWebFetchUrls = _allWebFetchUrls.filter(function(u) { if (_seenUrls.has(u)) return false; _seenUrls.add(u); return true; });
 
                     body.messages.push({
                         role: 'tool',
@@ -2591,7 +2587,6 @@ window.useAlternativeVisionModel = function() {
                         }
                     }
                 }
-                } // Phase 2 循环结束 (并行结果按序推入)
 
                 // ★ 工具执行循环结束 — 状态行各自有3秒定时器, 不强制清除
                 // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
@@ -2638,9 +2633,6 @@ window.useAlternativeVisionModel = function() {
                         streamingScrollLock = false;
                         try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                         if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
-                        // ★ 移除流式光标动画
-                        var _streamBubble = activeBubbleMap[chatId];
-                        if (_streamBubble) _streamBubble.classList.remove('streaming');
                         pendingMsg.time = Date.now() - startTime;
                         pendingMsg.usage = usage;
                         saveChats();
