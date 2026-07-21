@@ -46,6 +46,17 @@ function injectStyles() {
         .markdown-body a { color: #0366d6; text-decoration: underline; text-underline-offset: 2px; }
         .markdown-body a:hover { color: #0056b3; text-decoration: none; background-color: #f0f6ff; }
         .search-placeholder { color: #666; font-style: italic; }
+        /* ★ 流式输出平滑动效 */
+        .bubble.streaming { transition: box-shadow 0.3s ease; }
+        .bubble.streaming .markdown-body::after {
+            content: '▊'; display: inline; color: var(--text-primary,#1f2937);
+            animation: stream-blink 0.8s step-end infinite;
+            font-size: 0.9em; margin-left: 1px; vertical-align: baseline; opacity: 0.7;
+        }
+        @keyframes stream-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        .bubble.streaming .markdown-body { scroll-behavior: smooth; }
+        /* 流式过程平滑滚动 — 避免跳变 */
+        #chat-messages { scroll-behavior: smooth; }
         .search-status { background: rgba(0,0,0,0.03); border-radius: 4px; padding: 4px 8px; margin-bottom: 8px; font-size: 0.9em; color: #666; max-height: 100px; overflow-y: auto; }
         .dark .search-status { background: rgba(255,255,255,0.1); color: #aaa; }
         .code-actions { position: absolute; top: 4px; right: 4px; z-index: 5; display: flex; gap: 4px; pointer-events: none; opacity: 0; transition: opacity 0.2s; min-width: 0; width: auto; }

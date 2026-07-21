@@ -82,6 +82,7 @@ function _flushStreamRender_batched(chatId, st) {
     st.lastRenderLen = text.length;
     var bubble = st.bubble;
     if (!bubble) return;
+    if (!bubble.classList.contains('streaming')) bubble.classList.add('streaming');
     var mb = bubble.querySelector('.markdown-body');
     if (!mb) return;
     var prevH = mb.offsetHeight;
