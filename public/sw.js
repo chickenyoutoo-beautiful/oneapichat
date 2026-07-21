@@ -1,5 +1,5 @@
 // Service Worker v63 — Cache-First + 预缓存 + 更新通知
-const CACHE_NAME = 'naujtrats-v63';
+const CACHE_NAME = 'naujtrats-v64';
 const STATIC_EXTS = /\.(js|css|woff2?|ttf|eot|png|jpg|svg|ico|webp|json)$/i;
 const PRELOAD_URLS = [
   '/oneapichat/lib/katex/fonts/KaTeX_Main-Regular.woff2',
