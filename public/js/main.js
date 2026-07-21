@@ -2408,19 +2408,11 @@ window.useAlternativeVisionModel = function() {
                             _argPreview = _keys.length > 0 ? (_a[_keys[0]] || '').toString().substring(0, 40) : '';
                         }
                     } catch(e) {}
-                    // ★ 用户停止检测: 每次工具调用前检查
+                    // ★ 用户停止检测: 并行模式下改为返回 null 跳过
                     if (userAbortMap[chatId]) {
                         console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
                         if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId);
-                        var _abortMsg = {
-                            role: 'tool',
-                            tool_call_id: tc.id || '',
-                            content: '[用户已中断操作]'
-                        };
-                        body.messages.push(_abortMsg);
-                        // ★ 同时持久化到 chat 历史，防止下次发送时出现孤 tool_call 导致 400
-                        chats[chatId].messages.push(Object.assign({}, _abortMsg, { _toolResult: true }));
-                        continue;
+                        return { tc: tc, aborted: true, contentStr: '[用户已中断操作]', toolResult: {}, _toolStartTime: Date.now() };
                     }
 
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId);
@@ -2465,6 +2457,12 @@ window.useAlternativeVisionModel = function() {
                 for (var _ri = 0; _ri < _toolResults.length; _ri++) {
                     var _r = _toolResults[_ri];
                     var tc = _r.tc, contentStr = _r.contentStr, toolResult = _r.toolResult, _toolStartTime = _r._toolStartTime;
+                    // ★ 跳过已中止的工具
+                    if (_r.aborted) {
+                        body.messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr });
+                        chats[chatId].messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr, _toolResult: true });
+                        continue;
+                    }
                     // 去重 web_fetch URLs
                     var _seenUrls = new Set();
                     _allWebFetchUrls = _allWebFetchUrls.filter(function(u) { if (_seenUrls.has(u)) return false; _seenUrls.add(u); return true; });

@@ -12,6 +12,12 @@
 })();
 
 // ==== extracted from main.js L11-L13 ====
+// ★ 提前声明全局状态变量 — 避免 init 阶段引用时未定义
+window.isTypingMap = window.isTypingMap || {};
+window.isAutoScrolling = window.isAutoScrolling || false;
+window.userScrolled = false;
+window.prevWidth = window.prevWidth || window.innerWidth;
+
 // ==================== 全局常量 ====================
 const _apiBase = window.location.origin + '/oneapichat/api/engine_api.php';
 
