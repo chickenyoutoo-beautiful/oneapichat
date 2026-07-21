@@ -18,6 +18,7 @@ window.isAutoScrolling = window.isAutoScrolling || false;
 window.activeBubbleMap = window.activeBubbleMap || {};
 window.userScrolled = false;
 window.prevWidth = window.prevWidth || window.innerWidth;
+window.configPanelInteracting = false;
 
 // ==================== 全局常量 ====================
 const _apiBase = window.location.origin + '/oneapichat/api/engine_api.php';
