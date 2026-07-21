@@ -15,6 +15,7 @@
 // ★ 提前声明全局状态变量 — 避免 init 阶段引用时未定义
 window.isTypingMap = window.isTypingMap || {};
 window.isAutoScrolling = window.isAutoScrolling || false;
+window.activeBubbleMap = window.activeBubbleMap || {};
 window.userScrolled = false;
 window.prevWidth = window.prevWidth || window.innerWidth;
 
