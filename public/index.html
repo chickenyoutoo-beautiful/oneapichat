@@ -107,6 +107,21 @@ window.VISION_API_KEY = '';
 </script>
 </head>
 <body class="flex h-screen overflow-hidden text-gray-800 dark:text-gray-200">
+    <!-- ★ 启动加载动画 — 页面初始化完成后自动消失 -->
+    <div id="app-loader" style="position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg,#fff);transition:opacity 0.4s ease,visibility 0.4s ease;">
+        <div style="text-align:center;">
+            <div style="font-size:32px;font-weight:700;letter-spacing:-0.5px;color:var(--text-primary,#1f2937);margin-bottom:4px;">NAUJTRATS</div>
+            <div style="font-size:12px;color:var(--text-secondary,#9ca3af);margin-bottom:28px;letter-spacing:1px;">ONEAPICHAT</div>
+        </div>
+        <div style="width:200px;height:3px;background:var(--loader-track,rgba(99,102,241,0.12));border-radius:3px;overflow:hidden;">
+            <div id="loader-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#6366f1,#8b5cf6,#6366f1);background-size:200% 100%;border-radius:3px;animation:loader-shimmer 1.5s ease-in-out infinite;transition:width 0.5s ease;"></div>
+        </div>
+        <div id="loader-hint" style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:10px;min-height:16px;"></div>
+    </div>
+    <style>
+        @keyframes loader-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        #app-loader.hidden { opacity:0; visibility:hidden; pointer-events:none; }
+    </style>
     <!-- 登录弹窗 -->
     <div id="authOverlay" class="auth-overlay hidden">
         <div class="auth-modal">

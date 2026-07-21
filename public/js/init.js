@@ -782,14 +782,28 @@ function loadStyle(href, id) {
 }
 
 function initializeApp() {
+    // ★ 加载进度指示
+    function _loaderProgress(pct, hint) {
+        var bar = document.getElementById('loader-bar');
+        var hintEl = document.getElementById('loader-hint');
+        if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+        if (hintEl && hint) hintEl.textContent = hint;
+    }
+    function _hideLoader() {
+        var el = document.getElementById('app-loader');
+        if (el) { el.classList.add('hidden'); setTimeout(function(){ el && el.remove(); }, 500); }
+    }
+
     // ★ 始终等待 DOMContentLoaded（确保 main.js 等所有模块加载完毕）
     if (document.readyState === 'complete') { init(); }
     else { document.addEventListener('DOMContentLoaded', init); }
 
     async function init() {
         try {
+        _loaderProgress(15, '正在初始化界面...');
         cacheDOMElements();
         injectStyles();
+        _loaderProgress(25, '正在检查登录状态...');
         // ★ 恢复 ask_agent 临时授权状态(刷新不丢失指示灯)
         if (sessionStorage.getItem('_tempAgentGranted') === '1') {
             var _savedChatId = sessionStorage.getItem('_tempAgentChatId') || null;
@@ -890,8 +904,10 @@ function initializeApp() {
             console.log('[migrate] visionApiUrl: /mcp → MiniMax 直连');
         }
 
+        _loaderProgress(60, '正在同步数据...');
         // ★ 从服务器恢复当前账号的配置和聊天记录(登录用户专用)
         await restoreUserData();
+        _loaderProgress(90, '正在准备界面...');
 
         // ★ 预加载技能列表
         if (typeof window.loadSkills === 'function') {
@@ -935,6 +951,9 @@ function initializeApp() {
 
         try { loadInitialData(); } catch(e) { console.error('[Init] loadInitialData 失败:', e.message); }
         try { initRAGPanel(); } catch(e) {}
+        // ★ 界面就绪 → 平滑隐藏加载动画
+        _loaderProgress(100, '就绪');
+        setTimeout(_hideLoader, 200);
 
         // ★ 自动续生: 优先从引擎恢复活跃流, 回退到 _savedPartial 再生
         try {
