@@ -2397,22 +2397,6 @@ window.useAlternativeVisionModel = function() {
 
 // 执行每个工具调用并添加结果(只对有有效内容的tool call执行)
                 var _allWebFetchUrls = [];
-                // ★ Phase 1: 并行执行所有工具(批量提升速度)
-                var _toolPreResults = {};
-                if (normalizedToolCalls.length > 1 && !userAbortMap[chatId]) {
-                    var _prePromises = normalizedToolCalls.map(async function(_ptc) {
-                        var _pAbortCtrl = new AbortController();
-                        var _pStart = Date.now();
-                        try {
-                            var _pResult = await executeToolCallForRetry(_ptc, _pAbortCtrl.signal);
-                            return { tcId: _ptc.id, toolResult: _pResult, _toolStartTime: _pStart };
-                        } catch(e) { return { tcId: _ptc.id, toolResult: { error: e.message }, _toolStartTime: _pStart }; }
-                    });
-                    var _preResults = await Promise.all(_prePromises);
-                    for (var _pi = 0; _pi < _preResults.length; _pi++) {
-                        _toolPreResults[_preResults[_pi].tcId] = _preResults[_pi];
-                    }
-                }
                 for (const tc of normalizedToolCalls) {
                     // ★ 实时显示工具执行状态
                     var _argPreview = '';
@@ -2454,11 +2438,8 @@ window.useAlternativeVisionModel = function() {
                         _toolAbortCtrl.abort();
                     }
                     
-                    // ★ 优先使用并行预计算结果,否则顺序执行
-                    var _pre = _toolPreResults[tc.id];
-                    var toolResult = _pre ? _pre.toolResult : (await executeToolCallForRetry(tc, _toolAbortCtrl.signal));
-                    if (_pre && _pre._toolStartTime) _toolStartTime = _pre._toolStartTime;
-
+                    var toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
+                    
                     // 清理控制器
                     delete window.__toolAbortControllers[_toolAbortKey];
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId);
