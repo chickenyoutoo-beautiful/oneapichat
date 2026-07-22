@@ -172,10 +172,16 @@ if ($action === 'get_config' && $userId && $method === 'GET') {
     } catch (Exception $e) {}
 
     if ($dbConfig) {
+        // ★ 剥离不应跨设备同步的本地设置
+        $configArr = json_decode($dbConfig, true) ?: [];
+        unset($configArr['useAnthropicFormat']); // 本地开关，禁止从服务器恢复
         header('Content-Type: application/json; charset=utf-8');
-        echo $dbConfig;
+        echo json_encode($configArr);
     } elseif (file_exists($configFile)) {
-        readfile($configFile);
+        $fileConfig = json_decode(file_get_contents($configFile), true) ?: [];
+        unset($fileConfig['useAnthropicFormat']);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($fileConfig);
     } else {
         echo json_encode((object)[]);
     }
