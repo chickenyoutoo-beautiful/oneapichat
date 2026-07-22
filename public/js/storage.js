@@ -187,7 +187,7 @@ async function saveConfigToServer() {
                 k === 'ongoingChats' || k === 'authToken' || k === 'authUsername' ||
                 k === 'authUserId' || k === 'dark' || k === 'modelContextLength' ||
                 k === 'modelMaxOutputTokens' || k === 'autoDetectedTextModels' ||
-                k === '_test') continue;
+                k === 'useAnthropicFormat' || k === '_test') continue;
             allKeys.push(k);
         }
         allKeys.forEach(function(k) {
@@ -277,7 +277,7 @@ async function loadConfigFromServer() {
                 console.log('[loadConfigFromServer] 跳过无效 model:', config[k]);
                 continue;
             }
-            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode') {
+            if (config[k] !== null && config[k] !== undefined && k !== 'dark' && k !== 'agentMode' && k !== 'useAnthropicFormat') {
                 var _val = config[k];
                 // ★ 清理模型名中的 "models/" / "publishers/" 前缀 (Google API 等返回的格式)
                 if ((k === 'model' || k.indexOf('model_') === 0) && typeof _val === 'string') {
