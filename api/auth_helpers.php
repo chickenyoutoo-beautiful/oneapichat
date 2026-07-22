@@ -39,6 +39,25 @@ function verifyAuthToken(string $token): ?string {
     // 快速拒绝无效 token
     if (strlen($token) < 20) return null;
 
+    // ★ DB 优先：从 SQLite 查询 session
+    $dbPath = ONECHAT_ROOT . '/users/oneapichat.db';
+    if (file_exists($dbPath)) {
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("SELECT user_id, created_at FROM sessions WHERE token = ?");
+            $stmt->execute([$token]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                $expireTime = 30 * 24 * 3600;
+                if (time() - ($row['created_at'] ?? 0) < $expireTime) {
+                    return $row['user_id'];
+                }
+            }
+        } catch (Exception $e) {}
+    }
+
+    // Fallback: JSON 文件
     $sessionsFile = ONECHAT_ROOT . '/users/sessions.json';
     if (!file_exists($sessionsFile)) return null;
     $raw = file_get_contents($sessionsFile);

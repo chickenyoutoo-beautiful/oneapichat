@@ -396,10 +396,20 @@ function buildApiMessages(chatId) {
             }
         }
     }
+    // ★ 找到最后一个 assistant 消息的索引 — 其工具可能仍在执行中，不过滤
+    var _lastAssistantIdx = -1;
+    for (var _lai = apiMessagesUnfiltered.length - 1; _lai >= 0; _lai--) {
+        if (apiMessagesUnfiltered[_lai].role === 'assistant' && apiMessagesUnfiltered[_lai].tool_calls) {
+            _lastAssistantIdx = _lai;
+            break;
+        }
+    }
     // 第三遍: 清理 assistant tool_calls 中无对应 tool 结果的
     var _removedTcCount = 0;
     for (var _tfi2 = 0; _tfi2 < apiMessagesUnfiltered.length; _tfi2++) {
         var _tmsg2 = apiMessagesUnfiltered[_tfi2];
+        // ★ v2.6: 跳过最后一轮 assistant（工具结果尚未到达），防止竞态过滤
+        if (_tfi2 === _lastAssistantIdx) continue;
         if (_tmsg2.role === 'assistant' && _tmsg2.tool_calls && _tmsg2.tool_calls.length > 0) {
             var _validCalls = [];
             for (var _tci = 0; _tci < _tmsg2.tool_calls.length; _tci++) {

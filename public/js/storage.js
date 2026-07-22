@@ -64,7 +64,9 @@ function beaconSaveConfig() {
 }
 
 // ★ 防抖配置同步: 配置变更后 2 秒自动推送到服务器,避免每次滑动都发请求
+window._configRestored = false; // ★ 防止 restoreUserData 完成前覆盖服务器配置
 window._scheduleConfigSync = function() {
+    if (!window._configRestored) return; // ★ 等待 restoreUserData 完成
     if (window.__configSyncTimer) clearTimeout(window.__configSyncTimer);
     window.__configSyncTimer = setTimeout(function() {
         if (localStorage.getItem('authToken') && typeof saveConfigToServer === 'function') {
@@ -422,8 +424,8 @@ async function restoreUserData() {
                             // Agent 主聊: 与普通聊天相同逻辑 — 服务器消息更多时同步
                             if (!merged[_scid]) {
                                 merged[_scid] = JSON.parse(JSON.stringify(_serverChats[_scid]));
-                            } else if (_sc && _sc.messages && merged[_scid].messages && _sc.messages.length > merged[_scid].messages.length) {
-                                // ★ 服务器有更多消息 → 使用服务器版本（跨设备同步）
+                            } else if (_sc && _sc.messages && (!merged[_scid].messages || _sc.messages.length > merged[_scid].messages.length)) {
+                                // ★ DB模式或服务器有更多消息 → 使用服务器版本（跨设备同步）
                                 merged[_scid].messages = JSON.parse(JSON.stringify(_sc.messages));
                                 merged[_scid].updated_at = _sc.updated_at || Date.now();
                             }
@@ -673,9 +675,9 @@ async function restoreUserData() {
     } catch(e) {}
 
 
-    console.log('[restoreUserData] 恢复完成 — _agent_main msgs=' + (chats['_agent_main'] ? chats['_agent_main'].messages.length : 'N/A'));
+    console.log('[restoreUserData] 恢复完成 — _agent_main msgs=' + (chats['_agent_main'] && chats['_agent_main'].messages ? chats['_agent_main'].messages.length : 'N/A'));
     // ★ DEBUG: 监控_agent_main消息数组的修改,找到旧截断消息来源
-    if (chats['_agent_main']) {
+    if (chats['_agent_main'] && chats['_agent_main'].messages) {
         var __msgs = chats['_agent_main'].messages;
         var __origPush = __msgs.push;
         __msgs.push = function() {
@@ -689,6 +691,8 @@ async function restoreUserData() {
         };
     }
     console.log('[restoreUserData] 恢复完成');
+    // ★ 允许配置同步（在此之前 _scheduleConfigSync 会被拦截）
+    window._configRestored = true;
     // ★ 启动引擎状态自动刷新
     if (typeof window._startEngineAutoRefresh === 'function') {
         setTimeout(function() { window._startEngineAutoRefresh(); }, 2000);

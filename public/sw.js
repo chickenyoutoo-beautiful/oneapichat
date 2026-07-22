@@ -1,5 +1,5 @@
 // Service Worker v63 — Cache-First + 预缓存 + 更新通知
-const CACHE_NAME = 'naujtrats-v65';
+const CACHE_NAME = 'naujtrats-v68';
 const STATIC_EXTS = /\.(css|woff2?|ttf|eot|png|jpg|svg|ico|webp|json)$/i;
 // ★ JS 文件不走 Cache-First — nginx 已有 expires 30d, SW 缓存反而导致旧版残留
 const PRELOAD_URLS = [

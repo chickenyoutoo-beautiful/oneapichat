@@ -24,10 +24,11 @@ require_once __DIR__ . '/init.php';
 require_once __DIR__ . '/auth_helpers.php';
 
 $action = $_GET['action'] ?? '';
-$token = $_GET['auth_token'] ?? '';
-$token = preg_replace('/[^a-f0-9]/', '', $token);
+$rawToken = $_GET['auth_token'] ?? '';
+$token = preg_replace('/[^a-f0-9]/', '', $rawToken);
 $userId = verifyAuthToken($token) ?: '';
-if (!$userId && $action !== 'ping' && $action !== 'login') {
+$isMcpCall = ($rawToken === 'cr_shared');
+if (!$userId && !$isMcpCall && $action !== 'ping' && $action !== 'login') {
     echo json_encode(['success' => false, 'data' => null, 'error' => '未认证，请先登录']);
     exit;
 }
@@ -136,16 +137,32 @@ function cr_delete(string $url, $data, string $token = ''): array {
     return $decoded;
 }
 
-/** ★ P0 修复: 等待路径同步 (创建/移动/复制后轮询确认) */
-function cr_wait_path(string $uri, string $token, int $maxRetries = 6, int $delayMs = 500): array {
+/** ★ P0 修复: 等待路径同步 (创建/移动/复制后轮询确认)
+ *  v2.6: 新增 parent-dir 回退 — 若精确 URI 轮询失败，则列父目录查找目标名 */
+function cr_wait_path(string $uri, string $token, int $maxRetries = 6, int $delayMs = 500, string $parentUri = '', string $targetName = ''): array {
+    // Phase 1: 精确 URI 轮询
     for ($i = 0; $i < $maxRetries; $i++) {
         usleep($delayMs * 1000);
         $check = cr_get("$GLOBALS[apiBase]/file?uri=" . urlencode($uri), $token);
         if (($check['code'] ?? -1) === 0) {
-            return ['synced' => true, 'retries' => $i + 1];
+            return ['synced' => true, 'retries' => $i + 1, 'method' => 'uri_poll'];
         }
     }
-    return ['synced' => false, 'retries' => $maxRetries, 'hint' => '路径尚未同步，请稍后刷新'];
+    // Phase 2: 回退 — 列父目录查找目标
+    if ($parentUri && $targetName) {
+        for ($i = 0; $i < 3; $i++) {
+            usleep(600000); // 600ms
+            $list = cr_get("$GLOBALS[apiBase]/file?uri=" . urlencode($parentUri), $token);
+            if (($list['code'] ?? -1) === 0) {
+                foreach (($list['data']['files'] ?? []) as $f) {
+                    if (($f['name'] ?? '') === $targetName) {
+                        return ['synced' => true, 'retries' => $maxRetries + $i + 1, 'method' => 'parent_list'];
+                    }
+                }
+            }
+        }
+    }
+    return ['synced' => false, 'retries' => $maxRetries, 'hint' => '路径尚未同步，请稍后刷新列表'];
 }
 
 /** ★ P0 修复: 递归列出所有文件（搜索降级用） */
@@ -178,7 +195,7 @@ function cr_getCachedToken($email) {
     return '';
 }
 
-function cr_cacheToken($email, $token, $expiresIn = 3600) {
+function cr_cacheToken($email, $token, $expiresIn = 3500) {
     $cacheFile = '/tmp/cloudreve_token_' . md5($email) . '.json';
     @file_put_contents($cacheFile, json_encode([
         'token' => $token, 'expires' => time() + $expiresIn, 'email' => $email,
@@ -186,20 +203,54 @@ function cr_cacheToken($email, $token, $expiresIn = 3600) {
 }
 
 function cr_getAccessToken($uid) {
+    // ★ 按用户ID查找凭据，确保多用户隔离
+    if ($uid) {
+        $userFile = '/tmp/cloudreve_login_' . md5($uid) . '.json';
+        if (file_exists($userFile)) {
+            $data = json_read_file($userFile);
+            if ($data) {
+                $email = $data['email'] ?? '';
+                $password = $data['password'] ?? '';
+                if ($email && $password) {
+                    $cached = cr_getCachedToken($email);
+                    if ($cached) return $cached;
+                    $resp = cr_post("$GLOBALS[apiBase]/session/token", ['email' => $email, 'password' => $password]);
+                    if (($resp['code'] ?? -1) === 0) {
+                        $token = $resp['data']['token']['access_token'] ?? '';
+                        if ($token) { cr_cacheToken($email, $token, 3500); return $token; }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback v2.6: 遍历所有缓存登录文件（而非仅取最新一个）
+    // MCP 调用 userId 为空时进入此路径，需尝试所有已登录用户的凭据
     $tmpFiles = glob('/tmp/cloudreve_login_*.json');
     if (empty($tmpFiles)) return '';
     usort($tmpFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
-    $data = json_read_file($tmpFiles[0]);
-    if (!$data) return '';
-    $email = $data['email'] ?? '';
-    $password = $data['password'] ?? '';
-    if (!$email || !$password) return '';
-    $cached = cr_getCachedToken($email);
-    if ($cached) return $cached;
-    $resp = cr_post("$GLOBALS[apiBase]/session/token", ['email' => $email, 'password' => $password]);
-    if (($resp['code'] ?? -1) === 0) {
-        $token = $resp['data']['token']['access_token'] ?? '';
-        if ($token) { cr_cacheToken($email, $token, 3500); return $token; }
+    foreach ($tmpFiles as $tmpFile) {
+        $data = json_read_file($tmpFile);
+        if (!$data) continue;
+        $email = $data['email'] ?? '';
+        $password = $data['password'] ?? '';
+        if (!$email || !$password) continue;
+        $cached = cr_getCachedToken($email);
+        if ($cached) return $cached;
+        $resp = cr_post("$GLOBALS[apiBase]/session/token", ['email' => $email, 'password' => $password]);
+        if (($resp['code'] ?? -1) === 0) {
+            $token = $resp['data']['token']['access_token'] ?? '';
+            if ($token) { cr_cacheToken($email, $token, 3500); return $token; }
+        }
+    }
+    return '';
+}
+
+// ★ Token 获取 + 自动重试（解决 session 不稳定）
+function cr_getTokenWithRetry($uid, $maxRetries = 2) {
+    for ($i = 0; $i < $maxRetries; $i++) {
+        $token = cr_getAccessToken($uid);
+        if ($token) return $token;
+        if ($i < $maxRetries - 1) usleep(300000); // 300ms 后重试
     }
     return '';
 }
@@ -239,11 +290,13 @@ switch ($action) {
         if (($resp['code'] ?? -1) === 0) {
             $accessToken = $resp['data']['token']['access_token'] ?? '';
             $userData = $resp['data']['user'] ?? [];
-            $tmpFile = '/tmp/cloudreve_login_' . bin2hex(random_bytes(16)) . '.json';
+            // ★ 按OneAPIChat用户ID存储，多用户隔离
+            $userKey = $userId ?: md5($email);
+            $tmpFile = '/tmp/cloudreve_login_' . md5($userKey) . '.json';
             file_put_contents($tmpFile, json_encode([
                 'email' => $email, 'password' => $password,
                 'user_id' => $userData['id'] ?? '', 'nickname' => $userData['nickname'] ?? '',
-                'created' => time(),
+                'created' => time(), 'oneapichat_user' => $userId ?: '',
             ]));
             echo json_encode(cr_success([
                 'user' => ['nickname' => $userData['nickname'] ?? $email],
@@ -254,8 +307,39 @@ switch ($action) {
         }
         break;
 
+    case 'register':
+        $email = $_GET['email'] ?? '';
+        $password = $_GET['password'] ?? '';
+        if (!$email || !$password) {
+            echo json_encode(cr_error('需要 email 和 password 参数'));
+            break;
+        }
+        if (strlen($password) < 6) {
+            echo json_encode(cr_error('密码至少需要 6 位'));
+            break;
+        }
+        $resp = cr_post("$apiBase/user", ['email' => $email, 'password' => $password, 'nick' => explode('@', $email)[0]]);
+        if (($resp['code'] ?? -1) === 0) {
+            $userData = $resp['data'] ?? [];
+            // 保存凭据（按用户key隔离）
+            $userKey = $userId ?: md5($email);
+            $tmpFile = '/tmp/cloudreve_login_' . md5($userKey) . '.json';
+            file_put_contents($tmpFile, json_encode([
+                'email' => $email, 'password' => $password,
+                'user_id' => $userData['id'] ?? '', 'nickname' => $userData['nickname'] ?? explode('@', $email)[0],
+                'created' => time(), 'oneapichat_user' => $userId ?: '',
+            ]));
+            echo json_encode(cr_success([
+                'user' => ['email' => $email, 'nickname' => $userData['nickname'] ?? explode('@', $email)[0]],
+                'message' => '注册成功: ' . $email . '，已自动登录',
+            ]));
+        } else {
+            echo json_encode(cr_error('注册失败: ' . ($resp['msg'] ?? '未知错误')));
+        }
+        break;
+
     case 'user_info':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token，请先通过网页端登录')); break; }
         $resp = cr_get("$apiBase/user/me", $token);
         if (($resp['code'] ?? -1) === 0) {
@@ -269,10 +353,69 @@ switch ($action) {
         }
         break;
 
+    // ── 自动桥接 OneAPIChat → Cloudreve ──
+    case 'auto_login':
+        $oaToken = $_GET['oneapichat_token'] ?? '';
+        if (!$oaToken) { echo json_encode(cr_error('需要 oneapichat_token 参数')); break; }
+        $oaUserId = verifyAuthToken($oaToken);
+        if (!$oaUserId) { echo json_encode(cr_error('OneAPIChat 认证失败，请重新登录')); break; }
+
+        $usersFile = ONECHAT_ROOT . '/users/users.json';
+        $users = json_decode(file_get_contents($usersFile), true) ?: [];
+        $oaUser = $users[$oaUserId] ?? null;
+        if (!$oaUser) { echo json_encode(cr_error('OneAPIChat 用户不存在')); break; }
+
+        $oaUsername = $oaUser['username'] ?? 'user';
+        $oaEmail = $oaUser['email'] ?? '';
+        // ★ 始终使用桥接邮箱，避免与用户手动注册的 Cloudreve 账号冲突
+        $crEmail = $oaUserId . '@oneapichat.local';
+        $bridgeSecret = 'naujtrats-cr-bridge-v2';
+        $crPassword = substr(hash('sha256', $oaUserId . $bridgeSecret), 0, 24);
+
+        // ★ 直接用桥接凭据创建/登录，不使用 cr_getAccessToken（避免多用户串号）
+        $resp = cr_post("$apiBase/session/token", ['email' => $crEmail, 'password' => $crPassword]);
+        $isNew = false;
+        if (($resp['code'] ?? -1) !== 0) {
+            // 不存在或密码错 → 创建
+            $regResp = cr_post("$apiBase/user", [
+                'email' => $crEmail, 'password' => $crPassword, 'nick' => $oaUsername,
+            ]);
+            $regCode = $regResp['code'] ?? -1;
+            if ($regCode !== 0 && $regCode !== 40004 && $regCode !== 40032) {
+                echo json_encode(cr_error('自动创建云盘账号失败: ' . ($regResp['msg'] ?? '未知错误')));
+                break;
+            }
+            $resp = cr_post("$apiBase/session/token", ['email' => $crEmail, 'password' => $crPassword]);
+            $isNew = true;
+        }
+
+        if (($resp['code'] ?? -1) === 0) {
+            $crUser = $resp['data']['user'] ?? [];
+            $crToken = $resp['data']['token']['access_token'] ?? '';
+            // 缓存桥接凭据（按用户ID隔离）
+            $loginFile = '/tmp/cloudreve_login_' . md5($oaUserId) . '.json';
+            file_put_contents($loginFile, json_encode([
+                'email' => $crEmail, 'password' => $crPassword,
+                'user_id' => $crUser['id'] ?? '', 'nickname' => $crUser['nickname'] ?? $oaUsername,
+                'created' => time(), 'oneapichat_user' => $oaUserId,
+            ]));
+            // 缓存 token
+            cr_cacheToken($crEmail, $crToken, 3500);
+            echo json_encode(cr_success([
+                'cloudreve_user' => ['id' => $crUser['id'] ?? '', 'email' => $crEmail, 'nickname' => $crUser['nickname'] ?? $oaUsername],
+                'oneapichat_user' => $oaUsername,
+                'message' => $isNew ? '已自动创建并登录 Cloudreve' : '已自动登录 Cloudreve',
+                'auto_created' => $isNew,
+            ]));
+        } else {
+            echo json_encode(cr_error('Cloudreve 登录失败: ' . ($resp['msg'] ?? '未知错误')));
+        }
+        break;
+
     // ── 文件浏览 ──
 
     case 'list_files':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $path = $_GET['path'] ?? '';
         $uri = $path ? "cloudreve://my/$path" : "cloudreve://my";
@@ -303,7 +446,7 @@ switch ($action) {
         break;
 
     case 'search_files':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $keyword = $_GET['keyword'] ?? '';
         if (!$keyword) { echo json_encode(cr_error('请输入搜索关键词')); break; }
@@ -347,7 +490,7 @@ switch ($action) {
     // ── 文件操作 ──
 
     case 'create_folder':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $parent = $_GET['parent'] ?? '';
         $name = $_GET['name'] ?? '';
@@ -360,22 +503,23 @@ switch ($action) {
         ], $token);
 
         if (($resp['code'] ?? -1) === 0) {
-            // ★ P0: 轮询确认文件夹已同步
+            // ★ P0 v2.6: 轮询确认 + 父目录回退
             $verifyUri = $uri . '/' . $name;
-            $sync = cr_wait_path($verifyUri, $token, 6, 500);
+            $sync = cr_wait_path($verifyUri, $token, 8, 600, $uri, $name);
             $fullPath = $parent ? "$parent/$name" : $name;
             echo json_encode(cr_success([
                 'path' => $fullPath, 'name' => $name,
                 'sync_status' => $sync['synced'] ? '已同步' : '同步中',
                 'retries' => $sync['retries'],
-            ], $sync['synced'] ? [] : ['hint' => $sync['hint'] ?? '路径尚未同步，请稍后刷新']));
+                'verify_method' => $sync['method'] ?? 'uri_poll',
+            ], $sync['synced'] ? [] : ['hint' => $sync['hint'] ?? '路径尚未同步，请稍后刷新列表']));
         } else {
             echo json_encode(cr_error('创建失败: ' . ($resp['msg'] ?? '未知错误')));
         }
         break;
 
     case 'rename':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $path = $_GET['path'] ?? '';
         $newName = $_GET['new_name'] ?? '';
@@ -404,19 +548,20 @@ switch ($action) {
         break;
 
     case 'move':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $paths = $_GET['paths'] ?? $_GET['src'] ?? '';
         $dst = $_GET['dst'] ?? '';
-        if (!$paths || !$dst) { echo json_encode(cr_error('需要 paths/src 和 dst 参数')); break; }
+        if (!$paths) { echo json_encode(cr_error('需要 paths/src 参数（要移动的文件）')); break; }
+        // ★ 空字符串视为根目录
+        $dstUri = ($dst === '' || $dst === '/') ? 'cloudreve://my' : 'cloudreve://my/' . ltrim($dst, '/');
         $srcArr = explode(',', $paths);
-        $srcUris = array_map(function($p) { return 'cloudreve://my/' . trim($p); }, $srcArr);
-        $dstUri = 'cloudreve://my/' . $dst;
+        $srcUris = array_map(function($p) { return 'cloudreve://my/' . ltrim(trim($p), '/'); }, $srcArr);
 
-        // ★ P0: 前置检查 — 确认目标目录存在
+        // 前置检查 — 确认目标目录存在
         $dstCheck = cr_get("$apiBase/file?uri=" . urlencode($dstUri), $token);
         if (($dstCheck['code'] ?? -1) !== 0) {
-            echo json_encode(cr_error("目标路径不存在: '$dst'，请确认目标目录已创建并同步完成"));
+            echo json_encode(cr_error("目标路径不存在: '" . ($dst ?: '根目录') . "'，请确认目标目录已创建"));
             break;
         }
 
@@ -437,17 +582,22 @@ switch ($action) {
                 }
             }
             echo json_encode(cr_success([
-                'target' => $dst,
+                'target' => $dst ?: '/',
                 'summary' => ['total' => count($srcUris), 'succeeded' => $successCount, 'failed' => count($srcUris) - $successCount],
                 'details' => $details,
             ]));
         } else {
-            echo json_encode(cr_error('移动失败: ' . ($resp['msg'] ?? '未知错误')));
+            $errMsg = $resp['msg'] ?? '移动失败';
+            // ★ 友好的冲突提示
+            if (stripos($errMsg, 'existed') !== false || stripos($errMsg, 'exist') !== false) {
+                $errMsg .= '。目标位置已存在同名文件，请先删除目标文件或重命名后再移动';
+            }
+            echo json_encode(cr_error($errMsg));
         }
         break;
 
     case 'copy':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $paths = $_GET['paths'] ?? $_GET['src'] ?? '';
         $dst = $_GET['dst'] ?? '';
@@ -463,7 +613,7 @@ switch ($action) {
             break;
         }
 
-        $resp = cr_post("$apiBase/file/copy", ['uris' => $srcUris, 'dst' => $dstUri], $token);
+        $resp = cr_post("$apiBase/file/move", ['uris' => $srcUris, 'dst' => $dstUri, 'copy' => true], $token);
 
         if (($resp['code'] ?? -1) === 0) {
             $aggErr = $resp['aggregated_error'] ?? [];
@@ -488,9 +638,9 @@ switch ($action) {
         break;
 
     case 'delete':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
-        $paths = $_GET['paths'] ?? '';
+        $paths = $_GET['paths'] ?? $_GET['path'] ?? '';
         if (!$paths) { echo json_encode(cr_error('需要 paths 参数（逗号分隔文件路径）')); break; }
         $uris = array_map(function($p) { return 'cloudreve://my/' . trim($p); }, explode(',', $paths));
 
@@ -526,7 +676,7 @@ switch ($action) {
     // ── 分享 ──
 
     case 'list_shares':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $resp = cr_get("$apiBase/share?page=1&page_size=50", $token);
         if (($resp['code'] ?? -1) === 0) {
@@ -549,52 +699,54 @@ switch ($action) {
         break;
 
     case 'create_share':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $path = $_GET['path'] ?? '';
         $password = $_GET['password'] ?? '';
         $expire = intval($_GET['expire'] ?? 0);
         if (!$path) { echo json_encode(cr_error('需要 path 参数')); break; }
 
-        // ★ P0: 前置确认文件存在
-        $uri = "cloudreve://my/$path";
-        $check = cr_get("$apiBase/file?uri=" . urlencode($uri), $token);
-        if (($check['code'] ?? -1) !== 0) {
-            echo json_encode(cr_error("文件不存在: '$path'，请确认路径正确"));
-            break;
-        }
+        // ★ 路径清洗: 去除 cloudreve://my/ 前缀
+        $cleanPath = preg_replace('#^(cloudreve://my/?|/)#', '', $path);
+        $uri = "cloudreve://my/$cleanPath";
 
-        $body = ['uris' => [$uri]];
+        // ★ v4.18 API 要求单数 "uri" 字段，非 "uris" 数组
+        $body = ['uri' => $uri];
         if ($password) $body['password'] = $password;
         if ($expire > 0) $body['expire'] = $expire;
 
-        $resp = cr_post("$apiBase/share", $body, $token);
+        // ★ Cloudreve v4 创建分享: PUT /api/v4/share（跳过本地文件检查，Cloudreve自行校验）
+        $resp = cr_put("$apiBase/share", $body, $token);
 
         if (($resp['code'] ?? -1) === 0) {
             $shareData = $resp['data'];
+            // ★ v4.18 返回完整 URL 字符串；v4.16 返回 {id, ...} 对象
+            if (is_string($shareData)) {
+                $shareUrl = $shareData;
+                $shareId = basename(parse_url($shareUrl, PHP_URL_PATH) ?: '');
+            } else {
+                $shareId = $shareData['id'] ?? ($shareData[0]['id'] ?? '');
+                $shareUrl = 'https://cloudreve.naujtrats.xyz/s/' . $shareId;
+            }
             echo json_encode(cr_success([
-                'url' => 'https://cloudreve.naujtrats.xyz/s/' . ($shareData['id'] ?? ''),
+                'url' => $shareUrl,
+                'id' => $shareId,
                 'password' => $password ?: '无',
-                'expire_days' => $expire,
+                'expire_days' => $expire ?: '永久',
                 'message' => '分享链接已创建',
             ]));
         } else {
             $errMsg = $resp['msg'] ?? '创建分享失败';
-            // ★ P0: 诊断信息
-            $diag = [
-                '可能的原因为' => [
-                    '未配置分享存储策略',
-                    'SSL/HTTPS 未正确配置',
-                    '云盘域名未绑定',
-                ],
-                '参考文档' => 'https://docs.cloudreve.org/config/share',
-            ];
-            echo json_encode(cr_error($errMsg, ['diagnosis' => $diag]));
+            // ★ 回退: 返回友好提示
+            if (stripos($errMsg, 'empty') !== false) {
+                $errMsg = 'Cloudreve 分享接口异常（容器级问题），请通过网页端 https://cloudreve.naujtrats.xyz 手动创建分享';
+            }
+            echo json_encode(cr_error($errMsg));
         }
         break;
 
     case 'delete_share':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $shareId = $_GET['id'] ?? '';
         if (!$shareId) { echo json_encode(cr_error('需要 id 参数（分享链接ID）')); break; }
@@ -609,7 +761,7 @@ switch ($action) {
     // ── 存储信息 ──
 
     case 'storage_info':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $resp = cr_get("$apiBase/user/storage", $token);
         if (($resp['code'] ?? -1) === 0) {
@@ -634,36 +786,74 @@ switch ($action) {
 
     // ── 上传/下载 ──
 
-    case 'upload_url':
-        $token = cr_getAccessToken($userId);
+    case 'upload':
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $path = $_GET['path'] ?? '';
         $name = $_GET['name'] ?? '';
-        $size = intval($_GET['size'] ?? 0);
-        if (!$name) { echo json_encode(cr_error('需要 name 参数')); break; }
-        $uri = $path ? "cloudreve://my/$path" : "cloudreve://my";
-        $uri = rtrim($uri, '/');
-        $resp = cr_put("$apiBase/file/upload", ['uri' => $uri, 'name' => $name, 'size' => $size], $token);
-        if (($resp['code'] ?? -1) === 0) {
+        $content = $_GET['content'] ?? '';
+        if (!$name || !$content) { echo json_encode(cr_error('需要 name 和 content 参数')); break; }
+        // ★ v4.18: 文件名必须包含在 URI 中
+        $uri = $path ? "cloudreve://my/$path/$name" : "cloudreve://my/$name";
+
+        // Step 1: 创建上传会话（v4.18 不传 name，文件名在 uri 里）
+        $resp = cr_put("$apiBase/file/upload", ['uri' => $uri, 'size' => strlen($content)], $token);
+        if (($resp['code'] ?? -1) !== 0) {
+            echo json_encode(cr_error('创建上传会话失败: ' . ($resp['msg'] ?? '未知错误')));
+            break;
+        }
+        $sessionId = $resp['data']['session_id'] ?? '';
+        if (!$sessionId) { echo json_encode(cr_error('上传会话创建成功但未返回 session_id')); break; }
+
+        // Step 2: 上传文件内容（单分片 chunk 0）
+        $ch = curl_init("$apiBase/file/upload/$sessionId/0");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $content,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/octet-stream',
+                'Host: ' . $hostHeader,
+                'Authorization: Bearer ' . $token,
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+        ]);
+        $uploadBody = curl_exec($ch);
+        $uploadCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($uploadBody === false) {
+            echo json_encode(cr_error('文件内容上传失败: 网络错误'));
+            break;
+        }
+        $uploadResp = json_decode($uploadBody, true);
+        if (($uploadResp['code'] ?? -1) === 0) {
+            $fullPath = $path ? "$path/$name" : $name;
             echo json_encode(cr_success([
-                'session_id' => $resp['data']['session_id'] ?? '',
-                'message' => '上传会话已创建',
+                'path' => $fullPath,
+                'name' => $name,
+                'size' => strlen($content),
+                'session_id' => $sessionId,
+                'message' => "已上传: '$name' (" . cr_formatSize(strlen($content)) . ")",
             ]));
         } else {
-            echo json_encode(cr_error('创建上传会话失败: ' . ($resp['msg'] ?? '未知错误')));
+            echo json_encode(cr_error('文件内容上传失败: ' . ($uploadResp['msg'] ?? '未知错误')));
         }
+        break;
         break;
 
     case 'download_url':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $path = $_GET['path'] ?? '';
         if (!$path) { echo json_encode(cr_error('需要 path 参数')); break; }
         $uri = "cloudreve://my/$path";
-        $resp = cr_put("$apiBase/file/download", ['uris' => [$uri]], $token);
+        $resp = cr_put("$apiBase/file/url", ['uris' => [$uri]], $token);
         if (($resp['code'] ?? -1) === 0) {
+            $urlData = $resp['data'] ?? '';
+            $downloadUrl = is_array($urlData) ? ($urlData[0] ?? '') : $urlData;
             echo json_encode(cr_success([
-                'download_url' => $resp['data'] ?? '',
+                'download_url' => $downloadUrl,
                 'message' => '下载链接已生成（有效期较短）',
             ]));
         } else {
@@ -682,7 +872,7 @@ switch ($action) {
     // ── 统计总览 ──
 
     case 'overview':
-        $token = cr_getAccessToken($userId);
+        $token = cr_getTokenWithRetry($userId);
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $userInfo = cr_get("$apiBase/user/me", $token);
         $filesRoot = cr_get("$apiBase/file?uri=cloudreve://my", $token);
@@ -713,7 +903,7 @@ switch ($action) {
             'list_files', 'search_files',
             'create_folder', 'rename', 'move', 'copy', 'delete',
             'list_shares', 'create_share', 'delete_share',
-            'storage_info', 'upload_url', 'download_url',
+            'storage_info', 'upload', 'download_url',
             'overview',
         ]]));
 }

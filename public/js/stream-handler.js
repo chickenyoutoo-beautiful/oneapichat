@@ -444,7 +444,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                     ? currentToolCall.function.arguments
                                     : JSON.stringify(currentToolCall.function.arguments || '');
                                 // 只保存有实际内容的tool call(跳过空/碎片)
-                                var hasValidContent = currentArgs.length > 2 &&
+                                var hasValidContent = currentArgs.length >= 2 &&
                                     (currentArgs.includes('query') || currentArgs.includes('prompt') || currentToolCall.function?.name);
                                 if (hasValidContent) {
                                     toolCalls.push(currentToolCall);

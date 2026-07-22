@@ -1879,7 +1879,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var useStream = _isImageModel ? false : getChecked('streamToggle');
             // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
             // 用户可设置 __enableResumeStream='0' 显式禁用
-            var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
+            var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
             // ★ 工具续接也走RS: 每轮独立stream_id不嵌套,前8轮走RS超8轮退直连
             var _isContinuation = (toolCallCount > 8);
             // ★ Anthropic 格式不支持 RS (引擎用 OpenAI SDK), 强制直连
@@ -2253,7 +2253,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 // 将助手消息添加到历史(包含tool_calls)
                 // 确保tool_calls中的arguments是字符串(API要求)
                 // 过滤掉没有有效function.arguments的碎片
-                var validToolCalls = toolCalls.filter(tc => tc && tc.function && tc.function.name && (typeof tc.function.arguments === 'object' || (typeof tc.function.arguments === 'string' && tc.function.arguments.length > 2)));
+                var validToolCalls = toolCalls.filter(tc => tc && tc.function && tc.function.name && (typeof tc.function.arguments === 'object' || (typeof tc.function.arguments === 'string' && tc.function.arguments.length >= 2)));
                 var normalizedToolCalls = validToolCalls.map(tc => {
                     var argStr = typeof tc.function.arguments === 'string'
                         ? tc.function.arguments
@@ -3152,8 +3152,17 @@ window.useAlternativeVisionModel = function() {
                                 _orphanToolIds[body.messages[_oj].tool_call_id] = true;
                             }
                         }
+                        // ★ v2.6: 找到最后一个 assistant 消息的索引，不过滤其 tool_calls（工具仍在执行）
+                        var _lastAsstIdx = -1;
+                        for (var _lai0 = body.messages.length - 1; _lai0 >= 0; _lai0--) {
+                            if (body.messages[_lai0].role === 'assistant' && body.messages[_lai0].tool_calls) {
+                                _lastAsstIdx = _lai0;
+                                break;
+                            }
+                        }
                         var _removedOrphans = 0;
                         for (var _ok = 0; _ok < body.messages.length; _ok++) {
+                            if (_ok === _lastAsstIdx) continue;  // ★ 跳过最后一轮
                             if (body.messages[_ok].role === 'assistant' && body.messages[_ok].tool_calls) {
                                 var _beforeCount = body.messages[_ok].tool_calls.length;
                                 body.messages[_ok].tool_calls = body.messages[_ok].tool_calls.filter(function(tc) {

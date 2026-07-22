@@ -83,7 +83,7 @@ async function loadSearchConfig() {
     setChecked('ragToggle', ragChecked);
     window.RAG_ENABLED = ragChecked;
     // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
-    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') !== '0');
+    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
     setChecked('proxyToggle', localStorage.getItem('proxyEnabled') === '1');
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');

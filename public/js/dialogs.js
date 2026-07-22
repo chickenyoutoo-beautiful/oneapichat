@@ -471,67 +471,61 @@ function compressChatsForStorage(chatsObj) {
     return slim;
 }
 function slimSaveChats() {
-    // ★ 三级降级策略：正常压缩 → 裁剪旧聊天 → 最简模式
+    // ★ DB模式: localStorage只存元数据索引,完整数据走服务器SQLite
+    //    元数据索引 ~1KB/聊天, 100个聊天也仅~100KB — 永不超过配额
     var _slim = compressChatsForStorage(chats);
     var _json = JSON.stringify(_slim);
     var _size = _json.length;
-    console.log('[slimSaveChats] 压缩后大小:', _size, 'chars, 聊天数:', Object.keys(_slim).length);
 
-    if (_size < 4500000) {
+    if (_size < 3500000) {
+        // ★ 小数据: localStorage直接存完整数据(快速路径,无需服务器)
         try {
             localStorage.setItem('chats', _json);
+            localStorage.removeItem('_chats_db_mode');
             return true;
-        } catch(e) { /* 继续降级 */ }
+        } catch(e) { /* fall through to DB mode */ }
     }
 
-    console.warn('[slimSaveChats] 数据过大(' + _size + '), 降级: 仅保留最近20个聊天');
+    // ★ DB模式: 数据>3.5MB → 本地仅存索引, 完整数据走服务器
+    console.log('[slimSaveChats] DB模式: ' + _size + ' chars → 索引本地 + 全量服务器');
     try {
-        var _ids = Object.keys(_slim).sort(function(a, b) {
-            return (_slim[b].updated_at || 0) - (_slim[a].updated_at || 0);
-        });
-        var _recent = {}
-        _ids.slice(0, 20).forEach(function(id) { _recent[id] = _slim[id]; });
-        var _json2 = JSON.stringify(_recent);
-        console.log('[slimSaveChats] Level2 大小:', _json2.length, 'chars');
-        if (_json2.length < 4500000) {
-            localStorage.setItem('chats', _json2);
-            return true;
+        var _index = {};
+        var _keys = Object.keys(_slim);
+        for (var _i = 0; _i < _keys.length; _i++) {
+            var _c = _slim[_keys[_i]];
+            _index[_keys[_i]] = {
+                title: _c.title || '新对话',
+                updated_at: _c.updated_at || '',
+                userId: _c.userId || '',
+                msgCount: (_c.messages || []).length
+            };
         }
-    } catch(e) {}
-
-    console.warn('[slimSaveChats] 仍过大, 降级: 极限精简');
-    try {
-        var _ids2 = Object.keys(_slim).sort(function(a, b) {
-            return (_slim[b].updated_at || 0) - (_slim[a].updated_at || 0);
-        });
-        var _minimal = {}
-        _ids2.slice(0, 10).forEach(function(id) {
-            var _c = JSON.parse(JSON.stringify(_slim[id]));
-            if (_c.messages) {
-                _c.messages = _c.messages.map(function(msg) {
-                    delete msg.generatedImage;
-                    delete msg.generatedImages;
-                    delete msg.files;
-                    delete msg._webFetchUrls;
-                    if (typeof msg.content === 'string' && msg.content.length > 500) {
-                        msg.content = msg.content.substring(0, 500) + '...[截断]';
-                    }
-                    if (typeof msg.reasoning === 'string' && msg.reasoning.length > 500) {
-                        msg.reasoning = msg.reasoning.substring(0, 500) + '...[截断]';
-                    }
-                    return msg;
-                });
-            }
-            _minimal[id] = _c;
-        });
-        var _json3 = JSON.stringify(_minimal);
-        console.log('[slimSaveChats] Level3 大小:', _json3.length, 'chars');
-        localStorage.setItem('chats', _json3);
-        return true;
+        var _idxJson = JSON.stringify(_index);
+        localStorage.setItem('chats', _idxJson);
+        localStorage.setItem('_chats_db_mode', '1');
+        console.log('[slimSaveChats] 索引大小:', _idxJson.length, 'chars, 聊天数:', Object.keys(_index).length);
     } catch(e) {
-        console.error('[slimSaveChats] ❌ 所有降级均失败:', e.message);
-        return false;
+        // 极端情况: 降级仅保留最近聊天标题
+        console.warn('[slimSaveChats] 索引写入失败, 极限降级:', e.message);
+        try {
+            var _mini = {};
+            var _allIds = Object.keys(chats).sort(function(a, b) {
+                return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+            });
+            _allIds.slice(0, 30).forEach(function(id) {
+                _mini[id] = { title: chats[id].title || '新对话', updated_at: chats[id].updated_at || '' };
+            });
+            localStorage.setItem('chats', JSON.stringify(_mini));
+        } catch(e2) {
+            console.error('[slimSaveChats] ❌ 所有降级均失败:', e2.message);
+        }
     }
+
+    // 确保服务器保存(主存储)
+    if (typeof saveChatsToServer === 'function') {
+        saveChatsToServer(true);
+    }
+    return true;
 }
 
 let _saveDebounceTimer = null;

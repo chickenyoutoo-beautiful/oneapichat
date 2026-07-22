@@ -46,14 +46,17 @@ function injectStyles() {
         .markdown-body a { color: #0366d6; text-decoration: underline; text-underline-offset: 2px; }
         .markdown-body a:hover { color: #0056b3; text-decoration: none; background-color: #f0f6ff; }
         .search-placeholder { color: #666; font-style: italic; }
-        /* ★ 流式输出平滑动效 */
+        /* ★ 流式输出光标 — 细线呼吸动画 */
         .bubble.streaming { transition: box-shadow 0.3s ease; }
         .bubble.streaming .markdown-body::after {
-            content: '▊'; display: inline; color: var(--text-primary,#1f2937);
-            animation: stream-blink 0.8s step-end infinite;
-            font-size: 0.9em; margin-left: 1px; vertical-align: baseline; opacity: 0.7;
+            content: ''; display: inline-block;
+            width: 2px; height: 1em; margin-left: 2px;
+            vertical-align: text-bottom;
+            background: linear-gradient(180deg, #6366f1, #8b5cf6);
+            border-radius: 1px;
+            animation: stream-cursor 1s ease-in-out infinite;
         }
-        @keyframes stream-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes stream-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
         .bubble.streaming .markdown-body { scroll-behavior: smooth; }
         /* 流式过程平滑滚动 — 避免跳变 */
         #chat-messages { scroll-behavior: smooth; }

@@ -107,15 +107,74 @@ if (!$userId && !in_array($action, $publicActions)) {
 }
 if ($action === 'save_config' && $userId && $method === 'POST') {
     $input = file_get_contents('php://input');
+    $newConfig = json_decode($input, true);
     $configFile = $configDir . 'config_' . $namespace . '.json';
-    @file_put_contents($configFile, $input, LOCK_EX);
-    @chmod($configFile, 0666); // ★ 确保 www-data 后续可写入
+
+    // ★ DB 优先：写入 SQLite，JSON 文件作为备份
+    $dbPath = dirname(__DIR__) . '/users/oneapichat.db';
+    if (is_array($newConfig)) {
+        // 合并保护：防止新设备空配置覆盖已有密钥
+        $existingConfig = [];
+        // 先从 DB 读取
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("SELECT config_json FROM user_config WHERE user_id = ?");
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) { $existingConfig = json_decode($row['config_json'], true) ?: []; }
+        } catch (Exception $e) {}
+        // 也从 JSON 文件合并
+        if (file_exists($configFile)) {
+            $fileConfig = json_decode(file_get_contents($configFile), true) ?: [];
+            $existingConfig = array_merge($existingConfig, $fileConfig);
+        }
+        // 敏感字段保护
+        $protectedKeys = ['apiKey', 'searchApiKey', 'searchApiKeyBrave', 'searchApiKeyGoogle', 'searchApiKeyTavily',
+            'ep_apikey', 'ep_apikey_2', 'visionApiKey', 'imageApiKey', 'imageApiKey2',
+            'providerApiKey', 'providerApiKey2', 'providerApiKey3',
+            'apiKeyAntthropic', 'apiKeyDeepseek', 'apiKeyOpenai', 'apiKeyMinimax', 'apiKeyGoogle'];
+        foreach ($protectedKeys as $key) {
+            if (empty($newConfig[$key]) && !empty($existingConfig[$key])) {
+                $newConfig[$key] = $existingConfig[$key];
+            }
+        }
+        $newConfig = array_merge($existingConfig, $newConfig);
+
+        // 写入 DB
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("INSERT OR REPLACE INTO user_config (user_id, config_json, updated_at) VALUES (?, ?, ?)");
+            $stmt->execute([$userId, json_encode($newConfig), time()]);
+        } catch (Exception $e) {}
+    }
+
+    // 同步写 JSON 备份
+    @file_put_contents($configFile, json_encode($newConfig), LOCK_EX);
+    @chmod($configFile, 0666);
     echo json_encode(['success' => true]);
     exit;
 }
 if ($action === 'get_config' && $userId && $method === 'GET') {
     $configFile = $configDir . 'config_' . $namespace . '.json';
-    if (file_exists($configFile)) {
+
+    // ★ DB 优先读取
+    $dbPath = dirname(__DIR__) . '/users/oneapichat.db';
+    $dbConfig = null;
+    try {
+        $pdo = new PDO("sqlite:$dbPath");
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $stmt = $pdo->prepare("SELECT config_json FROM user_config WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) { $dbConfig = $row['config_json']; }
+    } catch (Exception $e) {}
+
+    if ($dbConfig) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo $dbConfig;
+    } elseif (file_exists($configFile)) {
         readfile($configFile);
     } else {
         echo json_encode((object)[]);
