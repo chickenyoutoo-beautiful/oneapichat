@@ -36,6 +36,12 @@ if (!$userId) {
 
 // ── 2. 解析请求体 ──
 $rawBody = file_get_contents('php://input');
+// ★ 保底机制: 超大请求体直接拒绝, 防止单条超长消息(如 900 万字符的工具结果)撑爆上游上下文
+if (strlen($rawBody) > 8 * 1024 * 1024) {
+    http_response_code(413);
+    echo json_encode(['error' => ['message' => 'Request body too large (' . strlen($rawBody) . ' bytes > 8MB limit). Please truncate messages or reduce history.', 'type' => 'invalid_request_error', 'code' => 'BODY_TOO_LARGE']]);
+    exit;
+}
 $body = json_decode($rawBody, true);
 if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
@@ -83,8 +89,8 @@ $providers = [
     'doubao'    => ['label' => '豆包',           'baseUrl' => 'https://ark.cn-beijing.volces.com/api/v3',       'keyName' => 'apiKeyDoubao'],
     'mimo'      => ['label' => 'MiMo',           'baseUrl' => 'https://api.xiaomimimo.com/v1',                 'keyName' => 'apiKeyMiMo'],
     'openrouter'=> ['label' => 'OpenRouter',     'baseUrl' => 'https://openrouter.ai/api/v1',                 'keyName' => 'apiKeyOpenRouter'],
-    'opencode'  => ['label' => 'OpenCode',       'baseUrl' => 'https://api.opencode.ai/v1',                     'keyName' => 'apiKeyOpenCode'],
     'llamacpp'  => ['label' => '本地模型',       'baseUrl' => 'https://localmodels.naujtrats.xyz/v1',          'keyName' => 'apiKeyLlamaCpp'],
+    'longcat'   => ['label' => 'LongCat',        'baseUrl' => 'https://api.longcat.chat/openai/v1',              'keyName' => 'apiKeyLongCat'],
     'custom'    => ['label' => '自定义',         'baseUrl' => '',                                               'keyName' => 'apiKeyCustom'],
 ];
 
@@ -408,11 +414,12 @@ curl_setopt_array($ch, [
 // 代理配置（仅对需要穿透的域名启用; 代理失败自动回退直连）
 $useProxy = false;
 if ($proxyEnabled && $proxyUrl) {
-    // ★ 仅以下域名需要代理穿透
+    // ★ 需要代理穿透的域名（GFW 干扰/封锁的 API）
     $needsProxy = stripos($providerBaseUrl, 'api.google') !== false
         || stripos($providerBaseUrl, 'generativelanguage') !== false
         || stripos($providerBaseUrl, 'api.openai.com') !== false
-        || stripos($providerBaseUrl, 'api.anthropic.com') !== false;
+        || stripos($providerBaseUrl, 'api.anthropic.com') !== false
+        || stripos($providerBaseUrl, 'api.deepseek.com') !== false;
     if ($needsProxy) $useProxy = true;
 } elseif (stripos($providerBaseUrl, 'api.google') !== false || stripos($providerBaseUrl, 'generativelanguage') !== false) {
     $useProxy = true;
@@ -537,6 +544,20 @@ function _sendStream($ch, $hadProxy = false): void {
     ]);
     curl_exec($ch);
     $err = curl_error($ch);
+
+    // ★ 直连失败（SSL_ERROR_SYSCALL 等 GFW 干扰）→ 代理重试
+    if ($err && !$hadProxy && $proxyEnabled && $proxyUrl && $proxyUrl !== '__relay_only__') {
+        $proxyParsed = parse_url($proxyUrl);
+        if ($proxyParsed && isset($proxyParsed['host'])) {
+            curl_setopt($ch, CURLOPT_PROXY, $proxyParsed['host']);
+            curl_setopt($ch, CURLOPT_PROXYPORT, $proxyParsed['port'] ?? 1080);
+            curl_setopt($ch, CURLOPT_PROXYTYPE, ($proxyParsed['scheme'] ?? '') === 'socks5' ? CURLPROXY_SOCKS5 : CURLPROXY_HTTP);
+            $err = ''; // 重置错误
+            curl_exec($ch);
+            $err = curl_error($ch);
+        }
+    }
+
     curl_close($ch);
 
     if ($err) {

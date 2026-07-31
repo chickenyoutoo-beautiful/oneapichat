@@ -101,13 +101,16 @@ async function uploadImageToServer(imageInput) {
 /**
  * 用 multipart/form-data 直接上传视频 Blob（避免 base64 内存爆炸）
  * 大视频（>50MB）不再读到 JS 内存中，直接以 Blob 流式上传
+ * ★ v2.7.0: 支持 isBinary 标志, 二进制文件(.msi/.exe/.zip等)走 target=generic 跳过图片验证
  */
-async function uploadVideoBlob(file, progressFn) {
+async function uploadVideoBlob(file, progressFn, isBinary) {
     try {
         var formData = new FormData();
         formData.append('image', file, file.name);
         var token = getAuthToken();
-        var url = SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token);
+        // ★ binary 模式: 添加 target=generic 让后端跳过图片/MIME验证
+        var url = SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token)
+            + (isBinary ? '&target=generic' : '');
         
         // 用 XMLHttpRequest 以支持上传进度
         var result = await new Promise(function(resolve, reject) {
@@ -124,7 +127,8 @@ async function uploadVideoBlob(file, progressFn) {
                 if (xhr.status === 200) {
                     try {
                         var data = JSON.parse(xhr.responseText);
-                        resolve(data.url || null);
+                        // ★ 返回完整信息：URL + server路径，模型可直接用path调cr_upload_file
+                        resolve({ url: data.url || '', path: data.path || '', size: data.size || 0, type: data.type || '' });
                     } catch(e) { reject(new Error('解析响应失败')); }
                 } else {
                     reject(new Error('HTTP ' + xhr.status));

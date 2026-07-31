@@ -356,10 +356,89 @@ switch ($action) {
         $max_lines = intval($_GET['max_lines'] ?? 200);
         $start_line = intval($_GET['start_line'] ?? 0);
         $end_line = intval($_GET['end_line'] ?? 0);
+        $offset = (isset($_GET['offset']) && $_GET['offset'] !== '') ? intval($_GET['offset']) : -1;
+        $max_chars = intval($_GET['max_chars'] ?? 0);
         if (!$path) { echo json_encode(['error' => '缺少path']); exit; }
         $url = $engine_url . '/engine/file/read?path=' . urlencode($path) . '&max_lines=' . $max_lines;
         if ($start_line > 0) $url .= '&start_line=' . $start_line;
         if ($end_line > 0) $url .= '&end_line=' . $end_line;
+        if ($offset >= 0) $url .= '&offset=' . $offset;
+        if ($max_chars > 0) $url .= '&max_chars=' . $max_chars;
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    case 'parse_document':
+        $path = $_GET['path'] ?? '';
+        $max_chars = intval($_GET['max_chars'] ?? 50000);
+        if (!$path) { echo json_encode(['ok' => false, 'error' => '缺少path参数']); exit; }
+        $url = $engine_url . '/engine/parse_document?path=' . urlencode($path) . '&max_chars=' . $max_chars;
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+
+    // ═══════════════════════════════════════════════════
+    // ★ 股票数据工具 (A股 — 东方财富数据源, 10秒缓存)
+    // ═══════════════════════════════════════════════════
+    case 'stock_realtime':
+        $symbol = $_GET['symbol'] ?? '';
+        if (!$symbol) { echo json_encode(['ok' => false, 'error' => '缺少symbol参数']); exit; }
+        $url = $engine_url . '/engine/stock_realtime?symbol=' . urlencode($symbol);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_kline':
+        $symbol = $_GET['symbol'] ?? '';
+        if (!$symbol) { echo json_encode(['ok' => false, 'error' => '缺少symbol参数']); exit; }
+        $period = $_GET['period'] ?? 'daily';
+        $start = $_GET['start'] ?? '';
+        $end = $_GET['end'] ?? '';
+        $adjust = $_GET['adjust'] ?? 'qfq';
+        $count = intval($_GET['count'] ?? 120);
+        $url = $engine_url . '/engine/stock_kline?symbol=' . urlencode($symbol)
+            . '&period=' . urlencode($period) . '&adjust=' . urlencode($adjust) . '&count=' . $count;
+        if ($start) $url .= '&start=' . urlencode($start);
+        if ($end) $url .= '&end=' . urlencode($end);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_sector_flow':
+        $sector_type = $_GET['sector_type'] ?? '2';
+        $url = $engine_url . '/engine/stock_sector_flow?sector_type=' . urlencode($sector_type);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_dragon_tiger':
+        $date = $_GET['date'] ?? '';
+        $url = $engine_url . '/engine/stock_dragon_tiger?date=' . urlencode($date);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_north_flow':
+        $url = $engine_url . '/engine/stock_north_flow';
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_diagnosis':
+        $symbol = $_GET['symbol'] ?? '';
+        if (!$symbol) { echo json_encode(['ok' => false, 'error' => '缺少symbol参数']); exit; }
+        $url = $engine_url . '/engine/stock_diagnosis?symbol=' . urlencode($symbol);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_indicators':
+        $symbol = $_GET['symbol'] ?? '';
+        if (!$symbol) { echo json_encode(['ok' => false, 'error' => '缺少symbol参数']); exit; }
+        $count = intval($_GET['count'] ?? 120);
+        $url = $engine_url . '/engine/stock_indicators?symbol=' . urlencode($symbol) . '&count=' . $count;
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_chart':
+        $symbol = $_GET['symbol'] ?? '';
+        if (!$symbol) { echo json_encode(['ok' => false, 'error' => '缺少symbol参数']); exit; }
+        $period = $_GET['period'] ?? 'daily';
+        $count = intval($_GET['count'] ?? 60);
+        $adjust = $_GET['adjust'] ?? 'qfq';
+        $indicators = $_GET['indicators'] ?? 'ma,macd,volume';
+        $url = $engine_url . '/engine/stock_chart?symbol=' . urlencode($symbol)
+            . '&period=' . urlencode($period) . '&count=' . $count
+            . '&adjust=' . urlencode($adjust) . '&indicators=' . urlencode($indicators);
+        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        break;
+    case 'stock_market_overview':
+        $url = $engine_url . '/engine/stock_market_overview';
         echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
@@ -501,6 +580,13 @@ switch ($action) {
             'agent_notifications', 'agent_notifications_mark',
             'agent_persona_load', 'agent_persona_save', 'agent_memory_load', 'agent_memory_save', 'agent_memory_delete',
             'agent_identity_load', 'agent_identity_save', 'agent_heartbeat', 'agent_heartbeat_status',
+            // ★ 记忆系统 v2
+            'memory_fact_save', 'memory_fact_list', 'memory_fact_delete',
+            'memory_episode_save', 'memory_episode_list', 'memory_episode_delete',
+            'memory_hybrid_search', 'memory_context', 'memory_extract', 'memory_stats', 'memory_cleanup',
+            'memory_v1_migrate',
+            'personality_presets', 'personality_set_preset', 'personality_load', 'personality_save',
+            'personality_validate', 'personality_narrative', 'personality_cache', 'personality_state',
             'workflow_create', 'workflow_run', 'workflow_list', 'workflow_status', 'workflow_delete', 'workflow_roles',
             'push', 'exec', 'python', 'sys_info', 'mmx', 'push_file', 'minimax_search',
             'file_read', 'file_write', 'file_search', 'file_grep', 'file_edit', 'file_op',
@@ -626,6 +712,131 @@ switch ($action) {
 
     case 'agent_heartbeat_status':
         echo _engine_get($engine_url . '/engine/agent/heartbeat/status?' . $userParam) ?: json_encode(['ok' => false]);
+        break;
+
+    // ==================== ★ 记忆系统 v2 ====================
+    case 'memory_fact_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/fact/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_fact_list':
+        $limit = $_GET['limit'] ?? 50;
+        $offset = $_GET['offset'] ?? 0;
+        echo _engine_get($engine_url . '/engine/memory/fact/list?' . $userParam . '&limit=' . $limit . '&offset=' . $offset) ?: json_encode([]);
+        break;
+
+    case 'memory_fact_delete':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/fact/delete?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_episode_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/episode/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_episode_list':
+        $limit = $_GET['limit'] ?? 20;
+        echo _engine_get($engine_url . '/engine/memory/episode/list?' . $userParam . '&limit=' . $limit) ?: json_encode([]);
+        break;
+
+    case 'memory_episode_delete':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/episode/delete?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_hybrid_search':
+        $q = urlencode($_GET['q'] ?? '');
+        $limit = $_GET['limit'] ?? 10;
+        $layers = urlencode($_GET['layers'] ?? '');
+        echo _engine_get($engine_url . '/engine/memory/hybrid_search?' . $userParam . '&q=' . $q . '&limit=' . $limit . '&layers=' . $layers) ?: json_encode([]);
+        break;
+
+    case 'memory_context':
+        $q = urlencode($_GET['q'] ?? '');
+        echo _engine_get($engine_url . '/engine/memory/context?' . $userParam . '&q=' . $q) ?: json_encode(['context' => '']);
+        break;
+
+    case 'memory_extract':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/extract?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_stats':
+        echo _engine_get($engine_url . '/engine/memory/stats?' . $userParam) ?: json_encode(['stats' => []]);
+        break;
+
+    case 'memory_cleanup':
+        $opts = ['http' => ['method' => 'POST']];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/cleanup?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'memory_v1_migrate':
+        $opts = ['http' => ['method' => 'POST']];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/memory/v1/migrate?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'personality_presets':
+        echo _engine_get($engine_url . '/engine/personality/presets') ?: json_encode(['presets' => []]);
+        break;
+
+    case 'personality_set_preset':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/set_preset?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'personality_load':
+        echo _engine_get($engine_url . '/engine/personality/load?' . $userParam) ?: json_encode(['personality' => []]);
+        break;
+
+    case 'personality_save':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/save?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'personality_validate':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/validate?' . $userParam, false, $ctx) ?: json_encode(['ok' => true]);
+        break;
+
+    case 'personality_narrative':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/narrative?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'personality_cache':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/cache?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
+        break;
+
+    case 'personality_state':
+        $json = file_get_contents('php://input');
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $json]];
+        $ctx = stream_context_create($opts);
+        echo _engine_get($engine_url . '/engine/personality/state?' . $userParam, false, $ctx) ?: json_encode(['ok' => false]);
         break;
 
     // ==================== 浏览器工具 ====================
@@ -766,11 +977,14 @@ switch ($action) {
         if (!$mp_name) { echo json_encode(['error' => '缺少 tool name']); exit; }
         // 按前缀路由到 MCP 子端点
         $mp_endpoint = str_starts_with($mp_name, 'bilibili_') ? '/mcp/bilibili/tools/call' : '/mcp/api/tools/call';
+        // ★ poll 类工具需要更长超时(长轮询等待扫码), 其他工具用默认超时
+        $mp_is_poll = (str_contains($mp_name, 'poll') || (is_array($mp_args) && ($mp_args['action'] ?? '') === 'poll'));
+        $mp_timeout = $mp_is_poll ? 300 : 120;
         $mp_ctx = stream_context_create(['http' => [
             'method' => 'POST',
             'header' => "Content-Type: application/json\r\n",
             'content' => json_encode(['name' => $mp_name, 'arguments' => $mp_args], JSON_UNESCAPED_UNICODE),
-            'timeout' => 120,
+            'timeout' => $mp_timeout,
             'ignore_errors' => true,
         ]]);
         $mp_resp = file_get_contents('http://127.0.0.1:18788' . $mp_endpoint, false, $mp_ctx);
@@ -832,5 +1046,65 @@ switch ($action) {
         $resp = curl_exec($ch);
         curl_close($ch);
         echo $resp;
+        break;
+
+    case 'video_hunter':
+        // ★ 视频猎手工具代理 → MCP Server (__video/ bridge)
+        $vh_action = $_GET['sub_action'] ?? '';
+        if (!$vh_action) { echo json_encode(['error' => '缺少 sub_action']); exit; }
+        // 构造 MCP 工具名
+        $vh_tool = 'video_' . $vh_action;
+        $vh_args = [];
+        foreach ($_GET as $k => $v) {
+            if ($k !== 'action' && $k !== 'sub_action' && $k !== 'auth_token') {
+                $vh_args[$k] = $v;
+            }
+        }
+        // 也检查 POST body
+        $vh_raw = file_get_contents('php://input');
+        if ($vh_raw) {
+            $vh_post = json_decode($vh_raw, true);
+            if ($vh_post) $vh_args = array_merge($vh_args, $vh_post);
+        }
+        $vh_ctx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => json_encode(['name' => $vh_tool, 'arguments' => $vh_args], JSON_UNESCAPED_UNICODE),
+            'timeout' => 120,
+            'ignore_errors' => true,
+        ]]);
+        $vh_resp = file_get_contents('http://127.0.0.1:18788/mcp/api/tools/call', false, $vh_ctx);
+        if ($vh_resp === false) { echo json_encode(['error' => 'MCP 服务不可达 (video_hunter)']); exit; }
+        header('Content-Type: application/json; charset=utf-8');
+        echo $vh_resp;
+        break;
+
+    case 'bilibili_bridge':
+        // ★ B站下载工具代理 → MCP Server (__bili/ bridge)
+        $bili_action = $_GET['sub_action'] ?? '';
+        if (!$bili_action) { echo json_encode(['error' => '缺少 sub_action']); exit; }
+        $bili_tool = 'bili_' . $bili_action;
+        $bili_args = [];
+        foreach ($_GET as $k => $v) {
+            if ($k !== 'action' && $k !== 'sub_action' && $k !== 'auth_token') {
+                $bili_args[$k] = $v;
+            }
+        }
+        $bili_raw = file_get_contents('php://input');
+        if ($bili_raw) {
+            $bili_post = json_decode($bili_raw, true);
+            if ($bili_post) $bili_args = array_merge($bili_args, $bili_post);
+        }
+        $bili_ctx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => json_encode(['name' => $bili_tool, 'arguments' => $bili_args], JSON_UNESCAPED_UNICODE),
+            'timeout' => 120,
+            'ignore_errors' => true,
+        ]]);
+        $bili_resp = file_get_contents('http://127.0.0.1:18788/mcp/api/tools/call', false, $bili_ctx);
+        if ($bili_resp === false) { echo json_encode(['error' => 'MCP 服务不可达 (bilibili_bridge)']); exit; }
+        header('Content-Type: application/json; charset=utf-8');
+        echo $bili_resp;
         break;
 }

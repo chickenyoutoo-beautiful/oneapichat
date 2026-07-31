@@ -10,14 +10,16 @@ AGENT_ROLES = {
     "explorer": {
         "label": "🔍 搜索专员",
         "desc": "只读搜索,适合查资料、抓网页。不可修改文件或执行命令",
-        "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "browser_get_content", "browser_get_snapshot"],
+        "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "browser_get_content", "browser_get_snapshot",
+                   "bilibili_search", "bilibili_video_info", "server_file_search", "server_file_grep", "get_current_time"],
         "model_tier": "cheap",
-        "max_rounds": 10
+        "max_rounds": 5
     },
     "planner": {
         "label": "📐 规划师",
         "desc": "制定方案、分析策略。不做执行,只出方案",
-        "tools": ["web_search", "engine_push", "browser_get_content", "browser_get_snapshot"],
+        "tools": ["web_search", "engine_push", "browser_get_content", "browser_get_snapshot",
+                   "get_current_time"],
         "model_tier": "smart",
         "max_rounds": 8
     },
@@ -26,16 +28,20 @@ AGENT_ROLES = {
         "desc": "读写文件、执行命令、搜索、浏览器操控。全能执行角色",
         "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "server_exec", "server_python",
                    "server_file_read", "server_file_write", "server_file_append", "video_edit",
+                   "server_file_search", "server_file_grep", "server_file_edit", "server_file_op",
                    "browser_navigate", "browser_screenshot", "browser_click", "browser_type",
-                   "browser_get_content", "browser_get_snapshot"],
+                   "browser_get_content", "browser_get_snapshot",
+                   "get_current_time", "generate_image", "generate_ppt",
+                   "cr_list_files", "cr_search_files", "cr_upload_file"],
         "model_tier": "smart",
-        "max_rounds": 30
+        "max_rounds": 5
     },
     "verifier": {
         "label": "✅ 验证者",
         "desc": "检查结果、找问题。只读,不可修改",
         "tools": ["web_search", "web_fetch", "platform_extract", "server_file_read", "engine_push",
-                   "browser_get_content", "browser_get_snapshot"],
+                   "browser_get_content", "browser_get_snapshot",
+                   "server_file_search", "server_file_grep", "get_current_time"],
         "model_tier": "smart",
         "max_rounds": 15
     },
@@ -44,8 +50,13 @@ AGENT_ROLES = {
         "desc": "所有工具可用(默认角色)",
         "tools": ["web_search", "web_fetch", "platform_extract", "engine_push", "server_exec", "server_python",
                    "server_file_read", "server_file_write", "server_file_append", "server_sys_info",
+                   "server_file_search", "server_file_grep", "server_file_edit", "server_file_op",
                    "video_edit", "browser_navigate", "browser_screenshot", "browser_click",
-                   "browser_type", "browser_get_content", "browser_get_snapshot"],
+                   "browser_type", "browser_get_content", "browser_get_snapshot",
+                   "get_current_time", "bilibili_search", "bilibili_video_info",
+                   "generate_image", "generate_ppt",
+                   "cr_list_files", "cr_search_files", "cr_upload_file", "cr_create_folder",
+                   "mmx_chat", "mmx_image", "mmx_speech", "mmx_vision"],
         "model_tier": "smart",
         "max_rounds": 30
     }
@@ -277,6 +288,253 @@ ALL_TOOLS_DEF = [
             "name": "browser_get_snapshot",
             "description": "获取浏览器页面快照。",
             "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    # ★ P0扩展: 文件操作工具
+    {
+        "type": "function",
+        "function": {
+            "name": "server_file_search",
+            "description": "在服务器文件系统中搜索文件（find命令）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "搜索目录路径"},
+                    "pattern": {"type": "string", "description": "文件名匹配模式，如 *.mp4"},
+                    "max_depth": {"type": "number", "description": "最大搜索深度，默认5"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "server_file_grep",
+            "description": "在服务器文件中搜索文本内容（grep）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "搜索路径"},
+                    "pattern": {"type": "string", "description": "正则搜索模式"}
+                },
+                "required": ["path", "pattern"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "server_file_edit",
+            "description": "编辑服务器文件内容。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径"},
+                    "old_string": {"type": "string", "description": "要替换的文本"},
+                    "new_string": {"type": "string", "description": "替换后的文本"}
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "server_file_op",
+            "description": "服务器文件操作：复制/移动/删除/创建目录。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["cp", "mv", "rm", "mkdir"], "description": "操作类型"},
+                    "src": {"type": "string", "description": "源路径"},
+                    "dst": {"type": "string", "description": "目标路径"}
+                },
+                "required": ["action", "src"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "获取当前日期时间。搜索时效性内容前应调用。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bilibili_search",
+            "description": "在B站搜索视频/番剧/用户。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "搜索关键词"},
+                    "type": {"type": "string", "enum": ["video", "bangumi", "user"], "description": "搜索类型"}
+                },
+                "required": ["keyword"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bilibili_video_info",
+            "description": "获取B站视频详细信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bvid": {"type": "string", "description": "BV号"},
+                    "aid": {"type": "string", "description": "AV号"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "使用AI生成图片。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "图片描述"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1792x1024", "1024x1792"]}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_ppt",
+            "description": "生成PPT演示文稿。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "PPT标题"},
+                    "pages": {"type": "number", "description": "页数"},
+                    "content": {"type": "string", "description": "内容大纲"}
+                },
+                "required": ["title", "pages"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cr_list_files",
+            "description": "列出Cloudreve云盘目录文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "目录路径"}},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cr_search_files",
+            "description": "在Cloudreve中搜索文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "关键词"},
+                    "path": {"type": "string", "description": "搜索路径"}
+                },
+                "required": ["keyword"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cr_upload_file",
+            "description": "上传文件到Cloudreve。自动分片。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "源文件路径"},
+                    "cloudreve_path": {"type": "string", "description": "目标目录"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cr_create_folder",
+            "description": "在Cloudreve创建文件夹。",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "文件夹路径"}},
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mmx_chat",
+            "description": "MiniMax对话模型。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "提示词"},
+                    "system_prompt": {"type": "string", "description": "系统提示词"}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mmx_image",
+            "description": "MiniMax图片生成。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "图片描述"},
+                    "n": {"type": "number", "description": "数量"}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mmx_speech",
+            "description": "MiniMax文本转语音。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "文本"},
+                    "voice_id": {"type": "string", "description": "语音ID"}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mmx_vision",
+            "description": "MiniMax图片理解/视觉分析。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_url": {"type": "string", "description": "图片URL"},
+                    "prompt": {"type": "string", "description": "分析提示词"}
+                },
+                "required": ["image_url"]
+            }
         }
     },
 ]

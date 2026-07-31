@@ -27,6 +27,7 @@ window.analyzeImage = async function(imageInput, focus) {
     if (isUrl) {
         if (isDirectApi) {
             // 直连模式: URL 图片需要先下载为 base64,因为 MiniMax API 不接受外链
+            var _downloadOk = false;
             try {
                 var _fetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
                 var _dlResp = await _fetchFn(imageInput);
@@ -41,11 +42,37 @@ window.analyzeImage = async function(imageInput, focus) {
                     prompt: focus || '请详细描述这张图片的所有内容,包括物体、场景、文字等可见信息。',
                     image_url: _compressed
                 };
+                _downloadOk = true;
             } catch(e) {
-                // ★ 直连模式下载失败时,不能传 HTTP URL (MiniMax 会报 invalid image URL)
-                // 直接抛错让上层降级处理
-                console.warn('[analyzeImage] 下载/压缩失败:', e.message);
-                throw new Error('图片下载失败,请重试或使用 MCP 代理模式: ' + e.message);
+                // ★ 浏览器下载/压缩失败: 降级到服务端代理 (从磁盘读取, 不依赖静态文件访问)
+                console.warn('[analyzeImage] 浏览器下载失败, 尝试服务端代理:', e.message);
+                try {
+                    var _proxyPath2 = imageInput.replace(/^https?:\/\/[^\/]+/, '');
+                    var _proxyResp3 = await fetch('/oneapichat/api/image_proxy.php?action=get&path=' + encodeURIComponent(_proxyPath2) + '&auth_token=' + encodeURIComponent(window.getAuthToken() || ''));
+                    if (_proxyResp3.ok) {
+                        var _proxyData3 = await _proxyResp3.json();
+                        if (_proxyData3.success && _proxyData3.dataUrl) {
+                            var _compressed2 = await compressImage(_proxyData3.dataUrl);
+                            requestBody = {
+                                prompt: focus || '请详细描述这张图片的所有内容,包括物体、场景、文字等可见信息。',
+                                image_url: _compressed2
+                            };
+                            _downloadOk = true;
+                            console.log('[analyzeImage] 服务端代理兜底成功');
+                        } else {
+                            console.warn('[analyzeImage] 代理返回失败:', _proxyData3.error || '未知');
+                        }
+                    } else {
+                        var _proxyErrText3 = await _proxyResp3.text().catch(function() { return ''; });
+                        console.warn('[analyzeImage] 代理HTTP错误:', _proxyResp3.status, _proxyErrText3.substring(0, 200));
+                    }
+                } catch(_proxyErr3) {
+                    console.warn('[analyzeImage] 服务端代理也失败:', _proxyErr3.message);
+                }
+            }
+            // ★ 两条路径都失败: 抛错让上层处理
+            if (!_downloadOk) {
+                throw new Error('图片下载失败,请重试或使用 MCP 代理模式: 浏览器下载和服务端代理均无法获取图片');
             }
         } else {
             // MCP 代理模式: 直接传 URL,服务端下载
@@ -129,6 +156,41 @@ window.analyzeImage = async function(imageInput, focus) {
             try { _visionKey = await decrypt(_rawVisionKey) || _rawVisionKey; } catch(e) { _visionKey = _rawVisionKey; }
             if (_visionKey) {
                 _fetchHeaders['Authorization'] = 'Bearer ' + _visionKey;
+            } else {
+                // ★ 视觉 API Key 未配置: 回退到主模型 (DeepSeek等原生支持视觉)
+                var _mainKey = localStorage.getItem('apiKey') || '';
+                var _mainBaseUrl = localStorage.getItem('baseUrl') || '';
+                var _mainModel = localStorage.getItem('modelSelect') || '';
+                if (_mainKey && _mainBaseUrl && _mainModel) {
+                    // 主模型 chat/completions 端点
+                    var _mainEndpoint = _mainBaseUrl.replace(/\/+$/, '').replace(/\/chat\/completions$/, '').replace(/\/v1$/, '');
+                    _mainEndpoint = _mainEndpoint + '/chat/completions';
+                    // 只有当主模型端点与视觉端点不同时才回退 (避免死循环)
+                    var _visionHost = ''; try { _visionHost = new URL(mcpEndpoint).host; } catch(e) {}
+                    var _mainHost = ''; try { _mainHost = new URL(_mainEndpoint).host; } catch(e) {}
+                    if (_mainHost && _visionHost && _mainHost !== _visionHost) {
+                        console.log('[analyzeImage] 视觉 Key 未配置, 回退到主模型:', _mainModel, '@', _mainEndpoint);
+                        mcpEndpoint = _mainEndpoint;
+                        // ★ 主模型用 OpenAI 视觉格式 (content 数组), 不是 MiniMax 的 prompt+image_url
+                        var _b64Image = requestBody.image_url || '';
+                        var _promptText = requestBody.prompt || focus || '请详细描述这张图片的所有内容';
+                        var _openaiBody = {
+                            model: _mainModel,
+                            messages: [{ role: 'user', content: [
+                                { type: 'text', text: _promptText },
+                                { type: 'image_url', image_url: { url: _b64Image, detail: 'auto' } }
+                            ]}],
+                            max_tokens: 2048,
+                            stream: false
+                        };
+                        _fetchBody = JSON.stringify(_openaiBody);
+                        _fetchHeaders['Authorization'] = 'Bearer ' + _mainKey;
+                    } else {
+                        console.warn('[analyzeImage] 视觉 Key 未配置, 主模型与视觉端点相同或不可用, 无法回退');
+                    }
+                } else {
+                    console.warn('[analyzeImage] 视觉 Key 未配置, 主模型信息不完整, 无法回退');
+                }
             }
         }
 

@@ -67,6 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $imageData = null;
     $ext = 'png';
 
+    // ★ v2.7.0: 通用文件上传模式 — target=generic 跳过图片/MIME验证, 允许任意扩展名
+    $isGeneric = (isset($_GET['target']) && $_GET['target'] === 'generic')
+        || (isset($_POST['_target']) && $_POST['_target'] === 'generic');
+
     // 支持 multipart/form-data 和 base64 JSON
     if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
         $tmpFile = $_FILES['image']['tmp_name'];
@@ -114,11 +118,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 验证文件类型（常见图片格式 + 视频格式）
     $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif', 'mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
     $videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
-    if (!in_array($ext, $allowedExts)) {
-        $ext = 'png'; // 未知扩展名默认 png
+    if (!$isGeneric && !in_array($ext, $allowedExts)) {
+        $ext = 'png'; // 未知扩展名默认 png (仅图片模式)
     }
     $isVideo = in_array($ext, $videoExts);
 
+    // ★ generic 模式: 跳过图片/MIME验证, 仅做基本扩展名安全过滤
+    if ($isGeneric) {
+        // 过滤危险扩展名 (防止上传可执行脚本)
+        $dangerousExts = ['php', 'php3', 'php4', 'php5', 'phtml', 'cgi', 'pl', 'py', 'sh', 'bash', 'exe', 'scr', 'pif', 'cmd', 'bat', 'com', 'vbs', 'js', 'wsf', 'msi'];
+        // 注意: .msi/.exe/.bat/.cmd 对 Cloudreve 存储来说是合法文件, 仅禁止作为 Web 脚本执行
+        // 真正危险的是 php/cgi/pl/py/sh 等可在服务器执行的脚本
+        $scriptExts = ['php', 'php3', 'php4', 'php5', 'phtml', 'cgi', 'pl', 'pyz', 'pyzw'];
+        if (in_array($ext, $scriptExts)) {
+            http_response_code(400);
+            echo json_encode(['error' => "禁止上传可执行脚本: .$ext"]);
+            exit;
+        }
+        // 扩展名安全: 只允许字母数字和少量安全符号
+        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $ext)) {
+            $ext = 'bin'; // 未知或异常扩展名统一为 bin
+        }
+    } else {
     // 检查是否为真实图片或视频
     if ($isVideo) {
         // 视频: 基本检查（大文件从 tmp 文件检测）
@@ -158,6 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     }
+    } // end if !$isGeneric
 
     // 限制文件大小: 2GB (大文件模式走 filesize)
     $maxSize = 2 * 1024 * 1024 * 1024;
@@ -181,7 +203,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $hash = substr(hash('sha256', $imageData), 0, 12);
     }
-    $filename = 'img_' . $hash . '.' . $ext;
+    // ★ generic 模式用 file_ 前缀, 图片/视频用 img_ 前缀
+    $prefix = $isGeneric ? 'file' : 'img';
+    $filename = $prefix . '_' . $hash . '.' . $ext;
     $filepath = safePath($uploadDir, $filename);
     if ($filepath === false) {
         http_response_code(403);

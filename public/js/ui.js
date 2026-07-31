@@ -510,6 +510,13 @@ window.toggleConfigPanel = () => {
             if (window.loadToolToggleStates) window.loadToolToggleStates();
             if (window.renderCustomSkillsList) window.renderCustomSkillsList();
             if (window.refreshMemoryList) window.refreshMemoryList();
+            // ★ v2: 同步人格预设选择器
+            setTimeout(function() {
+                var sel = document.getElementById('personalityPreset');
+                if (sel && window.__memoryContext && window.__memoryContext.presetId) {
+                    sel.value = window.__memoryContext.presetId;
+                }
+            }, 500);
         } else {
             configSnapshot = null;
             configPanelWasOpen = false;
@@ -597,7 +604,7 @@ window.onVisionProviderChange = async function() {
     var modelInput = getEl('visionModel');
     var hintEl = getEl('visionProviderHint');
     
-    // 切换前保存当前值到对应提供商的 localStorage
+    // ★ 切换前保存当前值到对应提供商的 localStorage (防止切换时丢失)
     if (window._lastVisionProvider && window._lastVisionProvider !== provider) {
         if (window._lastVisionProvider === 'minimax') {
             localStorage.setItem('visionApiKey', await encrypt(getVal('visionApiKey') || ''));
@@ -605,19 +612,22 @@ window.onVisionProviderChange = async function() {
         } else if (window._lastVisionProvider === 'openai') {
             localStorage.setItem('visionApiKeyOpenAI', await encrypt(getVal('visionApiKeyOpenAI') || ''));
             localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || '');
+        } else if (window._lastVisionProvider === 'xai') {
+            localStorage.setItem('visionApiKeyXAI', await encrypt(getVal('visionApiKeyXAI') || ''));
+            localStorage.setItem('visionApiUrlXAI', getVal('visionApiUrlXAI') || 'https://api.x.ai/v1');
         }
     }
     window._lastVisionProvider = provider;
     localStorage.setItem('visionProvider', provider);
     
     // 切换字段可见性
-    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'] };
+    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'] };
     Object.keys(fields).forEach(function(k) {
         fields[k].forEach(function(id) {
             var el = getEl(id); if (el) el.style.display = k === provider ? '' : 'none';
         });
     });
-    
+
     // 恢复对应提供商的配置值
     if (provider === 'openai') {
         var _storedKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '') || '';
@@ -625,7 +635,32 @@ window.onVisionProviderChange = async function() {
         if (oaKeyInput) oaKeyInput.value = _storedKey;
         if (oaUrlInput) oaUrlInput.value = _storedUrl;
         if (modelInput) modelInput.value = 'gpt-4o';
-        if (hintEl) hintEl.textContent = 'OpenAI: 使用 GPT-4o 等视觉模型。使用独立的 API Key。';
+        if (hintEl) hintEl.textContent = 'OpenAI: 使用 GPT-4o 等视觉模型。使用独立的 API Key。⚠️ 中国大陆需开启代理。';
+        // ★ 选择 OpenAI 时自动启用代理 (api.openai.com 在中国大陆被封锁)
+        if (!window.isProxyEnabled || !window.isProxyEnabled()) {
+            if (typeof window.toggleProxy === 'function' && typeof setChecked === 'function') {
+                setChecked('proxyToggle', true);
+                window.toggleProxy();
+                console.log('[visionProvider] OpenAI 已选择, 自动启用代理');
+            }
+        }
+    } else if (provider === 'xai') {
+        var _storedKeyX = await decrypt(localStorage.getItem('visionApiKeyXAI') || '') || '';
+        var _storedUrlX = localStorage.getItem('visionApiUrlXAI') || 'https://api.x.ai/v1';
+        var xaiKeyInput = getEl('visionApiKeyXAI');
+        var xaiUrlInput = getEl('visionApiUrlXAI');
+        if (xaiKeyInput) xaiKeyInput.value = _storedKeyX;
+        if (xaiUrlInput) xaiUrlInput.value = _storedUrlX;
+        if (modelInput) modelInput.value = 'grok-4.5';
+        if (hintEl) hintEl.textContent = 'xAI: 使用 Grok 视觉模型分析图片，结果以文本传给主模型。需配置 xAI API Key。⚠️ 中国大陆需开启代理。';
+        // ★ 选择 xAI 时自动启用代理 (api.x.ai 在中国大陆被封锁)
+        if (!window.isProxyEnabled || !window.isProxyEnabled()) {
+            if (typeof window.toggleProxy === 'function' && typeof setChecked === 'function') {
+                setChecked('proxyToggle', true);
+                window.toggleProxy();
+                console.log('[visionProvider] xAI 已选择, 自动启用代理');
+            }
+        }
     } else if (provider === 'minimax') {
         var _storedKey2 = await decrypt(localStorage.getItem('visionApiKey') || '') || '';
         var _storedUrl = localStorage.getItem('visionApiUrl') || 'https://api.minimaxi.com/v1/coding_plan/vlm';

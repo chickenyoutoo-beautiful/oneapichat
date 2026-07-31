@@ -84,12 +84,15 @@ async function loadSearchConfig() {
     window.RAG_ENABLED = ragChecked;
     // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
     setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
-    setChecked('proxyToggle', localStorage.getItem('proxyEnabled') === '1');
+    setChecked('proxyToggle', localStorage.getItem('proxyEnabled') !== '0');  // 默认开启
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
-    setVal('proxyUrl', localStorage.getItem('proxyUrl') || '');
     var _proxyDetails = document.getElementById('proxyConfigDetails');
-    if (_proxyDetails) _proxyDetails.style.display = localStorage.getItem('proxyEnabled') === '1' ? 'block' : 'none';
+    if (_proxyDetails) _proxyDetails.style.display = localStorage.getItem('proxyEnabled') !== '0' ? 'block' : 'none';
+    // 加载代理状态
+    if (localStorage.getItem('proxyEnabled') !== '0' && typeof _updateProxyStatus === 'function') {
+        setTimeout(_updateProxyStatus, 500);
+    }
     setVal('aiSearchJudgeModel', localStorage.getItem('aiSearchJudgeModel') || 'deepseek-chat');
     setVal('aiSearchJudgePrompt', localStorage.getItem('aiSearchJudgePrompt') || DEFAULT_CONFIG.aiSearchJudgePrompt);
     setVal('searchProvider', localStorage.getItem('searchProvider') || 'duckduckgo');
@@ -790,6 +793,8 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('visionProvider', getEl('visionProvider')?.value || 'minimax');
     localStorage.setItem('visionApiKeyOpenAI', await encrypt(getVal('visionApiKeyOpenAI') || ''));
     localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
+    localStorage.setItem('visionApiKeyXAI', await encrypt(getVal('visionApiKeyXAI') || ''));
+    localStorage.setItem('visionApiUrlXAI', getVal('visionApiUrlXAI') || 'https://api.x.ai/v1');
     localStorage.setItem('imageModel', getEl('imageModel')?.value || '');
     localStorage.setItem('imageApiKey', await encrypt(getVal('imageApiKey') || ''));
     localStorage.setItem('imageBaseUrl', getVal('imageBaseUrl') || '');
@@ -878,18 +883,52 @@ async function saveConfig(showFeedback = false) {
     }
 }
 
-// ★ 代理设置
+// ★ 代理设置 — 本地 Mihomo 集成
 window.toggleProxy = function() {
     var enabled = getChecked('proxyToggle');
     localStorage.setItem('proxyEnabled', enabled ? '1' : '0');
-    localStorage.setItem('proxyUrl', getVal('proxyUrl') || '');
     var details = document.getElementById('proxyConfigDetails');
     if (details) details.style.display = enabled ? 'block' : 'none';
-    // ★ 清空 CORS 域名缓存: 代理开关变化后重新尝试直连
-    window._corsBlockedDomains = {
-        'integrate.api.nvidia.com': true,  // NVIDIA NIM 无CORS头
-    };
+    if (enabled) {
+        _updateProxyStatus();
+    }
     window.saveConfig();
+};
+
+// ★ 更新代理状态显示
+window._updateProxyStatus = async function() {
+    var statusEl = document.getElementById('proxyStatus');
+    var listEl = document.getElementById('proxyNodeList');
+    if (!statusEl || !listEl) return;
+
+    try {
+        var resp = await fetch('/oneapichat/api/mihomo_status.php?t=' + Date.now());
+        var data = await resp.json();
+
+        if (data.ok && data.mihomo_running) {
+            statusEl.innerHTML = '✅ Mihomo 运行中 — 当前节点: <b>' + (data.current_node || '?') + '</b> (' + (data.node_delay || '?') + 'ms)';
+            statusEl.style.background = '#10b98120';
+            statusEl.style.color = '#065f46';
+
+            if (data.nodes && data.nodes.length > 0) {
+                listEl.innerHTML = data.nodes.map(function(n) {
+                    var color = n.alive ? (n.delay < 1000 ? '#10b981' : '#f59e0b') : '#ef4444';
+                    var icon = n.alive ? '🟢' : '🔴';
+                    return '<div style="padding:2px 0;">' + icon + ' ' + n.name + ' — <span style="color:' + color + '">' + (n.delay > 0 ? n.delay + 'ms' : '超时') + '</span></div>';
+                }).join('');
+            }
+        } else {
+            statusEl.innerHTML = '❌ Mihomo 未运行 — 请检查服务';
+            statusEl.style.background = '#ef444420';
+            statusEl.style.color = '#991b1b';
+            listEl.innerHTML = '<div style="color:#9ca3af;">尝试启动: sudo systemctl start mihomo</div>';
+        }
+    } catch (e) {
+        statusEl.innerHTML = '⚠️ 无法连接状态接口';
+        statusEl.style.background = '#f59e0b20';
+        statusEl.style.color = '#92400e';
+        listEl.innerHTML = '<div style="color:#9ca3af;">错误: ' + e.message + '</div>';
+    }
 };
 
 // ★ thinking 模式 — 仅在 MiniMax 模型时显示
@@ -905,25 +944,28 @@ window._saveThinkingMode = function() {
     saveConfig(false);
 };
 window.isProxyEnabled = function() {
-    return localStorage.getItem('proxyEnabled') === '1';
+    return localStorage.getItem('proxyEnabled') !== '0'; // 默认开启
 };
 window.getProxyUrl = function() {
     return localStorage.getItem('proxyUrl') || '';
 };
 
 // ★ 代理 fetch — 通过 PHP 代理中继转发请求
+// ★ 本地集成模式: proxy.php 自动走 Mihomo (127.0.0.1:1081), 无需前端配置代理
 window.proxyFetch = async function(targetUrl, options = {}) {
     // ★ 解析相对URL为绝对URL（proxy.php只接受http/https开头的URL）
     if (targetUrl.startsWith('/')) {
         targetUrl = window.location.origin + targetUrl;
     }
-    var proxyUrl = window.getProxyUrl();
-    var enabled = window.isProxyEnabled();
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
     // ★ 同源请求不需要走proxy.php中继
     if (_isLocal || targetUrl.startsWith(window.location.origin)) {
         return fetch(targetUrl, options);
     }
+
+    // ★ 本地集成模式: proxy.php 自动走 Mihomo (127.0.0.1:1081)
+    var proxyUrl = '';
+    var enabled = window.isProxyEnabled();
 
     // ★ 统一 429/5xx 重试(指数退避,最多3次) — 适用于直连和中继两条路径
     async function _fetchWithRetry(_fetchPromise, _label) {
@@ -932,6 +974,8 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         for (var _retry = 0; _retry <= _maxRetries; _retry++) {
             var _resp;
             try { _resp = await _fetchPromise; } catch(_e) {
+                // ★ 停止键: 用户中止/超时的请求不要自动重试, 否则停止后还会再发请求
+                if (_e && (_e.name === 'AbortError' || _e.name === 'TimeoutError')) throw _e;
                 if (_retry >= _maxRetries) throw _e;
                 await new Promise(function(r){setTimeout(r, 2000)}); continue;
             }
@@ -956,46 +1000,33 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         }
     }
 
-    // ★ 代理未启用: 优先直连(走浏览器本地网络栈,支持系统代理/VPN)
-    //    失败时 fallback 到 proxy.php 中继(绕过CORS)
-    // ★ Google API 域名直接走中继 (GFW封锁, 直连必然失败, 节省重试时间)
+    // ★ 代理开启: 全部走 proxy.php 中继 (proxy.php 自动走本地 Mihomo)
+    // ★ 代理关闭: 尝试直连, 失败时 fallback 到中继
     var _host = '';
     try { _host = new URL(targetUrl).host; } catch(e) {}
-    var _isGoogleAPI = _host && (_host.indexOf('generativelanguage.googleapis.com') >= 0 || _host.indexOf('googleapis.com') >= 0);
-    if (_isGoogleAPI && !enabled) {
-        window._corsBlockedDomains = window._corsBlockedDomains || {};
-        console.log('[Proxy] Google API 域名, 跳過直连走中继 (' + _host + ')');
-        window._corsBlockedDomains[_host] = true;
+
+    if (enabled) {
+        // ★ 代理已开启 — 全部走中继, 不尝试直连
         proxyUrl = '__relay_only__';
-    } else if (!enabled || !proxyUrl) {
-        // ★ 缓存已知的CORS拦截域名,避免重复直连失败(减少控制台红色错误)
-        window._corsBlockedDomains = window._corsBlockedDomains || {};
-        if (_host && window._corsBlockedDomains[_host]) {
-            // 已知此域名不支持CORS,直接走中继
+    } else {
+        // ★ 代理关闭 — 尝试直连
+        var _isGoogleAPI = _host && (_host.indexOf('generativelanguage.googleapis.com') >= 0 || _host.indexOf('googleapis.com') >= 0);
+        var _isLongCatAPI = _host && _host.indexOf('api.longcat.chat') >= 0;
+        if (_isGoogleAPI || _isLongCatAPI) {
             proxyUrl = '__relay_only__';
         } else {
-            console.log('[Proxy] →', targetUrl.substring(0, 80), '(direct, local proxy)');
+            console.log('[Proxy] →', targetUrl.substring(0, 80), '(direct)');
             try {
                 var _directResp = await _fetchWithRetry(fetch(targetUrl, options), 'direct');
-                // ★ 503/502 服务不可达 → 不返回, 走 relay 重试
                 if (_directResp.status === 503 || _directResp.status === 502) {
-                    console.warn('[Proxy] 直连 ' + _directResp.status + ', 走服务器中继重试');
                     proxyUrl = '__relay_only__';
-                    _host && (window._corsBlockedDomains[_host] = true);
-                    // fall through to relay below
                 } else {
                     return _directResp;
                 }
             } catch(_directErr) {
-                // ★ 静默处理: CORS/网络错误是预期行为,记录域名避免下次重试
-                if (_host) window._corsBlockedDomains[_host] = true;
-                console.log('[Proxy] 直连不可用(' + (_host || '?') + '), 走服务器中继');
-                // fall through to proxy.php relay
+                proxyUrl = '__relay_only__';
             }
-            proxyUrl = '__relay_only__';
         }
-    } else if (!/^https?:\/\//.test(proxyUrl) && !/^socks[45]?:\/\//.test(proxyUrl)) {
-        proxyUrl = 'http://' + proxyUrl;  // ★ 自动补全协议前缀
     }
 
     console.log('[Proxy] →', targetUrl.substring(0, 80), enabled ? '(via ' + proxyUrl + ')' : '(relay only)');
@@ -1013,7 +1044,13 @@ window.proxyFetch = async function(targetUrl, options = {}) {
 
     var body = null;
     if (options.body) {
-        body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+        if (typeof options.body === 'string') {
+            // ★ 尝试把 JSON 字符串解析回对象, 避免 proxy.php json_decode 后 \n 变成真正换行符
+            //    如果解析失败则保持原字符串 (如 form-data 等非 JSON body)
+            try { body = JSON.parse(options.body); } catch(e) { body = options.body; }
+        } else {
+            body = options.body;
+        }
     }
 
     var relayBody = {
@@ -1021,7 +1058,10 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         method: options.method || (body ? 'POST' : 'GET'),
         headers: headers,
         body: body,
-        proxy: proxyUrl
+        proxy: proxyUrl,
+        stream: options.stream || (body && body.stream) || false,
+        // ★ 智能路由: 代理开启时标记 tryDirect, 后端对非封锁域名直连优先 (失败回退 Mihomo)
+        tryDirect: enabled
     };
 
     return _fetchWithRetry(fetch(SERVER_API_BASE + '/proxy.php', {
@@ -1099,14 +1139,43 @@ window.fetchModels = async function (silent) {
         return;
     }
 
+    // ★ 部分提供商 (设置了 modelsUrl: null) 不支持 /models 端点, 跳过模型列表加载
+    var _provCfgModels = API_PROVIDERS[_provider] || {};
+    if (_provCfgModels.modelsUrl === null) {
+        selects.forEach(id => {
+            var el = getEl(id);
+            if (el) el.innerHTML = '<option value="default">默认模型</option>';
+        });
+        return;
+    }
+
     try {
         var _headers = _isLocalModel ? {} : { Authorization: `Bearer ${key}` };
-        var _ctrl = new AbortController();
-        var _tid = setTimeout(() => _ctrl.abort(), 8000);  // 8s 超时
         // ★ 非原生 Anthropic URL (如 api.deepseek.com/anthropic) 没有 /models, 用 OpenAI 端点
-        var _modelsUrl = url.replace(/\/anthropic\/?$/, '') + '/models';
-        var res = await window.proxyFetch(_modelsUrl, { headers: _headers, signal: _ctrl.signal });
-        clearTimeout(_tid);
+        // ★ 部分提供商 (如 LongCat) 的 /models 端点与 chat 端点不在同一路径前缀
+        var _modelsUrl = _provCfgModels.modelsUrl || (url.replace(/\/anthropic\/?$/, '') + '/models');
+        // ★ 代理场景下 Mihomo 冷启动/节点切换可能较慢, 给足 15s 超时 + 1次重试
+        var _isProxy = window.isProxyEnabled && window.isProxyEnabled();
+        var _timeoutMs = _isProxy ? 15000 : 8000;
+        var res = await (async function() {
+            for (var _attempt = 0; _attempt < 2; _attempt++) {
+                var _ctrl = new AbortController();
+                var _tid = setTimeout(() => _ctrl.abort(), _timeoutMs);
+                try {
+                    var _res = await window.proxyFetch(_modelsUrl, { headers: _headers, signal: _ctrl.signal });
+                    clearTimeout(_tid);
+                    return _res;
+                } catch(_fetchErr) {
+                    clearTimeout(_tid);
+                    // ★ 超时/中止且还有重试次数 → 静默重试 (Mihomo 冷启动常见)
+                    if (_attempt === 0 && (_fetchErr.name === 'AbortError' || String(_fetchErr.message || '').includes('abort'))) {
+                        console.warn('[fetchModels] 第' + (_attempt+1) + '次超时, 重试中...');
+                        continue;
+                    }
+                    throw _fetchErr;
+                }
+            }
+        })();
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         var data = await res.json();
         var models = data.data || [];
@@ -1517,5 +1586,4 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(cp, { attributes: true, attributeFilter: ['class'] });
     }
 });
-
 

@@ -107,6 +107,7 @@ class ToolDef:
             "enabled": self.enabled,
             "tags": self.tags,
             "has_handler": self.handler is not None,
+            "parameters": self.parameters or {"type": "object", "properties": {}},
         }
 
 

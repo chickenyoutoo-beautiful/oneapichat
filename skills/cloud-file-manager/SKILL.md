@@ -7,7 +7,7 @@ metadata:
     tools: [cr_login, cr_user_info, cr_list_files, cr_search_files, cr_create_folder, cr_rename, cr_move, cr_copy, cr_delete, cr_list_shares, cr_create_share, cr_delete_share, cr_storage_info, cr_overview, server_file_read, server_file_write, server_file_search]
     priority: medium
     emoji: "☁️"
-    triggers: [云盘, 网盘, 文件管理, 分享文件, 上传, 下载, Cloudreve, 存储, 空间, 文件列表, 找文件]
+    triggers: [云盘, Cloudreve, 我的云盘, 云空间, 分享链接, 云存储, 云文件]
 ---
 
 # 云盘文件管理

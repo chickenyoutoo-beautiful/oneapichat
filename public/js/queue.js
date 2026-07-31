@@ -58,6 +58,18 @@ window._clearPersistedQueue = function() {
 
 /** 智能发送：如果队列非空，走队列；否则直接发送 */
 window._smartSend = function() {
+    // ★ 图片过多时自动分批入队
+    if (pendingFiles && pendingFiles.length > 0) {
+        var _imgFiles = pendingFiles.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
+        var _provider = (getVal?.('provider') || localStorage.getItem('provider') || '').toLowerCase();
+        var _modelStr = (getVal?.('modelSelect') || localStorage.getItem('model') || '').toLowerCase();
+        var _isXai = _provider === 'xai' || _modelStr.indexOf('grok') !== -1;
+        var _maxImages = _isXai ? 10 : 20;
+        if (_imgFiles.length > _maxImages) {
+            _splitAndQueueImages(_maxImages);
+            return;
+        }
+    }
     if (window._messageQueue && window._messageQueue.length > 0) {
         window.pushToMsgQueue();
     } else {
@@ -65,7 +77,79 @@ window._smartSend = function() {
     }
 };
 
-/** 推入消息到队列 (不打断当前生成) */
+/** ★ 图片分批：将多余图片拆成多个消息, 用内存队列直接发送 (不经过 localStorage, 保留 base64 数据)
+ *  策略: 前 N-1 批只让模型识别/记忆图片(不操作), 最后一批才执行用户原始指令
+ */
+window._splitAndQueueImages = function(maxImages) {
+    var input = $.userInput;
+    var userText = input ? input.value.trim() : '';
+    var allFiles = pendingFiles.slice();
+    var imageFiles = allFiles.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
+    var nonImageFiles = allFiles.filter(function(f) { return !f.isImage && !(f.type && f.type.startsWith('image/')); });
+    var batches = [];
+    for (var i = 0; i < imageFiles.length; i += maxImages) {
+        batches.push(imageFiles.slice(i, i + maxImages));
+    }
+    var totalBatches = batches.length;
+    // ★ 内存队列: 保留完整文件数据 (含 base64 content), 不经过 localStorage
+    if (!window._imageBatchQueue) window._imageBatchQueue = [];
+    for (var bi = 0; bi < totalBatches; bi++) {
+        var batchFiles = batches[bi];
+        var batchText;
+        var isLast = (bi === totalBatches - 1);
+        var isFirst = (bi === 0);
+        if (totalBatches === 1) {
+            batchText = userText;
+            batchFiles = batchFiles.concat(nonImageFiles);
+        } else if (isFirst) {
+            batchText = '[图片分批识别] 这是第 1/' + totalBatches + ' 批图片（共 ' + imageFiles.length + ' 张）。' +
+                '请识别并记忆这些图片的内容，但不要开始任何操作。后续还有更多图片，全部发送完毕后会给你具体指令。' +
+                (userText ? '\n\n用户最终指令（请先记住，不要执行）: ' + userText : '');
+            batchFiles = batchFiles.concat(nonImageFiles);
+        } else if (isLast) {
+            batchText = '[图片分批识别] 这是最后一批（第 ' + (bi + 1) + '/' + totalBatches + ' 张）。' +
+                '所有 ' + imageFiles.length + ' 张图片已发送完毕。\n\n请根据之前识别的所有图片内容，执行用户指令: ' + userText;
+        } else {
+            batchText = '[图片分批识别] 这是第 ' + (bi + 1) + '/' + totalBatches + ' 批图片。' +
+                '请继续识别并记忆，不要开始操作。还有后续图片。';
+        }
+        window._imageBatchQueue.push({
+            text: batchText,
+            files: batchFiles,  // ★ 完整文件对象, 含 content/serverUrl
+            chatId: currentChatId || '',
+            _batchInfo: { batch: bi + 1, total: totalBatches, isLast: isLast, isFirst: isFirst }
+        });
+    }
+    if (input) { input.value = ''; window.autoResize(input); }
+    clearAllFiles();
+    showToast('📸 已自动分为 ' + totalBatches + ' 批发送（每批最多 ' + maxImages + ' 张），模型先识别后操作', 'info', 5000);
+    if (!isTypingMap[currentChatId]) {
+        setTimeout(function() { window._drainImageBatchQueue(); }, 300);
+    }
+};
+
+/** ★ 排干图片批队列: 逐一发送, 每批等前一批完成后再发下一批 */
+window._drainImageBatchQueue = async function() {
+    if (!window._imageBatchQueue || window._imageBatchQueue.length === 0) return;
+    if (isTypingMap[currentChatId]) {
+        setTimeout(function() { window._drainImageBatchQueue(); }, 1000);
+        return;
+    }
+    var item = window._imageBatchQueue.shift();
+    var _prevQueueMessage = window._isQueueMessage;
+    window._isQueueMessage = true;
+    try {
+        await window.sendMessage(true, item.text, item.files);
+    } catch(e) {
+        console.warn('[ImageBatch] sendMessage error:', e);
+    }
+    window._isQueueMessage = _prevQueueMessage;
+    if (window._imageBatchQueue.length > 0) {
+        setTimeout(function() { window._drainImageBatchQueue(); }, 500);
+    }
+};
+
+/** 推入消息到队列 (不打断当前生成) — 保留原队列行为供 smartSend 使用 */
 window.pushToMsgQueue = function() {
     var input = $.userInput;
     var text = input ? input.value.trim() : '';
@@ -91,6 +175,69 @@ window.pushToMsgQueue = function() {
     if (!isTypingMap[currentChatId]) {
         window._drainQueue();
     }
+};
+
+/**
+ * 推入对话 (按钮点击, Claude Code 风格)
+ * - AI 空闲: 直接发送
+ * - AI 生成中: 消息立即注入对话历史并渲染为可见气泡 (带推入标记),
+ *   不打断当前流, 流结束后自动触发新一轮 (模型会看到新消息)
+ *   ★ 注意: 按钮点击 = 用户明确要立即推入, 不进队列堆栈
+ */
+window.injectUserMessage = function() {
+    var input = $.userInput;
+    var text = input ? input.value.trim() : '';
+    if (!text && (!pendingFiles || pendingFiles.length === 0)) return;
+
+    var safeFiles = (pendingFiles || []).map(function(f) {
+        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
+    });
+
+    // ★ AI 空闲: 直接发送 (与普通发送一致)
+    if (!isTypingMap[currentChatId]) {
+        if (input) { input.value = ''; window.autoResize(input); }
+        clearAllFiles();
+        window.sendMessage(true, text, safeFiles);
+        return;
+    }
+
+    // ★ AI 生成中: 注入对话历史 (立即可见, 不进队列堆栈)
+    var chatId = currentChatId;
+    var _now = new Date();
+    var _daysZh = ['周日','周一','周二','周三','周四','周五','周六'];
+    var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' + _daysZh[_now.getDay()];
+    var _datePrefix = '[日期: ' + _dateStr + '] ';
+
+    var userMsg = {
+        role: 'user',
+        text: text,
+        _datePrefix: _datePrefix,
+        _injected: true,  // ★ 标记为推入消息 (渲染时显示标记, 流结束后自动触发新一轮)
+        files: safeFiles.map(function(f) {
+            return { name: f.name, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') };
+        })
+    };
+    chats[chatId].messages.push(userMsg);
+
+    // ★ 立即渲染用户气泡 (不重新渲染整个聊天, 避免干扰流式输出)
+    if (currentChatId === chatId) {
+        appendMessage('user', text, userMsg.files, null, null, null, false, null, null, false, -1, true);
+        setTimeout(function() { autoScrollToBottom('inject'); }, 30);
+    }
+
+    slimSaveChats();
+    if (typeof window._broadcastChatUpdate === 'function') {
+        window._broadcastChatUpdate(chatId);
+    }
+
+    // 清空输入
+    if (input) { input.value = ''; window.autoResize(input); }
+    clearAllFiles();
+
+    // ★ 标记有推入消息等待处理 (流结束后 finally 块会检测并自动触发新一轮)
+    window._hasInjectedMessage = true;
+
+    showToast('📨 已推入对话，模型将在当前回复后继续处理', 'info', 2500);
 };
 
 /** 排干队列 — 逐一发送排队消息 */
@@ -126,9 +273,15 @@ window._drainQueue = async function() {
         return;
     }
 
-    var queueFiles = item.files ? item.files.map(function(f) {
-        return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
-    }) : [];
+    // ★ 分批图片队列: 保留完整文件数据 (content/serverUrl)
+    var queueFiles;
+    if (item._batchInfo) {
+        queueFiles = item.files || [];
+    } else {
+        queueFiles = item.files ? item.files.map(function(f) {
+            return { name: f.name, content: null, isImage: !!f.isImage, type: f.type, size: f.size };
+        }) : [];
+    }
 
     window._isQueueMessage = true;
     try {

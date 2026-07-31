@@ -209,7 +209,7 @@ function fetchSingleURL($url, $uaIndex = 0) {
             'DNT: 1'
         ];
         // ★ 反爬: 添加 Referer 头
-        if ($referer) {
+        if (!empty($referer)) {
             $curlHeaders[] = 'Referer: ' . $referer;
         }
         $opts = [
@@ -414,20 +414,31 @@ if ($method === 'POST') {
     exit;
 }
 
-// ------ 代理配置（前端传入） ------
+// ------ 代理配置（本地 Mihomo 集成） ------
 $proxyUrl = isset($_GET['proxy']) ? trim($_GET['proxy']) : '';
-if ($proxyUrl === '__relay_only__' || $proxyUrl === '') $proxyUrl = '';
-// ★ 内部代理映射（与 proxy.php 一致）
-if (strpos($proxyUrl, 'proxy.naujtrats.xyz:8888') !== false) $proxyUrl = 'http://192.168.195.213:10808';
-if (strpos($proxyUrl, 'proxy.naujtrats.xyz:8889') !== false) $proxyUrl = 'http://192.168.195.22:10808';
+// ★ __relay_only__ 表示前端要求走中继, 由服务端自动走本地 Mihomo
+if ($proxyUrl === '__relay_only__') $proxyUrl = '';
+
+// ★ 本地 Mihomo 代理地址
+$localProxy = 'socks5h://127.0.0.1:1081';
+
 $proxyFlag = '';
 if ($proxyUrl) {
+    // 前端指定了代理地址
     $proxyType = CURLPROXY_HTTP;
     if (strpos($proxyUrl, 'socks5://') === 0) $proxyType = CURLPROXY_SOCKS5;
     elseif (strpos($proxyUrl, 'socks4://') === 0) $proxyType = CURLPROXY_SOCKS4;
-    // ★ 构建 curl 代理参数
     $proxyFlag = ' --proxy ' . escapeshellarg($proxyUrl);
     if ($proxyType === CURLPROXY_SOCKS5) $proxyFlag .= ' --socks5 ' . escapeshellarg($proxyUrl);
+} else {
+    // ★ 本地集成模式: 未传 proxy 参数时自动走本地 Mihomo
+    $proxyFlag = ' --proxy ' . escapeshellarg($localProxy);
+    $proxyFlag .= ' --socks5 ' . escapeshellarg($localProxy);
+}
+
+// ★ 将代理地址传递给 fetchSingleURL (通过全局变量)
+if (!$proxyUrl) {
+    $proxyUrl = $localProxy;
 }
 
 // ------ GET: 单页面抓取 ------

@@ -48,7 +48,7 @@ window.onProviderChange = async function() {
         antthropic: 'claude-sonnet-4-20250514', minimax: 'MiniMax-M3',
         gemini: 'gemini-2.0-flash', zhipu: 'glm-4-flash', qwen: 'qwen-turbo',
         moonshot: 'moonshot-v1-8k', doubao: 'doubao-lite-32k', mimo: 'mimo-v2-flash',
-        openrouter: 'openai/gpt-4o', opencode: 'gpt-4o', llamacpp: ''
+        openrouter: 'openai/gpt-4o', longcat: 'LongCat-2.0', llamacpp: ''
     };
     var sm = localStorage.getItem('model_' + provider) || '';
     if (sm) { setVal('modelSelect', sm); localStorage.setItem('model', sm); }
@@ -78,11 +78,143 @@ function getCurrentApiKeyLSKey() {
     return (API_PROVIDERS[p] || API_PROVIDERS.custom).keyLS;
 }
 
+// ★ 内容清洗: 防止 apply_chat_template 报错 'list object' has no attribute 'items'
+//    ★ 视觉模型例外: 含 image_url 的数组 content 必须保留, 否则图片无法传输
+window.sanitizeForLongCat = function(apiMessages) {
+    console.warn('[sanitize] msgs=' + apiMessages.length);
+    var _fixed = 0;
+    for (var i = 0; i < apiMessages.length; i++) {
+        var m = apiMessages[i];
+        // content 必须是字符串, 数组则拼接文本部分
+        // ★ 但如果数组含 image_url, 说明是视觉模型, 保留数组不转换
+        if (Array.isArray(m.content)) {
+            var _hasImageUrl = m.content.some(function(c) { return c && c.type === 'image_url'; });
+            if (_hasImageUrl) {
+                console.warn('[sanitize] msg[' + i + '] role=' + m.role + ' content has image_url, KEEPING array for vision model');
+                continue;  // ★ 跳过视觉消息, 保留完整 image_url 数组
+            }
+            _fixed++;
+            console.warn('[sanitize] msg[' + i + '] role=' + m.role + ' content is ARRAY, converting...');
+            m.content = m.content.map(function(c) {
+                if (typeof c === 'string') return c;
+                if (c && typeof c === 'object') {
+                    if (c.type === 'text') return c.text || '';
+                    return '';
+                }
+                return '';
+            }).filter(Boolean).join('\n');
+        }
+        // 空内容替换为占位符
+        if (m.content === '' || m.content === null || m.content === undefined) {
+            m.content = '(empty)';
+            _fixed++;
+        }
+        // 移除可能导致问题的字段
+        // ★ 保留 assistant 的 reasoning_content — DeepSeek 思考模式要求必须回传
+        //    (buildApiMessages 已仅在 assistant 消息上设置此字段)
+        //    空字符串也需保留: DeepSeek 要求一旦对话中出现过 reasoning,
+        //    后续所有 assistant 消息都必须带 reasoning_content (可为空)
+        if (m.role !== 'assistant') {
+            delete m.reasoning_content;
+        }
+        delete m.reasoning_details;
+        delete m._srcIndex;
+        delete m._useVisionModel;
+        // 确保 tool_calls 中的 arguments 是字符串
+        if (m.tool_calls && Array.isArray(m.tool_calls)) {
+            m.tool_calls = m.tool_calls.map(function(tc) {
+                if (tc && tc.function && typeof tc.function.arguments === 'object') {
+                    tc.function.arguments = JSON.stringify(tc.function.arguments || {});
+                }
+                return tc;
+            });
+        }
+    }
+    if (_fixed > 0) console.warn('[sanitize] fixed ' + _fixed + ' issues');
+    return apiMessages;
+};
+
 function logDebug(...args) {
 }
 
+// ★ 视觉预分析: 用独立的视觉模型分析图片, 返回文本描述
+// 当主模型不支持视觉或视觉分析失败时, 用此函数先分析图片
+window._analyzeImagesWithVisionProvider = async function(files) {
+    var provider = localStorage.getItem('visionProvider') || '';
+    if (!provider || provider === 'custom') return null; // 未配置视觉提供商
 
+    var apiKey, apiUrl, model;
+    if (provider === 'xai') {
+        apiKey = await decrypt(localStorage.getItem('visionApiKeyXAI') || '');
+        apiUrl = localStorage.getItem('visionApiUrlXAI') || 'https://api.x.ai/v1';
+        model = localStorage.getItem('visionModel') || 'grok-4.5';
+    } else if (provider === 'openai') {
+        apiKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
+        apiUrl = localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1';
+        model = localStorage.getItem('visionModel') || 'gpt-4o';
+    } else if (provider === 'minimax') {
+        apiKey = await decrypt(localStorage.getItem('visionApiKey') || '');
+        apiUrl = localStorage.getItem('visionApiUrl') || 'https://api.minimaxi.com/v1/coding_plan/vlm';
+        model = localStorage.getItem('visionModel') || 'MiniMax-VL-01';
+    } else {
+        return null;
+    }
 
+    if (!apiKey) return null; // 没有 API Key
+
+    // 提取图片文件
+    var imageFiles = files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
+    if (imageFiles.length === 0) return null;
+
+    console.log('[VisionPreAnalysis] 使用 ' + provider + '/' + model + ' 分析 ' + imageFiles.length + ' 张图片');
+
+    // ★ 构建视觉分析请求: 强制 base64 (xAI 无法下载外部 URL)
+    var content = [];
+    for (var i = 0; i < imageFiles.length; i++) {
+        var f = imageFiles[i];
+        var imgData = f.content || '';
+        // 只用 base64 data URL, 不用外部 URL
+        if (imgData && imgData.startsWith('data:')) {
+            content.push({ type: 'image_url', image_url: { url: imgData, detail: 'auto' } });
+        }
+    }
+    if (content.length === 0) {
+        console.warn('[VisionPreAnalysis] 没有可用的 base64 图片数据 (图片可能已被剥离 content)');
+        return null;
+    }
+
+    content.unshift({ type: 'text', text: '请详细描述这些图片的内容，包括可见的文字、物体、场景、颜色、布局等信息。每张图片用 [图片N] 标记开头。' });
+
+    try {
+        // ★ 使用 proxyFetch 走服务器代理 (避免 CORS + 走 Mihomo 代理)
+        var apiEndpoint = apiUrl.replace(/\/$/, '') + '/chat/completions';
+        var requestBody = JSON.stringify({ model: model, messages: [{ role: 'user', content: content }], max_tokens: 4096, stream: false });
+
+        console.log('[VisionPreAnalysis] 请求 ' + apiEndpoint + ', 图片数: ' + content.length + ', 请求体大小: ' + (requestBody.length / 1024 / 1024).toFixed(1) + 'MB');
+
+        // ★ proxyFetch 内置代理逻辑: 代理ON走proxy.php中继, 代理OFF直连+回退
+        var resp = await window.proxyFetch(apiEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: requestBody
+        });
+
+        if (!resp.ok) {
+            var errText = await resp.text().catch(function() { return ''; });
+            console.warn('[VisionPreAnalysis] API 错误: HTTP ' + resp.status, errText.substring(0, 300));
+            return null;
+        }
+        var data = await resp.json();
+        var analysis = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (analysis) {
+            console.log('[VisionPreAnalysis] 分析完成, 长度:', analysis.length);
+            return analysis;
+        }
+    } catch(e) {
+        console.warn('[VisionPreAnalysis] 失败:', e.message);
+    }
+    return null;
+};
 
 /** 获取某个模型的配置 */
 function _getModelConfigObj(name) {
@@ -158,21 +290,49 @@ function buildUserContent(text, files) {
     var hasImages = files.some(f => f.isImage || f.type?.startsWith('image/'));
 
     if (hasImages && shouldUseVisionFormat()) {
-        console.log('[Vision] shouldUseVisionFormat=true, 图片数:', files.filter(f => f.isImage || f.type?.startsWith('image/')).length);
+        var _allImageFiles = files.filter(f => f.isImage || f.type?.startsWith('image/'));
+        console.log('[Vision] shouldUseVisionFormat=true, 图片数:', _allImageFiles.length);
         // OpenAI 视觉模型格式:数组
         var content = [];
         var _baseUrl = (getVal?.('baseUrl') || localStorage.getItem('baseUrl') || '').toLowerCase();
         var _isLocalModel = _baseUrl.includes('localmodels') || _baseUrl.includes('localhost') || _baseUrl.includes('127.0.0.1') || _baseUrl.includes('192.168.');
-        for (const f of files) {
+        var _modelStr = (getVal?.('modelSelect') || localStorage.getItem('model') || '').toLowerCase();
+        // ★ xAI 检测: 从 baseUrl 或模型名判断 (更可靠)
+        var _isXai = _baseUrl.indexOf('api.x.ai') !== -1 || _modelStr.indexOf('grok') !== -1;
+        // ★ 图片数量限制: 避免请求体过大导致连接断开
+        var _maxImages = _isXai ? 10 : 20;  // xAI 限制更严格
+        var _imageFiles = _allImageFiles;
+        if (_allImageFiles.length > _maxImages) {
+            console.warn('[Vision] ⚠️ 图片过多 (' + _allImageFiles.length + '), 限制为前 ' + _maxImages + ' 张');
+            showToast('⚠️ 单次最多发送 ' + _maxImages + ' 张图片（当前 ' + _allImageFiles.length + ' 张），已截取前 ' + _maxImages + ' 张', 'warning', 5000);
+            _imageFiles = _allImageFiles.slice(0, _maxImages);
+        }
+        for (var _fi = 0; _fi < _imageFiles.length; _fi++) {
+            var f = _imageFiles[_fi];
             if (f.isImage || f.type?.startsWith('image/')) {
-                var _imgUrl = f.content;
-                if (!_isLocalModel && f.serverUrl) {
+                // ★ xAI: 强制用 base64 data URL (xAI 无法下载外部 URL)
+                // 其他模型: 优先用服务器 URL (节省请求体大小)
+                var _imgUrl;
+                if (f.content && f.content.startsWith('data:')) {
+                    // 有 base64 数据, 直接用
+                    _imgUrl = f.content;
+                } else if (_isXai && f.serverUrl) {
+                    // xAI 但没有 base64: 尝试从服务器获取并转为 base64
+                    console.warn('[Vision] ⚠️ xAI 图片无 base64, 尝试从服务器获取:', f.name);
+                    // 同步无法 fetch, 只能先用 URL (可能失败) 或跳过
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
+                } else if (f.serverUrl) {
+                    _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
+                } else if (f.content) {
+                    _imgUrl = f.content;
+                } else {
+                    console.warn('[Vision] ⚠️ 跳过无数据图片:', f.name);
+                    continue;
                 }
-                console.log('[Vision] 📷 name:', f.name, 'serverUrl:', f.serverUrl||'(none)', 'contentLen:', (f.content||'').length, 'finalUrl:', _imgUrl.substring(0, 80) + '...');
+                console.log('[Vision] 📷[' + (_fi+1) + '/' + _imageFiles.length + '] name:', f.name, 'mode:', (_imgUrl.startsWith('data:') ? 'BASE64' : 'URL'), 'len:', _imgUrl.length);
                 content.push({
                     type: 'image_url',
-                    image_url: { url: _imgUrl, detail: 'default' }
+                    image_url: { url: _imgUrl, detail: 'auto' }
                 });
             } else if (f.isVideo || f.type?.startsWith('video/')) {
                 // M3 原生视频理解
@@ -192,7 +352,7 @@ function buildUserContent(text, files) {
                     console.log('[Vision] 🖼️ PPTX图片:', _eimg.name, 'size:', (_eimg.size / 1024).toFixed(0) + 'KB');
                     content.push({
                         type: 'image_url',
-                        image_url: { url: _eimg.dataUrl, detail: 'default' }
+                        image_url: { url: _eimg.dataUrl, detail: 'auto' }
                     });
                 }
                 // 文本附后
@@ -203,13 +363,17 @@ function buildUserContent(text, files) {
                 // 非图片文件: 注入服务器路径元信息
                 var _isVid = f.isVideo || (f.type && f.type.startsWith('video/'));
                 var _info = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
-                if (f.serverUrl) {
-                    _info += `\n服务器路径: ${f.serverUrl}`;
-                    if (_isVid) {
-                        _info += `\n⚠️ 可直接用此路径调用 video_edit: input_path="${f.serverUrl}"`;
-                    }
+                // ★ v2.6.3: 告诉模型服务器上的真实文件路径, 可直接用于 cr_upload_file
+                if (f.serverPath) {
+                    _info += `\n服务器路径: ${f.serverPath}`;
+                    _info += `\n💡 上传到云盘: cr_upload_file { file_path: "${f.serverPath}" }`;
+                } else if (f.serverUrl) {
+                    _info += `\nURL: ${f.serverUrl}`;
                 }
-                if (!_isVid) {
+                if (_isVid && f.serverPath) {
+                    _info += `\n⚠️ video_edit: input_path="${f.serverPath}"`;
+                }
+                if (!_isVid && !f.isBinary) {
                     var _fText = f.content || '';
                     if (_fText.length > 80000) _fText = _fText.substring(0, 80000) + '\n...(文件过长已截断)';
                     if (_fText) _info += '\n' + _fText;
@@ -242,7 +406,12 @@ function buildUserContent(text, files) {
         });
         window._currentMessageImagesByChat[currentChatId] = _allImages;
 
-        var imageDescs = imageFiles.map(f => `[用户上传了图片: ${f.name}]`);
+        var imageDescs = imageFiles.map(f => {
+            var _d = `[用户上传了图片: ${f.name}]`;
+            if (f.serverPath) _d += `\n💡 文件路径: ${f.serverPath}`;
+            else if (f.serverUrl) _d += `\n🌐 URL: ${f.serverUrl}`;
+            return _d;
+        });
         if (_officeImages.length > 0) {
             imageDescs.push('[PPTX内嵌图片: ' + _officeImages.join(', ') + ']');
         }
@@ -251,9 +420,11 @@ function buildUserContent(text, files) {
             ? otherFiles.map(f => {
                 var _isV = f.isVideo || (f.type && f.type.startsWith('video/'));
                 var _oi = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> 附件: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
-                if (f.serverUrl) {
-                    _oi += `\n服务器路径: ${f.serverUrl}`;
-                    if (_isV) _oi += `\n⚠️ 可直接用此路径调用 video_edit: input_path="${f.serverUrl}"`;
+                if (f.serverPath) {
+                    _oi += `\n💡 服务器路径: ${f.serverPath}`;
+                    if (_isV) _oi += `\n⚠️ video_edit: input_path="${f.serverPath}"`;
+                } else if (f.serverUrl) {
+                    _oi += `\n🌐 URL: ${f.serverUrl}`;
                 }
                 if (!_isV) {
                     var _fc = f.content || '';

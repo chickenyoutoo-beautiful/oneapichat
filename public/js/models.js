@@ -81,7 +81,8 @@ const configs = [
         supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
-        maxOutputTokens: 1000000,
+        // ★ DeepSeek API max_tokens 上限 131072
+        maxOutputTokens: 131072,
         safetyMargin: 8192,
         defaultMaxTokens: 8192,
         alias: ['deepseek', 'ds-v4-flash'],
@@ -93,7 +94,8 @@ const configs = [
         supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
-        maxOutputTokens: 1000000,
+        // ★ DeepSeek API 实际 max_tokens 上限 131072 (非 context window), 防止 AutoAdjust 误取 min 边界
+        maxOutputTokens: 131072,
         safetyMargin: 8192,
         defaultMaxTokens: 8192,
         alias: ['deepseek-v4'],
@@ -105,7 +107,7 @@ const configs = [
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.SEED],
         bannedParams: ['logit_bias', 'user', 'reasoning_effort', 'max_completion_tokens'],
         contextWindow: 131072,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 131072,  // ★ DeepSeek V3 实际支持 131072 输出
         defaultMaxTokens: 4096,
         alias: ['ds-chat', 'deepseek-v3'],
     }),
@@ -117,7 +119,8 @@ const configs = [
         bannedParams: ['tools', 'tool_choice', 'top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'user', 'response_format', 'reasoning_effort'],
         bannedBodyKeys: ['tools', 'tool_choice'],
         contextWindow: 131072,
-        maxOutputTokens: 1000000,
+        // ★ DeepSeek API max_tokens 上限 131072
+        maxOutputTokens: 131072,
         safetyMargin: 4096,
         defaultMaxTokens: 4096,
         defaultTemp: 0.6,
@@ -216,7 +219,7 @@ const configs = [
         bannedParams: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'user', 'response_format', 'logprobs', 'reasoning_effort', 'temperature'],
         bannedBodyKeys: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'temperature', 'reasoning_effort'],
         contextWindow: 200000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 64000,  // ★ Claude 4 Opus 实际支持 64000 输出 (Claude 3.x 是 8192)
         defaultMaxTokens: 4096,
         alias: ['claude-opus'],
     }),
@@ -227,7 +230,7 @@ const configs = [
         bannedParams: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'user', 'response_format', 'logprobs', 'reasoning_effort'],
         bannedBodyKeys: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'reasoning_effort'],
         contextWindow: 200000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 64000,  // ★ Claude 4 Sonnet 实际支持 64000 输出
         defaultMaxTokens: 4096,
         alias: ['claude-sonnet'],
     }),
@@ -238,7 +241,7 @@ const configs = [
         bannedParams: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'user', 'response_format', 'logprobs', 'reasoning_effort'],
         bannedBodyKeys: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'reasoning_effort'],
         contextWindow: 200000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 8192,  // Claude 3.5 Haiku 上限 8192
         defaultMaxTokens: 4096,
         alias: ['claude-haiku'],
     }),
@@ -249,7 +252,7 @@ const configs = [
         bannedParams: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'user', 'response_format', 'logprobs', 'reasoning_effort'],
         bannedBodyKeys: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'reasoning_effort'],
         contextWindow: 200000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 8192,  // Claude 3.x 上限 8192
         defaultMaxTokens: 4096,
         alias: ['claude'],
     }),
@@ -261,7 +264,7 @@ const configs = [
         bannedParams: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'user', 'response_format', 'logprobs', 'reasoning_effort'],
         bannedBodyKeys: ['top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'seed', 'reasoning_effort'],
         contextWindow: 200000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 64000,  // ★ Claude 4 通用上限 64000
         defaultMaxTokens: 4096,
         alias: ['claude-4'],
     }),
@@ -328,7 +331,7 @@ const configs = [
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.SEED, S.PARALLEL_TOOL, S.RESP_FORMAT],
         bannedParams: ['logit_bias', 'user', 'logprobs', 'top_logprobs'],
         contextWindow: 131072,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,  // ★ Qwen 实际支持 16384 输出
         defaultMaxTokens: 4096,
         alias: ['qwen', 'tongyi'],
     }),
@@ -349,11 +352,21 @@ const configs = [
     // Grok 最终兼容: OpenAI 格式,支持 tools/stream/tool_choice
 
     cfg({
+        match: ['grok-4.5', 'grok-4-5'],
+        supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL],
+        bannedParams: ['logprobs', 'top_logprobs', 'response_format', 'user', 'logit_bias', 'presence_penalty', 'frequency_penalty', 'reasoning_effort'],
+        contextWindow: 1048576,
+        maxOutputTokens: 131072,  // ★ Grok 4.5 实际支持 131072 输出
+        defaultMaxTokens: 4096,
+        alias: ['grok-4.5', 'xai-grok-4.5'],
+    }),
+
+    cfg({
         match: ['grok-4.3', 'grok-4-3', 'grok-4.20'],
         supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logprobs', 'top_logprobs', 'response_format', 'user', 'logit_bias', 'presence_penalty', 'frequency_penalty', 'reasoning_effort'],
         contextWindow: 1048576,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 131072,  // ★ Grok 4.3 实际支持 131072 输出
         defaultMaxTokens: 4096,
         alias: ['grok-4', 'xai-grok-4'],
     }),
@@ -363,7 +376,7 @@ const configs = [
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
         bannedParams: ['logprobs', 'top_logprobs', 'response_format', 'user', 'logit_bias', 'presence_penalty', 'frequency_penalty', 'reasoning_effort'],
         contextWindow: 2000000,  // 2M tokens
-        maxOutputTokens: 8192,
+        maxOutputTokens: 131072,  // ★ Grok 4.1 Fast 实际支持 131072 输出
         defaultMaxTokens: 4096,
         alias: ['grok-fast'],
     }),
@@ -373,7 +386,7 @@ const configs = [
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logprobs', 'top_logprobs', 'response_format', 'reasoning_effort', 'user', 'logit_bias', 'presence_penalty', 'frequency_penalty'],
         contextWindow: 1000000,  // 1M tokens
-        maxOutputTokens: 8192,
+        maxOutputTokens: 131072,  // ★ Grok 3/4 实际支持 131072 输出
         defaultMaxTokens: 4096,
         alias: ['grok', 'xai'],
     }),
@@ -383,7 +396,7 @@ const configs = [
         supports: [S.REASONING, S.TOOLS, S.STREAM, S.TEMP, S.TOP_P],
         bannedParams: ['logprobs', 'top_logprobs', 'response_format', 'reasoning_effort', 'user', 'logit_bias', 'presence_penalty', 'frequency_penalty'],
         contextWindow: 1000000,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 131072,  // ★ Grok 3 reasoning 实际支持 131072 输出
         defaultMaxTokens: 4096,
         reasoningMode: 'thinking',
         alias: ['grok-reasoning'],
@@ -496,7 +509,7 @@ const configs = [
         supports: [S.TOOLS, S.REASON_EFFORT, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'user', 'response_format'],
         contextWindow: 1048576,  // 1M tokens
-        maxOutputTokens: 16384,
+        maxOutputTokens: 65536,  // ★ Gemini 3 实际支持 65536 输出
         safetyMargin: 8192,
         defaultMaxTokens: 4096,
         alias: ['gemini-3'],
@@ -507,7 +520,7 @@ const configs = [
         supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'user', 'response_format', 'reasoning_effort'],
         contextWindow: 1048576,  // 1M tokens
-        maxOutputTokens: 8192,
+        maxOutputTokens: 65536,  // ★ Gemini 2.x 实际支持 65536 输出
         safetyMargin: 8192,
         defaultMaxTokens: 4096,
         alias: ['gemini', 'google'],
@@ -518,7 +531,7 @@ const configs = [
         supports: [S.TOOLS, S.VISION, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'user', 'response_format', 'reasoning_effort'],
         contextWindow: 1048576,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 65536,  // ★ Gemini 2.0 Flash 实际支持 65536 输出
         defaultMaxTokens: 4096,
     }),
 
@@ -555,7 +568,7 @@ const configs = [
         supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
         bannedParams: ['presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'user', 'seed', 'parallel_tool_calls'],
         contextWindow: 131072,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 32768,  // ★ Llama 3/4 实际支持 32768+ 输出
         defaultMaxTokens: 4096,
     }),
 
@@ -619,6 +632,20 @@ const configs = [
         contextWindow: 16384,
         maxOutputTokens: 4096,
         defaultMaxTokens: 2048,
+    }),
+
+    // ──────────── LongCat 系列 ────────────
+    // LongCat API: max_tokens 上限 131072, 1M context
+    // ★ 注意: LongCat 不支持视觉 (移除 S.VISION), 图片由 analyze_image 工具处理
+    cfg({
+        match: ['longcat-', 'LongCat-', 'longcat_'],
+        supports: [S.TOOLS, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.SEED, S.PARALLEL_TOOL],
+        bannedParams: ['presence_penalty', 'frequency_penalty', 'logit_bias', 'user', 'response_format', 'reasoning_effort'],
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        safetyMargin: 8192,
+        defaultMaxTokens: 4096,
+        alias: ['longcat'],
     }),
 
     // ──────────── 通用配置 (fallback) ────────────
@@ -691,8 +718,13 @@ return {
         return _matchConfig(name).contextWindow;
     },
 
-    /** 获取最大输出 tokens */
+    /** 获取最大输出 tokens (优先使用 AutoAdjust 学习到的覆盖值) */
     getMaxOutputTokens: function(name) {
+        // ★ 优先: AutoAdjust 从 API 错误中提取并持久化的真实限制
+        try {
+            var _overrides = JSON.parse(localStorage.getItem('modelMaxOutputTokens') || '{}');
+            if (_overrides[name]) return _overrides[name];
+        } catch(e) {}
         return _matchConfig(name).maxOutputTokens || _matchConfig(name).contextWindow;
     },
 

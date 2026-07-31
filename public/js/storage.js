@@ -252,7 +252,7 @@ async function loadConfigFromServer() {
     if (!token) { console.log('[loadConfigFromServer] 无token'); return; }
     console.log('[loadConfigFromServer] token有效,请求配置');
     try {
-        var resp = await fetch(SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=get_config');
+        var resp = await fetch(SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=get_config', { cache: 'no-store' });
         console.log('[loadConfigFromServer] 响应状态:', resp.status);
         if (!resp.ok) { console.log('[loadConfigFromServer] 响应异常,跳过'); return; }
         var config = await resp.json();
@@ -283,6 +283,23 @@ async function loadConfigFromServer() {
                 if ((k === 'model' || k.indexOf('model_') === 0) && typeof _val === 'string') {
                     _val = _val.replace(/^(models|publishers)\//, '');
                 }
+                // ★ 不覆盖本地已设置的 baseUrlProvider(防止服务器旧值覆盖用户刚切换的厂商)
+                if (k === 'baseUrlProvider' && localStorage.getItem(k)) {
+                    console.log('[loadConfigFromServer] 跳过 baseUrlProvider(本地已有值):', localStorage.getItem(k));
+                    continue;
+                }
+                // ★ 视觉 Key 配置: 本地为空时始终使用服务器值 (服务器是权威来源)
+                //    URL 字段保留本地非默认值 (防止覆盖用户刚修改的)
+                if (k === 'visionApiKeyXAI' || k === 'visionApiKeyOpenAI' || k === 'visionApiKey') {
+                    var _localKey = localStorage.getItem(k);
+                    if (!_localKey || _localKey.length < 4) {
+                        // 本地 key 为空, 强制使用服务器值
+                        console.log('[loadConfigFromServer] 本地 key 为空, 使用服务器值:', k);
+                    } else {
+                        console.log('[loadConfigFromServer] 保留本地 key:', k);
+                        continue;
+                    }
+                }
                 try { localStorage.setItem(k, _val); } catch(e) { console.warn('[loadConfigFromServer] 写入失败:', k); }
             }
         }
@@ -307,7 +324,7 @@ async function loadChatsFromServer() {
         } else {
             url += '&device_id=' + deviceId;
         }
-        var response = await fetch(url);
+        var response = await fetch(url, { cache: 'no-store' });
         if (response.ok) {
             var result = await response.json();
             if (result.chats) return result.chats;
@@ -605,6 +622,7 @@ async function restoreUserData() {
         // 看看服务器数据里有没有 agent 主聊
         if (_serverChats && _serverChats[_agentMainId]) {
             chats[_agentMainId] = JSON.parse(JSON.stringify(_serverChats[_agentMainId]));
+            if (!chats[_agentMainId].messages) chats[_agentMainId].messages = [];
             console.log('[restoreUserData] 从服务器恢复了 Agent 主聊');
         } else if (_agentWasActive) {
             // 之前是 agent 模式但数据丢了,重新创建 (用缓存的 system prompt)

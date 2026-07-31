@@ -633,6 +633,23 @@ header, #chatBox {
 }
 .queue-clear-btn:hover { background: rgba(239,68,68,0.08); color: #ef4444; }
 
+/* ===== 推入消息标记 ===== */
+.msg-injected-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 8px; border-radius: 10px;
+    background: rgba(59,130,246,0.1); color: #3b82f6;
+    font-size: 10px; font-weight: 600;
+    margin-top: 6px; margin-bottom: 2px;
+    border: 1px solid rgba(59,130,246,0.2);
+}
+.dark .msg-injected-badge {
+    background: rgba(59,130,246,0.18); color: #60a5fa;
+    border-color: rgba(59,130,246,0.3);
+}
+.bubble-injected {
+    border-left: 3px solid rgba(59,130,246,0.4) !important;
+}
+
 /* ===== 消息列表体 ===== */
 .queue-bar-body {
     overflow: hidden;
@@ -730,6 +747,55 @@ header, #chatBox {
 .flow-panel.collapsed .flow-panel-footer { max-height: 0; opacity: 0; padding: 0; overflow: hidden; transition: all 0.3s ease; }
 .flow-panel:not(.collapsed) .flow-panel-body { max-height: 420px; }
 .flow-panel:not(.collapsed) .flow-panel-footer { max-height: 32px; }
+
+/* ★ Plan 模式审批横幅 */
+.plan-approval-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(99,102,241,0.06));
+    border-bottom: 1px solid rgba(59,130,246,0.15);
+    gap: 12px;
+    animation: plan-banner-in 0.35s cubic-bezier(0.16,1,0.3,1) forwards;
+}
+@keyframes plan-banner-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.plan-approval-text {
+    font-size: 12.5px; font-weight: 500; color: #1e40af;
+    display: flex; align-items: center; gap: 6px;
+}
+.dark .plan-approval-text { color: #93c5fd; }
+.plan-approval-icon { font-size: 16px; }
+.plan-approval-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.plan-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 11.5px; font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.plan-btn-approve {
+    background: #22c55e; color: #fff;
+    border-color: #16a34a;
+}
+.plan-btn-approve:hover { background: #16a34a; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(34,197,94,0.3); }
+.plan-btn-modify {
+    background: #fff; color: #3b82f6;
+    border-color: rgba(59,130,246,0.3);
+}
+.plan-btn-modify:hover { background: #eff6ff; border-color: #3b82f6; }
+.dark .plan-btn-modify { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+.plan-btn-cancel {
+    background: transparent; color: #9ca3af;
+    border-color: rgba(0,0,0,0.1);
+}
+.plan-btn-cancel:hover { color: #6b7280; background: rgba(0,0,0,0.04); }
+.dark .plan-btn-cancel { border-color: rgba(255,255,255,0.1); color: #6b7280; }
+.dark .plan-btn-cancel:hover { color: #9ca3af; background: rgba(255,255,255,0.05); }
 
 /* Header */
 .flow-panel-header {
@@ -3297,6 +3363,23 @@ html:not(.dark) #userInput {
     background: #1e3a5f;
     color: #60a5fa;
 }
+.agent-popup-separator {
+    width: 1px;
+    align-self: stretch;
+    background: #e5e7eb;
+    margin: 4px 2px;
+}
+.dark .agent-popup-separator {
+    background: #374151;
+}
+#sessionAutoApproveBtn.active {
+    background: #fef3c7;
+    color: #d97706;
+}
+.dark #sessionAutoApproveBtn.active {
+    background: #422006;
+    color: #fbbf24;
+}
 
 /* ★ 移动端: popup 变为底部抽屉 */
 @media (max-width: 640px) {
@@ -3548,6 +3631,14 @@ html:not(.dark) #userInput {
 }
 .dark .agent-sub-item:hover {
     background: rgba(99,102,241,0.1);
+}
+/* ★ 失败代理红色高亮 */
+.agent-sub-item-failed {
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.15);
+}
+.agent-sub-item-failed:hover {
+    background: rgba(239,68,68,0.12);
 }
 
 .agent-sub-dot {

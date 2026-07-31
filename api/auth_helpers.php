@@ -131,3 +131,35 @@ function generateApiKey(): array {
         'prefix' => substr($raw, 0, 12)
     ];
 }
+
+/**
+ * 解密存储的 API Key (v2 AES-256-GCM / v1 XOR)
+ * 供所有 API 端点统一使用 (从 chat/completions.php 提取为共享函数)
+ * @param string $encoded 加密后的 key (v2:xxx 或 base64)
+ * @return string 解密后的明文 key
+ */
+function decrypt_config_key(string $encoded): string
+{
+    if (empty($encoded)) return '';
+    if (str_starts_with($encoded, 'v2:')) {
+        $raw = base64_decode(substr($encoded, 3));
+        if ($raw === false || strlen($raw) < 28) return $encoded;
+        $iv = substr($raw, 0, 12);
+        $data = substr($raw, 12);
+        $ct = substr($data, 0, -16);
+        $tag = substr($data, -16);
+        $aesKey = hash_pbkdf2('sha256', getEncryptionKey(), 'oneapichat-aes-v2', 100000, 32, true);
+        $result = openssl_decrypt($ct, 'aes-256-gcm', $aesKey, OPENSSL_RAW_DATA, $iv, $tag);
+        return $result !== false ? $result : $encoded;
+    }
+    $decoded = base64_decode($encoded, true);
+    if ($decoded !== false && strlen($decoded) > 0) {
+        $encKey = getEncryptionKey();
+        $result = '';
+        for ($i = 0; $i < strlen($decoded); $i++) {
+            $result .= chr(ord($decoded[$i]) ^ ord($encKey[$i % strlen($encKey)]));
+        }
+        if (preg_match('/^(sk-|tvly-|oac-|AIza|nvapi-)/', $result)) return $result;
+    }
+    return $encoded;
+}

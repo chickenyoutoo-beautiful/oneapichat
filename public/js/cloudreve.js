@@ -35,6 +35,99 @@ async function cloudreveApiHandler(action, args) {
     }
 }
 
+// ==================== Cloudreve 简易面板 ====================
+window.toggleCloudrevePanel = async function() {
+    var existing = document.getElementById('crPanelOverlay');
+    if (existing) { existing.remove(); return; }
+
+    var overlay = document.createElement('div');
+    overlay.id = 'crPanelOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);position:relative;">' +
+        '<button onclick="document.getElementById(\'crPanelOverlay\').remove()" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>' +
+        '<h3 style="margin:0 0 16px;font-size:18px;">☁️ Cloudreve 云盘</h3>' +
+        '<div id="crPanelBody" style="color:#666;">加载中...</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+    var body = document.getElementById('crPanelBody');
+
+    async function loadPanel() {
+        body.innerHTML = '加载中...';
+        try {
+            var login = await cloudreveApiHandler('check_login', {});
+            var obj = JSON.parse(login.result);
+            // ★ 修复: check_login 返回 {success, data:{logged_in, nickname, ...}}，需取 obj.data
+            var cr = obj.data || obj;
+            if (cr.logged_in) {
+                var files = await cloudreveApiHandler('list_files', { path: '' });
+                var fobj = JSON.parse(files.result);
+                var items = fobj.files || fobj.data || [];
+                var html = '<p style="color:#16a34a;margin-bottom:12px;">✅ 已登录' + (cr.nickname ? ' (' + cr.nickname + ')' : '') + '</p>';
+                html += '<div style="font-size:13px;"><strong>文件列表:</strong><ul style="margin:8px 0;padding-left:20px;">';
+                if (Array.isArray(items) && items.length > 0) {
+                    items.slice(0, 20).forEach(function(f) {
+                        html += '<li>' + (f.name || f) + '</li>';
+                    });
+                    if (items.length > 20) html += '<li>...还有 ' + (items.length - 20) + ' 项</li>';
+                } else {
+                    html += '<li>(空目录)</li>';
+                }
+                html += '</ul></div>';
+                html += '<p style="font-size:12px;color:#999;margin-top:12px;">在聊天中输入云盘相关指令即可操作文件</p>';
+                body.innerHTML = html;
+            } else {
+                // 未登录 - 显示登录表单 + 已有账号快捷选择
+                var accounts = cr.accounts || [];
+                var html = '<p style="color:#dc2626;margin-bottom:12px;">❌ 未登录</p>';
+                if (accounts.length > 0) {
+                    html += '<div style="margin-bottom:12px;font-size:13px;"><strong>已有账号:</strong> ';
+                    accounts.forEach(function(acc) {
+                        html += '<button onclick="document.getElementById(\'crLoginEmail\').value=\'' + acc + '\'" style="margin:2px;padding:4px 8px;background:#f3f4f6;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">' + acc + '</button>';
+                    });
+                    html += '</div>';
+                }
+                html += '<div style="font-size:13px;">';
+                html += '<label style="display:block;margin-bottom:4px;color:#333;">邮箱</label>';
+                html += '<input id="crLoginEmail" type="email" placeholder="your@email.com" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;box-sizing:border-box;">';
+                html += '<label style="display:block;margin-bottom:4px;color:#333;">密码</label>';
+                html += '<input id="crLoginPwd" type="password" placeholder="密码" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;box-sizing:border-box;">';
+                html += '<button id="crLoginBtn" style="width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">登录</button>';
+                html += '<p id="crLoginMsg" style="margin-top:8px;font-size:12px;"></p>';
+                html += '</div>';
+                body.innerHTML = html;
+
+                document.getElementById('crLoginBtn').onclick = async function() {
+                    var email = document.getElementById('crLoginEmail').value.trim();
+                    var pwd = document.getElementById('crLoginPwd').value;
+                    var msg = document.getElementById('crLoginMsg');
+                    if (!email || !pwd) { msg.style.color = '#dc2626'; msg.textContent = '请填写邮箱和密码'; return; }
+                    msg.style.color = '#666'; msg.textContent = '登录中...';
+                    try {
+                        var r = await cloudreveApiHandler('login', { email: email, password: pwd });
+                        var d = JSON.parse(r.result);
+                        if (d.success) {
+                            msg.style.color = '#16a34a'; msg.textContent = '✅ 登录成功!';
+                            setTimeout(loadPanel, 800);
+                        } else {
+                            msg.style.color = '#dc2626'; msg.textContent = '❌ ' + (d.error || '登录失败');
+                        }
+                    } catch(e) {
+                        msg.style.color = '#dc2626'; msg.textContent = '❌ ' + e.message;
+                    }
+                };
+                // 回车提交
+                document.getElementById('crLoginPwd').onkeydown = function(e) { if (e.key === 'Enter') document.getElementById('crLoginBtn').click(); };
+            }
+        } catch(e) {
+            body.innerHTML = '<p style="color:#dc2626;">错误: ' + e.message + '</p>';
+        }
+    }
+
+    loadPanel();
+};
+
 async function engineApiHandler(action, args) {
     // 所有引擎 API 调用带上 auth_token 实现用户隔离
     var token = localStorage.getItem('authToken') || '';
@@ -222,15 +315,186 @@ async function engineApiHandler(action, args) {
             let _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
             if (args.start_line) _frUrl += '&start_line=' + args.start_line;
             if (args.end_line) _frUrl += '&end_line=' + args.end_line;
+            // ★ 字符偏移分页: 压缩 JSON 等单行巨长文件按行读不到内容, 用 offset/max_chars 分页
+            if (args.offset !== undefined && args.offset !== null && args.offset !== '') _frUrl += '&offset=' + args.offset;
+            if (args.max_chars) _frUrl += '&max_chars=' + args.max_chars;
             _frUrl += authSuffix;
             var r = await fetch(_frUrl);
             var d = await r.json();
             if (d.ok) {
-                var _range = d.shown_range ? ' [' + d.shown_range + '/' + d.total_lines + '行]' : '';
+                var _range = d.shown_range
+                    ? (d.mode === 'chars' ? ' [' + d.shown_range + ']' : ' [' + d.shown_range + '/' + d.total_lines + '行]')
+                    : '';
                 var out = '📄 ' + args.path + _range + ' (' + (d.size || 0) + ' bytes)\n' + d.content;
                 return { result: out };
             }
             return { error: d.error || '读取失败' };
+        }
+        if (action === 'parse_document') {
+            let _pdUrl = _apiBase + '?action=parse_document&path=' + encodeURIComponent(args.path);
+            if (args.max_chars) _pdUrl += '&max_chars=' + encodeURIComponent(args.max_chars);
+            _pdUrl += authSuffix;
+            var _pdr = await fetch(_pdUrl);
+            var _pdd = await _pdr.json();
+            if (_pdd.ok) {
+                var _truncMark = _pdd.truncated ? '\n\n[内容已截断，仅显示前 ' + (args.max_chars || 50000) + ' 字符]' : '';
+                var _pdOut = '📄 文档解析: ' + (_pdd.filename || args.path) + ' (格式: ' + (_pdd.format || '?') + ', 大小: ' + (_pdd.file_size || 0) + ' bytes)\n\n' + _pdd.content + _truncMark;
+                return { result: _pdOut };
+            }
+            return { error: _pdd.error || '解析失败' };
+        }
+        // ═══════════════════════════════════════════════════
+        // ★ 股票数据工具 (A股 — 东方财富数据源)
+        // ═══════════════════════════════════════════════════
+        if (action === 'stock_realtime') {
+            let _u = _apiBase + '?action=stock_realtime&symbol=' + encodeURIComponent(args.symbol) + authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok) {
+                let _arrow = _d.change_pct >= 0 ? '🔴📈' : '🟢📉';
+                let _out = '📈 **' + _d.name + ' (' + _d.symbol + ')** 实时行情\n\n' +
+                    _arrow + ' 最新价: **' + _d.price + '**  涨跌幅: **' + (_d.change_pct >= 0 ? '+' : '') + _d.change_pct + '%**  涨跌额: ' + (_d.change_amt >= 0 ? '+' : '') + _d.change_amt + '\n' +
+                    '📊 今开: ' + _d.open + '  最高: ' + _d.high + '  最低: ' + _d.low + '  昨收: ' + _d.prev_close + '\n' +
+                    '💰 成交量: ' + (_d.volume / 10000).toFixed(2) + '万手  成交额: ' + (_d.amount / 100000000).toFixed(2) + '亿  换手率: ' + _d.turnover + '%\n';
+                if (_d.pe) _out += '📐 市盈率(动): ' + _d.pe + '  总市值: ' + (_d.market_cap / 100000000).toFixed(0) + '亿';
+                return { result: _out };
+            }
+            return { error: _d.error || '获取行情失败' };
+        }
+        if (action === 'stock_kline') {
+            let _u = _apiBase + '?action=stock_kline&symbol=' + encodeURIComponent(args.symbol);
+            if (args.period) _u += '&period=' + encodeURIComponent(args.period);
+            if (args.start) _u += '&start=' + encodeURIComponent(args.start);
+            if (args.end) _u += '&end=' + encodeURIComponent(args.end);
+            if (args.adjust) _u += '&adjust=' + encodeURIComponent(args.adjust);
+            if (args.count) _u += '&count=' + encodeURIComponent(args.count);
+            _u += authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.data) {
+                let _out = '📊 **' + _d.name + ' (' + _d.symbol + ')** ' + _d.period + ' K线 (共' + _d.count + '条)\n\n';
+                _out += '| 日期 | 开盘 | 收盘 | 最高 | 最低 | 涨跌幅 | 成交量 |\n';
+                _out += '|------|------|------|------|------|--------|--------|\n';
+                _d.data.slice(-15).forEach(function(row) {
+                    _out += '| ' + row.date + ' | ' + row.open + ' | ' + row.close + ' | ' + row.high + ' | ' + row.low + ' | ' + (row.change_pct >= 0 ? '+' : '') + row.change_pct + '% | ' + (row.volume / 10000).toFixed(1) + '万 |\n';
+                });
+                return { result: _out };
+            }
+            return { error: _d.error || '获取K线失败' };
+        }
+        if (action === 'stock_sector_flow') {
+            let _u = _apiBase + '?action=stock_sector_flow';
+            if (args.sector_type) _u += '&sector_type=' + encodeURIComponent(args.sector_type);
+            _u += authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.data) {
+                let _out = '💰 **' + _d.type + '板块资金流向** (主力净流入TOP15)\n\n';
+                _out += '| 板块 | 涨跌幅 | 主力净流入 | 超大单 | 大单 |\n';
+                _out += '|------|--------|------------|--------|------|\n';
+                _d.data.slice(0, 15).forEach(function(s) {
+                    let _flow = (s.main_inflow / 100000000).toFixed(2);
+                    _out += '| ' + s.name + ' | ' + (s.change_pct >= 0 ? '+' : '') + s.change_pct + '% | ' + (_flow >= 0 ? '+' : '') + _flow + '亿 | ' + (s.super_large_inflow / 100000000).toFixed(2) + '亿 | ' + (s.large_inflow / 100000000).toFixed(2) + '亿 |\n';
+                });
+                return { result: _out };
+            }
+            return { error: _d.error || '获取板块资金流失败' };
+        }
+        if (action === 'stock_dragon_tiger') {
+            let _u = _apiBase + '?action=stock_dragon_tiger';
+            if (args.date) _u += '&date=' + encodeURIComponent(args.date);
+            _u += authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.data) {
+                let _out = '🐉 **龙虎榜** (' + _d.date + ', 共' + _d.count + '只)\n\n';
+                _out += '| 股票 | 收盘价 | 涨跌幅 | 净买入额 | 买入额 | 卖出额 |\n';
+                _out += '|------|--------|--------|----------|--------|--------|\n';
+                _d.data.slice(0, 20).forEach(function(item) {
+                    _out += '| ' + item.name + '(' + item.code + ') | ' + item.close + ' | ' + (item.change_pct >= 0 ? '+' : '') + item.change_pct + '% | ' + (item.net_amount / 10000).toFixed(0) + '万 | ' + (item.buy_amount / 10000).toFixed(0) + '万 | ' + (item.sell_amount / 10000).toFixed(0) + '万 |\n';
+                });
+                return { result: _out };
+            }
+            return { error: _d.error || '获取龙虎榜失败' };
+        }
+        if (action === 'stock_north_flow') {
+            let _u = _apiBase + '?action=stock_north_flow' + authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok) {
+                let _total = ((_d.sh_connect.net_inflow || 0) + (_d.sz_connect.net_inflow || 0)) / 100000000;
+                let _out = '🌊 **北向资金实时流向**\n\n' +
+                    '📥 沪股通净流入: **' + ((_d.sh_connect.net_inflow || 0) / 100000000).toFixed(2) + '亿**\n' +
+                    '📥 深股通净流入: **' + ((_d.sz_connect.net_inflow || 0) / 100000000).toFixed(2) + '亿**\n' +
+                    '💰 合计净流入: **' + (_total >= 0 ? '+' : '') + _total.toFixed(2) + '亿**';
+                return { result: _out };
+            }
+            return { error: _d.error || '获取北向资金失败' };
+        }
+        if (action === 'stock_diagnosis') {
+            let _u = _apiBase + '?action=stock_diagnosis&symbol=' + encodeURIComponent(args.symbol) + authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok) {
+                let _arrow = _d.change_pct >= 0 ? '🔴📈' : '🟢📉';
+                let _out = '🏥 **' + _d.name + ' (' + _d.symbol + ')** 综合诊断\n\n' +
+                    _arrow + ' 最新价: **' + _d.price + '**  涨跌幅: **' + (_d.change_pct >= 0 ? '+' : '') + _d.change_pct + '%**\n' +
+                    '📐 市盈率(动): ' + (_d.pe || '-') + '  市净率: ' + (_d.pb || '-') + '\n' +
+                    '🔄 换手率: ' + _d.turnover + '%  总市值: ' + (_d.market_cap ? (_d.market_cap / 100000000).toFixed(0) + '亿' : '-');
+                return { result: _out };
+            }
+            return { error: _d.error || '获取诊断失败' };
+        }
+        if (action === 'stock_indicators') {
+            let _u = _apiBase + '?action=stock_indicators&symbol=' + encodeURIComponent(args.symbol);
+            if (args.count) _u += '&count=' + encodeURIComponent(args.count);
+            _u += authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.data) {
+                let _out = '📐 **' + _d.name + ' (' + _d.symbol + ')** 技术指标\n\n';
+                _d.data.forEach(function(row) {
+                    _out += '**' + row.date + '**\n';
+                    if (row.MA5) _out += '  MA5=' + row.MA5 + ' MA10=' + row.MA10 + ' MA20=' + row.MA20;
+                    if (row.DIF) _out += '\n  DIF=' + row.DIF + ' DEA=' + row.DEA + ' MACD=' + row.MACD;
+                    if (row.K) _out += '\n  K=' + row.K + ' D=' + row.D + ' J=' + row.J;
+                    if (row.RSI6) _out += '\n  RSI6=' + row.RSI6 + ' RSI12=' + row.RSI12 + ' RSI24=' + row.RSI24;
+                    if (row.BOLL_MID) _out += '\n  布林上轨=' + row.BOLL_UP + ' 中轨=' + row.BOLL_MID + ' 下轨=' + row.BOLL_DN;
+                    _out += '\n\n';
+                });
+                return { result: _out };
+            }
+            return { error: _d.error || '计算指标失败' };
+        }
+        if (action === 'stock_chart') {
+            let _u = _apiBase + '?action=stock_chart&symbol=' + encodeURIComponent(args.symbol);
+            if (args.period) _u += '&period=' + encodeURIComponent(args.period);
+            if (args.count) _u += '&count=' + encodeURIComponent(args.count);
+            if (args.adjust) _u += '&adjust=' + encodeURIComponent(args.adjust);
+            if (args.indicators) _u += '&indicators=' + encodeURIComponent(args.indicators);
+            _u += authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.chart_url) {
+                let _out = '📈 **' + _d.name + ' (' + _d.symbol + ')** K线分析图 (' + _d.period + ', ' + _d.data_points + '条)\n\n' +
+                    '![K线图](' + _d.chart_url + ')';
+                return { result: _out };
+            }
+            return { error: _d.error || '生成图表失败' };
+        }
+        if (action === 'stock_market_overview') {
+            let _u = _apiBase + '?action=stock_market_overview' + authSuffix;
+            let _r = await fetch(_u);
+            let _d = await _r.json();
+            if (_d.ok && _d.data) {
+                let _out = '🏛️ **A股市场主要指数**\n\n';
+                _d.data.forEach(function(idx) {
+                    let _arrow = idx.change_pct >= 0 ? '🔴📈' : '🟢📉';
+                    _out += _arrow + ' **' + idx.name + '**: ' + idx.price + ' (' + (idx.change_pct >= 0 ? '+' : '') + idx.change_pct + '%)\n';
+                });
+                return { result: _out };
+            }
+            return { error: _d.error || '获取市场概览失败' };
         }
         if (action === 'file_grep') {
             let _fgUrl = _apiBase + '?action=file_grep&pattern=' + encodeURIComponent(args.pattern) + '&path=' + encodeURIComponent(args.path || '/var/www/html/oneapichat');
@@ -247,6 +511,14 @@ async function engineApiHandler(action, args) {
                     _fgOut += '─── ' + _fr.file + ' ───\n';
                     _fr.matches.forEach(function(_m) { _fgOut += _m + '\n\n'; });
                 });
+                // ★ 保底截断: 即使引擎已限制, 客户端再兜一层, 防止超长结果撑爆上下文
+                var _fgTotalChars = _fgd.total_chars || _fgOut.length;
+                if (_fgd.truncated) {
+                    _fgOut += '...(结果过多已截断: ' + (_fgd.note || '请缩小搜索范围或减少 max_results') + ')\n';
+                }
+                if (_fgOut.length > 100000) {
+                    _fgOut = _fgOut.substring(0, 100000) + '\n\n...(结果过长已截断: 原始约 ' + _fgTotalChars + ' 字符 → 仅保留前 100000 字符)';
+                }
                 return { result: _fgOut };
             }
             return { error: _fgd.error || '搜索失败' };
@@ -423,6 +695,48 @@ async function engineApiHandler(action, args) {
             fetch(_wrUrl).catch(function(){}); // 异步启动，不等待
             return { ok: true };
         }
+        // ===== 视频猎手 Video Hunter (B站下载/BT磁力/云盘) =====
+        if (action === 'video_hunter') {
+            var vhAction = args.action || '';
+            var vhArgs = args.args || {};
+            var _vhUrl = _apiBase + '?action=video_hunter&sub_action=' + encodeURIComponent(vhAction);
+            // 拼接参数
+            Object.keys(vhArgs).forEach(function(k) {
+                var v = vhArgs[k];
+                if (v !== undefined && v !== null && v !== '') {
+                    _vhUrl += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(typeof v === 'object' ? JSON.stringify(v) : String(v));
+                }
+            });
+            _vhUrl += authSuffix;
+            try {
+                var _vhr = await fetch(_vhUrl);
+                var _vhd = await _vhr.json();
+                if (_vhd.error) return { error: _vhd.error };
+                return { result: typeof _vhd === 'string' ? _vhd : JSON.stringify(_vhd, null, 2) };
+            } catch(_vhErr) {
+                return { error: '视频猎手执行失败: ' + _vhErr.message };
+            }
+        }
+        if (action === 'bilibili') {
+            var biliAction = args.action || '';
+            var biliArgs = args.args || {};
+            var _biliUrl = _apiBase + '?action=bilibili_bridge&sub_action=' + encodeURIComponent(biliAction);
+            Object.keys(biliArgs).forEach(function(k) {
+                var v = biliArgs[k];
+                if (v !== undefined && v !== null && v !== '') {
+                    _biliUrl += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(typeof v === 'object' ? JSON.stringify(v) : String(v));
+                }
+            });
+            _biliUrl += authSuffix;
+            try {
+                var _biliR = await fetch(_biliUrl);
+                var _biliD = await _biliR.json();
+                if (_biliD.error) return { error: _biliD.error };
+                return { result: typeof _biliD === 'string' ? _biliD : JSON.stringify(_biliD, null, 2) };
+            } catch(_biliErr) {
+                return { error: 'B站工具执行失败: ' + _biliErr.message };
+            }
+        }
         return { error: '未知操作: ' + action };
     } catch(e) {
         console.error('[EngineAPI] ' + action + ' 失败:', e.message, '(请确认引擎服务运行正常)');
@@ -526,5 +840,3 @@ function loadEmbedConfig() {
             }
         }).catch(function() {});
 }
-
-

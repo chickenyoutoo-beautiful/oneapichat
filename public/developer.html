@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>开发者中心 - OneAPI Chat</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; }
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 1.4rem; color: #58a6ff; }
+  .header p { color: #8b949e; margin-top: 4px; font-size: 0.9rem; }
+  .btn-cli { background: #238636; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
+  .btn-cli:hover { background: #2ea043; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 30px 40px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; transition: border-color 0.2s, transform 0.2s; }
+  .card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+  .card h3 { color: #58a6ff; margin-bottom: 8px; font-size: 1.1rem; }
+  .card p { color: #8b949e; font-size: 0.85rem; line-height: 1.5; }
+  .card .status { display: inline-block; margin-top: 12px; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .status.ok { background: #1b4332; color: #56d364; }
+  .status.warn { background: #3d2e00; color: #d29922; }
+  .status.err { background: #3d1114; color: #f85149; }
+  .back { display: inline-block; margin-bottom: 20px; color: #58a6ff; text-decoration: none; font-size: 0.9rem; }
+  .back:hover { text-decoration: underline; }
+  .api-test { margin-top: 12px; padding: 8px 14px; background: #21262d; border: 1px solid #30363d; border-radius: 8px; color: #58a6ff; cursor: pointer; font-size: 0.8rem; }
+  .api-test:hover { background: #30363d; }
+  .result { margin-top: 8px; font-size: 0.8rem; color: #8b949e; word-break: break-all; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+
+  /* CLI 模态框 */
+  .cli-overlay { display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.8); }
+  .cli-overlay.active { display: flex; align-items: center; justify-content: center; }
+  .cli-box { background: #0d1117; border: 1px solid #30363d; border-radius: 12px; width: 90vw; max-width: 900px; height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+  .cli-header { background: #161b22; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
+  .cli-header span { color: #58a6ff; font-weight: 600; font-size: 0.95rem; }
+  .cli-close { background: none; border: none; color: #8b949e; font-size: 1.4rem; cursor: pointer; padding: 0 8px; }
+  .cli-close:hover { color: #f85149; }
+  .cli-terminal { flex: 1; padding: 12px 16px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; overflow-y: auto; color: #e1e4e8; line-height: 1.6; }
+  .cli-terminal .prompt { color: #56d364; }
+  .cli-terminal .output { color: #8b949e; white-space: pre-wrap; }
+  .cli-terminal .error { color: #f85149; }
+  .cli-input-line { display: flex; align-items: center; padding: 8px 16px; background: #161b22; border-top: 1px solid #30363d; }
+  .cli-input-line span { color: #56d364; margin-right: 8px; font-family: monospace; }
+  .cli-input-line input { flex: 1; background: none; border: none; color: #e1e4e8; font-family: monospace; font-size: 0.85rem; outline: none; }
+  .cli-hint { padding: 6px 16px; font-size: 0.72rem; color: #484f58; background: #0d1117; border-top: 1px solid #21262d; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>🔧 OneAPI Chat — 开发者中心</h1>
+    <p>引擎状态 · API 测试 · 系统信息 · CLI</p>
+  </div>
+  <button class="btn-cli" onclick="openCloudCLI()">☁️ CloudCLI</button>
+</div>
+<div class="container">
+  <a href="/oneapichat/" class="back">← 返回 OneAPI Chat</a>
+  <div class="grid">
+    <div class="card">
+      <h3>Python 引擎</h3>
+      <p>后端引擎服务 (port 8766) — 负责 Agent、记忆、工作流、浏览器控制等。</p>
+      <span class="status ok" id="engine-status">检测中...</span>
+      <button class="api-test" onclick="testEngine()">测试 /engine/health</button>
+      <div class="result" id="engine-result"></div>
+    </div>
+    <div class="card">
+      <h3>PHP-FPM</h3>
+      <p>PHP 8.3 FastCGI — 处理认证、配置、聊天记录、API 代理。</p>
+      <span class="status ok">运行中</span>
+    </div>
+    <div class="card">
+      <h3>Nginx</h3>
+      <p>反向代理 + SSL 终止 + 静态资源服务。</p>
+      <span class="status ok">运行中</span>
+    </div>
+    <div class="card">
+      <h3>Agent 数量</h3>
+      <p>当前用户的 Agent 实例数。</p>
+      <div class="result" id="agent-count">点击刷新加载</div>
+      <button class="api-test" onclick="loadAgents()">刷新</button>
+    </div>
+    <div class="card">
+      <h3>系统负载</h3>
+      <p>引擎所在主机的 CPU / 内存 / 磁盘概览。</p>
+      <div class="result" id="sys-info">点击刷新加载</div>
+      <button class="api-test" onclick="loadSysInfo()">刷新</button>
+    </div>
+    <div class="card">
+      <h3>通知流 (SSE)</h3>
+      <p>Server-Sent Events 实时推送 Agent 状态变更。</p>
+      <span class="status warn" id="sse-status">未连接</span>
+      <button class="api-test" onclick="testSSE()">连接测试</button>
+    </div>
+  </div>
+</div>
+
+<!-- CLI 模态框 -->
+<div class="cli-overlay" id="cliOverlay">
+  <div class="cli-box">
+    <div class="cli-header">
+      <span>〉 OneAPI Chat CLI</span>
+      <button class="cli-close" onclick="closeCLI()">×</button>
+    </div>
+    <div class="cli-terminal" id="cliTerminal">
+      <div class="output">Welcome to OneAPI Chat CLI v1.0</div>
+      <div class="output">Type "help" for available commands.</div>
+      <div class="output">─────────────────────────────────────</div>
+    </div>
+    <div class="cli-hint">提示: help · status · engine · agents · skills · config · clear · 支持 /engine/* 和 /oneapichat/api/* 代理调用</div>
+    <div class="cli-input-line">
+      <span>$</span>
+      <input type="text" id="cliInput" placeholder="输入命令..." autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+</div>
+
+<script>
+// === 卡片功能 ===
+async function apiGet(url) {
+  const res = await fetch(url);
+  return { status: res.status, data: await res.json() };
+}
+async function testEngine() {
+  const s = document.getElementById('engine-status');
+  const r = document.getElementById('engine-result');
+  try {
+    const d = await apiGet('/engine/health');
+    s.textContent = '✅ 正常';
+    s.className = 'status ok';
+    r.textContent = JSON.stringify(d.data, null, 2);
+  } catch(e) {
+    s.textContent = '❌ 不可达';
+    s.className = 'status err';
+    r.textContent = e.message;
+  }
+}
+async function loadAgents() {
+  const el = document.getElementById('agent-count');
+  el.textContent = '加载中...';
+  try {
+    const token = localStorage.getItem('authToken') || '';
+    const d = await apiGet('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + token);
+    el.textContent = (d.data.agents ? d.data.agents.length : 0) + ' 个 Agent';
+  } catch(e) { el.textContent = '加载失败: ' + e.message; }
+}
+async function loadSysInfo() {
+  const el = document.getElementById('sys-info');
+  el.textContent = '加载中...';
+  try {
+    const d = await apiGet('/engine/sys/info');
+    el.textContent = JSON.stringify(d.data, null, 2).slice(0, 200);
+  } catch(e) { el.textContent = '加载失败: ' + e.message; }
+}
+function testSSE() {
+  const s = document.getElementById('sse-status');
+  try {
+    const es = new EventSource('/engine/events?user_id=test');
+    es.onopen = () => { s.textContent = '✅ 已连接'; s.className = 'status ok'; };
+    es.onerror = () => { s.textContent = '⚠️ 连接断开'; s.className = 'status warn'; };
+    setTimeout(() => es.close(), 3000);
+  } catch(e) { s.textContent = '❌ ' + e.message; s.className = 'status err'; }
+}
+testEngine();
+
+// === CLI 功能 ===
+function openCloudCLI() {
+  window.open('/developer/', '_blank');
+  document.getElementById('cliInput').focus();
+}
+function closeCLI() {
+  // closed
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeCLI();
+});
+
+const term = document.getElementById('cliTerminal');
+const input = document.getElementById('cliInput');
+
+function appendLine(text, cls = 'output') {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+}
+
+input.addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  const cmd = input.value.trim();
+  if (!cmd) return;
+  appendLine('$ ' + cmd, 'prompt');
+  input.value = '';
+
+  try {
+    if (cmd === 'help') {
+      appendLine('可用命令:');
+      appendLine('  help          - 显示帮助');
+      appendLine('  status        - 系统状态总览');
+      appendLine('  engine        - 引擎健康检查');
+      appendLine('  agents        - 列出所有 Agent');
+      appendLine('  skills        - 列出所有技能');
+      appendLine('  config        - 查看当前配置');
+      appendLine('  api <path>    - 调用 /oneapichat/api/ <path>');
+      appendLine('  eng <path>    - 调用 /engine/<path>');
+      appendLine('  clear         - 清屏');
+    } else if (cmd === 'clear') {
+      term.innerHTML = '';
+    } else if (cmd === 'status') {
+      const [eng, skills] = await Promise.all([
+        apiGet('/engine/health').catch(() => null),
+        apiGet('/oneapichat/api/skills_api.php?action=list').catch(() => null),
+      ]);
+      appendLine('⚙️ 引擎: ' + (eng ? '✅ 运行中' : '❌ 不可达'));
+      appendLine('📦 技能: ' + (skills ? skills.data.count + ' 个' : '加载失败'));
+      appendLine('🖥️ PHP-FPM: ✅ 运行中');
+    } else if (cmd === 'engine') {
+      const d = await apiGet('/engine/health');
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else if (cmd === 'agents') {
+      const token = localStorage.getItem('authToken') || '';
+      const d = await apiGet('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + token);
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else if (cmd === 'skills') {
+      const d = await apiGet('/oneapichat/api/skills_api.php?action=list');
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else if (cmd === 'config') {
+      const token = localStorage.getItem('authToken') || '';
+      const d = await apiGet('/oneapichat/api/config.php?action=get&auth_token=' + token);
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else if (cmd.startsWith('api ')) {
+      const path = cmd.slice(4);
+      const token = localStorage.getItem('authToken') || '';
+      const sep = path.includes('?') ? '&' : '?';
+      const d = await apiGet('/oneapichat/api/' + path + sep + 'auth_token=' + token);
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else if (cmd.startsWith('eng ')) {
+      const path = cmd.slice(4);
+      const d = await apiGet('/engine/' + path);
+      appendLine(JSON.stringify(d.data, null, 2));
+    } else {
+      appendLine('未知命令: ' + cmd + ' (输入 help 查看可用命令)', 'error');
+    }
+  } catch(err) {
+    appendLine('错误: ' + err.message, 'error');
+  }
+});
+</script>
+</body>
+</html>

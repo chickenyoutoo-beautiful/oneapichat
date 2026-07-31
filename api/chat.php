@@ -133,7 +133,9 @@ if ($action === 'save_config' && $userId && $method === 'POST') {
         $protectedKeys = ['apiKey', 'searchApiKey', 'searchApiKeyBrave', 'searchApiKeyGoogle', 'searchApiKeyTavily',
             'ep_apikey', 'ep_apikey_2', 'visionApiKey', 'imageApiKey', 'imageApiKey2',
             'providerApiKey', 'providerApiKey2', 'providerApiKey3',
-            'apiKeyAntthropic', 'apiKeyDeepseek', 'apiKeyOpenai', 'apiKeyMinimax', 'apiKeyGoogle'];
+            'apiKeyAntthropic', 'apiKeyDeepseek', 'apiKeyOpenai', 'apiKeyMinimax', 'apiKeyGoogle',
+            'apiKeyXAI', 'apiKeyGemini', 'apiKeyZhipu', 'apiKeyQwen', 'apiKeyMoonshot',
+            'apiKeyDoubao', 'apiKeyMiMo', 'apiKeyOpenRouter', 'apiKeyLlamaCpp', 'apiKeyNvidia', 'apiKeyLongCat', 'apiKeyCustom'];
         foreach ($protectedKeys as $key) {
             if (empty($newConfig[$key]) && !empty($existingConfig[$key])) {
                 $newConfig[$key] = $existingConfig[$key];

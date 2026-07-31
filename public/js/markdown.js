@@ -100,7 +100,11 @@ function _flushStreamRender_batched(chatId, st) {
             try {
                 var _blocks = mb.querySelectorAll('pre code[class*="language-"]:not(.hljs):not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"])');
                 for (var _bi = 0; _bi < _blocks.length && _bi < 20; _bi++) {
-                    try { hljs.highlightElement(_blocks[_bi]); } catch(e) {}
+                    try {
+                        var _lang = (_blocks[_bi].className || '').match(/language-(\S+)/);
+                        if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
+                        hljs.highlightElement(_blocks[_bi]);
+                    } catch(e) {}
                 }
             } catch(e) { /* 高亮失败不影响渲染 */ }
         }
@@ -479,7 +483,11 @@ const MarkdownRenderer = {
         if (typeof hljs === 'undefined') return;
         var _blocks = container.querySelectorAll('pre code:not(.hljs):not([class*="mermaid"]):not([class*="gantt"]):not([class*="dot"])');
         for (var _i = 0; _i < _blocks.length && _i < 30; _i++) {
-            try { hljs.highlightElement(_blocks[_i]); } catch (e) {}
+            try {
+                var _lang = (_blocks[_i].className || '').match(/language-(\S+)/);
+                if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
+                hljs.highlightElement(_blocks[_i]);
+            } catch (e) {}
         }
     },
 

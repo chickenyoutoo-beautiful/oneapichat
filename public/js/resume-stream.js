@@ -17,11 +17,49 @@ window.ResumeStream = (function() {
         } catch(e) {}
     }
 
-    async function _readSSE(sid, chatId, pendingMsg, isResume) {
+    function _cancelStream(sid) {
+        if (!sid) return;
+        // ★ 通知引擎后台生成线程停止(设置cancel标记), 否则用户停止后引擎仍继续生成
+        try {
+            fetch('/engine/chat/stream/' + encodeURIComponent(sid), { method: 'DELETE' }).catch(function(){});
+        } catch(e) {}
+    }
+
+    function _getStopSignal(chatId) {
+        try {
+            if (typeof abortControllerMap !== 'undefined' && abortControllerMap && abortControllerMap[chatId] && abortControllerMap[chatId].signal) {
+                return abortControllerMap[chatId].signal;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    function _isUserStopped(chatId) {
+        // userAbortMap 是顶层 let(全局词法作用域), 不是 window 属性, 用安全引用判断
+        try {
+            return !!(typeof userAbortMap !== 'undefined' && userAbortMap && userAbortMap[chatId]);
+        } catch(e) { return false; }
+    }
+
+    async function _readSSE(sid, chatId, pendingMsg, isResume, stopSignal) {
         var url = '/engine/chat/stream/' + encodeURIComponent(sid);
         var resp;
-        try { resp = await fetch(url); } catch(e) { return null; }
+        try {
+            resp = await fetch(url, stopSignal ? { signal: stopSignal } : undefined);
+        } catch(e) {
+            // ★ 停止键: fetch被中止时返回aborted标记, 阻止main.js回退直连再次请求
+            if (_isUserStopped(chatId)) {
+                _cancelStream(sid);
+                return {fullText:'', reasoningText:'', usage:null, toolCalls:[], completed:false, aborted:true};
+            }
+            return null;
+        }
         if (!resp.ok) { return null; }
+        // ★ 停止键: 响应已返回但已被中止(JSON快路径/未开始读取时)也要立即退出
+        if (_isUserStopped(chatId) || (stopSignal && stopSignal.aborted)) {
+            _cancelStream(sid);
+            return {fullText:'', reasoningText:'', usage:null, toolCalls:[], completed:false, aborted:true};
+        }
 
         // ★ 已完成流返回JSON(非SSE) — 直接解析,避免TCP分片导致done事件丢失
         var _ct = resp.headers.get('content-type')||'';
@@ -61,7 +99,7 @@ window.ResumeStream = (function() {
         try { reader = resp.body.getReader(); } catch(e) { return null; }
         if (isResume) { showToast('🔄 续接流式...', 'info'); }
 
-        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false, readerEof=false, streamError=null;
+        var buf='', full='', reasoning='', tcList=[], usage=null, done=false, streamCompleted=false, readerEof=false, streamError=null, aborted=false;
         var _decoder = new TextDecoder();  // ★ 复用解码器，避免 UTF-8 多字节字符跨 chunk 损坏
 
         var timer = setInterval(function(){
@@ -72,9 +110,17 @@ window.ResumeStream = (function() {
         }, 500);
 
         while (!done) {
+            // ★ 停止键: 每轮读取前检查中止状态, 立即中断而不等模型思考完
+            if (_isUserStopped(chatId) || (stopSignal && stopSignal.aborted)) {
+                aborted = true;
+                break;
+            }
             if (Date.now() - (pendingMsg._rsStart || Date.now()) > 300000) break;
             var rr;
-            try { rr = await reader.read(); } catch(e) { break; }
+            try { rr = await reader.read(); } catch(e) {
+                if (_isUserStopped(chatId) || (stopSignal && stopSignal.aborted)) aborted = true;
+                break;
+            }
             done = rr.done;
             if (rr.done) readerEof = true;  // ★ 记录是否收到EOF(引擎正常关闭连接)
             if (rr.value) buf += _decoder.decode(rr.value, {stream:true});
@@ -218,6 +264,12 @@ window.ResumeStream = (function() {
             }
         }
         clearInterval(timer);
+        if (aborted) {
+            // ★ 用户停止: 通知引擎取消后台生成 + 返回aborted标记(不回退直连)
+            _cancelStream(sid);
+            try { cleanupStreamState(chatId); } catch(e) {}
+            return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:[], completed:false, aborted:true};
+        }
         // ★ 刷新缓冲区:流结束后处理buf中残留的SSE数据(跨chunk拆分)
         if (buf && buf.trim()) {
             var _remLines = buf.split('\n');
@@ -318,10 +370,92 @@ window.ResumeStream = (function() {
         return {fullText:full, reasoningText:reasoning, usage:usage, toolCalls:tcList, completed:streamCompleted, error:streamError};
     }
 
+    // ★ 工具调用续接: 恢复的流返回tool_calls → 执行工具 → 交还sendMessage继续循环
+    // 解决刷新后tool_calls被丢弃导致的输出中断+400问题(DeepSeek等)
+    async function _resumeToolHandoff(toolCalls, pm, chatId, isCurrentChat) {
+        try {
+            if (!window.executeToolCallForRetry) {
+                console.warn('[RS resume] executeToolCallForRetry 未加载,无法续接工具调用');
+                return false;
+            }
+            // 标准化tool_calls(轻量版,与main.js normalize保持一致)
+            var normalized = toolCalls.filter(function(tc){ return tc && tc.function && tc.function.name; }).map(function(tc){
+                var argStr = typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments || {});
+                try { JSON.parse(argStr); } catch(_eArgs) {
+                    argStr = argStr.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+                    var _qc = (argStr.match(/"/g)||[]).length; if (_qc % 2 !== 0) argStr += '"';
+                    var _ob = (argStr.match(/\{/g)||[]).length, _cb = (argStr.match(/\}/g)||[]).length;
+                    while (_cb < _ob) { argStr += '}'; _cb++; } while (_ob < _cb) { argStr = '{' + argStr; _ob++; }
+                    try { JSON.parse(argStr); } catch(_e2){ argStr = '{}'; }
+                }
+                var tcId = (tc.id || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+                if (!tcId || tcId.length > 64) tcId = 'tc_' + Date.now();
+                var _norm = { id: tcId, type: tc.type || 'function', function: { name: tc.function.name, arguments: argStr } };
+                // ★ 保留Gemini thought_signature(Google API要求回传否则400)
+                if (tc.thought_signature) _norm.thought_signature = tc.thought_signature;
+                if (tc.function.thought_signature) _norm.function.thought_signature = tc.function.thought_signature;
+                return _norm;
+            });
+            pm.tool_calls = normalized;
+            console.log('[RS resume] 工具续接: 执行 ' + normalized.length + ' 个工具调用');
+
+            // 执行每个工具并追加结果到聊天历史
+            var _body = { messages: [] };
+            for (var _ti = 0; _ti < normalized.length; _ti++) {
+                var tc = normalized[_ti];
+                var toolRes = { error: null, result: null };
+                try {
+                    toolRes = await window.executeToolCallForRetry(tc, null, {
+                        body: _body, pendingMsg: pm, chatId: chatId,
+                        currentChatId: currentChatId, activeBubbleMap: activeBubbleMap, chats: chats
+                    }) || { error: null, result: null };
+                } catch(_te) { toolRes = { error: String(_te && _te.message || _te), result: null }; }
+                var contentStr = toolRes.error || toolRes.result || '(empty)';
+                contentStr = typeof contentStr === 'string' ? contentStr : JSON.stringify(contentStr);
+                chats[chatId].messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr, _toolResult: true });
+            }
+
+            // ★ 最终化当前气泡(移除typing动画) — sendMessage会创建下一轮的新气泡
+            if (isCurrentChat) {
+                var _bub = activeBubbleMap[chatId];
+                if (_bub) {
+                    _bub.classList.remove('typing');
+                    var _md = _bub.querySelector('.markdown-body');
+                    if (_md && window._triggerPostRender) window._triggerPostRender(_md);
+                }
+            }
+
+            slimSaveChats();
+            saveChats();
+            if (isCurrentChat) loadChat(chatId);
+
+            // ★ 交还sendMessage继续工具循环(重建body.messages,处理Anthropic/链式/RS续传)
+            if (typeof window.sendMessage === 'function') {
+                console.log('[RS resume] 工具执行完毕,交还sendMessage继续循环');
+                // 异步启动,不阻塞resume返回
+                window.sendMessage(true).catch(function(_se){ console.warn('[RS resume] sendMessage续接错误:', _se.message); });
+            }
+            return true;
+        } catch(_he) {
+            console.warn('[RS resume] 工具续接异常:', _he.message);
+            return false;
+        }
+    }
+
     return {
+        // ★ 停止键: 取消当前chat的活跃可恢复流(通知引擎后台线程停止生成)
+        cancelActive: function(chatId) {
+            var sid = '';
+            var cid = '';
+            try { sid = localStorage.getItem('_rs_sid') || ''; } catch(e) {}
+            try { cid = localStorage.getItem('_rs_cid') || ''; } catch(e) {}
+            if (cid && cid !== 'pending' && chatId && cid !== chatId) return;
+            _cancelStream(sid);
+        },
         create: async function(messages, config, chatId, pendingMsg) {
             if (_active[chatId]) return null;
             _active[chatId]=true;
+            var _stopSignal = _getStopSignal(chatId);   // ★ 停止键: 捕获当前请求的中止信号
             try {
                 var _msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
                 var token = localStorage.getItem('authToken')||'';
@@ -329,6 +463,12 @@ window.ResumeStream = (function() {
                 var _proxyEnabled = (window.isProxyEnabled && window.isProxyEnabled()) || false;
                 var _proxyUrl = _proxyEnabled ? (window.getProxyUrl ? window.getProxyUrl() : '') : '';
                 // ★ 用相对URL避免代理拦截同源请求
+                // ★ 停止键: 创建阶段也接上中止信号(15s超时 + 用户停止), 避免停止后仍等创建完成
+                var _createCtrl = new AbortController();
+                var _createTimeout = setTimeout(function(){ _createCtrl.abort(); }, 15000);
+                if (_stopSignal && typeof _stopSignal.addEventListener === 'function') {
+                    _stopSignal.addEventListener('abort', function(){ _createCtrl.abort(); }, { once: true });
+                }
                 var cr = await fetch('/oneapichat/api/engine_api.php?action=chat_create', {
                     method:'POST',
                     headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
@@ -337,10 +477,14 @@ window.ResumeStream = (function() {
                         base_url:config.baseUrl||'', chat_id:chatId, msg_id: _msgId,
                         temperature:config.temp||0.7, max_tokens:config.tokens||4096,
                         tools:(config.tools&&config.tools.length)?config.tools:undefined,
-                        proxy_enabled: _proxyEnabled, proxy_url: _proxyUrl
+                        proxy_enabled: _proxyEnabled, proxy_url: _proxyUrl,
+                        // ★ Anthropic格式支持: 传递标志+端点URL,引擎走Anthropic Messages API流式
+                        anthropic_format: config.anthropicFormat ? true : false,
+                        anthropic_url: config.anthropicUrl || ''
                     }),
-                    signal:AbortSignal.timeout(15000)
+                    signal: _createCtrl.signal
                 });
+                clearTimeout(_createTimeout);
                 if (!cr.ok) { return null; }
                 var cd = await cr.json();
                 var sid = cd.stream_id;
@@ -348,7 +492,7 @@ window.ResumeStream = (function() {
                 if (!sid) { console.error('[RS] chat_create: no stream_id in response'); /*_clean_removed*/; return null; }
                 console.log('[RS] stream created:', sid, 'msgId:', msgId);
                 _saveState(sid, chatId, msgId);
-                var _result = await _readSSE(sid, chatId, pendingMsg, false);
+                var _result = await _readSSE(sid, chatId, pendingMsg, false, _stopSignal);
                 console.log('[RS] _readSSE result:', _result ? 'OK' : 'NULL');
                 return _result;
             } catch(e) { /*_clean_removed*/; return null; }
@@ -439,7 +583,7 @@ window.ResumeStream = (function() {
                     }
                 }
                 console.log('[RS resume] Before _readSSE — msgs count:', chats[chatId].messages.length);
-                var result = await _readSSE(sid, chatId, pm, true);
+                var result = await _readSSE(sid, chatId, pm, true, _getStopSignal(chatId));
                 console.log('[RS resume] After _readSSE — msgs count:', chats[chatId].messages.length);
                 console.log('[RS resume] _readSSE returned:', result ? ('fullText=' + (result.fullText||'').substring(0,80) + ' toolCalls=' + (result.toolCalls||[]).length) : 'NULL');
                 isTypingMap[chatId] = false;
@@ -450,10 +594,17 @@ window.ResumeStream = (function() {
                     pm.reasoning = result.reasoningText || '';
                     pm.usage = result.usage;
                     pm.time = Date.now();  // ★ 关键: 设置time防止被隐形截断检测误删
-                    console.log('[RS resume] SUCCESS — msgs count:', msgs.length, 'last 3 roles:', msgs.slice(-3).map(function(m){return m.role + (m.partial?'(partial)':'')}).join(', '));
                     // ★ 清除 _savedPartial: _readSSE的定时器可能已重新写入,
                     // 防止下方 loadChat 的旧版恢复逻辑读取它创建重复消息
                     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+
+                    // ★ 工具调用续接: 恢复的流返回tool_calls时,执行工具并交还sendMessage继续循环
+                    if (result.toolCalls && result.toolCalls.length > 0) {
+                        var _handedOff = await _resumeToolHandoff(result.toolCalls, pm, chatId, _isCurrentChat);
+                        if (_handedOff) return true;
+                    }
+
+                    console.log('[RS resume] SUCCESS — msgs count:', msgs.length, 'last 3 roles:', msgs.slice(-3).map(function(m){return m.role + (m.partial?'(partial)':'')}).join(', '));
                     slimSaveChats();
                     saveChats();
                     // ★ 无论是否当前chat都刷新: 清除旧气泡+渲染完成消息

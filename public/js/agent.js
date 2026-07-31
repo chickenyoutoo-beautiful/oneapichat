@@ -3,6 +3,12 @@
 
 // ==================== 三模式系统 (Plan / Agent / YOLO) ====================
 
+// ★ Plan 模式审批状态机
+// _planState: 'exploring'(只读探索) | 'reviewing'(等待用户审批) | 'executing'(已批准执行中)
+window._planState = 'exploring';
+window._planApproved = false;  // 用户是否已批准当前计划
+window._pendingPlanActions = [];  // 审批前暂存的写操作（备用）
+
 /** 获取当前 Agent 模式: 'off' | 'plan' | 'agent' | 'yolo' */
 function getAgentMode() {
     var val = localStorage.getItem('agentMode');
@@ -77,6 +83,12 @@ function setAgentMode(mode) {
         // ★ 切回 off: 退出特效(仅当从非 off 模式切换时)
         playAgentExitEffect(prevMode);
         window._agentAnimLock = setTimeout(function() { window._agentAnimLock = null; }, 700);
+        // ★ 关闭 Agent 模式时清除会话自动批准
+        if (window._sessionAutoApprove) {
+            window._sessionAutoApprove = false;
+            var _btn = document.getElementById('sessionAutoApproveBtn');
+            if (_btn) _btn.classList.remove('active');
+        }
     }
 
     updateAgentUI();
@@ -137,6 +149,17 @@ function setAgentMode(mode) {
     // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
     if (mode === 'plan') {
         AGENT_TOOL_KEYS.forEach(function(k) { window.setToolEnabled(k, false); });
+        // ★ 初始化 Plan 审批状态机
+        window._planState = 'exploring';
+        window._planApproved = false;
+        window._pendingPlanActions = [];
+    }
+    // ★ 从 Plan 模式切走时清理计划状态
+    if (mode !== 'plan' && prevMode === 'plan') {
+        window._planState = 'exploring';
+        window._planApproved = false;
+        window._pendingPlanActions = [];
+        if (window._agentPlan) { window.dismissFlowPanel(); }
     }
     // 模式切换不弹 toast(已有横幅和绿点提示)
     if (typeof renderToolPanel === 'function') renderToolPanel();
@@ -326,6 +349,9 @@ function _inheritChatContext(agentId) {
         if (recentMsgs.length === 0) return;
 
         // 在 system prompt 后插入上下文摘要
+        if (!chats[agentId].messages || chats[agentId].messages.length === 0) {
+            chats[agentId].messages = [{ role: 'system', content: 'You are an AI assistant in Agent mode.' }];
+        }
         var sysMsg = chats[agentId].messages[0];
         var contextLines = ['[上下文 - 从普通聊天继承]'];
         recentMsgs.forEach(function(m) {
@@ -506,18 +532,20 @@ window.refreshMemoryList = async function() {
     var listEl = document.getElementById('memoryList');
     if (!listEl || !token) return;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=get_memories&token=' + encodeURIComponent(token));
+        // ★ v2: 使用新事实列表端点
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=50&auth_token=' + encodeURIComponent(token));
         var data = await resp.json();
-        var memories = data.memories || [];
-        if (memories.length === 0) {
+        var facts = (data.ok && data.facts) ? data.facts : [];
+        if (facts.length === 0) {
             listEl.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">暂无记忆</div>';
         } else {
-            listEl.innerHTML = memories.map(function(m) {
-                var k = escapeHtml(m.key || '');
-                var c = escapeHtml((m.content || '').substring(0, 60));
+            listEl.innerHTML = facts.map(function(f) {
+                var rel = escapeHtml(f.relation || 'fact');
+                var c = escapeHtml((f.content || '').substring(0, 60));
+                var fid = f.id || '';
                 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;font-size:11px;border-bottom:1px solid #f3f4f6;" class="dark:border-gray-700">' +
-                    '<span><b>' + k + '</b>: ' + c + '</span>' +
-                    '<button onclick="window.deleteMemoryEntry(\'' + k.replace(/'/g, "\\'") + '\')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;">✕</button>' +
+                    '<span><b>' + rel + '</b>: ' + c + '</span>' +
+                    '<button onclick="window.deleteMemoryEntry(\'' + fid.replace(/'/g, "\\'") + '\')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;">✕</button>' +
                 '</div>';
             }).join('');
         }
@@ -526,6 +554,7 @@ window.refreshMemoryList = async function() {
     }
     window._loadCloudMemories();
     window._loadCloudIdentity();
+    if (window.refreshMemoryContext) window.refreshMemoryContext();
 };
 
 window.addMemoryEntry = async function() {
@@ -537,13 +566,14 @@ window.addMemoryEntry = async function() {
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
+        // ★ v2: 使用新端点,将 key+content 映射为 fact 的 entity+relation+target
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save&auth_token=' + encodeURIComponent(token), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: key, content: content })
+            body: JSON.stringify({ entity: 'user', relation: key, target: content, content: content, importance: 5, source: 'manual' })
         });
         var data = await resp.json();
-        if (data.success) {
+        if (data.ok) {
             keyEl.value = ''; contentEl.value = '';
             showToast('记忆已保存', 'success');
             window.refreshMemoryList();
@@ -553,18 +583,18 @@ window.addMemoryEntry = async function() {
     } catch(e) { showToast('保存失败', 'error'); }
 };
 
-window.deleteMemoryEntry = async function(key) {
-    if (!confirm('删除记忆: ' + key + '?')) return;
+window.deleteMemoryEntry = async function(factId) {
+    if (!confirm('删除此记忆?')) return;
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=delete_memory&token=' + encodeURIComponent(token), {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete&auth_token=' + encodeURIComponent(token), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: key })
+            body: JSON.stringify({ id: factId })
         });
         var data = await resp.json();
-        if (data.success) {
+        if (data.ok) {
             showToast('已删除', 'success');
             window.refreshMemoryList();
         }
@@ -576,17 +606,18 @@ window.clearAllMemories = async function() {
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=get_memories&token=' + encodeURIComponent(token));
+        // ★ v2: 获取所有事实并逐个删除
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=200&auth_token=' + encodeURIComponent(token));
         var data = await resp.json();
-        var memories = data.memories || [];
-        for (var i = 0; i < memories.length; i++) {
-            await fetch('/oneapichat/api/memory_api.php?action=delete_memory&token=' + encodeURIComponent(token), {
+        var facts = (data.ok && data.facts) ? data.facts : [];
+        for (var i = 0; i < facts.length; i++) {
+            await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete&auth_token=' + encodeURIComponent(token), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: memories[i].key })
+                body: JSON.stringify({ id: facts[i].id })
             });
         }
-        showToast('已清空 ' + memories.length + ' 条记忆', 'success');
+        showToast('已清空 ' + facts.length + ' 条记忆', 'success');
         window.refreshMemoryList();
     } catch(e) { showToast('清空失败', 'error'); }
 };
@@ -618,6 +649,13 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
     // 本地模型通常兼容deepseek-chat,直接用; 其他provider用当前模型
     var model = (_provider === 'llamacpp') ? 'deepseek-chat'
         : (localStorage.getItem('model') || localStorage.getItem('model_' + _provider) || 'deepseek-chat');
+    // ★ LongCat 仅支持 LongCat-2.0, 强制修正
+    if (_provider === 'longcat' || (baseUrl && baseUrl.indexOf('api.longcat.chat') >= 0)) {
+        model = 'LongCat-2.0';
+    }
+
+    // ★ 跟随用户设置的流式/非流式开关
+    var _stream = localStorage.getItem('stream') !== 'false';
 
     try {
         var resp = await window.proxyFetch(baseUrl + '/chat/completions', {
@@ -630,32 +668,72 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
                     { role: 'user', content: '请从以下对话提取值得长期记住的信息:\n' + conversation }
                 ],
                 temperature: 0.1,
-                max_tokens: 300
+                max_tokens: 300,
+                stream: _stream
             })
         });
         if (!resp.ok) return;
-        var data = await resp.json();
-        var text = data.choices?.[0]?.message?.content || '';
+
+        // ★ 根据流式/非流式解析响应
+        var text = '';
+        if (_stream) {
+            // 流式: 解析 SSE, 拼接所有 content chunk
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            while (true) {
+                var { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                var lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (var li = 0; li < lines.length; li++) {
+                    var line = lines[li].trim();
+                    if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                        try {
+                            var chunk = JSON.parse(line.substring(6));
+                            var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+                            if (delta && delta.content) text += delta.content;
+                        } catch(e) {}
+                    }
+                }
+            }
+        } else {
+            // 非流式: 直接解析 JSON
+            var data = await resp.json();
+            text = data.choices?.[0]?.message?.content || '';
+        }
         // 提取JSON
         var jsonMatch = text.match(/\[[\s\S]*\]/);
         if (!jsonMatch) return;
         var items = JSON.parse(jsonMatch[0]);
         if (!Array.isArray(items) || items.length === 0) return;
 
-        // 保存每条记忆
+        // ★ 保存每条记忆到新旧两个系统(过渡期双写)
         var saved = 0;
         for (var i = 0; i < items.length; i++) {
             if (!items[i].key || !items[i].content) continue;
-            await fetch('/oneapichat/api/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: items[i].key, content: items[i].content })
-            });
+            var fact = { entity: 'user', relation: items[i].key, target: items[i].content, content: items[i].content, importance: 6, source: 'auto_extract' };
+            // 新系统 (SQLite + chromadb)
+            try {
+                await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save&auth_token=' + encodeURIComponent(token), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fact)
+                });
+            } catch(e) {}
+            // 旧系统 (PHP JSON, 兼容)
+            try {
+                await fetch('/oneapichat/api/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: items[i].key, content: items[i].content })
+                });
+            } catch(e) {}
             saved++;
         }
         if (saved > 0) {
             console.log('[自动记忆] 已保存 ' + saved + ' 条');
             window._loadCloudMemories();
+            if (window.refreshMemoryList) window.refreshMemoryList();
         }
     } catch(e) { console.warn('[自动记忆] 失败:', e.message); }
 };
@@ -726,7 +804,106 @@ window._handleIdentityQuick = function(name) {
 };
 
 /**
+ * ★ 记忆v2: 统一内存上下文对象 (替代旧的8个全局变量)
+ */
+window.__memoryContext = {
+    contextBlock: null,   // 预格式化的 system prompt 块
+    persona: null,        // 人格信息
+    identity: null,       // 用户身份
+    facts: [],            // 事实列表
+    episodes: [],         // 最近对话
+    presetId: null,       // 当前人格预设ID
+    lastUpdated: null,
+};
+
+/**
+ * ★ 记忆v2: 刷新统一内存上下文 (带重试)
+ */
+window.refreshMemoryContext = async function() {
+    var token = localStorage.getItem('authToken');
+    if (!token) { console.log('[MemoryCtx] no token, skip'); return; }
+
+    // 加载记忆上下文 (带1次重试)
+    for (var retry = 0; retry < 2; retry++) {
+        try {
+            var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_context&auth_token=' + encodeURIComponent(token), { signal: AbortSignal.timeout(10000) });
+            var data = await resp.json();
+            if (data.ok && data.context) {
+                window.__memoryContext.contextBlock = data.context;
+                window.__memoryContext.lastUpdated = Date.now();
+                break;
+            } else if (data.error) {
+                console.warn('[MemoryCtx] server error:', data.error);
+            }
+        } catch(e) {
+            if (retry === 1) console.warn('[MemoryCtx] load failed after retry:', e.message);
+            else await new Promise(function(r) { setTimeout(r, 1000); }); // wait 1s before retry
+        }
+    }
+
+    // 加载人格预设信息
+    try {
+        var presp = await fetch('/oneapichat/api/engine_api.php?action=personality_load&auth_token=' + encodeURIComponent(token), { signal: AbortSignal.timeout(8000) });
+        var pdata = await presp.json();
+        if (pdata.ok && pdata.personality) {
+            window.__memoryContext.persona = pdata.personality.constitution || {};
+            window.__memoryContext.identity = pdata.personality.narrative || {};
+            window.__memoryContext.presetId = pdata.personality.preset_id;
+        }
+    } catch(e) { console.warn('[MemoryCtx] personality load failed:', e.message); }
+};
+
+/**
+ * ★ 记忆v2: 加载人格预设列表
+ */
+window.loadPersonalityPresets = async function() {
+    try {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=personality_presets', { signal: AbortSignal.timeout(5000) });
+        var data = await resp.json();
+        return data.ok ? data.presets : [];
+    } catch(e) { return []; }
+};
+
+/**
+ * ★ 记忆v2: 设置人格预设
+ */
+window.setPersonalityPreset = async function(presetId) {
+    if (!presetId) return;
+    // ★ 立即保存到 localStorage 确保刷新不丢失
+    localStorage.setItem('personalityPreset', presetId);
+    var token = localStorage.getItem('authToken');
+    if (!token) return;
+    try {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=personality_set_preset&auth_token=' + encodeURIComponent(token), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preset: presetId })
+        });
+        var data = await resp.json();
+        if (data.ok) {
+            showToast('人格已设为: ' + presetId, 'success');
+            if (window.refreshMemoryContext) window.refreshMemoryContext();
+            if (window.refreshMemoryList) window.refreshMemoryList();
+        }
+    } catch(e) { console.warn('[Personality] set preset failed:', e); }
+};
+
+/**
+ * ★ 恢复上次选择的人格(从localStorage)
+ */
+window.restorePersonalityPreset = async function() {
+    var saved = localStorage.getItem('personalityPreset');
+    if (saved) {
+        var sel = document.getElementById('personalityPreset');
+        if (sel) sel.value = saved;
+        // 异步加载引擎端人格上下文
+        if (window.refreshMemoryContext) window.refreshMemoryContext();
+    }
+};
+
+/**
  * 在 Agent 聊天加载时,从引擎加载记忆/人格/身份并注入 system prompt
+ * ★ v2: 优先使用新记忆端点,旧端点作为回退
  */
 async function _injectAgentMemoryIntoSystem(chatId) {
     if (chatId !== AGENT_CHAT_ID) return;
@@ -734,22 +911,46 @@ async function _injectAgentMemoryIntoSystem(chatId) {
     if (!chat || !chat.messages) return;
 
     try {
-        // 并行加载记忆、人格、身份
+        // ★ v2: 先尝试统一的 memory/context 端点
+        await window.refreshMemoryContext();
+        var ctxBlock = window.__memoryContext.contextBlock;
+
+        if (ctxBlock) {
+            // 使用新版上下文块
+            var sysIdx = chat.messages.findIndex(function(m) { return m.role === 'system'; });
+            if (sysIdx !== -1) {
+                var existingContent = chat.messages[sysIdx].content;
+                // 移除旧的记忆注入块
+                existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?(\n## (?!人格)|$)/, '');
+                existingContent = existingContent.replace(/\n*## 长期记忆[\s\S]*?(\n## (?!长期)|$)/, '');
+                existingContent = existingContent.replace(/\n*## 用户信息[\s\S]*?(\n## (?!用户)|$)/, '');
+                existingContent = existingContent.replace(/\n*## 最近对话摘要[\s\S]*?$/, '');
+                existingContent = existingContent.trim();
+                chat.messages[sysIdx].content = existingContent + '\n\n' + ctxBlock;
+            }
+            // 同时设置旧缓存兼容
+            window.__agentPersonaCache = window.__memoryContext.persona;
+            window.__agentIdentityCache = window.__memoryContext.identity;
+            window.__agentMemoryCache = window.__memoryContext.facts;
+            return;
+        }
+    } catch(e) {
+        console.warn('[Memory v2] context load failed, falling back to legacy:', e);
+    }
+
+    // ★ 回退到旧端点
+    try {
         var [personaRes, identityRes, memoryRes] = await Promise.all([
             window.loadAgentPersona(),
             window.loadAgentIdentity(),
             window.loadAgentMemory()
         ]);
 
-        // ★ 缓存到内存,供 API 调用时注入
         window.__agentPersonaCache = null;
         window.__agentIdentityCache = null;
         window.__agentMemoryCache = null;
 
         var sysIdx = chat.messages.findIndex(function(m) { return m.role === 'system'; });
-        var baseSys = '';
-
-        // 构建记忆注入块
         let memoryBlock = '';
 
         if (personaRes && personaRes.ok && personaRes.persona) {
@@ -781,8 +982,7 @@ async function _injectAgentMemoryIntoSystem(chatId) {
 
         if (memoryRes && memoryRes.ok && memoryRes.entries && memoryRes.entries.length > 0) {
             window.__agentMemoryCache = memoryRes.entries;
-            memoryBlock += '\n## 长期记忆\n';
-            memoryBlock += '以下是你与用户的长期记忆(记住这些信息以便后续对话):\n';
+            memoryBlock += '\n## 长期记忆\n以下是你与用户的长期记忆(记住这些信息以便后续对话):\n';
             var count = 0;
             for (var i = 0; i < memoryRes.entries.length && count < 20; i++) {
                 var e = memoryRes.entries[i];
@@ -794,10 +994,8 @@ async function _injectAgentMemoryIntoSystem(chatId) {
             }
         }
 
-        // 注入:替换或追加到第一条 system 消息
         if (sysIdx !== -1) {
             var existingContent = chat.messages[sysIdx].content;
-            // 移除旧的记忆注入块(如果有)
             existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?## 用户信息[\s\S]*?## 长期记忆[\s\S]*?(?=\n## |$)/, '');
             existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?## 长期记忆[\s\S]*?(?=\n## |$)/, '');
             existingContent = existingContent.replace(/\n*## 人格设定[\s\S]*?(?=\n## |$)/, '');
@@ -851,6 +1049,21 @@ function _startAgentHeartbeatIfNeeded() {
     };
 })();
 
+
+// ★ 会话级自动批准开关
+window.toggleSessionAutoApprove = function() {
+    window._sessionAutoApprove = !window._sessionAutoApprove;
+    var btn = document.getElementById('sessionAutoApproveBtn');
+    if (btn) {
+        btn.classList.toggle('active', window._sessionAutoApprove);
+        btn.title = window._sessionAutoApprove ? '✅ 会话自动批准已开启 — 点击关闭' : '会话自动批准 — 本轮免弹窗';
+    }
+    if (window._sessionAutoApprove) {
+        showToast('✅ 会话自动批准已开启: 本轮工具调用免弹窗', 'success', 3000);
+    } else {
+        showToast('⛔ 会话自动批准已关闭,恢复审批弹窗', 'info', 2000);
+    }
+};
 
 window.openAgentPanel = function() {
     var ap = $.agentPanel || getEl('agentPanel');
@@ -991,26 +1204,44 @@ window._renderAgentList = function(agents, container) {
     var roleLabels = {'explorer':'🔍搜','planner':'📐规','developer':'⚡开','verifier':'✅验','general':'🌐全'};
     container.innerHTML = names.map(function(name) {
         var a = agents[name];
-        var dotClass = a.status === 'running' ? 'running' : a.status === 'completed' ? 'completed' : a.status === 'failed' ? 'offline' : 'idle';
-        var preview = '';
-        if (a.result) {
-            preview = '<div class="text-xs text-gray-400 truncate mt-0.5" style="font-size:10px;">' + escapeHtml(a.result.substring(0, 50)) + '</div>';
-        } else if (a.error) {
-            preview = '<div class="text-xs text-red-400 truncate mt-0.5" style="font-size:10px;">' + escapeHtml(a.error.substring(0, 50)) + '</div>';
+        // ★ 解析_structured字段(存储时是JSON字符串)
+        if (a._structured && typeof a._structured === 'string') {
+            try { a._structured = JSON.parse(a._structured); } catch(e) {}
         }
+        var dotClass = a.status === 'running' ? 'running' : a.status === 'completed' ? 'completed' : a.status === 'failed' ? 'offline' : 'idle';
         var safeName = escapeHtml(name);
         var statusColor = a.status==='completed'?'#6366f1' : a.status==='failed'?'#ef4444' : a.status==='running'?'#10b981' : '#9ca3af';
         var role = a.role || 'general';
         var roleColor = roleColors[role] || '#9ca3af';
         var roleLabel = roleLabels[role] || role;
-        return '<div class="agent-sub-item" onclick="window.selectAgentChat(\'' + safeName + '\')">' +
+
+        // ★ 增强信息: 进度/工具/错误详情
+        var extraInfo = '';
+        if (a.status === 'running') {
+            var stepInfo = '';
+            if (typeof a._step !== 'undefined' && a._step > 0) {
+                stepInfo = ' (' + a._step + '/' + (a._maxSteps || '?') + '步)';
+            }
+            var toolInfo = a._lastTool ? ' 🔧' + a._lastTool : '';
+            extraInfo = '<span class="text-xs text-green-500" style="font-size:10px;">⏳运行中' + stepInfo + toolInfo + '</span>';
+        } else if (a.status === 'failed') {
+            var errPreview = (a.error || a.result || '').substring(0, 80);
+            extraInfo = '<div class="text-xs text-red-500 mt-0.5" style="font-size:10px;line-height:1.3;">⚠️ ' + escapeHtml(errPreview) + '</div>';
+        } else if (a.result) {
+            var summary = (a._structured && a._structured.summary) ? a._structured.summary : a.result.substring(0, 60);
+            extraInfo = '<div class="text-xs text-gray-400 truncate mt-0.5" style="font-size:10px;">' + escapeHtml(summary) + '</div>';
+        } else {
+            extraInfo = '<span class="text-xs text-gray-400" style="font-size:10px;">' + (a.status || 'idle') + '</span>';
+        }
+
+        return '<div class="agent-sub-item' + (a.status==='failed'?' agent-sub-item-failed':'') + '" onclick="window.selectAgentChat(\'' + safeName + '\')">' +
             '<div class="flex items-center gap-2 min-w-0 flex-1">' +
                 '<span class="agent-sub-dot ' + dotClass + '"></span>' +
                 '<div class="min-w-0 flex-1">' +
                     '<span class="text-xs font-medium truncate block">' + safeName + '</span>' +
                     '<div class="flex gap-1 items-center mt-0.5">' +
                         '<span class="text-xs" style="color:' + roleColor + ';font-weight:500;">' + roleLabel + '</span>' +
-                        (preview || '<span class="text-xs text-gray-400" style="font-size:10px;">' + (a.status || 'idle') + '</span>') +
+                        extraInfo +
                     '</div>' +
                 '</div>' +
             '</div>' +
@@ -1100,27 +1331,47 @@ window.selectAgentChat = function(agentName) {
                 var a = agents[agentName];
                 if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在(可能已被删除)</div>'; return; }
                 if (a.status === 'running') {
+                    var stepInfo = '';
+                    if (typeof a._step !== 'undefined' && a._step > 0) stepInfo = ' · 步骤 ' + a._step + '/' + (a._maxSteps || '?');
+                    var toolInfo = a._lastTool ? ' · 🔧' + a._lastTool : '';
                     var partial = a.result || '';
                     if (partial) {
                         msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                            '<div class="text-xs text-green-500 font-medium mb-1">🟡 运行中,已生成内容:</div>' +
+                            '<div class="text-xs text-green-500 font-medium mb-1">⏳ 运行中' + stepInfo + toolInfo + '</div>' +
                             '<div class="text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300" style="font-size:11px;max-height:300px;overflow-y:auto;">' + escapeHtml(partial.substring(0, 2000)) + '</div>' +
-                            '<div class="text-xs text-gray-400 mt-1">轮询刷新中...</div></div>';
+                            '<div class="text-xs text-gray-400 mt-1">实时更新中...</div></div>';
                     } else {
-                        msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-green-500 font-medium">🟢 正在运行中...</div></div>';
+                        msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
+                            '<div class="text-xs text-green-500 font-medium">⏳ 正在初始化...</div>' +
+                            '<div class="text-xs text-gray-400 mt-1">子代理启动后将显示实时进度</div></div>';
                     }
+                    return;
+                }
+                if (a.status === 'failed') {
+                    var errText = a.error || a.result || '未知错误';
+                    msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant" style="border-left:3px solid #ef4444;">' +
+                        '<div class="text-xs text-red-500 font-medium mb-1">❌ 执行失败</div>' +
+                        '<div class="text-xs text-red-600 dark:text-red-400 mb-2" style="font-size:11px;">' + escapeHtml(errText.substring(0, 500)) + '</div>' +
+                        '<div class="text-xs text-gray-400">💡 建议: 检查错误信息后重新创建子代理, 或让主代理直接处理</div></div>';
+                    var ms = [{ role: 'assistant', content: '失败: ' + errText, time: Date.now() }];
+                    localStorage.setItem(key, JSON.stringify(ms));
                     return;
                 }
                 if (a.result) {
                         var rEl = getEl('agentChatMessages');
                         if (rEl) {
-                            rEl.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                                '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(agentName) + '</div>' +
-                                '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div>' +
+                            var structured = a._structured || null;
+                            var resultHtml = '<div class="agent-chat-bubble role-assistant">' +
+                                '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(agentName) + ' · ✅完成</div>';
+                            if (structured && structured.summary) {
+                                resultHtml += '<div class="text-xs font-medium text-gray-800 dark:text-gray-200 mb-2" style="font-size:11px;">📋 ' + escapeHtml(structured.summary) + '</div>';
+                            }
+                            resultHtml += '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div>' +
                                 '</div>';
+                            rEl.innerHTML = resultHtml;
                         }
-                        var ms = [{ role: 'assistant', content: a.result, time: Date.now() }];
-                        localStorage.setItem(key, JSON.stringify(ms));
+                        var ms2 = [{ role: 'assistant', content: a.result, time: Date.now() }];
+                        localStorage.setItem(key, JSON.stringify(ms2));
                     }
                 }).catch(function(err) {
                     msgArea.innerHTML = '<div class="text-xs text-red-400 p-2">加载失败: ' + escapeHtml(err.message) + '</div>';
@@ -1243,7 +1494,7 @@ function updateAgentUI() {
             if (window.__bannerTimer) { clearTimeout(window.__bannerTimer); window.__bannerTimer = null; }
         } else {
             banner.classList.remove('hidden');
-            var tips = { 'plan': 'Plan 只读 · 仅搜索和读取', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
+            var tips = { 'plan': 'Plan 规划 · 先出计划后审批执行', 'agent': 'Agent 交互 · AI可操作需审批', 'yolo': 'YOLO 自动 · 所有操作自动批准' };
             var bannerClasses = { 'plan': 'banner-plan', 'agent': 'banner-agent', 'yolo': 'banner-yolo' };
             banner.className = 'agent-banner ' + (bannerClasses[mode] || '');
             banner.innerHTML = '<span class="agent-banner-icon">' + _svgIcons[mode] + '</span>' +
@@ -1602,8 +1853,28 @@ function requestToolApproval(toolName, args) {
             return;
         }
 
-        // Plan 模式: 拒绝所有写操作
+        // ★ 会话级自动批准: 用户手动开启后,本轮对话所有工具自动批准(无需弹窗)
+        if (window._sessionAutoApprove) {
+            sessionUsage.approvalsGranted++;
+            resolve(true);
+            return;
+        }
+
+        // Plan 模式: 只读工具自动批准,写操作根据审批状态决定
         if (mode === 'plan') {
+            // 只读工具始终自动批准(探索阶段也需要搜索/读取)
+            if (isReadOnlyTool(toolName)) {
+                sessionUsage.approvalsGranted++;
+                resolve(true);
+                return;
+            }
+            // 写操作: 已批准执行态 → 自动批准
+            if (window._planApproved && window._planState === 'executing') {
+                sessionUsage.approvalsGranted++;
+                resolve(true);
+                return;
+            }
+            // 写操作: 未批准 → 拒绝并提示等待审批
             sessionUsage.approvalsRejected++;
             resolve(false);
             return;
@@ -1935,6 +2206,12 @@ window.pushAgentResultToTask = function(taskId, agentName, status, result, error
     }
     console.log('[Task] ' + taskId + ' 子代理完成: ' + agentName + ' = ' + (status || 'completed'));
 
+    // ★ 失败时Toast通知(覆盖轮询路径)
+    if (normalizedStatus === 'failed' || normalizedStatus === 'error') {
+        var _errPreview = (error || result || '').substring(0, 120);
+        showToast('❌ 子代理 ' + agentName + ' 失败: ' + _errPreview, 'error', 6000);
+    }
+
     // ★ 立即同步到计划面板（无论任务是否全部完成）
     if (window._agentPlan && window._agentPlan.tasks && normalizedStatus !== 'running') {
         var _planUpdated = false;
@@ -1968,6 +2245,40 @@ window.pushAgentResultToTask = function(taskId, agentName, status, result, error
 
     // 检查该任务是否所有子代理都完成了
     window._checkTaskCompletion(taskId);
+};
+
+/** ★ P0: 推送子代理结果(含结构化数据),由SSE agent:result事件直接调用 */
+window.pushAgentResultToTaskWithStructured = function(agentName, status, result, error, structured) {
+    if (window._tasks && typeof window._tasks === 'object') {
+        for (var _tId in window._tasks) {
+            var _t = window._tasks[_tId];
+            if (_t && _t.agents && _t.agents[agentName] && !_t.mainResponded) {
+                var ns = status || 'completed';
+                if (ns === 'idle' || ns === 'running') ns = 'completed';
+                _t.subResults[agentName] = {
+                    status: ns,
+                    result: result || '',
+                    error: error || '',
+                    _structured: structured || null
+                };
+                if (_t.agents[agentName]) _t.agents[agentName].status = ns;
+                console.log('[SSE] agent:result 推送 ' + agentName + ' 到任务 ' + _tId);
+                window._checkTaskCompletion(_tId);
+                return true;
+            }
+        }
+    }
+    // 降级: 存入pending队列
+    if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
+    window._pendingSubAgentResultsData[agentName] = {
+        status: status || 'completed',
+        result: result || '',
+        error: error || '',
+        _structured: structured || null
+    };
+    // ★ 无论是否Agent模式,都触发子代理自动回复(普通聊天+Agent聊天统一处理)
+    window.triggerAgentAutoReplyForSubAgent(agentName);
+    return false;
 };
 
 /** 检查任务是否所有子代理都已完成 */
@@ -2019,8 +2330,50 @@ window._triggerMainAgentForTask = function(taskId) {
             var statusLabel = stored.status === 'completed' ? '✅完成' :
                              stored.status === 'failed' ? '❌失败' : '🔄超时';
             if (stored.status === 'failed' || stored.status === 'error') hasFailed = true;
-            var detail = (stored.error || stored.result || '').substring(0, 6000);
-            results.push(statusLabel + ' ' + name + '\n' + detail);
+
+            // ★ P0: 检查结构化数据,有则格式化,无则保持旧格式
+            var structured = stored._structured;
+            if (structured && typeof structured === 'object' && structured.summary) {
+                var parts = [];
+                parts.push('### 📋 ' + name + ' ' + statusLabel);
+                parts.push('');
+                parts.push('**摘要**: ' + (structured.summary || '无摘要'));
+
+                if (structured.findings && structured.findings.length > 0) {
+                    parts.push('');
+                    parts.push('**关键发现**:');
+                    structured.findings.forEach(function(f) {
+                        var confIcon = f.confidence === 'high' ? '🔴' : f.confidence === 'medium' ? '🟡' : '🟢';
+                        parts.push('- ' + confIcon + ' **' + (f.key || '') + '**: ' + (f.value || '') +
+                                  (f.source ? ' (来源: ' + f.source + ')' : ''));
+                    });
+                }
+
+                if (structured.actions_taken && structured.actions_taken.length > 0) {
+                    parts.push('');
+                    parts.push('**执行的操作**:');
+                    structured.actions_taken.forEach(function(a) { parts.push('- ' + a); });
+                }
+
+                if (structured.errors && structured.errors.length > 0) {
+                    parts.push('');
+                    parts.push('**错误**:');
+                    structured.errors.forEach(function(e) { parts.push('- ⚠️ ' + e); });
+                }
+
+                var detail = (stored.result || '').substring(0, 3000);
+                if (detail) {
+                    parts.push('');
+                    parts.push('**原始详情**:');
+                    parts.push(detail);
+                }
+
+                results.push(parts.join('\n'));
+            } else {
+                // 旧格式(无结构化数据)
+                var detail = (stored.error || stored.result || '').substring(0, 6000);
+                results.push(statusLabel + ' ' + name + '\n' + detail);
+            }
         } else {
             results.push('⏰超时 ' + name + ' (无返回)');
         }
@@ -2029,6 +2382,7 @@ window._triggerMainAgentForTask = function(taskId) {
 
     var chatId = task.chatId;
     if (chatId && chats[chatId] && typeof window.sendMessage === 'function') {
+        if (!chats[chatId].messages) chats[chatId].messages = [];
         var sysMsg = '以下子代理已返回结果,请据此整合回复用户:\n\n' + ctx;
         if (hasFailed) {
             sysMsg += '\n\n### ⚠️ 有子代理执行失败\n' +
@@ -2045,21 +2399,30 @@ window._triggerMainAgentForTask = function(taskId) {
         chats[chatId].messages = chats[chatId].messages.filter(function(m) { return !m._internal; });
         chats[chatId].messages.push({ role: 'system', content: sysMsg, _internal: true, temporary: false });
         saveChats();
-        
+
         window.__internalAgentContext = null;
-        
-        // ★ OpenClaw 风格: 不打断当前生成,等 AI 空闲后再发送
-        // 当前 turn 的 finally 中会调 _drainQueue 来处理
-        // _drainQueue 会检查 isTypingMap 然后发下一条
+
+        // ★ 切换到任务所在聊天(如果当前不在该聊天)
+        if (currentChatId !== chatId) {
+            console.log('[Task] 切换到任务所在聊天: ' + chatId);
+            currentChatId = chatId;
+            localStorage.setItem('lastChatId', chatId);
+            // 异步加载聊天UI(不阻塞发送)
+            if (typeof window.loadChat === 'function') {
+                setTimeout(function() { window.loadChat(chatId); }, 100);
+            }
+        }
+
+        // ★ 等 AI 空闲后再发送(如果忙则设置标记,在 finally 中触发)
         var _sendSummary = function() {
             if (!isTypingMap[chatId]) {
                 window.sendMessage(true, '请整合子代理结果并告知用户进展');
                 console.log('[Task] ' + taskId + ' 已触发主代理回复');
                 return true;
             }
-            // AI 忙:把主代理回复推入_enginePendingQueue,等空闲时处理
-            // 或者直接让 sendMessage 的 finally 触发
-            console.log('[Task] ' + taskId + ' 主代理忙,等当前turn完成');
+            // AI 忙:设置标记,等当前 turn 的 finally 块触发
+            console.log('[Task] ' + taskId + ' 主代理忙,设置 pendingAgentReply 标记');
+            window._pendingAgentReply = true;
             return false;
         };
         _sendSummary();
@@ -2091,18 +2454,42 @@ window.getRunningAgentsForTask = function(taskId) {
 // triggerAgentAutoReplyForSubAgent: 被 mainAgentReply 按钮和新通知系统调用
 // 作为 pushAgentResultToTask 的降级：当没有 task 时，创建临时 task 然后触发回复
 window.triggerAgentAutoReplyForSubAgent = function(agentName) {
+    // ★ 从引擎获取最新结果(不依赖 localStorage 缓存)
+    var token = getAuthToken();
+    if (token) {
+        fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+            .then(function(r) { return r.json(); })
+            .then(function(agents) {
+                var a = agents[agentName];
+                if (a) {
+                    // 更新 pending 数据
+                    if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
+                    window._pendingSubAgentResultsData[agentName] = {
+                        status: a.status || 'completed',
+                        result: a.result || '',
+                        error: a.error || '',
+                        _structured: (typeof a._structured === 'string') ? (function(){try{return JSON.parse(a._structured)}catch(e){return null}})() : (a._structured || null)
+                    };
+                }
+                _doTrigger(agentName);
+            }).catch(function() { _doTrigger(agentName); });
+    } else {
+        _doTrigger(agentName);
+    }
+};
+
+function _doTrigger(agentName) {
     // 尝试找到包含此 agent 的 task
     if (window._tasks && typeof window._tasks === 'object') {
         for (var _tId in window._tasks) {
             var _t = window._tasks[_tId];
             if (_t && _t.agents && _t.agents[agentName] && !_t.mainResponded) {
-                // 状态可能还是 running，手动标记为 completed
                 if (_t.agents[agentName].status === 'running') {
                     _t.agents[agentName].status = 'completed';
                 }
                 var stored = (window._pendingSubAgentResultsData || {})[agentName];
                 if (stored && !_t.subResults[agentName]) {
-                    _t.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '' };
+                    _t.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '', _structured: stored._structured || null };
                 }
                 window._checkTaskCompletion(_tId);
                 return;
@@ -2115,10 +2502,10 @@ window.triggerAgentAutoReplyForSubAgent = function(agentName) {
     var stored = (window._pendingSubAgentResultsData || {})[agentName];
     task.agents[agentName] = { status: 'completed', role: 'general', createdAt: Date.now() };
     if (stored) {
-        task.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '' };
+        task.subResults[agentName] = { status: stored.status || 'completed', result: stored.result || '', error: stored.error || '', _structured: stored._structured || null };
     }
     window._triggerMainAgentForTask(taskId);
-};
+}
 
 window._legacyTrigger = window.triggerAgentAutoReplyForSubAgent;
 window._agentNotifyQueue = [];
@@ -2381,6 +2768,82 @@ window.dismissFlowPanel = function() {
     }, 300);
 
     console.log('[FlowPanel] 面板已关闭');
+};
+
+// ==================== Plan 模式审批控制 ====================
+
+/** 用户同意计划 → 进入执行态 */
+window.approvePlan = function() {
+    if (getAgentMode() !== 'plan') return;
+    window._planApproved = true;
+    window._planState = 'executing';
+    console.log('[Plan] 用户已批准计划，进入执行态');
+    // 移除审批横幅
+    var banner = getEl('planApprovalBanner');
+    if (banner) {
+        banner.style.opacity = '0';
+        banner.style.transform = 'translateY(-8px)';
+        banner.style.transition = 'all 0.3s ease';
+        setTimeout(function() { banner.remove(); }, 300);
+    }
+    // 更新横幅提示
+    var agentBanner = getEl('agentBanner');
+    if (agentBanner) {
+        agentBanner.classList.remove('hidden');
+        agentBanner.className = 'agent-banner banner-plan';
+        agentBanner.innerHTML = '<span class="agent-banner-icon">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>' +
+            '<span class="agent-banner-text">Plan 执行中 — 计划已批准，AI 正在执行</span>';
+    }
+    // 触发模型继续执行（通过 resolve 暂存的 tool call）
+    if (window._pendingPlanActions && window._pendingPlanActions.length > 0) {
+        window._pendingPlanActions.forEach(function(action) { action.resolve(true); });
+        window._pendingPlanActions = [];
+    }
+};
+
+/** 用户要求修改计划 → 回到探索态，通知模型修改 */
+window.rejectPlan = function() {
+    if (getAgentMode() !== 'plan') return;
+    window._planApproved = false;
+    window._planState = 'reviewing';
+    console.log('[Plan] 用户要求修改计划');
+    // 通知模型（通过注入系统消息触发重新规划）
+    var chatId = currentChatId;
+    if (chats[chatId] && chats[chatId].messages) {
+        chats[chatId].messages.push({
+            role: 'system',
+            content: '[Plan 审批] 用户要求修改计划。请根据用户反馈重新调整计划，然后再次调用 plan_update(action="create") 提交新计划。',
+            _timestamp: Date.now()
+        });
+    }
+    // 移除审批横幅
+    var banner = getEl('planApprovalBanner');
+    if (banner) banner.remove();
+    // 更新状态
+    if (window._agentPlan) window._agentPlan.status = 'exploring';
+};
+
+/** 用户取消计划 → 关闭面板，回到探索态 */
+window.cancelPlan = function() {
+    if (getAgentMode() !== 'plan') return;
+    window._planApproved = false;
+    window._planState = 'exploring';
+    console.log('[Plan] 用户取消计划');
+    // 通知模型取消
+    var chatId = currentChatId;
+    if (chats[chatId] && chats[chatId].messages) {
+        chats[chatId].messages.push({
+            role: 'system',
+            content: '[Plan 审批] 用户取消了计划。请停止当前规划，回到普通对话。',
+            _timestamp: Date.now()
+        });
+    }
+    // 关闭面板 + 移除审批横幅
+    window.dismissFlowPanel();
+    var banner = getEl('planApprovalBanner');
+    if (banner) banner.remove();
+    window._agentPlan = null;
 };
 
 /** 折叠/展开流程面板 */

@@ -178,17 +178,40 @@ switch ($method) {
                 if (($u['email'] ?? '') === $email) jsonError(409, '该邮箱已被注册');
             }
 
-            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            // ★ 防刷：IP 维度限流（窗口策略见 init.php）
+            require_once __DIR__ . '/init.php';
+            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $rl = checkLoginRateLimit($ip, 'ip');
+            if (!$rl['allowed']) {
+                http_response_code(429);
+                jsonError(429, "请求过于频繁，请 {$rl['retry_after']} 秒后重试");
+                exit;
+            }
+
             $codeFile = $usersDir . 'reg_codes.json';
             $regCodes = readJson($codeFile);
-            $regCodes[$email] = ['code' => $code, 'time' => time()];
+            $prev = $regCodes[$email] ?? null;
+            // ★ 每邮箱 60s 冷却
+            if ($prev && (time() - ($prev['time'] ?? 0)) < 60) {
+                $wait = 60 - (time() - $prev['time']);
+                http_response_code(429);
+                jsonError(429, "发送过于频繁，请 {$wait} 秒后再试");
+                exit;
+            }
+
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            // ★ 有效期 300s，附带错误尝试计数器
+            $regCodes[$email] = ['code' => $code, 'time' => time(), 'attempts' => 0];
             writeJson($codeFile, $regCodes);
 
             require_once __DIR__ . '/mailer.php';
             if (sendVerificationCode($email, $code)) {
                 jsonSuccess(['message' => '验证码已发送到 ' . $email]);
             } else {
-                jsonSuccess(['message' => '验证码: ' . $code, 'debug_code' => $code]);
+                // ★ 禁止把验证码回传前端（调试模式泄漏）；只写服务端日志
+                error_log('[auth.php] send_reg_code mail failed for ' . $email . ' code=' . $code);
+                http_response_code(502);
+                jsonError(502, '邮件发送失败，请稍后重试或联系管理员');
             }
 
         } elseif ($action === 'send_reset') {
@@ -266,10 +289,18 @@ switch ($method) {
             $codeFile = $usersDir . 'reg_codes.json';
             $regCodes = readJson($codeFile);
             $saved = $regCodes[$email] ?? null;
-            if (!$saved || time() - ($saved['time'] ?? 0) > 600) {
+            if (!$saved || time() - ($saved['time'] ?? 0) > 300) {
                 jsonError(400, '验证码已过期，请重新发送');
             }
+            // ★ 错误尝试 5 次锁定，需重新发送
+            if (($saved['attempts'] ?? 0) >= 5) {
+                unset($regCodes[$email]);
+                writeJson($codeFile, $regCodes);
+                jsonError(400, '验证码错误次数过多，请重新发送');
+            }
             if (($saved['code'] ?? '') !== $code) {
+                $regCodes[$email]['attempts'] = ($saved['attempts'] ?? 0) + 1;
+                writeJson($codeFile, $regCodes);
                 jsonError(400, '验证码错误');
             }
             unset($regCodes[$email]);
@@ -420,6 +451,16 @@ switch ($method) {
             if (!$userId) jsonError(401, '登录已过期');
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError(400, '邮箱格式不正确');
 
+            // ★ 防刷：IP 限流 + 每用户 60s 冷却
+            require_once __DIR__ . '/init.php';
+            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $rl = checkLoginRateLimit($ip, 'ip');
+            if (!$rl['allowed']) {
+                http_response_code(429);
+                jsonError(429, "请求过于频繁，请 {$rl['retry_after']} 秒后重试");
+                exit;
+            }
+
             $users = readJson($usersFile);
             // 检查邮箱是否已被其他用户绑定
             foreach ($users as $id => $u) {
@@ -428,18 +469,29 @@ switch ($method) {
                 }
             }
 
+            $prevTime = $users[$userId]['verify_code_time'] ?? 0;
+            if ($prevTime && (time() - $prevTime) < 60) {
+                $wait = 60 - (time() - $prevTime);
+                http_response_code(429);
+                jsonError(429, "发送过于频繁，请 {$wait} 秒后再试");
+                exit;
+            }
+
             $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
             $users[$userId]['verify_code'] = $code;
             $users[$userId]['verify_code_time'] = time();
             $users[$userId]['pending_email'] = $email;
+            $users[$userId]['verify_attempts'] = 0;
             writeJson($usersFile, $users);
 
             require_once __DIR__ . '/mailer.php';
             if (sendVerificationCode($email, $code)) {
                 jsonSuccess(['message' => '验证码已发送到 ' . $email]);
             } else {
-                // SMTP 不可用，debug 模式：返回验证码给前端
-                jsonSuccess(['message' => '验证码: ' . $code . '（调试模式，请尽快配置SMTP）', 'debug_code' => $code]);
+                // ★ 禁止把验证码回传前端（调试模式泄漏）；只写服务端日志
+                error_log('[auth.php] send_verify_code mail failed for ' . $userId . ' -> ' . $email . ' code=' . $code);
+                http_response_code(502);
+                jsonError(502, '邮件发送失败，请稍后重试或联系管理员');
             }
 
         } elseif ($action === 'bind_email') {
@@ -456,12 +508,21 @@ switch ($method) {
 
             $savedCode = $userData['verify_code'] ?? '';
             $codeTime = $userData['verify_code_time'] ?? 0;
-            if (time() - $codeTime > 600) jsonError(400, '验证码已过期，请重新发送');
-            if ($savedCode !== $code) jsonError(400, '验证码错误');
+            if (time() - $codeTime > 300) jsonError(400, '验证码已过期，请重新发送');
+            if (($userData['verify_attempts'] ?? 0) >= 5) {
+                unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email'], $users[$userId]['verify_attempts']);
+                writeJson($usersFile, $users);
+                jsonError(400, '验证码错误次数过多，请重新发送');
+            }
+            if ($savedCode !== $code) {
+                $users[$userId]['verify_attempts'] = ($userData['verify_attempts'] ?? 0) + 1;
+                writeJson($usersFile, $users);
+                jsonError(400, '验证码错误');
+            }
 
             $newEmail = $userData['pending_email'] ?? '';
             $users[$userId]['email'] = $newEmail;
-            unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email']);
+            unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email'], $users[$userId]['verify_attempts']);
             writeJson($usersFile, $users);
 
             jsonSuccess(['email' => $newEmail, 'message' => '邮箱绑定成功']);

@@ -1,6 +1,106 @@
 // files.js — 文件处理 v1.0 (Phase 6)
 // 文件读写/预览/上传/粘贴/拖拽
 
+// ==================== 工具函数 ====================
+// ★ 检测 ArrayBuffer 是否为有效 ZIP 文件（PK 魔数头）
+function _isZipBuffer(ab) {
+    if (!ab || ab.byteLength < 4) return false;
+    var _dv = new DataView(ab);
+    // ZIP 文件以 PK\x03\x04 或 PK\x05\x06 (空ZIP) 开头
+    return _dv.getUint8(0) === 0x50 && _dv.getUint8(1) === 0x4B &&
+           (_dv.getUint8(2) === 0x03 || _dv.getUint8(2) === 0x05);
+}
+
+// ★ 提取旧版 .doc (OLE2 二进制格式) 中的文本
+//   原理: .doc 文件以 UTF-16LE 存储文本, 夹杂二进制格式控制符
+//   策略: 逐双字节解码, 提取连续可打印字符序列
+function _extractDocText(ab) {
+    if (!ab || ab.byteLength < 100) return '';
+    var _u8 = new Uint8Array(ab);
+    var _len = _u8.length;
+    var _result = [];
+    var _current = '';
+
+    // ★ 方法1: 逐双字节 UTF-16LE 解码, 提取可打印字符
+    for (var _i = 0; _i + 1 < _len; _i += 2) {
+        var _lo = _u8[_i];
+        var _hi = _u8[_i + 1];
+        var _code = _lo | (_hi << 8);
+
+        // 高字节为 0 → 基本 ASCII/Latin (UTF-16LE)
+        if (_hi === 0) {
+            if (_code >= 0x20 && _code < 0x7F) {
+                // 可打印 ASCII
+                _current += String.fromCharCode(_code);
+            } else if (_code === 0x0A || _code === 0x0D || _code === 0x09) {
+                // 换行/回车/制表
+                if (_current.trim()) _result.push(_current.trim());
+                _current = '';
+            } else if (_code < 0x20 && _code !== 0x09) {
+                // 控制字符 → 截断
+                if (_current.trim()) _result.push(_current.trim());
+                _current = '';
+            } else {
+                // 其他 (0x80-0xFF 扩展 ASCII)
+                _current += String.fromCharCode(_code);
+            }
+        } else if (_code >= 0x4E00 && _code <= 0x9FFF) {
+            // ★ 中文字符 (CJK 统一表意文字)
+            _current += String.fromCharCode(_code);
+        } else if (_code >= 0x3000 && _code <= 0x303F) {
+            // 中文标点
+            _current += String.fromCharCode(_code);
+        } else if (_code >= 0xFF00 && _code <= 0xFFEF) {
+            // 全角字符
+            _current += String.fromCharCode(_code);
+        } else if (_hi >= 0x20 && _hi <= 0x7E) {
+            // 其他双字节: 高字节可打印 → 可能是乱码, 跳过
+            if (_current.trim()) _result.push(_current.trim());
+            _current = '';
+        } else {
+            // 二进制控制数据 → 截断
+            if (_current.trim()) _result.push(_current.trim());
+            _current = '';
+        }
+    }
+    if (_current.trim()) _result.push(_current.trim());
+
+    // ★ 方法2: 方法1结果太少时, 尝试用 TextDecoder UTF-16LE 全文解码
+    if (_result.length < 5) {
+        try {
+            var _full = new TextDecoder('utf-16le', {fatal: false}).decode(ab);
+            var _segments = _full.split(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]+/);
+            _segments.forEach(function(_seg) {
+                var _t = _seg.trim();
+                if (_t.length > 1) _result.push(_t);
+            });
+        } catch(e) {}
+    }
+
+    // ★ 去重 + 过滤噪音
+    var _seen = {};
+    var _filtered = [];
+    for (var _ri = 0; _ri < _result.length; _ri++) {
+        var _t = _result[_ri].trim();
+        if (_t.length < 2) continue;
+        if (_seen[_t]) continue;
+        // 过滤纯二进制乱码 (可打印率 < 70%)
+        var _printable = 0;
+        for (var _ci = 0; _ci < _t.length; _ci++) {
+            var _cc = _t.charCodeAt(_ci);
+            if (_cc >= 0x20 && _cc < 0x7F) _printable++;
+            else if (_cc >= 0x4E00 && _cc <= 0x9FFF) _printable++;
+            else if (_cc >= 0x3000 && _cc <= 0x303F) _printable++;
+        }
+        if (_printable / _t.length < 0.5) continue;
+        _seen[_t] = true;
+        _filtered.push(_t);
+    }
+
+    if (_filtered.length === 0) return '';
+    return '[DOC 提取]\n\n' + _filtered.join('\n');
+}
+
 // ==================== 文件处理 ====================
 async function extractFileContent(file) {
     var ext = file.name.split('.').pop().toLowerCase();
@@ -12,10 +112,17 @@ async function extractFileContent(file) {
             fr.readAsText(file);
         });
     }
+    // ★ 旧版 .doc (二进制 OLE2 格式) — 尽力提取文本
+    if (ext === 'doc' || file.type === 'application/msword') {
+        var _docAb = await file.arrayBuffer();
+        var _docText = _extractDocText(_docAb);
+        return _docText || '[DOC] 无法提取文本。建议用 Word/WPS 打开后另存为 .docx 重新上传以获得更好效果。';
+    }
     if (ext === 'docx' || file.type.includes('word')) {
         var _ab = await file.arrayBuffer();
         var _docText = '';
         var _docImages = [];
+        var _isDocxZip = _isZipBuffer(_ab);
 
         // ★ 1) 尝试 mammoth 提取文本
         if (window.mammoth) {
@@ -27,7 +134,8 @@ async function extractFileContent(file) {
             }
         }
         // ★ 2) mammoth 失败 → 用 JSZip 解压后提取 XML 文本（DOCX 本质是 ZIP）
-        if (!_docText && window.JSZip) {
+        //    ★ 先检测是否为有效 ZIP, 不是则跳过 JSZip 避免无意义报错
+        if (!_docText && window.JSZip && _isDocxZip) {
             try {
                 var _docZip = await JSZip.loadAsync(_ab);
                 var _docXmlFile = _docZip.files['word/document.xml'];
@@ -107,7 +215,7 @@ async function extractFileContent(file) {
         }
 
         // ★ 3) 提取内嵌图片（word/media/ 目录）
-        if (window.JSZip) {
+        if (window.JSZip && _isDocxZip) {
             try {
                 var _docZip = await JSZip.loadAsync(_ab);
                 var _mediaFiles = Object.keys(_docZip.files).filter(function(f) {
@@ -180,6 +288,7 @@ async function extractFileContent(file) {
     }
     if (['xlsx', 'xls', 'xlsm'].includes(ext) || file.type.includes('spreadsheet')) {
         var _xlsxAb = await file.arrayBuffer();
+        var _isXlsxZip = _isZipBuffer(_xlsxAb);
         // ★ 1) 优先用 SheetJS
         if (window.XLSX) {
             try {
@@ -189,8 +298,8 @@ async function extractFileContent(file) {
                 console.warn('[xlsx] SheetJS 解析失败，降级为 JSZip:', _xlsxErr.message);
             }
         }
-        // ★ 2) SheetJS 不可用/失败 → JSZip 直接解析 XML
-        if (window.JSZip) {
+        // ★ 2) SheetJS 不可用/失败 → JSZip 直接解析 XML（仅有效ZIP才尝试）
+        if (window.JSZip && _isXlsxZip) {
             try {
                 var _xlsxZip = await JSZip.loadAsync(_xlsxAb);
                 var _sharedStrings = [];
@@ -718,10 +827,12 @@ async function processSelectedFiles(fileList) {
                 var fileObj = { name: file.name, isVideo: true, type: file.type, size: file.size };
                 _setProgress(30, '上传视频中...');
                 try {
-                    var srvUrl = await uploadVideoBlob(file, _setProgress);
-                    if (srvUrl) {
-                        fileObj.serverUrl = srvUrl;
-                        fileObj.content = srvUrl; // 存 URL 而非 base64,节省内存
+                    var result = await uploadVideoBlob(file, _setProgress);
+                    if (result && (result.url || result.path)) {
+                        var _url = typeof result === 'string' ? result : (result.url || '');
+                        fileObj.serverUrl = _url;
+                        fileObj.serverPath = result.path || ''; // ★ 服务器真实路径, 模型可直接用
+                        fileObj.content = _url; // 存 URL 而非 base64,节省内存
                         _setProgress(95, '上传完成');
                     } else {
                         // 降级: 小视频走 base64
@@ -750,26 +861,58 @@ async function processSelectedFiles(fileList) {
                     updateFilePreviewUI();
                 }, 600);
             } else {
-                _setProgress(20, '解析中...');
-                var _extractResult = await extractFileContent(file);
-                // ★ 支持 office 文档返回 {text, images, isOfficeDoc} 对象
-                if (_extractResult && typeof _extractResult === 'object' && _extractResult.isOfficeDoc) {
-                    var _fileObj = { name: file.name, content: _extractResult.text || '', size: file.size, isImage: false, type: file.type };
-                    if (_extractResult.images && _extractResult.images.length > 0) {
-                        _fileObj.extractedImages = _extractResult.images;
-                        _fileObj.hasEmbeddedImages = true;
-                        _setProgress(90, '提取到' + _extractResult.images.length + '张图');
+                // ★ v2.7.0: 判断是否为可解析的文本/文档, 否则作为通用文件上传到服务器
+                var _ext = (file.name.split('.').pop() || '').toLowerCase();
+                var _parseableExts = ['txt', 'md', 'js', 'py', 'json', 'html', 'css', 'xml', 'csv', 'log', 'sh', 'bat', 'conf', 'ini',
+                    'docx', 'xlsx', 'xls', 'xlsm', 'pdf', 'doc', 'pptx', 'ppt', 'rtf', 'odt', 'epub'];
+                var _isBinary = !_parseableExts.includes(_ext) && !file.type.startsWith('text/');
+
+                if (_isBinary) {
+                    // ★ 二进制文件(.msi/.exe/.zip/.apk等): 直接上传到服务器, 保留路径供Cloudreve/工具使用
+                    _setProgress(10, '上传文件中...');
+                    var _fileObj2 = { name: file.name, isVideo: false, isImage: false, type: file.type, size: file.size, isBinary: true };
+                    try {
+                        var _result2 = await uploadVideoBlob(file, _setProgress, true);
+                        if (_result2 && (_result2.url || _result2.path)) {
+                            _fileObj2.serverUrl = typeof _result2 === 'string' ? _result2 : (_result2.url || '');
+                            _fileObj2.serverPath = _result2.path || '';
+                            _fileObj2.content = _fileObj2.serverUrl;
+                            _setProgress(95, '上传完成');
+                        } else {
+                            _setError('上传失败');
+                        }
+                    } catch(e) {
+                        console.warn('[binary] 上传失败:', e.message);
+                        _setError('上传失败');
                     }
-                    pendingFiles.push(_fileObj);
+                    pendingFiles.push(_fileObj2);
+                    _setDone();
+                    setTimeout(function() {
+                        if (progressContainer.parentNode) progressContainer.remove();
+                        updateFilePreviewUI();
+                    }, 600);
                 } else {
-                    var content = typeof _extractResult === 'string' ? _extractResult : (_extractResult ? String(_extractResult) : '');
-                    pendingFiles.push({ name: file.name, content: content, size: file.size, isImage: false, type: file.type });
+                    _setProgress(20, '解析中...');
+                    var _extractResult = await extractFileContent(file);
+                    // ★ 支持 office 文档返回 {text, images, isOfficeDoc} 对象
+                    if (_extractResult && typeof _extractResult === 'object' && _extractResult.isOfficeDoc) {
+                        var _fileObj = { name: file.name, content: _extractResult.text || '', size: file.size, isImage: false, type: file.type };
+                        if (_extractResult.images && _extractResult.images.length > 0) {
+                            _fileObj.extractedImages = _extractResult.images;
+                            _fileObj.hasEmbeddedImages = true;
+                            _setProgress(90, '提取到' + _extractResult.images.length + '张图');
+                        }
+                        pendingFiles.push(_fileObj);
+                    } else {
+                        var content = typeof _extractResult === 'string' ? _extractResult : (_extractResult ? String(_extractResult) : '');
+                        pendingFiles.push({ name: file.name, content: content, size: file.size, isImage: false, type: file.type });
+                    }
+                    _setDone();
+                    setTimeout(function() {
+                        if (progressContainer.parentNode) progressContainer.remove();
+                        updateFilePreviewUI();
+                    }, 400);
                 }
-                _setDone();
-                setTimeout(function() {
-                    if (progressContainer.parentNode) progressContainer.remove();
-                    updateFilePreviewUI();
-                }, 400);
             }
         } catch (err) {
             console.warn('[processFile] 出错:', err.message);

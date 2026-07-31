@@ -461,7 +461,7 @@ function _renderWebFetchUrls(bubble, urls) {
     bubble.appendChild(container);
 }
 
-function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false, msgIndex = -1) {
+function appendMessage(role, text, files = null, reasoning = null, usage = null, time = 0, isLast = false, generatedImage = null, generatedImages = null, partial = false, msgIndex = -1, injected = false) {
 // ★ 防御性清理:确保参数都是字符串且不含 [object Object]
     var safeStr = (val) => {
         if (val === null || val === undefined) return '';
@@ -732,6 +732,16 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         bubble.appendChild(imgContainer);
     }
 
+    // ★ 推入标记: 消息在模型生成中途被推入时显示一个小角标
+    if (injected && role === 'user') {
+        var injectedBadge = document.createElement('div');
+        injectedBadge.className = 'msg-injected-badge';
+        injectedBadge.innerHTML = '📨 推入';
+        injectedBadge.title = '此消息在模型生成中途被推入,模型将在当前回复后处理';
+        bubble.appendChild(injectedBadge);
+        bubble.classList.add('bubble-injected');
+    }
+
     wrapper.appendChild(bubble);
 
     // 操作按钮 — 放在气泡内部,自然对齐气泡右边缘
@@ -970,7 +980,11 @@ function applySyntaxHighlighting(container) {
         var _warn = console.warn;
         console.warn = function() {};
         container.querySelectorAll('pre code:not([class*="mermaid"]):not([class*="gantt"]):not([class*="dot"])').forEach(function(block) {
-            try { hljs.highlightElement(block); } catch(e) {}
+            try {
+                var _lang = (block.className || '').match(/language-(\S+)/);
+                if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) return;
+                hljs.highlightElement(block);
+            } catch(e) {}
         });
         console.warn = _warn;
     }

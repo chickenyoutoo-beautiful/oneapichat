@@ -8,6 +8,20 @@
     <link rel="manifest" href="/oneapichat/manifest.json">
     <meta name="theme-color" content="#6366f1">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <script>
+    // ★ 全局 fetch 拦截: 所有 .php 请求强制绕过缓存
+    (function() {
+        var _origFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            if (typeof url === 'string' && url.indexOf('.php') !== -1) {
+                opts.cache = 'no-store';
+                url += (url.indexOf('?') !== -1 ? '&' : '?') + '_=' + Date.now();
+            }
+            return _origFetch.call(window, url, opts);
+        };
+    })();
+    </script>
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="NAUJTRATS">
@@ -40,7 +54,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="./css/tailwind-index.min.css">
-    <link rel="stylesheet" href="./css/style.css?v=1784691685">
+    <link rel="stylesheet" href="./css/style.css?v=1784691686">
     <link rel="stylesheet" href="./css/src-console.css?v=4">
     <script src="./lib/highlight.min.js"></script>
     <!-- Markdown 解析库 (marked) — 必须在 core.js 之前加载 -->
@@ -48,38 +62,40 @@
     <!-- Mermaid 图表渲染 — defer 加载，确保 window.mermaid 在所有 JS 之前可用 -->
     <script defer src="./lib/mermaid/mermaid.min.js"></script>
     <!-- ═══ 核心模块 (defer 按序加载) ═══ -->
-    <script defer src="./js/core.js?v=1784691685"></script>
+    <script defer src="./js/core.js?v=1784730172"></script>
     <script defer src="./js/translations.js?v=2"></script>
-    <script defer src="./js/image-gen.js?v=2"></script>
-    <script defer src="./js/markdown.js?v=25"></script>
-    <script defer src="./js/agent.js?v=7"></script>
-    <script defer src="./js/storage.js?v=1784694092"></script>
-    <script defer src="./js/config.js?v=1784691685"></script>
-    <script defer src="./js/dialogs.js?v=1784691685"></script>
-    <script defer src="./js/cloudreve.js?v=8"></script>
+    <script defer src="./js/image-gen.js?v=1785169400"></script>
+    <script defer src="./js/markdown.js?v=26"></script>
+    <script defer src="./js/agent.js?v=1785220000"></script>
+    <script defer src="./js/storage.js?v=1785223000"></script>
+    <script defer src="./js/config.js?v=1785323000"></script>
+    <script defer src="./js/dialogs.js?v=1785168300"></script>
+    <script defer src="./js/cloudreve.js?v=1785514139"></script>
+    <script defer src="./js/amap.js?v=1"></script>
+    <script defer src="./js/netdisk.js?v=1785515100"></script>
     <script defer src="./js/rag-system.js?v=3"></script>
     <script defer src="./js/chaoxing-tools.js?v=6"></script>
-    <script defer src="./js/files.js?v=4"></script>
-    <script defer src="./js/rendering.js?v=12"></script>
+    <script defer src="./js/files.js?v=1785168400"></script>
+    <script defer src="./js/rendering.js?v=14"></script>
     <script defer src="./js/search.js?v=8"></script>
     <script defer src="./js/ui.js?v=5"></script>
-    <script defer src="./js/utils.js?v=1784472769"></script>
-    <script defer src="./js/skills.js?v=2"></script>
-    <script defer src="./js/tools-exec.js?v=1784478294"></script>
-    <script defer src="./js/init.js?v=1784691685"></script>
-    <script defer src="./js/agent-notify.js?v=1784478114"></script>
-    <script defer src="./js/models.js?v=10"></script>
+    <script defer src="./js/utils.js?v=1785168900"></script>
+    <script defer src="./js/skills.js?v=3"></script>
+    <script defer src="./js/tools-exec.js?v=1785322000"></script>
+    <script defer src="./js/init.js?v=1785222000"></script>
+    <script defer src="./js/agent-notify.js?v=1785220000"></script>
+    <script defer src="./js/models.js?v=1785223000"></script>
     <!-- PPT/PPTX 解析 -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script defer src="./js/tools.js?v=17"></script>
-    <script defer src="./js/upload.js?v=3"></script>
-    <script defer src="./js/queue.js?v=1784472379"></script>
+    <script defer src="./js/tools.js?v=1785515100"></script>
+    <script defer src="./js/upload.js?v=1785150002"></script>
+    <script defer src="./js/queue.js?v=1785168850"></script>
     <script defer src="./js/commands.js?v=1"></script>
-    <script defer src="./js/resume-stream.js?v=21"></script>
-    <script defer src="./js/api-messages.js?v=1784691685"></script>
-    <script defer src="./js/stream-handler.js?v=1784692646"></script>
-    <script defer src="./js/main.js?v=1784692646"></script>
-    <script defer src="./js/src-manager.js?v=4"></script>
+    <script defer src="./js/resume-stream.js?v=1785324000"></script>
+    <script defer src="./js/api-messages.js?v=1785514137"></script>
+    <script defer src="./js/stream-handler.js?v=1785320000"></script>
+    <script defer src="./js/main.js?v=1785514138"></script>
+    <!-- src-manager.js 已移除 (星穹铁道功能弃用) -->
 
     <!-- /命令列表 SVG 图标库 -->
     <!-- /命令列表 SVG 图标库 -->
@@ -218,7 +234,7 @@ window.VISION_API_KEY = '';
         <div class="sidebar-mobile-actions hidden space-y-1 pt-2 pb-1">
             <div class="text-xs font-bold text-gray-400 uppercase px-3 mb-1">功能</div>
             <a href="chaoxing.html" class="flex items-center gap-3 text-sm px-3 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>刷课</span></a>
-            <button onclick="window.srcManager ? srcManager.toggle() : console.log('srcManager not loaded')" class="flex items-center gap-3 text-sm w-full px-3 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition text-left"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h4l3-9 4 18 3-9h4"/></svg><span>SRC 星穹铁道</span></button>
+            <button onclick="window.toggleCloudrevePanel ? window.toggleCloudrevePanel() : cloudreveApiHandler('check_login', {})" class="flex items-center gap-3 text-sm w-full px-3 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition text-left"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg><span>Cloudreve 云盘</span></button>
             <button onclick="window.toggleConfigPanel()" class="flex items-center gap-3 text-sm w-full px-3 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition text-left"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg><span>设置</span></button>
         </div>
         <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
@@ -269,13 +285,13 @@ window.VISION_API_KEY = '';
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
                         </button>
                         <div class="agent-mode-popup" id="agentModePopup">
-                            <button data-mode="plan" onclick="setAgentMode('plan')" title="Plan">
+                            <button data-mode="plan" onclick="setAgentMode('plan')" title="Plan — 先规划后审批执行">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                             </button>
-                            <button data-mode="agent" onclick="setAgentMode('agent')" title="Agent">
+                            <button data-mode="agent" onclick="setAgentMode('agent')" title="Agent — 工具需审批">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v4m0 2v6" stroke-linecap="round"/><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
                             </button>
-                            <button data-mode="yolo" onclick="setAgentMode('yolo')" title="YOLO">
+                            <button data-mode="yolo" onclick="setAgentMode('yolo')" title="YOLO — 全部自动">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
                             </button>
                         </div>
@@ -309,9 +325,9 @@ window.VISION_API_KEY = '';
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                 </a>
-                <button id="srcHeaderBtn" onclick="window.srcManager ? srcManager.toggle() : console.log('srcManager not loaded')" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" title="SRC 星穹铁道控制台">
+                <button onclick="window.toggleCloudrevePanel ? window.toggleCloudrevePanel() : cloudreveApiHandler('check_login', {})" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" title="Cloudreve 云盘">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h4l3-9 4 18 3-9h4"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/>
                     </svg>
                 </button>
                 <button onclick="window.toggleConfigPanel()" class="p-2 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200">
@@ -365,7 +381,7 @@ window.VISION_API_KEY = '';
                         <span class="queue-collapsed-summary" id="queueCollapsedSummary"></span>
                     </div>
                     <div class="queue-bar-header-right" onclick="event.stopPropagation()">
-                        <button onclick="window.pushToMsgQueue()" id="queuePushBtn" class="queue-push-btn">⇥ 推入队列</button>
+                        <button onclick="window.injectUserMessage()" id="queuePushBtn" class="queue-push-btn">⇥ 推入队列</button>
                         <button onclick="window._clearAllQueue()" class="queue-clear-btn" title="清空队列">✕</button>
                     </div>
                 </div>
@@ -591,6 +607,7 @@ window.VISION_API_KEY = '';
                 <select id="visionProvider" class="config-input config-select" onchange="window.onVisionProviderChange()">
                     <option value="minimax">MiniMax VLM</option>
                     <option value="openai">OpenAI Vision</option>
+                    <option value="xai">xAI Vision (Grok)</option>
                     <option value="custom">自定义</option>
                 </select>
             </div>
@@ -612,13 +629,22 @@ window.VISION_API_KEY = '';
                 <label class="config-label">OpenAI API 地址</label>
                 <input type="text" id="visionApiUrlOpenAI" placeholder="如: https://api.openai.com/v1" class="config-input">
             </div>
+            <!-- xAI 专用配置 -->
+            <div class="config-field" id="visionXAIKeyField" style="display:none;">
+                <label class="config-label">xAI API Key</label>
+                <input type="text" id="visionApiKeyXAI" autocomplete="off" class="config-input masked-key" placeholder="xAI 密钥 (与主模型可相同)">
+            </div>
+            <div class="config-field" id="visionXAIUrlField" style="display:none;">
+                <label class="config-label">xAI API 地址</label>
+                <input type="text" id="visionApiUrlXAI" placeholder="https://api.x.ai/v1" class="config-input">
+            </div>
             <!-- 自定义配置（始终显示模型输入框）-->
             <div class="config-field" id="visionModelField">
                 <label class="config-label">模型</label>
                 <input type="text" id="visionModel" placeholder="如: MiniMax-VL-01" class="config-input">
             </div>
             <div id="visionProviderHint" class="config-hint" style="font-size:12px;color:#666;margin-top:4px;">
-                MiniMax: 使用 coding-plan-vlm 端点的视觉理解能力。OpenAI: 使用 GPT-4o 等视觉模型。自定义: 设置自己的 API 地址和模型。
+                MiniMax: 使用 coding-plan-vlm 端点的视觉理解能力。OpenAI: 使用 GPT-4o 等视觉模型。xAI: 使用 Grok 视觉模型分析图片后传给主模型。自定义: 设置自己的 API 地址和模型。
             </div>
             </div>
             </details>
@@ -785,16 +811,15 @@ window.VISION_API_KEY = '';
                     <label class="switch small"><input type="checkbox" id="ragToggle" checked><span class="slider"></span></label>
                 </div>
                 <div class="config-toggle-row">
-                    <span class="config-label" style="cursor:pointer" onclick="var d=document.getElementById('proxyConfigDetails');d.style.display=d.style.display==='none'?'block':'none'">🌐 代理设置 <span style="font-size:10px;color:#999">(穿透网络限制)</span></span>
-                    <label class="switch small"><input type="checkbox" id="proxyToggle" onchange="window.toggleProxy()"><span class="slider"></span></label>
+                    <span class="config-label" style="cursor:pointer" onclick="var d=document.getElementById('proxyConfigDetails');d.style.display=d.style.display==='none'?'block':'none'">🌐 代理模式 <span style="font-size:10px;color:#999">(本地 Mihomo 自动选节点)</span></span>
+                    <label class="switch small"><input type="checkbox" id="proxyToggle" checked onchange="window.toggleProxy()"><span class="slider"></span></label>
                 </div>
                 <div id="proxyConfigDetails" style="display:none;margin-top:8px;">
-                    <div class="config-field">
-                        <label class="config-label">代理 URL</label>
-                        <input type="text" id="proxyUrl" autocomplete="off" class="config-input" placeholder="如: socks5://192.168.1.1:10808 或 http://127.0.0.1:7890" onchange="localStorage.setItem('proxyUrl', this.value);window._scheduleConfigSync()">
+                    <div id="proxyStatus" style="font-size:12px;padding:6px 8px;border-radius:6px;background:#10b98120;color:#065f46;margin-bottom:6px;">
+                        ✅ 代理已就绪 — Mihomo 运行中，自动选择最优节点
                     </div>
-                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
-                        支持 HTTP/HTTPS/SOCKS5 代理。所有 API 请求将通过代理转发。
+                    <div id="proxyNodeList" style="font-size:11px;color:#6b7280;max-height:80px;overflow-y:auto;">
+                        加载中...
                     </div>
                 </div>
                 <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700" id="searchConfigDetails" style="display:none;">
@@ -908,6 +933,22 @@ window.VISION_API_KEY = '';
                         记忆系统
                     </summary>
                     <div class="details-content">
+                    <!-- ★ 人格预设选择器 -->
+                    <div style="margin-bottom:8px;">
+                        <label style="font-size:11px;color:#6b7280;margin-bottom:4px;display:block;">🎭 人格预设</label>
+                        <select id="personalityPreset" class="config-input" style="font-size:11px;padding:6px 8px;width:100%;"
+                            onchange="window.setPersonalityPreset(this.value)">
+                            <option value="">-- 选择人格 --</option>
+                            <option value="default">默认助手 - 专业友好简洁</option>
+                            <option value="tech_mentor">技术导师 - 深入严谨耐心</option>
+                            <option value="creative">创意伙伴 - 开放联想有趣</option>
+                            <option value="friend">知心朋友 - 温暖共情幽默</option>
+                            <option value="coach">效率教练 - 直接结构化</option>
+                            <option value="scholar">知识学者 - 学术思辨</option>
+                            <option value="zen">禅意导师 - 平静哲学</option>
+                            <option value="roleplay">角色扮演 - 自定义沉浸</option>
+                        </select>
+                    </div>
                     <!-- 记忆条目列表 -->
                     <div id="memoryList" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">
                         <div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">加载中...</div>
@@ -1174,7 +1215,8 @@ async function performAuthLogin() {
         if (!username || !password) { authError('请填写用户名和密码'); btn.disabled = false; btn.textContent = orig; return; }
         const resp = await fetch(SERVER_API_BASE + '/auth.php?action=login', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({ username, password }),
+            cache: 'no-store',
         });
         if (!resp.ok) {
             // 读取服务端返回的具体错误消息（如 用户名或密码错误）
@@ -1251,7 +1293,8 @@ function sendOACRegCode() {
     }, 1000);
     fetch(SERVER_API_BASE + '/auth.php?action=send_reg_code', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email })
+        body: JSON.stringify({ email: email }),
+        cache: 'no-store',
     }).then(function(r){ return r.json(); }).then(function(d){
         if (!d.success) {
             clearInterval(timer); sendOACCoolDown=0; btn.textContent='发送验证码'; btn.disabled=false;
@@ -1286,7 +1329,8 @@ async function performAuthRegister() {
         if (!vcode) { authError('请输入邮箱验证码'); btn.disabled = false; btn.textContent = orig; return; }
         const resp = await fetch(SERVER_API_BASE + '/auth.php?action=register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, email, code: vcode })
+            body: JSON.stringify({ username, password, email, code: vcode }),
+            cache: 'no-store',
         });
         if (!resp.ok) { authError('网络错误 (HTTP ' + resp.status + ')，请检查代理设置'); btn.disabled = false; btn.textContent = orig; return; }
         let data;
@@ -1434,7 +1478,8 @@ function logout() {
         fetch(SERVER_API_BASE + '/auth.php?action=logout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
+            body: JSON.stringify({ token }),
+            cache: 'no-store',
         }).catch(function() {});
     }
     // 重载页面
@@ -1450,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', function initAuth() {
     function doVerify() {
         var _t = getAuthToken();
         if (_t) {
-            fetch(SERVER_API_BASE + '/auth.php?action=verify&token=' + encodeURIComponent(_t))
+            fetch(SERVER_API_BASE + '/auth.php?action=verify&token=' + encodeURIComponent(_t) + '&_=' + Date.now(), { cache: 'no-store' })
                 .then(function(r){ return r.json(); })
                 .then(function(d) {
                     if (!d.valid) {
@@ -1468,7 +1513,7 @@ document.addEventListener('DOMContentLoaded', function initAuth() {
         }
     }
     try {
-        fetch(SERVER_API_BASE + '/auth.php?action=cross_domain_token')
+        fetch(SERVER_API_BASE + '/auth.php?action=cross_domain_token', { cache: 'no-store' })
             .then(function(r){ return r.json(); })
             .then(function(data) {
                 if (data.success && data.token) {
@@ -1508,6 +1553,17 @@ window.addEventListener('pageshow', function(e) {
     <script>
     // Service Worker 已禁用，避免缓存问题
     </script>
+    <!-- ★ QR码弹窗容器 -->
+    <div id="qr-popup-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:2147483647;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+        <div id="qr-popup-content" style="background:#fff;border-radius:20px;padding:28px;text-align:center;max-width:360px;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.1);animation:qr-popup-in 0.3s ease-out;">
+            <div id="qr-popup-title" style="font-size:20px;font-weight:bold;margin-bottom:8px;color:#1a1a1a;">📷 扫码登录</div>
+            <div id="qr-popup-desc" style="font-size:14px;color:#666;margin-bottom:16px;">请用手机APP扫描二维码</div>
+            <img id="qr-popup-img" src="" style="width:240px;height:240px;border-radius:14px;display:block;margin:0 auto 16px;border:3px solid #1a73e8;box-shadow:0 4px 16px rgba(26,115,232,0.3);" />
+            <div id="qr-popup-hint" style="font-size:13px;color:#888;margin-bottom:16px;line-height:1.4;"></div>
+            <button onclick="document.getElementById('qr-popup-overlay').style.display='none'" style="background:#1a73e8;color:#fff;border:none;border-radius:10px;padding:12px 32px;font-size:15px;cursor:pointer;font-weight:500;box-shadow:0 2px 8px rgba(26,115,232,0.3);">关闭</button>
+        </div>
+    </div>
+    <style>@keyframes qr-popup-in{from{opacity:0;transform:scale(0.9) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}</style>
 </div>
 </body>
 </html>

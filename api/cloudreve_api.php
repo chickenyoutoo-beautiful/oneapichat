@@ -28,7 +28,7 @@ $rawToken = $_GET['auth_token'] ?? '';
 $token = preg_replace('/[^a-f0-9]/', '', $rawToken);
 $userId = verifyAuthToken($token) ?: '';
 $isMcpCall = ($rawToken === 'cr_shared');
-if (!$userId && !$isMcpCall && $action !== 'ping' && $action !== 'login') {
+if (!$userId && !$isMcpCall && $action !== 'ping' && $action !== 'login' && $action !== 'check_login') {
     echo json_encode(['success' => false, 'data' => null, 'error' => '未认证，请先登录']);
     exit;
 }
@@ -279,6 +279,34 @@ switch ($action) {
         ]));
         break;
 
+    case 'check_login':
+        // ★ 快速检查登录状态 — 避免每次对话都重新登录
+        $cachedToken = cr_getAccessToken($userId);
+        if ($cachedToken) {
+            $resp = cr_get("$apiBase/user/me", $cachedToken);
+            if (($resp['code'] ?? -1) === 0) {
+                echo json_encode(cr_success([
+                    'logged_in' => true,
+                    'nickname' => $resp['data']['nickname'] ?? '',
+                    'email' => $resp['data']['email'] ?? '',
+                    'message' => '已登录: ' . ($resp['data']['nickname'] ?? $resp['data']['email'] ?? 'Cloudreve'),
+                ]));
+                break;
+            }
+        }
+        // 无有效凭据时返回 logged_in: false + 已有账号列表（方便前端显示）
+        $existingAccounts = [];
+        foreach (glob('/tmp/cloudreve_login_*.json') as $f) {
+            $d = json_read_file($f);
+            if ($d && !empty($d['email'])) $existingAccounts[] = $d['email'];
+        }
+        echo json_encode(cr_success([
+            'logged_in' => false,
+            'message' => '未登录，请调用 cr_login 登录',
+            'accounts' => array_unique($existingAccounts),
+        ]));
+        break;
+
     case 'login':
         $email = $_GET['email'] ?? '';
         $password = $_GET['password'] ?? '';
@@ -290,14 +318,16 @@ switch ($action) {
         if (($resp['code'] ?? -1) === 0) {
             $accessToken = $resp['data']['token']['access_token'] ?? '';
             $userData = $resp['data']['user'] ?? [];
-            // ★ 按OneAPIChat用户ID存储，多用户隔离
-            $userKey = $userId ?: md5($email);
-            $tmpFile = '/tmp/cloudreve_login_' . md5($userKey) . '.json';
-            file_put_contents($tmpFile, json_encode([
+            $loginData = [
                 'email' => $email, 'password' => $password,
                 'user_id' => $userData['id'] ?? '', 'nickname' => $userData['nickname'] ?? '',
                 'created' => time(), 'oneapichat_user' => $userId ?: '',
-            ]));
+            ];
+            // ★ 双写: 同时存储 userId 和 email 两种路径，确保 check_login 和 fallback 都能找到
+            if ($userId) {
+                file_put_contents('/tmp/cloudreve_login_' . md5($userId) . '.json', json_encode($loginData));
+            }
+            file_put_contents('/tmp/cloudreve_login_' . md5(md5($email)) . '.json', json_encode($loginData));
             echo json_encode(cr_success([
                 'user' => ['nickname' => $userData['nickname'] ?? $email],
                 'message' => '登录成功: ' . ($userData['nickname'] ?? $email),
@@ -494,6 +524,17 @@ switch ($action) {
         if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
         $parent = $_GET['parent'] ?? '';
         $name = $_GET['name'] ?? '';
+        // ★ v2.6.2: 兼容 MCP 工具只传 path 的情况 — 解析为 parent + name
+        if (!$name && !empty($_GET['path'])) {
+            $rawPath = trim($_GET['path'], '/');
+            $slashPos = strrpos($rawPath, '/');
+            if ($slashPos !== false) {
+                $parent = substr($rawPath, 0, $slashPos);
+                $name = substr($rawPath, $slashPos + 1);
+            } else {
+                $name = $rawPath;
+            }
+        }
         if (!$name) { echo json_encode(cr_error('请输入文件夹名称')); break; }
         $uri = $parent ? "cloudreve://my/$parent" : "cloudreve://my";
         $uri = rtrim($uri, '/');
@@ -840,6 +881,107 @@ switch ($action) {
             echo json_encode(cr_error('文件内容上传失败: ' . ($uploadResp['msg'] ?? '未知错误')));
         }
         break;
+
+    // ★ v2.6.2: 从服务器文件路径上传（支持大文件/二进制文件，自动分片）
+    case 'upload_file':
+        $token = cr_getTokenWithRetry($userId);
+        if (!$token) { echo json_encode(cr_error('无法获取 Cloudreve token')); break; }
+        $filePath = $_GET['file_path'] ?? '';
+        $crPath = $_GET['cloudreve_path'] ?? '';
+        $crName = $_GET['cloudreve_name'] ?? '';
+        if (!$filePath) { echo json_encode(cr_error('需要 file_path 参数（服务器上的文件路径）')); break; }
+        // ★ v2.6.3: 智能路径解析 — 支持 URL/相对路径/绝对路径
+        //    1. https://naujtrats.xyz/oneapichat/uploads/xxx → /var/www/html/oneapichat/uploads/xxx
+        //    2. /oneapichat/uploads/xxx → /var/www/html/oneapichat/uploads/xxx
+        //    3. uploads/user_xxx/img.mp4 → /var/www/html/oneapichat/uploads/user_xxx/img.mp4
+        if (preg_match('#^https?://[^/]+(/oneapichat/.+)$#', $filePath, $urlMatch)) {
+            $filePath = ONECHAT_ROOT . substr($urlMatch[1], strlen('/oneapichat'));
+        } elseif (preg_match('#^/oneapichat/(.+)$#', $filePath, $relMatch)) {
+            $filePath = ONECHAT_ROOT . '/' . $relMatch[1];
+        } elseif ($filePath[0] !== '/') {
+            $filePath = ONECHAT_ROOT . '/' . ltrim($filePath, '/');
+        }
+        // 回退: 尝试 uploads/ 简写
+        if (!file_exists($filePath)) {
+            $altPath = ONECHAT_ROOT . '/uploads/' . basename($filePath);
+            if (file_exists($altPath)) $filePath = $altPath;
+        }
+        if (!file_exists($filePath)) { echo json_encode(cr_error("文件不存在: $filePath")); break; }
+        if (!is_readable($filePath)) { echo json_encode(cr_error("文件不可读: $filePath")); break; }
+
+        $fileSize = filesize($filePath);
+        $fileName = $crName ?: basename($filePath);
+        $uri = $crPath ? "cloudreve://my/$crPath/$fileName" : "cloudreve://my/$fileName";
+
+        // Step 1: 创建上传会话
+        $resp = cr_put("$apiBase/file/upload", ['uri' => $uri, 'size' => $fileSize], $token);
+        if (($resp['code'] ?? -1) !== 0) {
+            echo json_encode(cr_error('创建上传会话失败: ' . ($resp['msg'] ?? '未知错误')));
+            break;
+        }
+        $sessionId = $resp['data']['session_id'] ?? '';
+        $chunkSize = $resp['data']['chunk_size'] ?? 26214400; // Cloudreve 默认 25MB 分片
+        if (!$sessionId) { echo json_encode(cr_error('上传会话创建成功但未返回 session_id')); break; }
+
+        // Step 2: 分片上传
+        $totalChunks = (int)ceil($fileSize / $chunkSize);
+        $fh = fopen($filePath, 'rb');
+        if (!$fh) { echo json_encode(cr_error('无法打开文件')); break; }
+
+        $uploadedChunks = 0;
+        $lastError = null;
+
+        for ($i = 0; $i < $totalChunks; $i++) {
+            $chunkData = fread($fh, $chunkSize);
+            if ($chunkData === false) {
+                $lastError = "读取文件分片 $i/$totalChunks 失败";
+                break;
+            }
+
+            $ch = curl_init("$apiBase/file/upload/$sessionId/$i");
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $chunkData,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/octet-stream',
+                    'Host: ' . $hostHeader,
+                    'Authorization: Bearer ' . $token,
+                    'Content-Length: ' . strlen($chunkData),
+                ],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 120,
+            ]);
+            $uploadBody = curl_exec($ch);
+            $uploadCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($uploadBody === false) {
+                $lastError = "分片 $i/$totalChunks 上传网络错误";
+                break;
+            }
+            $uploadResp = json_decode($uploadBody, true);
+            if (($uploadResp['code'] ?? -1) !== 0) {
+                $lastError = "分片 $i/$totalChunks 失败: " . ($uploadResp['msg'] ?? '未知错误');
+                break;
+            }
+            $uploadedChunks++;
+        }
+        fclose($fh);
+
+        if ($lastError) {
+            echo json_encode(cr_error($lastError, ['uploaded_chunks' => $uploadedChunks, 'total_chunks' => $totalChunks]));
+            break;
+        }
+
+        echo json_encode(cr_success([
+            'path' => $crPath ? "$crPath/$fileName" : $fileName,
+            'name' => $fileName,
+            'size' => $fileSize,
+            'size_formatted' => cr_formatSize($fileSize),
+            'session_id' => $sessionId,
+            'chunks' => $totalChunks,
+            'message' => "已上传: '$fileName' (" . cr_formatSize($fileSize) . ", {$totalChunks}个分片)",
+        ]));
         break;
 
     case 'download_url':
@@ -899,11 +1041,11 @@ switch ($action) {
 
     default:
         echo json_encode(cr_error("未知操作: $action", ['available_actions' => [
-            'ping', 'login', 'user_info',
+            'ping', 'check_login', 'login', 'user_info',
             'list_files', 'search_files',
             'create_folder', 'rename', 'move', 'copy', 'delete',
             'list_shares', 'create_share', 'delete_share',
-            'storage_info', 'upload', 'download_url',
+            'storage_info', 'upload', 'upload_file', 'download_url',
             'overview',
         ]]));
 }

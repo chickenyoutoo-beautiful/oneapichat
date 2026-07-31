@@ -313,6 +313,10 @@ async function initializeConfig() {
     var storedOAKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
     setVal('visionApiKeyOpenAI', (storedOAKey && storedOAKey !== 'not-needed') ? storedOAKey : '');
     setVal('visionApiUrlOpenAI', localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
+    // ★ 加载 xAI Vision 的配置(刷新后恢复)
+    var storedXAIKey = await decrypt(localStorage.getItem('visionApiKeyXAI') || '');
+    setVal('visionApiKeyXAI', (storedXAIKey && storedXAIKey !== 'not-needed') ? storedXAIKey : '');
+    setVal('visionApiUrlXAI', localStorage.getItem('visionApiUrlXAI') || 'https://api.x.ai/v1');
     var storedImageKey = await decrypt(localStorage.getItem('imageApiKey') || '');
     var cleanImageKey = (storedImageKey && storedImageKey !== 'not-needed') ? storedImageKey : '';
     setVal('imageApiKey', cleanImageKey || '');
@@ -323,6 +327,15 @@ async function initializeConfig() {
     setVal('imageApiKeyOpenrouter', cleanOrKey_Final || '');
     setVal('imageBaseUrlOpenrouter', localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api');
     setVal('imageProvider', localStorage.getItem('imageProvider') || DEFAULT_CONFIG.imageProvider || 'minimax');
+    // ★ 根据当前视觉提供商切换字段可见性(刷新后恢复正确的字段显示)
+    var _visProvInit = localStorage.getItem('visionProvider') || 'minimax';
+    var _visFields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'] };
+    Object.keys(_visFields).forEach(function(_vk) {
+        _visFields[_vk].forEach(function(_fid) {
+            var _el = getEl(_fid);
+            if (_el) _el.style.display = _vk === _visProvInit ? '' : 'none';
+        });
+    });
     // ★ 搜索配置必须早于 toggleImageProviderFields(因为后者会触发 saveConfig)
     createSearchConfigSection();
     bindSearchEvents();
@@ -605,6 +618,7 @@ function setupEventListeners() {
                 }
                 e.preventDefault();
                 if (isTypingMap[currentChatId] || (window._messageQueue && window._messageQueue.length > 0)) {
+                    // ★ AI 生成中 或 队列有消息: 推入队列 (随堆栈逐一推出)
                     window.pushToMsgQueue();
                     return;
                 }
@@ -841,11 +855,12 @@ function initializeApp() {
             // 异步验证token有效性
             (async function() {
                 try {
-                    var resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
+                    var _ts = Date.now();
+                    var resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token) + '&_=' + _ts, { cache: 'no-store' });
                     if (!resp.ok) {
                         // ★ 429 限流或网络错误: 重试一次
                         await new Promise(function(r) { setTimeout(r, 2000); });
-                        resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token));
+                        resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token) + '&_=' + Date.now(), { cache: 'no-store' });
                     }
                     var data = await resp.json();
                     if (!data.valid) {
@@ -861,6 +876,9 @@ function initializeApp() {
                         if (typeof updateAuthHeaderBtn === 'function') updateAuthHeaderBtn();
                         if (typeof window._loadCloudMemories === 'function') window._loadCloudMemories();
                         if (typeof window._loadCloudIdentity === 'function') window._loadCloudIdentity();
+                        // ★ v2: 刷新统一记忆上下文 + 恢复人格选择
+                        if (typeof window.refreshMemoryContext === 'function') window.refreshMemoryContext();
+                        if (typeof window.restorePersonalityPreset === 'function') window.restorePersonalityPreset();
                         setTimeout(function() {
                             if (typeof window._autoAskIdentity === 'function') window._autoAskIdentity();
                         }, 3000);
@@ -869,7 +887,7 @@ function initializeApp() {
                     // ★ 网络异常/502 HTML: 延迟重试，先检查响应是否为JSON
                     console.warn('[Auth] 验证token失败,2s后重试:', e.message);
                     setTimeout(function() {
-                        fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token))
+                        fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token), { cache: 'no-store' })
                             .then(function(r2) {
                                 if (!r2.ok) throw new Error('HTTP ' + r2.status);
                                 return r2.json();
@@ -969,6 +987,43 @@ function initializeApp() {
         _loaderProgress(100, '就绪');
         setTimeout(_hideLoader, 200);
 
+        // ★ 执行孤立的 tool_calls (assistant有tool_calls但刷新时工具未执行)
+        // 找出最后一个有tool_calls的assistant,执行缺结果的工具,追加到历史
+        async function _executeOrphanedToolCalls(chatId, asstIdx) {
+            var msgs = chats[chatId] && chats[chatId].messages;
+            if (!msgs || asstIdx < 0 || asstIdx >= msgs.length) return;
+            var asst = msgs[asstIdx];
+            if (asst.role !== 'assistant' || !asst.tool_calls || !asst.tool_calls.length) return;
+            // 收集已有结果的 tool_call_id
+            var _haveResult = {};
+            for (var _ri = asstIdx + 1; _ri < msgs.length; _ri++) {
+                if (msgs[_ri].role === 'tool' && msgs[_ri].tool_call_id) _haveResult[msgs[_ri].tool_call_id] = true;
+            }
+            // 找出缺结果的工具调用
+            var _missing = asst.tool_calls.filter(function(tc){ return tc && tc.id && !_haveResult[tc.id]; });
+            if (!_missing.length) return;
+            if (!window.executeToolCallForRetry) { console.warn('[AutoRecover] executeToolCallForRetry 未加载'); return; }
+            console.log('[AutoRecover] Phase 3: 执行 ' + _missing.length + ' 个孤立工具调用');
+            var _pm = { role: 'assistant', content: asst.content || '', reasoning: asst.reasoning || '', tool_calls: asst.tool_calls };
+            var _body = { messages: [] };
+            for (var _mi = 0; _mi < _missing.length; _mi++) {
+                var tc = _missing[_mi];
+                var toolRes = { error: null, result: null };
+                try {
+                    toolRes = await window.executeToolCallForRetry(tc, null, {
+                        body: _body, pendingMsg: _pm, chatId: chatId,
+                        currentChatId: currentChatId, activeBubbleMap: activeBubbleMap, chats: chats
+                    }) || { error: null, result: null };
+                } catch(_te) { toolRes = { error: String(_te.message || _te), result: null }; }
+                var contentStr = toolRes.error || toolRes.result || '(empty)';
+                contentStr = typeof contentStr === 'string' ? contentStr : JSON.stringify(contentStr);
+                chats[chatId].messages.push({ role: 'tool', tool_call_id: tc.id || '', content: contentStr, _toolResult: true });
+            }
+            try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+            slimSaveChats();
+            saveChats();
+        }
+
         // ★ 自动续生: 优先从引擎恢复活跃流, 回退到 _savedPartial 再生
         try {
             (async function _autoRecover() {
@@ -982,7 +1037,7 @@ function initializeApp() {
                 }
                 // ★ Phase 3: 检测未完成的工具调用交互(刷新中断工具链)
                 // 最后一条是tool_result或assistant有tool_calls但无后续响应→自动续接
-                if (!window._backendRecovered && currentChatId && chats[currentChatId]) {
+                if (!window._backendRecovered && currentChatId && chats[currentChatId] && chats[currentChatId].messages) {
                     var _tmsgs = chats[currentChatId].messages;
                     var _lastToolIdx = -1, _lastAsstIdx = -1, _lastUserIdx = -1;
                     for (var _ti = _tmsgs.length - 1; _ti >= 0; _ti--) {
@@ -992,18 +1047,34 @@ function initializeApp() {
                     }
                     // 工具结果在最后(无assistant响应) 或 assistant有tool_calls等待处理
                     var _needsContinue = false;
+                    var _orphanedAsstIdx = -1;
                     if (_lastToolIdx > _lastAsstIdx && _lastToolIdx > _lastUserIdx) {
                         _needsContinue = true;  // 工具结果未被处理
                     } else if (_lastAsstIdx > _lastUserIdx && _tmsgs[_lastAsstIdx].tool_calls && _tmsgs[_lastAsstIdx].tool_calls.length > 0) {
-                        // assistant有tool_calls但工具还未执行→需要重新生成
+                        // assistant有tool_calls但工具还未执行→需要先执行工具再续接
                         _needsContinue = true;
+                        _orphanedAsstIdx = _lastAsstIdx;
                     }
                     if (_needsContinue) {
                         var _age2 = Date.now() - (chats[currentChatId].updated_at || 0);
                         if (_age2 < 300000) {  // 5分钟内
-                            console.log('[AutoRecover] Phase 3: 检测到未完成工具交互, 自动续接');
+                            console.log('[AutoRecover] Phase 3: 检测到未完成工具交互, 自动续接 (orphanedAsst=' + _orphanedAsstIdx + ')');
                             showToast('🔄 检测到未完成的工具调用, 正在继续...', 'info', 3000);
                             setTimeout(function() {
+                                // ★ Case 2: assistant有tool_calls但工具未执行→先执行工具,追加结果,再交sendMessage续接
+                                if (_orphanedAsstIdx >= 0) {
+                                    _executeOrphanedToolCalls(currentChatId, _orphanedAsstIdx).then(function() {
+                                        sendMessage(true).catch(function(){});
+                                    }).catch(function(_e) {
+                                        console.warn('[AutoRecover] Phase 3 工具执行失败, 回退重发:', _e.message);
+                                        var _lu = _tmsgs[_lastUserIdx];
+                                        if (_lu && _lu.role === 'user') {
+                                            sendMessage(true, _lu.text || '', _lu.files || []).catch(function(){});
+                                        }
+                                    });
+                                    return;
+                                }
+                                // ★ Case 1: 工具已执行无响应→直接续接
                                 var _lu = _tmsgs[_lastUserIdx];
                                 if (_lu && _lu.role === 'user') {
                                     sendMessage(true, _lu.text || '', _lu.files || []).catch(function(){});
@@ -1203,20 +1274,7 @@ function initializeApp() {
 
 
 
-// ★ Service Worker: Cache-First 静态资源 + 更新通知
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/oneapichat/sw.js', { scope: '/oneapichat/' }).catch(function(){});
-    navigator.serviceWorker.addEventListener('message', function(e) {
-        if (e.data && e.data.type === 'SW_UPDATED') {
-            var _b = document.createElement('div');
-            _b.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#667eea;color:#fff;padding:10px 18px;border-radius:8px;cursor:pointer;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);font-size:14px;';
-            _b.textContent = '🔄 有新版本可用，点击刷新';
-            _b.onclick = function() { location.reload(); };
-            document.body.appendChild(_b);
-            setTimeout(function() { _b.style.opacity = '0'; _b.style.transition = 'opacity .5s'; }, 8000);
-        }
-    });
-}
+// ★ Service Worker: 已禁用 (旧 SW 缓存 PHP 源码导致 API 请求失败)
 
 // ★ 注册初始化 — 等待 DOMContentLoaded 确保 main.js 已加载
 initializeApp();

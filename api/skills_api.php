@@ -29,6 +29,7 @@ if (!is_dir($skillsDir)) {
 
 /**
  * 解析 SKILL.md 的 YAML frontmatter + Markdown body
+ * v2: 支持3层嵌套 (metadata.oneapichat.tools/emoji/triggers/priority)
  */
 function parseSkillFile(string $path): ?array {
     if (!file_exists($path)) return null;
@@ -42,26 +43,19 @@ function parseSkillFile(string $path): ?array {
         $yamlStr = $m[1];
         $skill['content'] = trim($m[2]);
 
-        // 简易 YAML 解析（避免依赖外部库）
+        // 简易 YAML 解析（支持3层嵌套）
         $lines = explode("\n", $yamlStr);
         $currentKey = '';
-        $inMetadata = false;
-        $inRequires = false;
-        $inTriggers = false;
-        $inTools = false;
+        $currentSubKey = '';  // 2层嵌套当前key (如 oneapichat)
 
         foreach ($lines as $line) {
             if (trim($line) === '' || trim($line)[0] === '#') continue;
 
-            // 顶级字段
+            // 顶级字段 (0缩进)
             if (preg_match('/^(\w[\w-]*):\s*(.*)$/', $line, $lm)) {
                 $currentKey = $lm[1];
+                $currentSubKey = '';
                 $val = trim($lm[2]);
-                $inMetadata = false;
-                $inRequires = false;
-                $inTriggers = false;
-                $inTools = false;
-
                 if ($val !== '') {
                     $skill['meta'][$currentKey] = $val;
                 } else {
@@ -70,41 +64,66 @@ function parseSkillFile(string $path): ?array {
                 continue;
             }
 
-            // 缩进2空格: 嵌套字段
+            // 缩进2空格: 第2层嵌套 (如 metadata: → oneapichat:)
             if (preg_match('/^  (\w[\w-]*):\s*(.*)$/', $line, $lm)) {
                 $subKey = $lm[1];
                 $subVal = trim($lm[2]);
 
                 if ($currentKey === 'metadata') {
-                    $inMetadata = true;
                     if (!isset($skill['meta']['metadata'])) $skill['meta']['metadata'] = [];
                     if ($subVal !== '') {
                         $skill['meta']['metadata'][$subKey] = $subVal;
+                    } else {
+                        $skill['meta']['metadata'][$subKey] = [];
                     }
-                } elseif ($inMetadata && $subKey === 'openclaw' || $subKey === 'oneapichat') {
-                    if (!isset($skill['meta']['metadata'][$subKey])) $skill['meta']['metadata'][$subKey] = [];
-                } elseif ($inMetadata && ($subKey === 'requires')) {
-                    $inRequires = true;
-                } elseif ($inMetadata && ($subKey === 'triggers')) {
-                    $inTriggers = true;
-                } elseif ($inMetadata && ($subKey === 'tools')) {
-                    $inTools = true;
+                    $currentSubKey = $subKey;  // 记录当前2层key
                 }
                 continue;
             }
 
-            // 缩进4空格: 列表项
-            if (preg_match('/^    -\s*(.*)$/', $line, $lm)) {
-                $itemVal = trim($lm[1]);
-                if ($inTriggers && isset($skill['meta']['metadata']['oneapichat'])) {
-                    if (!isset($skill['meta']['metadata']['oneapichat']['triggers'])) $skill['meta']['metadata']['oneapichat']['triggers'] = [];
-                    $skill['meta']['metadata']['oneapichat']['triggers'][] = $itemVal;
-                } elseif ($inTools && isset($skill['meta']['metadata']['oneapichat'])) {
-                    if (!isset($skill['meta']['metadata']['oneapichat']['tools'])) $skill['meta']['metadata']['oneapichat']['tools'] = [];
-                    $skill['meta']['metadata']['oneapichat']['tools'][] = $itemVal;
-                } elseif ($inRequires && isset($skill['meta']['metadata']['oneapichat'])) {
-                    // requires.env / requires.bins
+            // 缩进4空格: 第3层嵌套 (如 oneapichat: → tools: / emoji: / triggers:)
+            if (preg_match('/^    (\w[\w-]*):\s*(.*)$/', $line, $lm) && $currentSubKey !== '') {
+                $deepKey = $lm[1];
+                $deepVal = trim($lm[2]);
+
+                // 确保路径存在: meta.metadata.{oneapichat}
+                if (!isset($skill['meta']['metadata'][$currentSubKey])) {
+                    $skill['meta']['metadata'][$currentSubKey] = [];
                 }
+
+                if ($deepVal !== '') {
+                    // 行内数组: tools: [a, b, c]
+                    if (preg_match('/^\[(.*)\]$/', $deepVal, $arrMatch)) {
+                        $items = array_values(array_filter(array_map('trim', explode(',', $arrMatch[1])), function($t) { return $t !== ''; }));
+                        $skill['meta']['metadata'][$currentSubKey][$deepKey] = $items;
+                    } else {
+                        $skill['meta']['metadata'][$currentSubKey][$deepKey] = $deepVal;
+                    }
+                } else {
+                    $skill['meta']['metadata'][$currentSubKey][$deepKey] = [];
+                }
+                continue;
+            }
+
+            // 缩进6空格: 第3层列表项 (如 triggers 的 - item)
+            if (preg_match('/^      -\s*(.*)$/', $line, $lm) && $currentSubKey !== '') {
+                $itemVal = trim($lm[1]);
+                if ($itemVal === '') continue;
+
+                // 找到最后一个赋值的3层key作为列表目标
+                $target = &$skill['meta']['metadata'][$currentSubKey];
+                if (is_array($target)) {
+                    // 找最后一个值为空数组的key作为列表容器
+                    $lastKey = '';
+                    foreach ($target as $k => $v) {
+                        if (is_array($v) && empty($v)) $lastKey = $k;
+                    }
+                    if ($lastKey) {
+                        if (!isset($target[$lastKey]) || !is_array($target[$lastKey])) $target[$lastKey] = [];
+                        $target[$lastKey][] = $itemVal;
+                    }
+                }
+                unset($target);
             }
         }
     } else {
@@ -125,11 +144,23 @@ switch ($action) {
             if (!file_exists($skillFile)) continue;
             $parsed = parseSkillFile($skillFile);
             if (!$parsed) continue;
+            // 提取 oneapichat 元数据 (与 match action 一致)
+            $oneapichat = $parsed['meta']['metadata']['oneapichat'] ?? [];
+            // 提取 emoji
+            $emoji = $oneapichat['emoji'] ?? '📦';
+            if (!is_string($emoji) || empty($emoji)) $emoji = '📦';
             $skills[] = [
                 'name' => $name,
                 'description' => $parsed['meta']['description'] ?? '',
                 'version' => $parsed['meta']['version'] ?? '0.1.0',
-                'meta' => $parsed['meta']['metadata'] ?? [],
+                'meta' => [
+                    'oneapichat' => [
+                        'tools' => is_array($oneapichat['tools'] ?? null) ? $oneapichat['tools'] : [],
+                        'emoji' => $emoji,
+                        'triggers' => is_array($oneapichat['triggers'] ?? null) ? $oneapichat['triggers'] : [],
+                        'priority' => $oneapichat['priority'] ?? 'medium',
+                    ],
+                ],
                 'size' => strlen($parsed['content']),
             ];
         }
@@ -237,6 +268,7 @@ switch ($action) {
         // 按分数排序
         usort($matched, function($a, $b) { return $b['score'] - $a['score']; });
 
+        // 返回TOP5匹配技能(前端getMatchedSkillsPrompt只取TOP3注入)
         echo json_encode(['matched' => array_slice($matched, 0, 5), 'query' => $query], JSON_UNESCAPED_UNICODE);
         break;
 

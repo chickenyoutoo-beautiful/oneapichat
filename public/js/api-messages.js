@@ -315,9 +315,14 @@ function buildApiMessages(chatId) {
             }
             // ★ thinking模式: reasoning内容必须传回API(空字符串也不行,需保留原值)
             // DeepSeek要求: 若对话中任何assistant有过reasoning,后续所有assistant都需带回
+            // ★ LongCat 例外: 其 apply_chat_template 不支持 reasoning_content 非标准字段,
+            //    迭代消息时会尝试调用 .items() 导致 'list object' has no attribute 'items' 错误
             var _rc = msg.reasoning_content || msg.reasoning || '';
             if (_rc || msg._hadReasoning) {
-                _assistantMsg.reasoning_content = _rc;
+                var _isLongCat = (getVal('modelSelect') || '').toLowerCase().includes('longcat');
+                if (!_isLongCat) {
+                    _assistantMsg.reasoning_content = _rc;
+                }
             }
             // ★ 将生成的图片 URL 以文本形式注入到 assistant 消息中
             // （视觉模型可通过这些 URL 了解之前生成了什么，配合 system 指令可以调用 analyze_image 查看）
@@ -462,20 +467,9 @@ function buildApiMessages(chatId) {
         }
     }
     if (_removedToolMsgCount > 0) {
-        // ★ 同步清理源消息中的孤立 tool 消息，防止下轮重复出现
-        var _orphanIds = {};
-        for (var _oi = 0; _oi < apiMessagesUnfiltered.length; _oi++) {
-            if (apiMessagesUnfiltered[_oi]._removeOrphan && apiMessagesUnfiltered[_oi].tool_call_id) {
-                _orphanIds[apiMessagesUnfiltered[_oi].tool_call_id] = true;
-            }
-        }
-        // 从源 msgs 删除
-        for (var _si = msgs.length - 1; _si >= 0; _si--) {
-            if (msgs[_si].role === 'tool' && _orphanIds[msgs[_si].tool_call_id]) {
-                console.log('[buildApiMessages] 从源删除孤 tool 消息:', msgs[_si].tool_call_id);
-                msgs.splice(_si, 1);
-            }
-        }
+        // ★ 修复: 孤立 tool 结果只在本轮请求中过滤，不再从源消息删除。
+        //   否则轮次间的瞬时配对失败(如链式模式 partial 未清除、RS 覆盖 tool_calls)会把工具结果永久销毁,
+        //   模型下一轮看不到结果 → 反复重发同一工具调用 → 死循环(曾出现 76 个重复 video_download)。
         apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
     }
     if (_removedTcCount > 0 || _removedToolMsgCount > 0) {
@@ -541,8 +535,21 @@ function buildApiMessages(chatId) {
                 _m.content = String(_m.content || '');
             }
         }
+        // ★ 保底机制: 单条消息内容设上限。历史中一旦被污染(如 grep 返回了 900 多万字符),
+        //   发送前也必须截断, 不能反复把超长内容塞进上下文。
+        if (typeof _m.content === 'string' && _m.content.length > 100000) {
+            var _mcOrigLen = _m.content.length;
+            _m.content = _m.content.substring(0, 100000)
+                + '\n\n...[消息内容过长已截断: 原始 ' + _mcOrigLen + ' 字符, 仅保留前 100000 字符]';
+        }
         apiMessages.push(_m);
     }
+    // ★ LongCat 清洗: 使用统一的 isLongCat() 检测 (同时检查模型名 + base URL + provider)
+    //    apply_chat_template 不支持数组 content (会报 'list object' has no attribute 'items')
+    if (typeof window.sanitizeForLongCat === 'function') {
+        apiMessages = window.sanitizeForLongCat(apiMessages);
+    }
+
     // ★ 诊断: 打印最终消息摘要检测重复 tool_call_id
     // ★ 分开跟踪: assistant.tool_calls[].id 和 tool.tool_call_id 是配对的(正常),不应视为重复
     var _tcDiagAssistant = {};  // tool_call_id from assistant.tool_calls[]

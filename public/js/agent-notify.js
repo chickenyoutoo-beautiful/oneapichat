@@ -63,12 +63,16 @@ window.syncAgentChat = function(agentName) {
     var key = 'agent_chat_' + agentName;
     var msgs = JSON.parse(localStorage.getItem(key) || '[]');
     if (msgs.length > 0) {
-        var html = msgs.map(function(m) {
+        var html = msgs.map(function(m, idx) {
             var roleClass = m.role === 'user' ? 'role-user' : 'role-assistant';
             var timeStr = m.time ? new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
-            var contentPreview = (m.content || '').substring(0, 3000);
-            return '<div class="agent-chat-bubble ' + roleClass + '">' +
-                '<div class="text-xs text-gray-400 mb-1">' + (m.role === 'user' ? '你' : escapeHtml(agentName)) + (timeStr ? ' · ' + timeStr : '') + '</div>' +
+            var content = (m.content || '');
+            var isError = content.indexOf('失败:') === 0 || content.indexOf('错误:') === 0;
+            var contentPreview = content.substring(0, 3000);
+            var bubbleStyle = isError ? 'border-left:3px solid #ef4444;' : '';
+            var label = m.role === 'user' ? '你' : (idx === msgs.length - 1 ? '✅ ' + escapeHtml(agentName) + ' · 最终结果' : escapeHtml(agentName));
+            return '<div class="agent-chat-bubble ' + roleClass + '" style="' + bubbleStyle + '">' +
+                '<div class="text-xs text-gray-400 mb-1">' + label + (timeStr ? ' · ' + timeStr : '') + '</div>' +
                 '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(contentPreview) + '</div>' +
                 '</div>';
         }).join('');
@@ -118,7 +122,7 @@ function ensureChatExists() {
 window.startAgentNotificationPolling = function() {
     if (_agentPollTimer) return;
     ensureChatExists();
-    _agentPollTimer = setInterval(window.checkAgentNotifications, 15000);
+    _agentPollTimer = setInterval(window.checkAgentNotifications, 30000);  // ★ P0: SSE即时推送,轮询降级为30s后备
     window.checkAgentNotifications();
 };
 
@@ -334,10 +338,76 @@ window.connectSSEChannel = function() {
     _sseChannel.addEventListener('agent:status', function(e) {
         try {
             var ev = JSON.parse(e.data);
+            // ★ 失败时即时Toast,不等轮询
+            if (ev.status === 'failed' || ev.status === 'error') {
+                showToast('❌ 子代理 ' + (ev.agent || '') + ' 执行失败', 'error', 5000);
+            }
             if (typeof window.checkAgentNotifications === 'function') {
                 window.checkAgentNotifications();
             }
         } catch(_sce) {}
+    });
+
+    // ★ P0: 即时子代理结果推送 — SSE携带完整数据,无需轮询
+    _sseChannel.addEventListener('agent:result', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            var agentName = ev.agent || '';
+            var status = ev.status || 'completed';
+            var result = ev.result || '';
+            var error = ev.error || '';
+            var structured = ev.structured || null;
+
+            if (typeof window.pushAgentResultToTaskWithStructured === 'function') {
+                window.pushAgentResultToTaskWithStructured(agentName, status, result, error, structured);
+            } else if (typeof window.pushAgentResultToTask === 'function') {
+                if (window._tasks && typeof window._tasks === 'object') {
+                    for (var _tId in window._tasks) {
+                        var _t = window._tasks[_tId];
+                        if (_t && _t.agents && _t.agents[agentName]) {
+                            window.pushAgentResultToTask(_tId, agentName, status, result, error);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (result) {
+                var agentKey = 'agent_chat_' + agentName;
+                var agentMsgs = JSON.parse(localStorage.getItem(agentKey) || '[]');
+                agentMsgs.push({ role: 'assistant', content: result, time: Date.now() });
+                if (agentMsgs.length > 50) agentMsgs = agentMsgs.slice(-50);
+                localStorage.setItem(agentKey, JSON.stringify(agentMsgs));
+            }
+
+            // ★ 失败时显示Toast通知
+            if (status === 'failed' || status === 'error') {
+                var errMsg = error || result || '未知错误';
+                showToast('❌ 子代理 ' + agentName + ' 执行失败: ' + errMsg.substring(0, 100), 'error', 6000);
+            }
+        } catch(_sce) {}
+    });
+
+    // ★ P1: 子代理实时步骤进度
+    _sseChannel.addEventListener('agent:step', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            var agentName = ev.agent || '';
+            var tool = ev.tool || '';
+            var step = ev.step || 0;
+            var maxSteps = ev.max_steps || 0;
+            if (window._tasks && typeof window._tasks === 'object') {
+                for (var _tId in window._tasks) {
+                    var _t = window._tasks[_tId];
+                    if (_t && _t.agents && _t.agents[agentName]) {
+                        _t.agents[agentName]._lastTool = tool;
+                        _t.agents[agentName]._step = step;
+                        _t.agents[agentName]._maxSteps = maxSteps;
+                        break;
+                    }
+                }
+            }
+        } catch(_s) {}
     });
 
     _sseChannel.addEventListener('heartbeat:push', function(e) {
@@ -350,6 +420,7 @@ window.connectSSEChannel = function() {
 
     _sseChannel.onerror = function() {
         console.warn('[SSE] Connection error, EventSource will auto-reconnect');
+        window._sseDisconnected = true;  // ★ P0: 标记断开,轮询作为后备
     };
 };
 
@@ -666,9 +737,8 @@ window.checkAgentNotifications = function() {
                         result: n.result || '',
                         error: n.error || ''
                     };
-                    if (isAgentToolsActive()) {
-                        window.triggerAgentAutoReplyForSubAgent(agentName);
-                    }
+                    // ★ 无论是否Agent模式,都触发子代理自动回复(普通聊天+Agent聊天统一处理)
+                    window.triggerAgentAutoReplyForSubAgent(agentName);
                 }
             });
 

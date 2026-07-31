@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / ".engine" / "skills"
+SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills"
 SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -61,9 +61,39 @@ def _save_skills(user_id: str, data: dict):
 
 
 def list_skills(user_id: str) -> list[dict]:
-    """列出用户的所有技能"""
+    """列出用户的所有技能(全局 SKILL.md + 用户自定义 JSON)"""
+    skills = []
+    # ★ 1. 加载全局技能(SKILL.md 文件,与 PHP skills_api.php 一致)
+    if SKILLS_DIR.exists():
+        for skill_dir in sorted(SKILLS_DIR.iterdir()):
+            if not skill_dir.is_dir():
+                continue
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists():
+                continue
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+                # 解析 YAML frontmatter
+                meta = {}
+                if content.startswith("---"):
+                    end = content.find("---", 3)
+                    if end > 0:
+                        import yaml
+                        meta = yaml.safe_load(content[3:end]) or {}
+                        # ★ YAML 之后的内容作为 prompt_template
+                        body = content[end+3:].strip()
+                        if body:
+                            meta["prompt_template"] = body
+                if meta and isinstance(meta, dict):
+                    skills.append(meta)
+            except Exception:
+                pass
+    # 2. 加载用户自定义技能(JSON)
     data = _load_skills(user_id)
-    return data.get("skills", [])
+    for s in data.get("skills", []):
+        if not any(existing.get("name") == s.get("name") for existing in skills):
+            skills.append(s)
+    return skills
 
 
 def get_skill(user_id: str, name: str) -> Optional[dict]:

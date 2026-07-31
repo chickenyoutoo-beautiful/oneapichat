@@ -69,3 +69,39 @@ src_routes_backup_optimize.py
 engine_sub_test*
 chaoxing_qr.png
 bilibili_qr.png
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+# Environment variables
+.env
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+.DS_Store
+
+# 敏感/本地数据（勿上传）
+.claude/
+.taskmaster/
+users/*.db
+config/amap_config.php
+api/test.php
+tmp_analyze_*.png
+aliyun_qr.png
+baidu_qr.png
+quark_qr.png
+
+# Task files
+# tasks.json
+# tasks/ 

@@ -219,6 +219,10 @@ async function compressContextIfNeeded(chatId) {
             max_tokens: 800
         };
         compressBody.extra_body = { thinking: { type: 'disabled' } };
+        // ★ LongCat 清洗: 压缩请求也可能走 LongCat (当主模型是 LongCat 时)
+        if (typeof window.sanitizeForLongCat === 'function') {
+            compressBody.messages = window.sanitizeForLongCat(compressBody.messages);
+        }
 
         var res = await fetch(getVal('baseUrl') + '/chat/completions', {
             method: 'POST',
@@ -442,14 +446,15 @@ function compressChatsForStorage(chatsObj) {
                         return (gi && typeof gi === 'string' && gi.startsWith('data:')) ? '' : gi;
                     }).filter(Boolean);
                 }
-                // ★ 剥离用户上传文件中的 base64 content（仅保留元数据）
+                // ★ 剥离用户上传文件中的 base64 content（保留元数据 + 适中小图片）
                 if (msg.files && msg.files.length > 0) {
                     msg.files = msg.files.map(function(f) {
                         var isMedia = f.isImage || f.isVideo || (f.type && (f.type.startsWith('image/') || f.type.startsWith('video/')));
-                        if (isMedia && f.content && f.content.length > 500) {
-                            // 保留元数据，清除 base64 内容（刷新后应从 serverUrl 恢复）
+                        if (isMedia && f.content && f.content.length > 200000) {
+                            // 大图片(>200KB base64): 只保留元数据, 刷新后无法恢复 base64
                             return { name: f.name, type: f.type || (f.isImage ? 'image/png' : 'video/mp4'), size: f.size, isImage: f.isImage, isVideo: f.isVideo, content: '', serverUrl: f.serverUrl || '' };
                         }
+                        // 中小图片: 保留 base64 (刷新后 xAI 仍可用)
                         // ★ 清除 Office 文档内嵌图片（base64 太大，刷新后需重新上传才能看到图片）
                         if (f.extractedImages && f.extractedImages.length > 0) {
                             delete f.extractedImages;
@@ -700,6 +705,7 @@ window.createNewChat = function () {
 
 window.loadChat = async function (id) {
     if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
+    if (!chats[id].messages) chats[id].messages = [];
     try {
     // ★ 会话切换：先保存旧会话队列
     var _oldChatId = currentChatId;
@@ -890,7 +896,8 @@ window.loadChat = async function (id) {
                         m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
                 }
             } else if (m.role === 'user') {
-                appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx);
+                // ★ 保留推入标记 (消息在模型生成中途被推入时显示角标)
+                appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx, !!m._injected);
             } else {
                 // ★ 工具调用历史：可折叠卡片式列表
                 var toolDisplayHtml = '';

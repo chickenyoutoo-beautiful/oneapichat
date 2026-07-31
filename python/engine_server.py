@@ -31,16 +31,26 @@ def _load_proxy_config():
                     cfg = json.load(f)
                 if cfg.get('proxyEnabled') == '1' and cfg.get('proxyUrl'):
                     proxy_url = cfg['proxyUrl']
-                    # ★ 公网地址映射为内网直连
-                    if 'proxy.naujtrats.xyz:8888' in proxy_url:
-                        proxy_url = 'http://192.168.195.213:10808'
-                    elif 'proxy.naujtrats.xyz:8889' in proxy_url:
-                        proxy_url = 'http://192.168.195.22:10808'
                     os.environ['HTTP_PROXY'] = proxy_url
                     os.environ['HTTPS_PROXY'] = proxy_url
                     os.environ['ALL_PROXY'] = proxy_url
                     print(f'[Engine] 代理已启用: {proxy_url}')
                     return proxy_url
+            except Exception:
+                pass
+        # ★ 回退: proxyEnabled=1 但无 proxyUrl → 使用本地 Mihomo
+        for cf in config_files:
+            try:
+                with open(cf, 'r') as f:
+                    cfg = json.load(f)
+                if cfg.get('proxyEnabled') == '1':
+                    # ★ 本地集成模式: 使用 Mihomo SOCKS5 代理
+                    _local_proxy = 'socks5h://127.0.0.1:1081'
+                    os.environ['HTTP_PROXY'] = _local_proxy
+                    os.environ['HTTPS_PROXY'] = _local_proxy
+                    os.environ['ALL_PROXY'] = _local_proxy
+                    print(f'[Engine] proxyEnabled=1, 使用本地 Mihomo: {_local_proxy}')
+                    return _local_proxy
             except Exception:
                 pass
     except Exception as e:
@@ -104,6 +114,7 @@ from engine.cron import _run_cron_job, _start_cron_job as _cron_start, _stop_cro
 from engine.agent_roles import AGENT_ROLES, filter_tools_by_role as _filter_tools_by_role, cleanup_old_agents as _cleanup_old_agents
 from engine.server_tools import register_server_tools
 from engine.agent_endpoints import register_agent_endpoints
+from engine.memory_endpoints import register_memory_endpoints
 from engine.crypto import load_encryption_key, get_aes_key, decrypt_xor
 from engine.agent_memory import read_memory_json, write_memory_json
 from engine.workflow import create_workflow, run_workflow, list_workflows, status_workflow, delete_workflow, get_roles as _wf_get_roles
@@ -334,6 +345,9 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     api_key = main_config.get("api_key", "") or os.getenv("OPENAI_API_KEY", "")
     base_url = main_config.get("base_url", "") or os.getenv("OPENAI_BASE_URL", "") or "https://api.minimaxi.com/v1"
     model = main_config.get("model", "") or "MiniMax-M2.7"
+    # ★ 防御: model 为无效值(如"加载中...")时回退到默认
+    if not model or model.startswith("加载中") or len(model) < 3:
+        model = "deepseek-chat" if "deepseek" in base_url else "MiniMax-M2.7"
     if "api.minimaxi.com" in base_url and "minimax" not in model.lower():
         model = "MiniMax-M2.7"
     if not api_key:
@@ -347,11 +361,6 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     _agent_proxy_enabled = agent.get("proxy_enabled", "")
     _agent_http_client = None
     if _agent_proxy_enabled == '1' and _agent_proxy_url:
-        # 公网地址映射为内网
-        if 'proxy.naujtrats.xyz:8888' in _agent_proxy_url:
-            _agent_proxy_url = 'http://192.168.195.213:10808'
-        elif 'proxy.naujtrats.xyz:8889' in _agent_proxy_url:
-            _agent_proxy_url = 'http://192.168.195.22:10808'
         import httpx as _httpx
         _agent_http_client = _httpx.Client(proxy=_agent_proxy_url)
     elif _PROXY_URL:
@@ -385,7 +394,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return "错误:缺少 query 参数"
             try:
                 # 从主聊配置读取搜索 Provider 和对应的 API Key
-                search_provider = "tavily"  # 默认
+                search_provider = ""  # 从配置读取,无配置时用 DuckDuckGo(不需要API Key)
                 search_api_key = ""
                 try:
                     config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
@@ -395,89 +404,126 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     raw_provider = raw_cfg.get("searchProvider", "") or ""
                     if raw_provider and raw_provider != "not-needed":
                         search_provider = raw_provider
-                    # 读取对应 Provider 的 API Key
+                except Exception:
+                    pass
+                # ★ 未配置或读取失败时,默认 DuckDuckGo(不需要API Key)
+                if not search_provider:
+                    search_provider = "duckduckgo"
+                # 读取对应 Provider 的 API Key(优先专用字段,回退到通用 searchApiKey)
+                try:
                     provider_key_fields = {
-                        "tavily": "searchApiKeyTavily",
-                        "brave": "searchApiKeyBrave",
-                        "google": "searchApiKeyGoogle",
+                        "tavily": ["searchApiKeyTavily", "searchApiKey"],
+                        "brave": ["searchApiKeyBrave", "searchApiKey"],
+                        "google": ["searchApiKeyGoogle", "searchApiKey"],
                     }
-                    key_field = provider_key_fields.get(search_provider, "searchApiKey")
-                    stored = raw_cfg.get(key_field, "") or raw_cfg.get("searchApiKey", "") or ""
-                    if stored:
+                    key_fields = provider_key_fields.get(search_provider, ["searchApiKey"])
+                    # ★ 依次尝试所有候选字段,第一个非空且解密成功的胜出
+                    for key_field in key_fields:
+                        stored = raw_cfg.get(key_field, "")
+                        if not stored:
+                            continue
                         decrypted = _decrypt_xor(stored)
                         if decrypted:
                             search_api_key = decrypted
-                        else:
-                            print(f"[web_search] {search_provider} API Key 解密失败, 尝试明文", flush=True)
-                            search_api_key = stored  # 可能是明文存储
-                    print(f"[web_search] provider={search_provider} key_len={len(search_api_key) if search_api_key else 0}", flush=True)
+                            break
+                        elif not stored.startswith("v2:"):
+                            search_api_key = stored  # 明文存储
+                            break
                 except Exception:
-                    pass
+                    search_api_key = ""
+                # ★ 无 key 时强制回退到 DuckDuckGo(不需要 API Key)
+                if not search_api_key and search_provider != "duckduckgo":
+                    print(f"[web_search] provider={search_provider} 无有效 API Key,回退 DuckDuckGo", flush=True)
+                    search_provider = "duckduckgo"
+                print(f"[web_search] user_id={user_id} provider={search_provider} key_len={len(search_api_key) if search_api_key else 0} key_prefix={search_api_key[:10] if search_api_key else 'NONE'}", flush=True)
 
-                # DuckDuckGo 不需要 API Key,直接转发
+                # DuckDuckGo: 通过 _http_session 代理直接请求 DDG lite HTML
                 if search_provider == "duckduckgo":
                     try:
-                        from duckduckgo_search import DDGS
-                        with DDGS() as ddgs:
-                            ddgs_results = list(ddgs.text(query, max_results=8))
-                        if not ddgs_results:
-                            return f'搜索 "{query}" 无结果。请更换关键词重试。'
-                        lines = []
-                        for res in ddgs_results[:8]:
-                            title = res.get("title", "")
-                            url = res.get("href", res.get("link", ""))
-                            content = res.get("body", res.get("snippet", ""))[:200].replace("\n", " ")
-                            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
-                            lines.append(f"- [{title}]({url})\n  {content}")
-                        return f"搜索结果 (provider: {search_provider}, query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
-                    except ImportError:
-                        # duckduckgo_search 未安装,回退至 Tavily
-                        search_provider = "tavily"
-                    except Exception as e:
-                        return f"搜索出错 ({search_provider}): {str(e)}\n请稍后重试或更换关键词。"
+                        _ddg_url = f"https://lite.duckduckgo.com/lite/?q={requests.utils.quote(query)}"
+                        _ddg_r = _http_session.get(_ddg_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=15)
+                        if _ddg_r.status_code == 200 and len(_ddg_r.text) > 100:
+                            from bs4 import BeautifulSoup
+                            soup = BeautifulSoup(_ddg_r.text, "html.parser")
+                            _ddg_results = []
+                            for link in soup.select("a.result-link")[:8]:
+                                _title = link.get_text(strip=True)
+                                _href = link.get("href", "")
+                                if _href.startswith("//duckduckgo.com/l/?"):
+                                    from urllib.parse import parse_qs, urlparse
+                                    _parsed = urlparse("https:" + _href)
+                                    _uddg = parse_qs(_parsed.query).get("uddg", [""])[0]
+                                    _href = requests.utils.unquote(_uddg) if _uddg else _href
+                                _ddg_results.append(f"- [{_title}]({_href})")
+                            if _ddg_results:
+                                return f"搜索结果 (provider: duckduckgo, query: {query}):\n" + "\n\n".join(_ddg_results) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                    except Exception as _ddg_e:
+                        print(f"[web_search] duckduckgo error: {_ddg_e}", flush=True)
+                    # DDG 也失败 → 回退 tavily
+                    search_provider = "tavily"
 
-                # Tavily 搜索 (失败时自动回退到 MiniMax CLI 搜索)
+
+                # Tavily 搜索 (失败时自动回退到 PHP 代理 → MiniMax CLI)
                 def _try_tavily(q):
-                    if not search_api_key:
-                        return None
+                    import re as _re  # ★ 嵌套函数必须内部 import,否则闭包找不到模块级变量
+                    # ★ 路径1: 直接调用 Tavily API
+                    if search_api_key:
+                        try:
+                            _depth = "basic"
+                            if search_api_key.startswith("tvly-") and not search_api_key.startswith("tvly-dev-") and not search_api_key.startswith("tvly-free-"):
+                                _depth = "advanced"
+                            r = _http_session.post(
+                                "https://api.tavily.com/search",
+                                json={"api_key": search_api_key, "query": q, "search_depth": _depth, "max_results": 10, "include_answer": True},
+                                timeout=20
+                            )
+                            if r.status_code == 200:
+                                data = r.json()
+                                results = data.get("results", [])
+                                answer = data.get("answer", "") or ""
+                                if results or answer:
+                                    if not results and answer:
+                                        return f"搜索结果 (query: {q}):\n[摘要] {answer[:500]}"
+                                    lines = []
+                                    for res in results[:8]:
+                                        title = res.get("title", "")
+                                        url = res.get("url", "")
+                                        content = res.get("content", "")[:200].replace("\n", " ")
+                                        content = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                                        lines.append(f"- [{title}]({url})\n  {content}")
+                                    return f"搜索结果 (provider: tavily, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                        except Exception:
+                            pass
+                        except Exception as _e:
+                            with open("/tmp/engine_tool_debug.log", "a") as _f:
+                                _f.write(f"[TAVILY_XXX] exception: {_e}\n")
+                    # ★ 路径2: PHP 代理回退(与父代理相同路径)
                     try:
-                        # ★ 免费 key (tvly-dev-/tvly-free-) 仅支持 basic, 付费 key 可用 advanced
-                        _depth = "basic"
-                        if search_api_key.startswith("tvly-") and not search_api_key.startswith("tvly-dev-") and not search_api_key.startswith("tvly-free-"):
-                            _depth = "advanced"
-                        r = _http_session.post(
-                            "https://api.tavily.com/search",
-                            json={
-                                "api_key": search_api_key,
-                                "query": q,
-                                "search_depth": _depth,
-                                "max_results": 10,
-                                "include_answer": True
-                            },
-                            timeout=20
-                        )
-                        print(f"[tavily] status={r.status_code} depth={_depth} query={q[:50]}", flush=True)
-                        if r.status_code != 200:
-                            print(f"[tavily] non-200 response: {r.text[:200]}", flush=True)
-                            return None  # 401/429/500 → 回退
-                        data = r.json()
-                        results = data.get("results", [])
-                        answer = data.get("answer", "") or ""
-                        print(f"[tavily] results_count={len(results)} answer_len={len(answer) if answer else 0}", flush=True)
-                        if not results:
-                            if answer:
-                                return f"搜索结果 (query: {q}):\n[摘要] {answer[:500]}\n\n注: 未搜索到具体网页结果,以上为 AI 摘要。"
-                            return None  # 空结果 → 回退
-                        lines = []
-                        for res in results[:8]:
-                            title = res.get("title", "")
-                            url = res.get("url", "")
-                            content = res.get("content", "")[:200].replace("\n", " ")
-                            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
-                            lines.append(f"- [{title}]({url})\n  {content}")
-                        return f"搜索结果 (provider: tavily, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                        _api_key_param = f"&api_key={search_api_key}" if search_api_key else ""
+                        _proxy_url = f"https://127.0.0.1/oneapichat/api/engine_api.php?action=tavily_search&q={requests.utils.quote(q)}&limit=10{_api_key_param}"
+                        _pr = _http_session.get(_proxy_url, headers={"Host": "naujtrats.xyz"}, timeout=20, verify=False)
+                        if _pr.status_code == 200:
+                            _pd = _pr.json()
+                            if _pd.get("results") or _pd.get("answer"):
+                                results = _pd.get("results", [])
+                                answer = _pd.get("answer", "")
+                                if answer and not results:
+                                    return f"搜索结果 (query: {q}):\n[摘要] {answer[:500]}"
+                                lines = []
+                                for res in results[:8]:
+                                    if isinstance(res, dict):
+                                        title = res.get("title", "")
+                                        url = res.get("url", "")
+                                        content = res.get("content", "")[:200].replace("\n", " ")
+                                        content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                                        lines.append(f"- [{title}]({url})\n  {content}")
+                                if lines:
+                                    return f"搜索结果 (provider: tavily_proxy, query: {q}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                            if _pr.text and len(_pr.text) > 50 and '<!doctype' not in _pr.text.lower():
+                                return f"搜索结果 (provider: proxy, query: {q}):\n{_pr.text[:2000]}"
                     except Exception:
-                        return None
+                        pass
+                    return None
 
                 # MiniMax CLI 搜索回退
                 def _try_minimax_search(q):
@@ -516,7 +562,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     mmx_result = _try_minimax_search(query)
                     if mmx_result:
                         return mmx_result
-                    return f'搜索 "{query}" 无结果。请更换关键词重试。'
+                    return f'搜索 "{query}" 无结果。搜索引擎不可用,请用 web_fetch 或换其他方式获取信息。'
 
                 # Brave 搜索
                 if search_provider == "brave":
@@ -530,7 +576,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     data = r.json()
                     results = data.get("web", {}).get("results", [])
                     if not results:
-                        return f'搜索 "{query}" 无结果。请更换关键词重试。'
+                        return f'搜索 "{query}" 无结果。搜索引擎不可用,请用 web_fetch 或换其他方式获取信息。'
                     lines = []
                     for res in results[:8]:
                         title = res.get("title", "")
@@ -556,7 +602,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if tavily_result:
                     return tavily_result
                 print(f"[web_search] 全部搜索失败,返回无结果", flush=True)
-                return f'搜索 "{query}" 无结果。请更换关键词重试。'
+                return f'搜索 "{query}" 无结果。搜索引擎不可用,请用 web_fetch 或换其他方式获取信息。'
             except Exception as e:
                 return f"搜索出错: {str(e)}\n请稍后重试或更换关键词。"
         elif tool_name == "web_fetch":
@@ -575,20 +621,28 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         bm = _asyncio.run(ensure_browser_connected())
                     except Exception:
                         pass
-                    ext_result = _asyncio.run(_wex.extract(url, _http_session, bm))
-                    if ext_result and ext_result.content and len(ext_result.content) > 50:
+                    ext_result = _asyncio.run(asyncio.wait_for(_wex.extract(url, _http_session, bm), timeout=15))
+                    if ext_result and ext_result.content and len(ext_result.content) > 100:
                         text = ext_result.content
                     else:
                         # 回退到简单HTTP请求
-                        r = _http_session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                        r = _http_session.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=10)
                         raw = r.text
                         raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+                        raw = re.sub(r'<script[^>]*>.*?</script>', '', raw, flags=re.DOTALL)
+                        raw = re.sub(r'<style[^>]*>.*?</style>', '', raw, flags=re.DOTALL)
                         raw = re.sub(r'<[^>]+>', ' ', raw)
                         raw = re.sub(r'\s+', ' ', raw).strip()
                         text = raw[:20000]
-                    results.append(f"[{url}]: {text}")
+                    # ★ 内容质量检查: 如果提取的内容大部分是导航/菜单,标注为低质量
+                    _nav_keywords = ['首页', '登录', '注册', '导航', '菜单', 'Copyright', '备案号', '网站地图']
+                    _nav_count = sum(1 for k in _nav_keywords if k in text[:2000])
+                    if _nav_count >= 3 and len(text) < 500:
+                        results.append(f"[{url}]: ⚠️ 提取内容质量较低(可能为导航页面)。建议直接访问网站查看。\n原始片段: {text[:500]}")
+                    else:
+                        results.append(f"[{url}]: {text}")
                 except Exception as e:
-                    results.append(f"[{url}]: 错误 - {str(e)}")
+                    results.append(f"[{url}]: ⚠️ 抓取失败 - {str(e)[:100]}。建议更换URL或直接搜索。")
             return "\n\n".join(results) if results else "未提供URL"
         elif tool_name == "run_skill":
             skill_name = args.get("skill_name", "")
@@ -994,17 +1048,104 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 return json.dumps(_d, ensure_ascii=False)
             except Exception as _e:
                 return f"工具执行失败: {str(_e)}"
-        # 遇到未知工具时 not-sub-tool, 先尝试通过 engine/heartbeat 转发给主系统
-        try:
-            _engine_url = "http://127.0.0.1:8766/engine/agent/heartbeat?user_id=" + str(user_id) + "&tool_name=" + str(tool_name) + "&args=" + str(json.dumps(args))
-            _r = _http_session.get(_engine_url, timeout=10)
-            if _r.ok:
-                _d = _r.json()
-                if _d.get("ok") or _d.get("result"):
-                    return json.dumps(_d.get("result", _d), ensure_ascii=False)
-        except Exception:
-            pass
+        # ★ P0: get_current_time 本地处理
+        elif tool_name == "get_current_time":
+            from datetime import datetime as _dt
+            _now = _dt.now()
+            return json.dumps({
+                "datetime": _now.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": _now.strftime("%Y-%m-%d"),
+                "time": _now.strftime("%H:%M:%S"),
+                "weekday": ["周一","周二","周三","周四","周五","周六","周日"][_now.weekday()],
+                "timezone": "Asia/Shanghai (UTC+8)",
+                "iso": _now.isoformat(),
+                "unix_ms": int(_now.timestamp() * 1000)
+            }, ensure_ascii=False)
+
+        # ★ P0: MCP工具直连Node.js MCP服务器(port 18788),绕过PHP认证
+        _mcp_prefixes = ('bilibili_', 'cr_', 'src_', 'mmx_', 'generate_', 'chaoxing_', 'win_')
+        if tool_name.startswith(_mcp_prefixes):
+            try:
+                _mcp_endpoint = "/bilibili/tools/call" if tool_name.startswith("bilibili_") else "/api/tools/call"
+                _mcp_url = f"http://127.0.0.1:18788{_mcp_endpoint}"
+                _resp = _http_session.post(_mcp_url, json={"name": tool_name, "arguments": args}, timeout=30)
+                if _resp.ok:
+                    _text = _resp.text
+                    try:
+                        _d = json.loads(_text)
+                        if isinstance(_d, dict):
+                            return json.dumps(_d.get("result", _d), ensure_ascii=False)
+                    except Exception:
+                        pass
+                    return _text[:4000]
+                return f"MCP工具 {tool_name} 返回HTTP {_resp.status_code}"
+            except Exception as _e:
+                return f"MCP工具 {tool_name} 转发异常: {str(_e)}"
         return f"[警告: 当前环境不支持 {tool_name} 工具] 跳过此操作,请用 web_search/web_fetch 替代"
+
+    # ★ P0+P1: 加载子代理系统上下文(Skills + 人格/记忆/项目)
+    _agent_system_parts = []
+
+    # 1. 可用技能列表
+    try:
+        from engine.skills import list_skills
+        _skills = list_skills(user_id)
+        if _skills:
+            _skill_lines = ["## 可用技能\n你可以调用 `run_skill` 工具执行以下预定义技能："]
+            for _s in _skills:
+                if _s.get("enabled", True):
+                    _skill_lines.append(f"- **{_s['name']}**: {_s.get('description', '无描述')}")
+            _agent_system_parts.append("\n".join(_skill_lines))
+    except Exception:
+        pass
+
+    # 2. P1: 用户人格/记忆
+    _mem_dir = Path(PROJECT_ROOT) / ".engine" / "memory"
+    try:
+        _mem_dir.mkdir(parents=True, exist_ok=True)
+        _persona_file = _mem_dir / f"user_{user_id}_agent_persona.json"
+        if _persona_file.exists():
+            with open(_persona_file) as f:
+                _p = json.load(f)
+            if _p.get("name") or _p.get("style"):
+                _agent_system_parts.append(f"## 用户人格\n- 名称: {_p.get('name', '未设置')}\n- 风格: {_p.get('style', '未设置')}")
+    except Exception:
+        pass
+
+    # 3. P1: 最近记忆(最多5条)
+    try:
+        _mem_file = _mem_dir / f"user_{user_id}_agent_memory.json"
+        if _mem_file.exists():
+            with open(_mem_file) as f:
+                _m = json.load(f)
+            _entries = _m.get("entries", [])[-5:]
+            if _entries:
+                _lines = ["## 用户记忆"]
+                for _e in _entries:
+                    _lines.append(f"- {_e.get('key', '')}: {_e.get('content', '')[:200]}")
+                _agent_system_parts.append("\n".join(_lines))
+    except Exception:
+        pass
+
+    # 4. P1: CLAUDE.md 项目上下文(前2000字符)
+    try:
+        _claude_path = Path(PROJECT_ROOT) / "CLAUDE.md"
+        if _claude_path.exists():
+            with open(_claude_path) as f:
+                _claude = f.read()[:2000]
+            _agent_system_parts.append(f"## 项目上下文\n{_claude}")
+    except Exception:
+        pass
+
+    # ★ 重要: 告诉子代理在获取足够数据后停止工具调用,返回最终答案
+    _agent_system_parts.append(
+        "## ⚠️ 停止规则\n"
+        "1. 当你已经获取了足够的信息来回答用户的问题时,停止使用工具\n"
+        "2. 最后一轮必须只输出最终答案(不再调用任何工具)\n"
+        "3. 最终答案要综合所有已获取的信息,用中文条理清晰地输出\n"
+        "4. 不要无限制地搜索,通常 2-3 轮工具调用后就应该总结输出"
+    )
+    _agent_system_context = "\n\n".join(_agent_system_parts) if _agent_system_parts else ""
 
     def _run():
         _lock = _get_agent_store_lock(user_id)
@@ -1024,7 +1165,13 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         try:
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=120,
                             http_client=_agent_http_client)
-            messages = [{"role": "user", "content": agent.get("prompt", "")}]
+            if _agent_system_context:
+                messages = [
+                    {"role": "system", "content": _agent_system_context},
+                    {"role": "user", "content": agent.get("prompt", "")}
+                ]
+            else:
+                messages = [{"role": "user", "content": agent.get("prompt", "")}]
             max_rounds = max_agent_rounds
             result_parts = []
             start_time = time.time()
@@ -1034,13 +1181,17 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if time.time() - start_time > MAX_EXECUTION_SECONDS:
                     raise TimeoutError(f"子代理执行超过{MAX_EXECUTION_SECONDS//60}分钟,自动终止")
 
+                # ★ 最终轮: 移除工具强制模型总结输出(不再调用工具)
+                _is_final_round = (round_num >= max_rounds - 1)
+                _tools_for_call = None if _is_final_round else TOOLS
+
                 resp = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=TOOLS,
-                    tool_choice="auto",
+                    tools=_tools_for_call,
+                    tool_choice="auto" if not _is_final_round else "none",
                     temperature=0.3,
-                    max_tokens=2048,
+                    max_tokens=4096 if _is_final_round else 2048,
                     timeout=120
                 )
                 msg = resp.choices[0].message
@@ -1054,6 +1205,12 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     result_parts.append(cleaned)
                 if not msg.tool_calls:
                     break  # 模型完成了
+
+                # ★ 早停: 如果已经获取了足够多数据(>3000字符),强制进入总结轮
+                _total_result_len = sum(len(str(p)) for p in result_parts)
+                if _total_result_len > 3000 and round_num >= 2:
+                    # 下一轮将是最终总结轮(无工具)
+                    max_rounds = min(max_rounds, round_num + 2)
 
                 # 获取 reasoning_content(DeepSeek 需要传回)
                 asst_msg = {"role": "assistant", "content": msg.content}
@@ -1112,6 +1269,17 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     # ★ put 结果时再做一次安全包装
                     safe_content = str(result) if result else '(empty)'
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": safe_content})
+                    # ★ P1: 广播子代理步骤进度
+                    try:
+                        _broadcast_to_user(user_id, 'agent:step', {
+                            'agent': name,
+                            'tool': tool_name,
+                            'step': round_num + 1,
+                            'max_steps': max_rounds,
+                            'result_preview': str(result)[:100]
+                        })
+                    except Exception:
+                        pass
                     # ★ 实时写入 partial result(带锁+重读,防止覆盖其他代理)
                     _lock.acquire()
                     try:
@@ -1124,13 +1292,85 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     finally:
                         _lock.release()
 
-                # ★ 最终保存(带锁+重读)
+            # ★ P0: 尝试从累积结果生成结构化输出
+            _structured_output = None
+            try:
+                if role_config.get("model_tier") != "cheap":
+                    _raw_content = "\n".join(result_parts)
+                    if _raw_content.strip():
+                        _struct_messages = [
+                            {"role": "system", "content": "你是一个输出格式化器。将以下子代理工作成果整理为JSON，严格遵循schema。仅输出JSON，不包含其他内容。"},
+                            {"role": "user", "content": "工作记录:\n\n" + _raw_content[:8000]}
+                        ]
+                        _struct_resp = client.chat.completions.create(
+                            model=model,
+                            messages=_struct_messages,
+                            temperature=0.1,
+                            max_tokens=4096,
+                            timeout=30,
+                            response_format={
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "sub_agent_result",
+                                    "strict": True,
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "summary": {"type": "string", "description": "结果的单句摘要"},
+                                            "findings": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "key": {"type": "string"},
+                                                        "value": {"type": "string"},
+                                                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                                                        "source": {"type": "string"}
+                                                    },
+                                                    "required": ["key", "value", "confidence", "source"]
+                                                },
+                                                "description": "关键发现列表"
+                                            },
+                                            "actions_taken": {"type": "array", "items": {"type": "string"}, "description": "执行的操作列表"},
+                                            "errors": {"type": "array", "items": {"type": "string"}, "description": "遇到的错误"},
+                                            "raw_output": {"type": "string", "description": "原始累积输出文本"}
+                                        },
+                                        "required": ["summary", "findings", "actions_taken", "errors", "raw_output"]
+                                    }
+                                }
+                            }
+                        )
+                        _struct_text = _struct_resp.choices[0].message.content
+                        if _struct_text:
+                            _cleaned_text = _struct_text.strip()
+                            if _cleaned_text.startswith("```"):
+                                _first_nl = _cleaned_text.find("\n")
+                                if _first_nl > 0:
+                                    _cleaned_text = _cleaned_text[_first_nl + 1:]
+                                if _cleaned_text.endswith("```"):
+                                    _cleaned_text = _cleaned_text[:-3].strip()
+                            _parsed = json.loads(_cleaned_text)
+                            if isinstance(_parsed, dict):
+                                _parsed.setdefault("summary", "")
+                                _parsed.setdefault("findings", [])
+                                _parsed.setdefault("actions_taken", [])
+                                _parsed.setdefault("errors", [])
+                                _parsed.setdefault("raw_output", _raw_content[:5000])
+                                _structured_output = _parsed
+                                print(f"[子代理:{name}] 结构化输出成功: {_parsed.get('summary', '')[:80]}", flush=True)
+            except Exception as _se:
+                print(f"[子代理:{name}] 结构化输出失败(跳过): {_se}", flush=True)
+                _structured_output = None
+
+            # ★ 最终保存(带锁+重读)
             _lock.acquire()
             try:
                 current = store.get()
                 current[name] = current.get(name, {})
                 final_result = "\n".join(result_parts)
                 current[name]["result"] = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', final_result)
+                if _structured_output:
+                    current[name]["_structured"] = json.dumps(_structured_output, ensure_ascii=False)
                 current[name]["status"] = "completed"
                 store.set(current)
             finally:
@@ -1158,6 +1398,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             "status": _latest_agent.get("status", "unknown"),
             "result": _latest_agent.get("result", ""),
             "error": _latest_agent.get("error", ""),
+            "structured": _latest_agent.get("_structured", ""),
             "time": datetime.now().isoformat(),
             "processed": False
         })
@@ -1170,6 +1411,18 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             'agent': name,
             'status': _latest_agent.get('status', 'unknown'),
             'result_preview': (_latest_agent.get('result', '') or '')[:200],
+            'time': notifs[-1]['time']
+        })
+        # ★ P0: 广播完整结果(含结构化数据),前端即时消费无需轮询
+        _full_result = _latest_agent.get('result', '') or ''
+        _structured_raw = _latest_agent.get('_structured', '')
+        _structured_data = json.loads(_structured_raw) if _structured_raw else None
+        _broadcast_to_user(user_id, 'agent:result', {
+            'agent': name,
+            'status': _latest_agent.get('status', 'unknown'),
+            'result': _full_result,
+            'structured': _structured_data,
+            'error': _latest_agent.get('error', ''),
             'time': notifs[-1]['time']
         })
 
@@ -1198,27 +1451,82 @@ def _decrypt_xor(encoded: str) -> str:
     _aes = _get_aes_key() if (encoded and encoded.startswith("v2:")) else None
     return decrypt_xor(encoded, ENCRYPTION_KEY, _aes)
 def _get_main_chat_config(user_id: str) -> dict:
-    """从主聊天配置读取 api_key / base_url / model
-    自动 XOR 解密 apiKey,优先主聊配置,无值则返回空字符串。
+    """从 PHP get_config 获取主代理配置(与前端完全统一)
+    PHP 已经处理好 provider/key/model 映射,引擎不需要重复逻辑。
     """
     result = {"api_key": "", "base_url": "", "model": ""}
     if not user_id:
         return result
-    config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
     try:
-        with open(config_path) as f:
-            cfg = json.load(f)
-        stored_key = cfg.get("apiKey", "") or ""
-        # 优先 XOR 解密,解密失败则用原始值
-        if stored_key:
-            decrypted = _decrypt_xor(stored_key)
-            result["api_key"] = decrypted if decrypted else stored_key
-        result["base_url"] = cfg.get("baseUrl", "") or ""
-        result["model"] = cfg.get("model", "") or ""
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    except Exception as e:
-        print(f"[引擎] 读取主聊配置失败: {e}")
+        # ★ 调 PHP get_config(与前端 loadConfigFromServer 完全一致)
+        _php_url = f"https://127.0.0.1/oneapichat/api/chat.php?action=get_config"
+        _php_r = _http_session.get(_php_url, headers={"Host": "naujtrats.xyz", "Cookie": f"auth_token=_session_lookup_{user_id}"}, timeout=10, verify=False)
+        if _php_r.status_code == 200:
+            cfg = _php_r.json()
+        else:
+            raise Exception(f"PHP get_config status={_php_r.status_code}")
+    except Exception:
+        # 回退: 直接读 JSON
+        config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
+        try:
+            with open(config_path) as f:
+                cfg = json.load(f)
+        except Exception:
+            return result
+
+    # ★ Provider 映射(与前端 API_PROVIDERS 一致)
+    PROVIDER_MAP = {
+        "openai":    {"key_field": "apiKeyOpenAI",    "base": "https://api.openai.com/v1",         "default_model": "gpt-4o"},
+        "deepseek":  {"key_field": "apiKeyDeepseek",  "base": "https://api.deepseek.com/v1",       "default_model": "deepseek-v4-flash"},
+        "longcat":   {"key_field": "apiKeyLongCat",   "base": "https://api.longcat.chat/openai/v1", "default_model": "LongCat-2.0"},
+        "minimax":   {"key_field": "apiKeyMiniMax",   "base": "https://api.minimaxi.com/v1",       "default_model": "MiniMax-M2.7"},
+        "anthropic": {"key_field": "apiKeyAnth",      "base": "https://api.anthropic.com/v1",      "default_model": "claude-sonnet-4-20250514"},
+        "gemini":    {"key_field": "apiKeyGemini",    "base": "https://generativelanguage.googleapis.com/v1beta/openai", "default_model": "gemini-2.0-flash"},
+        "moonshot":  {"key_field": "apiKeyMoonshot",  "base": "https://api.moonshot.cn/v1",        "default_model": "moonshot-v1-8k"},
+        "xai":       {"key_field": "apiKeyXAI",       "base": "https://api.x.ai/v1",                "default_model": "grok-4-latest"},
+        "zhipu":     {"key_field": "apiKeyZhipu",     "base": "https://open.bigmodel.cn/api/paas/v4", "default_model": "glm-4-flash"},
+        "opencode":  {"key_field": "apiKeyOpenCode",  "base": "https://opencode.ai/v1",            "default_model": "claude-sonnet-4-5"},
+        "nvidia":    {"key_field": "apiKeyNvidia",    "base": "https://integrate.api.nvidia.com/v1", "default_model": "deepseek-ai/deepseek-v4-flash"},
+        "openrouter":{"key_field": "apiKeyOpenRouter","base": "https://openrouter.ai/api/v1",      "default_model": "openai/gpt-4o"},
+        "mimo":      {"key_field": "apiKeyMiMo",      "base": "https://api.mimo.ai/v1",             "default_model": "mimo-v4-flash"},
+        "custom":    {"key_field": "apiKeyCustom",    "base": "",                                    "default_model": ""},
+    }
+
+    # 1. 读 baseUrlProvider 确定当前 provider
+    provider = cfg.get("baseUrlProvider", "") or ""
+    if not provider:
+        model_select = (cfg.get("modelSelect", "") or "").lower()
+        if "deepseek" in model_select: provider = "deepseek"
+        elif "gpt" in model_select: provider = "openai"
+
+    pm = PROVIDER_MAP.get(provider, {})
+
+    # ★ 2. 读 key — 与前端完全一致: localStorage.apiKey 就是当前 provider 的 key
+    # 前端 setProvider() 会: 解密 apiKey<Provider> → 写入 localStorage.apiKey
+    # 所以引擎只需要读 apiKey 字段(通用字段),不需要猜 provider-specific 字段
+    stored_key = cfg.get("apiKey", "") or ""
+    if stored_key:
+        decrypted = _decrypt_xor(stored_key)
+        result["api_key"] = decrypted if decrypted else stored_key
+
+    # 3. base_url
+    custom_base = cfg.get("baseUrlCustom", "") or ""
+    if custom_base and provider == "custom":
+        result["base_url"] = custom_base
+    elif pm.get("base"):
+        result["base_url"] = pm["base"]
+    else:
+        result["base_url"] = cfg.get("baseUrl", "") or "https://api.deepseek.com/v1"
+
+    # 4. model — 优先 provider-specific, 回退 provider 默认
+    provider_model = cfg.get(f"model_{provider}", "") or ""
+    generic_model = cfg.get("model", "") or ""
+    result["model"] = provider_model or generic_model or pm.get("default_model", "gpt-4o")
+
+    if not result["model"] or result["model"].startswith("加载中") or len(result["model"]) < 3:
+        result["model"] = pm.get("default_model", "gpt-4o")
+
+    print(f"[引擎] 主聊配置: provider={provider} model={result['model']} base={result['base_url'][:40]} key_len={len(result['api_key'])}", flush=True)
     return result
 
 
@@ -1741,15 +2049,10 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         return f"event: {event_type}\ndata: {data_str}\n\n"
 
     try:
-        # ★ 代理配置: 请求级优先（公网域名→内网IP映射）
+        # ★ 代理配置: 请求级优先 → 全局回退
         _httpc = None
         _rp = request_data.get('proxy_url', '')
         if request_data.get('proxy_enabled') and _rp:
-            # ★ 公网地址映射为内网（与 proxy.php 逻辑一致）
-            if 'proxy.naujtrats.xyz:8888' in _rp:
-                _rp = 'http://192.168.195.213:10808'
-            elif 'proxy.naujtrats.xyz:8889' in _rp:
-                _rp = 'http://192.168.195.22:10808'
             import httpx; _httpc = httpx.Client(proxy=_rp)
         elif _PROXY_URL:
             import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
@@ -1806,6 +2109,12 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         _TAG_MAX2 = 10
         _TAGS2 = ('(think)', '(endthink)', '<think>', '</think>')
         for chunk in stream:
+            # ★ 防御: 部分提供商(LongCat等)会返回空choices块(仅usage),直接取[0]会 IndexError
+            if not chunk.choices:
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    try: usage = chunk.usage.model_dump()
+                    except Exception: pass
+                continue
             delta = chunk.choices[0].delta
             seq += 1
 
@@ -1979,6 +2288,13 @@ _resumable_lock = threading.Lock()
 _RESUMABLE_TTL = 1800      # 30 分钟超时
 
 
+def _is_cancelled(stream_id: str) -> bool:
+    """检查流是否被用户取消(停止键)"""
+    with _resumable_lock:
+        entry = _resumable.get(stream_id)
+        return bool(entry and entry.get('cancel'))
+
+
 # ═══════════════════════════════════════════════════════════════
 # StreamBuffer — 磁盘持久化流缓冲（引擎重启不丢 chunks）
 # ═══════════════════════════════════════════════════════════════
@@ -2037,6 +2353,177 @@ def _get_stream_buffer(msg_id: str) -> StreamBuffer:
         return _stream_buffers[msg_id]
 
 
+def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
+    """Anthropic Messages API 流式分支 — 用 requests 直接调 /messages?stream=True"""
+    import requests as _requests
+    q = _resumable[stream_id]['queue']
+    full = ''
+    reasoning = ''
+    tool_calls = []
+    usage = None
+
+    anthropic_url = request.get('anthropic_url', '')
+    api_key = request.get('api_key', '')
+    model = request.get('model', '')
+    # ★ 代理配置: 请求级优先 → 全局回退
+    _req_proxy = request.get('proxy_url', '')
+    _proxies = None
+    if request.get('proxy_enabled') and _req_proxy:
+        _proxies = {'http': _req_proxy, 'https': _req_proxy}
+    elif _PROXY_URL:
+        _proxies = {'http': _PROXY_URL, 'https': _PROXY_URL}
+
+    # ★ 提取 system 消息 (Anthropic 用顶级 system 字段)
+    system_content = ''
+    anthropic_messages = []
+    for m in request.get('messages', []):
+        if isinstance(m, dict) and m.get('role') == 'system':
+            system_content += (system_content and '\n\n') + (m.get('content', '') or '')
+        else:
+            anthropic_messages.append(m)
+
+    payload = {
+        'model': model,
+        'messages': anthropic_messages,
+        'max_tokens': request.get('max_tokens', 4096),
+        'stream': True,
+    }
+    if system_content:
+        payload['system'] = system_content
+    if request.get('tools'):
+        payload['tools'] = request['tools']
+    if request.get('temperature') is not None:
+        payload['temperature'] = request['temperature']
+
+    # ★ 认证头: 原生Anthropic用 x-api-key, 其他(LongCat/DeepSeek)用 Bearer
+    if 'api.anthropic.com' in anthropic_url:
+        headers = {
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+            'content-type': 'application/json',
+        }
+    else:
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'content-type': 'application/json',
+        }
+
+    _tool_use_map = {}  # index → {id, name, input_json}
+    _current_tool_idx = -1
+
+    try:
+        print(f"[_generate_resumable_anthropic] Starting stream {stream_id} model={model} url={anthropic_url[:60]}", flush=True)
+        with _requests.post(anthropic_url, json=payload, headers=headers, proxies=_proxies,
+                            stream=True, timeout=300) as resp:
+            if resp.status_code != 200:
+                _emit('error', {'error': f'Anthropic HTTP {resp.status_code}: {resp.text[:300]}'})
+                _resumable[stream_id]['finished'] = True
+                try: q.put(None)
+                except Exception: pass
+                return
+
+            for line in resp.iter_lines():
+                if _is_cancelled(stream_id):
+                    print(f"[_generate_resumable_anthropic] CANCELLED stream {stream_id}", flush=True)
+                    break
+                if not line:
+                    continue
+                try:
+                    line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                except Exception:
+                    continue
+                if not line_str.startswith('data: '):
+                    continue
+                try:
+                    d = json.loads(line_str[6:])
+                except Exception:
+                    continue
+                etype = d.get('type', '')
+
+                if etype == 'message_start':
+                    mu = d.get('message', {}).get('usage')
+                    if mu:
+                        usage = {'prompt_tokens': mu.get('input_tokens', 0), 'completion_tokens': 0,
+                                 'total_tokens': mu.get('input_tokens', 0)}
+                elif etype == 'content_block_start':
+                    cb = d.get('content_block', {}) or {}
+                    if cb.get('type') == 'tool_use':
+                        idx = d.get('index', 0)
+                        _current_tool_idx = idx
+                        _tool_use_map[idx] = {'id': cb.get('id', ''), 'name': cb.get('name', ''), 'input_json': ''}
+                    elif cb.get('type') == 'text':
+                        pass
+                elif etype == 'content_block_delta':
+                    delta = d.get('delta', {}) or {}
+                    if delta.get('type') == 'text_delta':
+                        txt = delta.get('text', '')
+                        if txt:
+                            full += txt
+                            _emit('content', {'delta': txt})
+                    elif delta.get('type') == 'thinking_delta':
+                        rtxt = delta.get('thinking', '')
+                        if rtxt:
+                            reasoning += rtxt
+                            _emit('reasoning', {'delta': rtxt})
+                    elif delta.get('type') == 'input_json_delta':
+                        if _current_tool_idx >= 0 and _current_tool_idx in _tool_use_map:
+                            _tool_use_map[_current_tool_idx]['input_json'] += delta.get('partial_json', '')
+                            # ★ 实时推送部分tool_call快照(前端展示)
+                            _snap = []
+                            for _idx in sorted(_tool_use_map.keys()):
+                                _tu = _tool_use_map[_idx]
+                                _snap.append({'id': _tu['id'], 'type': 'function',
+                                              'function': {'name': _tu['name'], 'arguments': _tu['input_json']}})
+                            _emit('tool_call', {'partial': True, 'tools': _snap})
+                elif etype == 'content_block_stop':
+                    if _current_tool_idx >= 0 and _current_tool_idx in _tool_use_map:
+                        tu = _tool_use_map[_current_tool_idx]
+                        inp = {}
+                        try:
+                            inp = json.loads(tu['input_json']) if tu['input_json'] else {}
+                        except Exception:
+                            pass
+                        tool_calls.append({'id': tu['id'], 'type': 'function',
+                                           'function': {'name': tu['name'], 'arguments': json.dumps(inp)}})
+                        _current_tool_idx = -1
+                elif etype == 'message_delta':
+                    mu = d.get('usage')
+                    if mu:
+                        if usage:
+                            usage['completion_tokens'] = mu.get('output_tokens', 0)
+                            usage['total_tokens'] = usage.get('prompt_tokens', 0) + mu.get('output_tokens', 0)
+                        else:
+                            usage = {'prompt_tokens': 0, 'completion_tokens': mu.get('output_tokens', 0),
+                                     'total_tokens': mu.get('output_tokens', 0)}
+                # message_stop / ping → 忽略
+    except Exception as e:
+        _emit('error', {'error': f'Anthropic stream error: {str(e)}'})
+        _resumable[stream_id]['finished'] = True
+        try: q.put(None)
+        except Exception: pass
+        return
+
+    if _is_cancelled(stream_id):
+        # 用户停止: 标记完成并清理, 不输出done(前端已中断)
+        with _resumable_lock:
+            entry = _resumable.get(stream_id)
+            if entry:
+                entry['finished'] = True
+        try: q.put(None)
+        except Exception: pass
+        with _resumable_lock:
+            _resumable.pop(stream_id, None)
+        return
+
+    done_data = {'full_text': full.strip(), 'reasoning_text': reasoning.strip(),
+                 'tool_calls': tool_calls, 'usage': usage}
+    _emit('done', done_data)
+    _resumable[stream_id]['finished'] = True
+    try: q.put(None)
+    except Exception: pass
+
+
 def _generate_resumable(request: dict, stream_id: str):
     """后台线程: 调用 OpenAI 流式 API，逐 chunk 写入缓存和队列"""
     from openai import OpenAI
@@ -2056,17 +2543,16 @@ def _generate_resumable(request: dict, stream_id: str):
         buf.append(sse)
         q.put(sse)  # queue.Queue is thread-safe
 
+    # ★ Anthropic Messages API 流式分支 (前端已转换消息/工具为Anthropic格式)
+    if request.get('anthropic_format') and request.get('anthropic_url'):
+        return _generate_resumable_anthropic(request, stream_id, _emit)
+
     try:
         print(f"[_generate_resumable] Starting stream {stream_id} with model={request.get('model','?')} base_url={request.get('base_url','?')[:50]}", flush=True)
-        # ★ 代理配置: 请求级优先 → 全局 env 回退（公网域名→内网IP映射）
+        # ★ 代理配置: 请求级优先 → 全局回退
         _http_client = None
         _req_proxy = request.get('proxy_url', '')
         if request.get('proxy_enabled') and _req_proxy:
-            # ★ 公网地址映射为内网（与 proxy.php 逻辑一致）
-            if 'proxy.naujtrats.xyz:8888' in _req_proxy:
-                _req_proxy = 'http://192.168.195.213:10808'
-            elif 'proxy.naujtrats.xyz:8889' in _req_proxy:
-                _req_proxy = 'http://192.168.195.22:10808'
             import httpx
             _http_client = httpx.Client(proxy=_req_proxy)
         elif _PROXY_URL:
@@ -2164,6 +2650,15 @@ def _generate_resumable(request: dict, stream_id: str):
         _TAG_MAX = 10        # max(len('(endthink)'), len('</think>'), len('(think)'), len('<think>'))
         _TAGS = ('(think)', '(endthink)', '<think>', '</think>')
         for chunk in client.chat.completions.create(**params):
+            if _is_cancelled(stream_id):
+                print(f"[_generate_resumable] CANCELLED stream {stream_id}", flush=True)
+                break
+            # ★ 防御: 部分提供商(LongCat等)会返回空choices块(仅usage),直接取[0]会 IndexError
+            if not chunk.choices:
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    try: usage = chunk.usage.model_dump()
+                    except Exception: pass
+                continue
             delta = chunk.choices[0].delta
             c = (delta.content or '')
             r = getattr(delta, 'reasoning_content', '') or ''
@@ -2256,6 +2751,17 @@ def _generate_resumable(request: dict, stream_id: str):
             if hasattr(chunk, 'usage') and chunk.usage:
                 try: usage = chunk.usage.model_dump()
                 except Exception: pass
+
+        if _is_cancelled(stream_id):
+            # 用户停止: 标记完成并清理, 不输出done(前端已中断)
+            _resumable[stream_id]['finished'] = True
+            buf.done()
+            _complete_task_from_stream(stream_id, 'failed')
+            try: q.put(None)
+            except Exception: pass
+            with _resumable_lock:
+                _resumable.pop(stream_id, None)
+            return
 
         # ★ 最终合并的tool_calls（去重: 按id去重，保留首次出现）
         _seen_tc_order_ids = set()
@@ -2488,8 +2994,12 @@ async def chat_stream_get(stream_id: str):
 
 @app.delete("/engine/chat/stream/{stream_id}")
 async def chat_stream_delete(stream_id: str):
-    """清理指定流"""
-    _resumable.pop(stream_id, None)
+    """取消/清理指定流 — 标记 cancel, 通知后台生成线程停止
+    (用户点停止键后调用, 避免"停止了还在等模型思考完"、继续消耗token)"""
+    with _resumable_lock:
+        entry = _resumable.get(stream_id)
+        if entry:
+            entry['cancel'] = True
     return {"cleaned": True}
 
 
@@ -2805,6 +3315,9 @@ threading.Thread(target=_cleanup_old_streams, daemon=True).start()
 # ★ Agent 端点 + 浏览器工具 → engine/agent_endpoints.py
 register_agent_endpoints(app, ENGINE_DIR, tool_registry)
 
+# ★ 记忆系统 v2 → engine/memory_endpoints.py (Phase B: chromadb + FTS5 + 人格)
+register_memory_endpoints(app, ENGINE_DIR)
+
 @app.get("/engine/ppt/generate")
 def ppt_generate(user_id: str = Query(""), title: str = Query(""), pages: str = Query("[]"), theme: str = Query("default"), filename: str = Query("")):
     """PPT 生成 HTTP 端点"""
@@ -2956,16 +3469,16 @@ def pdf_generate(user_id: str = Query(""), title: str = Query(""), content: str 
         pdf = FPDF()
         pdf.add_page()
         # Register Chinese font if available
-        _cn_fonts = {}
+        _cn_font_ok = False
         for _fp in ['/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
                      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/truetype/arphic/uming.ttc']:
             if _os.path.exists(_fp):
-                pdf.add_font('CN', '', _fp, uni=True)
-                pdf.add_font('CNB', '', _fp, uni=True)
-                _cn_fonts = {'': 'CN', 'B': 'CN'}
+                pdf.add_font('CN', '', _fp, uni=True)   # 常规
+                pdf.add_font('CN', 'B', _fp, uni=True)  # 粗体（同文件，fpdf2 用 style='B' 区分）
+                _cn_font_ok = True
                 break
         def _set_font(style='', size=10):
-            if _cn_fonts:
+            if _cn_font_ok:
                 pdf.set_font('CN', style, size)
             else:
                 pdf.set_font('Helvetica', style, size)

@@ -273,6 +273,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     let toolCallContent = '';
     let inToolCall = false;
     let toolCallCompleted = false; // ★ 标记:是否已保存完成的tool call,阻止重放覆盖
+    let streamAborted = false;     // ★ 标记:流是否被中断(超时/用户停止/网络错误), 用于丢弃半截工具调用
 
     while (true) {
         let readResult;
@@ -280,6 +281,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             readResult = await reader.read();
         } catch (readErr) {
             // 读取流数据异常,尝试用 buffer 中已有内容
+            streamAborted = true;
             console.warn('[STREAM] 流读取异常:', readErr.message);
             break;
         }
@@ -999,7 +1001,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         if (!fullText && reasoningText) { fullText = reasoningText; }
     }
 
-    return { fullText, reasoningText, usage, toolCalls };
+    return { fullText, reasoningText, usage, toolCalls, streamAborted };
 }
 
 async function handleNonStream(res, chatId, pendingMsg, currentBubble) {

@@ -1,18 +1,18 @@
 ---
 name: deep-search
-description: 多源深度搜索整合。整合B站搜索+网络搜索+网页抓取+平台提取+知识库，多维度交叉验证。B站内容通常比网页搜索更新更详细，中文/教程/评测类优先B站。Use for comprehensive multi-source research across Bilibili, web, and knowledge base.
-version: 2.0.0
+description: 调研驱动文档创作 — 多源深度搜索(B站+网络+知识库) → 整理分析 → 生成专业文档(Word/PPT/Excel/PDF)。中文/教程/评测优先B站。Use for research, fact-checking, topic deep-dives, and document creation.
+version: 3.0.0
 metadata:
   oneapichat:
-    tools: [get_current_time, web_search, web_fetch, bilibili_search, bilibili_video_info, bilibili_article_read, bilibili_dynamic_list, platform_extract, rag_search, generate_docx, generate_pdf]
+    tools: [get_current_time, web_search, web_fetch, bilibili_search, bilibili_video_info, bilibili_article_read, bilibili_dynamic_list, platform_extract, rag_search, parse_document, generate_docx, generate_ppt, generate_xlsx, generate_pdf]
     priority: high
     emoji: "🔍"
-    triggers: [深度搜索, 全面搜索, 详细查, 多查一下, 多找找, 综合搜索, 多源, 搜索, 查资料, 深入调研, 深入调查, 全面了解, 搜全, 多维度, 对比, 多方]
+    triggers: [深度搜索, 全面搜索, 详细查, 多查一下, 多找找, 综合搜索, 多源, 搜索, 查资料, 深入调研, 深入调查, 全面了解, 搜全, 多维度, 对比, 多方, 调研, 研究, 查一下, 最新, 写报告, 做报告, 写文档, 整理成, 生成文档]
 ---
 
-# 多源深度搜索
+# 调研驱动文档创作 (v3.0)
 
-整合全部搜索渠道进行多维度信息搜集，一次搜索覆盖B站+网络+知识库三方来源。
+多源深度搜索 → 整理分析 → 生成专业文档，一站式调研+输出。
 
 **★ B站优先**: B站内容(视频/专栏/动态)通常比搜索引擎更新、更详细、更具实操性。中文内容、教程、评测、游戏攻略优先B站。
 
@@ -39,6 +39,8 @@ metadata:
 - 用户说"详细查"/"多找找"/"全面搜索"
 - 需要多来源交叉验证的信息
 - 学术/技术调研场景
+- 用户需要写报告/文档/整理资料
+- 用户说"写报告"/"做报告"/"整理成文档"
 
 ## 搜索策略
 
@@ -100,7 +102,7 @@ metadata:
 
 ## 调研→文档管线
 
-正式报告输出: 调研成果 → `generate_docx`(可编辑Word) 或 `generate_pdf`(正式PDF)
+正式报告输出: 调研成果 → `generate_docx`(可编辑Word) 或 `generate_pdf`(正式PDF) 或 `generate_ppt`(演示文稿) 或 `generate_xlsx`(数据表格)
 
 ## 技巧
 

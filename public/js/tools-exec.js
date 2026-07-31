@@ -5,6 +5,28 @@
     var body = ctx.body, pendingMsg = ctx.pendingMsg, chatId = ctx.chatId,
         currentChatId = ctx.currentChatId, activeBubbleMap = ctx.activeBubbleMap,
         chats = ctx.chats;
+
+    // ★ QR码弹窗函数 (放在最前面确保回调时可访问)
+    function showQrCodePopup(qrB64, title, hint) {
+        var _overlay = document.getElementById('qr-popup-overlay');
+        var _img = document.getElementById('qr-popup-img');
+        var _title = document.getElementById('qr-popup-title');
+        var _desc = document.getElementById('qr-popup-desc');
+        var _hintEl = document.getElementById('qr-popup-hint');
+        if (_overlay && _img && qrB64) {
+            _img.src = qrB64;
+            if (_title) _title.textContent = '📷 ' + (title || '扫码登录');
+            if (_desc) _desc.textContent = '请用手机APP扫描二维码';
+            if (_hintEl) _hintEl.textContent = hint || '扫码确认后将自动完成登录';
+            _overlay.style.display = 'flex';
+        }
+    }
+    function hideQrCodePopup() {
+        var _overlay = document.getElementById('qr-popup-overlay');
+        if (_overlay) _overlay.style.display = 'none';
+    }
+    window.showQrCodePopup = showQrCodePopup;
+    window.hideQrCodePopup = hideQrCodePopup;
                     var func = tc.function;
                     let args;
                     try {
@@ -127,8 +149,10 @@
                     }
                     else if (func.name === 'web_fetch') {
                         let urls = [];
-                        // 支持 urls 数组 或 单个 url 字符串
-                        if (Array.isArray(args.urls)) {
+                        // ★ 部分模型(如LongCat)会将URL数组直接作为arguments传入,而非包装在 {urls:[...]} 中
+                        if (Array.isArray(args)) {
+                            urls = args.filter(function(u) { return typeof u === 'string'; }).slice(0, 5);
+                        } else if (Array.isArray(args.urls)) {
                             urls = args.urls.slice(0, 5); // 最多5个
                         } else if (typeof args.urls === 'string') {
                             urls = [args.urls];
@@ -165,7 +189,8 @@
                                             : (r.content || '(无内容)');
                                         return `${label}${r.url}\n${content}`;
                                     });
-                                    toolResult = { result: parts.join('\n\n---\n\n'), _webFetchUrls: urls };
+                                    // ★ 只返回字符串结果, 避免LongCat API报 'list object has no attribute items' 错误
+                                    toolResult = { result: parts.join('\n\n---\n\n') };
                                     if (currentChatId === chatId) {
                                         var currentBubble = activeBubbleMap[chatId];
                                         let status = currentBubble?.querySelector('.search-status');
@@ -334,6 +359,13 @@
                     }
                      else if (func.name === 'engine_agent_status') {
                         toolResult = await engineApiHandler('agent_status', args);
+                        // ★ 防护: 子代理运行中时追加警告,防止浪费token轮询
+                        if (toolResult && toolResult.result && typeof toolResult.result === 'object') {
+                            var _s = toolResult.result.status || '';
+                            if (_s === 'running') {
+                                toolResult.result._polling_warning = '⚠️ 该子代理正在运行中。请勿重复查询状态！完成后会自动推送结果。';
+                            }
+                        }
                     }
                      else if (func.name === 'engine_agent_list') {
                         toolResult = await engineApiHandler('agent_list');
@@ -371,6 +403,46 @@
                     }
                      else if (func.name === 'server_file_read') {
                         toolResult = await engineApiHandler('file_read', args);
+                    }
+                     else if (func.name === 'parse_document') {
+                        // ★ 文档解析: 调用引擎 parse_document 端点
+                        if (!args.path) { toolResult = { error: '缺少 path 参数。格式: parse_document(path="/path/to/file.docx")' }; }
+                        else { toolResult = await engineApiHandler('parse_document', args); }
+                    }
+                    // ═══════════════════════════════════════════════════
+                    // ★ 股票数据工具 (A股 — 东方财富数据源)
+                    // ═══════════════════════════════════════════════════
+                     else if (func.name === 'stock_realtime') {
+                        if (!args.symbol) { toolResult = { error: '缺少 symbol 参数。格式: stock_realtime(symbol="000001")' }; }
+                        else { toolResult = await engineApiHandler('stock_realtime', args); }
+                    }
+                     else if (func.name === 'stock_kline') {
+                        if (!args.symbol) { toolResult = { error: '缺少 symbol 参数。格式: stock_kline(symbol="000001", period="daily")' }; }
+                        else { toolResult = await engineApiHandler('stock_kline', args); }
+                    }
+                     else if (func.name === 'stock_sector_flow') {
+                        toolResult = await engineApiHandler('stock_sector_flow', args || {});
+                    }
+                     else if (func.name === 'stock_dragon_tiger') {
+                        toolResult = await engineApiHandler('stock_dragon_tiger', args || {});
+                    }
+                     else if (func.name === 'stock_north_flow') {
+                        toolResult = await engineApiHandler('stock_north_flow', {});
+                    }
+                     else if (func.name === 'stock_diagnosis') {
+                        if (!args.symbol) { toolResult = { error: '缺少 symbol 参数。格式: stock_diagnosis(symbol="600519")' }; }
+                        else { toolResult = await engineApiHandler('stock_diagnosis', args); }
+                    }
+                     else if (func.name === 'stock_indicators') {
+                        if (!args.symbol) { toolResult = { error: '缺少 symbol 参数。格式: stock_indicators(symbol="300750")' }; }
+                        else { toolResult = await engineApiHandler('stock_indicators', args); }
+                    }
+                     else if (func.name === 'stock_chart') {
+                        if (!args.symbol) { toolResult = { error: '缺少 symbol 参数。格式: stock_chart(symbol="000001")' }; }
+                        else { toolResult = await engineApiHandler('stock_chart', args); }
+                    }
+                     else if (func.name === 'stock_market_overview') {
+                        toolResult = await engineApiHandler('stock_market_overview', {});
                     }
                      else if (func.name === 'server_file_write') {
                         // ★ 参数别名容错
@@ -472,7 +544,7 @@
                                 _updateTempGrantBanner(true);
                                 // ★ Agent 模式同款进入动效
                                 if (typeof playAgentEnterEffect === 'function') playAgentEnterEffect('agent');
-                                toolResult = { result: '✅ 已获得单次授权。\n\n⚠️ 重要规则：\n1. 搜索类任务必须用 delegate_task 创建子代理来执行，禁止直接用 web_search 然后谎称是子代理做的\n2. 子代理创建后必须等待其完成（用 engine_agent_status 查询），不要同时自己搜\n3. 只有超过2次搜索或需要分析/总结的复杂任务才需要子代理\n4. 简单搜索（≤2次）可以直接用 web_search\n\n可用工具：delegate_task（子代理）、engine_agent_create、web_search、web_fetch、server_exec 等。完成后权限自动回收。' };
+                                toolResult = { result: '✅ 已获得单次授权。\n\n⚠️ 重要规则：\n1. 搜索类任务必须用 delegate_task 创建子代理来执行，禁止直接用 web_search 然后谎称是子代理做的\n2. 子代理创建后请等待系统自动通知结果,禁止调用 engine_agent_status 轮询(会浪费token)\n3. 只有超过2次搜索或需要分析/总结的复杂任务才需要子代理\n4. 简单搜索（≤2次）可以直接用 web_search\n\n可用工具：delegate_task（子代理）、engine_agent_create、web_search、web_fetch、server_exec 等。完成后权限自动回收。' };
                                 console.log('[AskAgent] 单次授权已授予, chatId=' + chatId);
                             }
                         }
@@ -500,7 +572,12 @@
                     }
                      else if (func.name === 'plan_update') {
                         var planAction = args.action || '';
-                        if (planAction === 'create') {
+                        // ★ 智能修复: 检测常见错误并给出明确提示
+                        if (!planAction || planAction.trim() === '') {
+                            toolResult = { error: '❌ plan_update 缺少 action 参数。\n\n正确用法:\n1. 创建计划: plan_update(action="create", tasks=[{"id":"step_1","title":"任务1"},{"id":"step_2","title":"任务2"}])\n2. 更新状态: plan_update(action="update", task_id="step_1", status="running/completed/failed")\n3. 完成计划: plan_update(action="complete")\n\n注意: "running" 是 status 参数的值,不是 action 的值。' };
+                        } else if (planAction === 'running' || planAction === 'pending' || planAction === 'completed' || planAction === 'failed') {
+                            toolResult = { error: '❌ plan_update 的 action 参数不能是 "' + planAction + '"。\n\n"' + planAction + '" 是 status 参数的值。\n\n正确用法: plan_update(action="update", task_id="步骤ID", status="' + planAction + '")' };
+                        } else if (planAction === 'create') {
                             var planTasks = (args.tasks || []).map(function(t, idx) {
                                 return {
                                     id: t.id || 'step_' + (idx + 1),
@@ -519,7 +596,14 @@
                                     currentTaskId: null
                                 };
                                 window.createFlowPanel(window._agentPlan);
-                                toolResult = { result: '✅ 已创建计划，共 ' + planTasks.length + ' 个任务：\n' + planTasks.map(function(t) { return '- [' + t.status + '] ' + t.title; }).join('\n') + '\n\n现在按计划逐步执行，每完成一步调用 plan_update(action="update", task_id="...", status="completed") 更新状态。' };
+                                // ★ Plan 模式: 显示审批横幅，等待用户同意
+                                if (typeof getAgentMode === 'function' && getAgentMode() === 'plan') {
+                                    window._planState = 'reviewing';
+                                    window._createPlanApprovalBanner(planTasks.length);
+                                    toolResult = { result: '✅ 已创建计划，共 ' + planTasks.length + ' 个任务。\n\n请向用户展示计划摘要，等待用户审批。用户同意后将自动进入执行阶段。' };
+                                } else {
+                                    toolResult = { result: '✅ 已创建计划，共 ' + planTasks.length + ' 个任务：\n' + planTasks.map(function(t) { return '- [' + t.status + '] ' + t.title; }).join('\n') + '\n\n现在按计划逐步执行，每完成一步调用 plan_update(action="update", task_id="...", status="completed") 更新状态。' };
+                                }
                             }
                         } else if (planAction === 'update') {
                             var tid = args.task_id;
@@ -600,13 +684,18 @@
                                     if (t.status === 'pending' || t.status === 'running') t.status = 'completed';
                                 });
                                 window.renderPlanTasks(window._agentPlan.tasks);
+                                // ★ Plan 模式: 完成后重置审批状态
+                                if (typeof getAgentMode === 'function' && getAgentMode() === 'plan') {
+                                    window._planState = 'exploring';
+                                    window._planApproved = false;
+                                }
                                 setTimeout(function() { window.dismissFlowPanel(); }, 2500);
                                 toolResult = { result: '✅ 计划已完成，所有任务已标记为完成。面板将在几秒后自动关闭。' };
                             } else {
                                 toolResult = { error: '没有活跃计划可完成。' };
                             }
                         } else {
-                            toolResult = { error: '未知 action: "' + planAction + '" 。支持的值: create, update, complete。' };
+                            toolResult = { error: '❌ plan_update 不支持 action="' + planAction + '"。\n\n支持的 action: create, update, complete。\n\n示例:\n- 创建: plan_update(action="create", tasks=[{"id":"t1","title":"搜索资料"},{"id":"t2","title":"整理输出"}])\n- 更新: plan_update(action="update", task_id="t1", status="completed")\n- 完成: plan_update(action="complete")' };
                         }
                     }
                      else if (func.name === 'engine_agent_ask') {
@@ -679,6 +768,12 @@
                         }
                     }
                     // ===== Cloudreve 云盘工具 =====
+                     else if (func.name === 'cr_check_login') {
+                        toolResult = await cloudreveApiHandler('check_login', args);
+                     }
+                     else if (func.name === 'cr_register') {
+                        toolResult = await cloudreveApiHandler('register', args);
+                     }
                      else if (func.name === 'cr_login') {
                         toolResult = await cloudreveApiHandler('login', args);
                      }
@@ -710,6 +805,12 @@
                             else { toolResult = await cloudreveApiHandler('delete', args); }
                         } else { toolResult = await cloudreveApiHandler('delete', args); }
                      }
+                     else if (func.name === 'cr_upload') {
+                        toolResult = await cloudreveApiHandler('upload', args);
+                     }
+                     else if (func.name === 'cr_upload_file') {
+                        toolResult = await cloudreveApiHandler('upload_file', args);
+                     }
                      else if (func.name === 'cr_list_shares') {
                         toolResult = await cloudreveApiHandler('list_shares', args);
                      }
@@ -725,87 +826,68 @@
                      else if (func.name === 'cr_overview') {
                         toolResult = await cloudreveApiHandler('overview', args);
                      }
-                    // ===== SRC 星穹铁道工具 (完整版) =====
-                     else if (func.name === 'src_status') {
-                        var r = await _srcApi('/status?config_name=src');
-                        toolResult = r.ok ? { result: (r.alive ? '✅ 运行中' : '❌ ' + (r.state_label || '已停止')) + ' | state=' + (r.state||'') } : { error: r.error || '获取状态失败' };
-                    }
-                     else if (func.name === 'src_dashboard') {
-                        var r = await _srcApi('/dashboard?config_name=src');
-                        if (r.ok && r.resources) {
-                            var res = r.resources;
-                            var lines = [];
-                            var fmts = { trailblaze_power: '⚡体力', reserved_power: '💾后备体力', fuel: '⛽燃料', stellar_jade: '💎星琼', credit: '💰信用点', immersifier: '📿沉浸器', battle_pass_level: '📊大月卡', daily_activity: '📋活跃度', simulated_universe: '🌌模拟宇宙分', echo_of_war: '⚔️历战余响', relic: '📦遗器碎片' };
-                            Object.keys(fmts).forEach(function(k) {
-                                if (res[k]) lines.push(fmts[k] + ': ' + (res[k].value||0) + '/' + (res[k].total||'∞') + (res[k].time ? ' (' + res[k].time + ')' : ''));
-                            });
-                            toolResult = { result: '📊 资源面板:\n' + lines.join('\n') + '\n\n更新: ' + (r.updated_at || '') };
-                        } else { toolResult = { error: r.error || '获取失败' }; }
-                    }
-                     else if (func.name === 'src_start') {
-                        var task = args.task || 'Alas';
-                        var r = await _srcApi('/run', { method: 'POST', body: JSON.stringify({ config_name: 'src', task: task }) });
-                        toolResult = r.ok ? { result: '✅ ' + task + ' 已启动' } : { error: r.error || '启动失败(可能已在运行,需先停止)' };
-                    }
-                     else if (func.name === 'src_stop') {
-                        var r = await _srcApi('/stop', { method: 'POST', body: JSON.stringify({ config_name: 'src' }) });
-                        toolResult = r.ok ? { result: '✅ SRC 已停止' } : { error: r.error || '停止失败' };
-                    }
-                     else if (func.name === 'src_get_tasks') {
-                        var r = await _srcApi('/tasks?config_name=src');
-                        if (r.ok && r.tasks) {
-                            var lines = r.tasks.map(function(t) {
-                                return (t.enable ? '✅' : '⏸️') + ' ' + t.name + ': ' + (t.description||'') + (t.next_run ? ' → ' + t.next_run : '');
-                            });
-                            toolResult = { result: '📋 任务列表:\n' + lines.join('\n') };
-                        } else { toolResult = { error: r.error || '获取失败' }; }
-                    }
-                     else if (func.name === 'src_toggle_task') {
-                        // 通过配置路径修改任务启用状态
-                        var taskName = args.name;
-                        var taskPathMap = { Dungeon: 'Dungeon.Scheduler.Enable', Weekly: 'Weekly.Scheduler.Enable', Rogue: 'Rogue.Scheduler.Enable', Ornament: 'Ornament.Scheduler.Enable', Daemon: 'Daemon.Scheduler.Enable', DailyQuest: 'DailyQuest.Scheduler.Enable', BattlePass: 'BattlePass.Scheduler.Enable', Assignment: 'Assignment.Scheduler.Enable', Freebies: 'Freebies.Scheduler.Enable', PlannerScan: 'PlannerScan.Scheduler.Enable' };
-                        var path = taskPathMap[taskName];
-                        if (!path) { toolResult = { error: '未知任务: ' + taskName + ', 可选: ' + Object.keys(taskPathMap).join(', ') }; }
-                        else {
-                            var r = await _srcApi('/config/src', { method: 'PUT', body: JSON.stringify({ path: path, value: !!args.enable }) });
-                            toolResult = r.ok ? { result: (args.enable ? '✅' : '⏸️') + ' ' + taskName + '已' + (args.enable ? '启用' : '禁用') } : { error: r.error || '操作失败' };
-                        }
-                    }
-                     else if (func.name === 'src_get_config') {
-                        var r = await _srcApi('/config/src');
-                        toolResult = r.ok ? { result: JSON.stringify(r.data, null, 2) } : { error: r.error || '获取配置失败' };
-                    }
-                     else if (func.name === 'src_set_config') {
-                        var path = args.path, val = args.value;
-                        if (val === 'true' || val === 'True') val = true;
-                        else if (val === 'false' || val === 'False') val = false;
-                        else if (/^\d+$/.test(val)) val = parseInt(val);
-                        else if (/^\d+\.\d+$/.test(val)) val = parseFloat(val);
-                        var r = await _srcApi('/config/src', { method: 'PUT', body: JSON.stringify({ path: path, value: val }) });
-                        toolResult = r.ok ? { result: '✅ ' + path + ' = ' + JSON.stringify(val) } : { error: r.error || '保存失败' };
-                    }
-                     else if (func.name === 'src_get_logs') {
-                        var lines = Math.min(args.lines || 50, 200);
-                        var r = await _srcApi('/logs?config_name=src&limit=' + lines);
-                        var logLines = r.lines || r.logs || [];
-                        // 过滤掉 rich.table.Table 对象
-                        var filtered = logLines.filter(function(l) { return typeof l === 'string' && l.indexOf('<rich.table.Table') === -1; });
-                        toolResult = r.ok ? { result: filtered.join('\n') || '(日志为空)' } : { error: r.error || '获取失败' };
-                    }
-                     else if (func.name === 'src_check_upgrade') {
-                        var r = await fetch('/oneapichat/api/src_upgrade.php?action=check');
-                        var d = await r.json();
-                        toolResult = d.ok ? { result: '当前: ' + d.current + ', 落后 ' + d.behind + ' commit, ' + (d.need_update ? '🔔需要更新' : '✅已是最新') } : { error: d.error || '检查失败' };
-                    }
-                     else if (func.name === 'src_do_upgrade') {
-                        if (!confirm('⚠️ AI请求SRC升级\n\ngit pull + pip install + 重启\n\n确认?')) {
-                            toolResult = { result: '❌ 取消升级' };
-                        } else {
-                            var r = await fetch('/oneapichat/api/src_upgrade.php?action=upgrade');
-                            var d = await r.json();
-                            toolResult = d.ok ? { result: '✅ ' + (d.message || '升级完成') + '\n' + (d.output || '') } : { error: d.error || '升级失败' };
-                        }
-                    }
+                    // ===== 高德地图工具 =====
+                     else if (func.name === 'amap_geo') {
+                        toolResult = await amapApiHandler('geo', args);
+                     }
+                     else if (func.name === 'amap_regeocode') {
+                        toolResult = await amapApiHandler('regeocode', args);
+                     }
+                     else if (func.name === 'amap_text_search') {
+                        toolResult = await amapApiHandler('text_search', args);
+                     }
+                     else if (func.name === 'amap_around_search') {
+                        toolResult = await amapApiHandler('around_search', args);
+                     }
+                     else if (func.name === 'amap_direction_bicycling') {
+                        toolResult = await amapApiHandler('direction_bicycling', args);
+                     }
+                     else if (func.name === 'amap_distance') {
+                        toolResult = await amapApiHandler('distance', args);
+                     }
+                     else if (func.name === 'amap_search_detail') {
+                        toolResult = await amapApiHandler('search_detail', args);
+                     }
+                     else if (func.name === 'amap_direction_walking') {
+                        toolResult = await amapApiHandler('direction_walking', args);
+                     }
+                     else if (func.name === 'amap_direction_driving') {
+                        toolResult = await amapApiHandler('direction_driving', args);
+                     }
+                     else if (func.name === 'amap_direction_transit') {
+                        toolResult = await amapApiHandler('direction_transit', args);
+                     }
+                     else if (func.name === 'amap_ip_location') {
+                        toolResult = await amapApiHandler('ip_location', args);
+                     }
+                     else if (func.name === 'amap_weather') {
+                        toolResult = await amapApiHandler('weather', args);
+                     }
+                     else if (func.name === 'amap_district') {
+                        toolResult = await amapApiHandler('district', args);
+                     }
+                     else if (func.name === 'amap_schema_personal_map') {
+                        toolResult = await amapApiHandler('schema_personal_map', args);
+                     }
+                    // ===== 网盘解析工具 =====
+                     else if (func.name === 'netdisk_parse') {
+                        toolResult = await netdiskApiHandler('parse', args);
+                     }
+                     else if (func.name === 'netdisk_download') {
+                        toolResult = await netdiskApiHandler('download', args);
+                     }
+                     else if (func.name === 'netdisk_parse_and_download') {
+                        toolResult = await netdiskApiHandler('parse_and_download', args);
+                     }
+                     else if (func.name === 'netdisk_status') {
+                        toolResult = await netdiskApiHandler('status', args);
+                     }
+                    // ===== 视频猎手 Video Hunter (B站下载/BT磁力/云盘) =====
+                     else if (func.name.startsWith('video_') || func.name.startsWith('bili_')) {
+                        // 视频猎手工具 → MCP代理 (统一走 mcp_proxy)
+                        toolResult = await _mcpExecute(func.name, args);
+                     }
+                    // ★ SRC 星穹铁道工具已移除 (功能弃用, 入口改为 Cloudreve 云盘)
                     // ===== Windows 本机工具 =====
                      else if (func.name === 'win_info') {
                         var cmd = WIN_POWERSHELL + ' -Command "systeminfo"';
@@ -1376,6 +1458,25 @@
                             currentFiles = pendingFiles.length > 0 ? pendingFiles : (chats[chatId]?.messages?.slice(-1)[0]?.files || []);
                         }
 
+                        // ★ 修复: 如果当前消息图片不足,从聊天历史中收集所有用户上传的图片(支持多批次上传)
+                        if (currentFiles.length < 2 && chats[chatId]) {
+                            var _allHistoricalImages = [];
+                            var _msgsAll2 = chats[chatId].messages;
+                            for (let _hi = _msgsAll2.length - 1; _hi >= 0; _hi--) {
+                                if (_msgsAll2[_hi].role === 'user' && _msgsAll2[_hi].files && _msgsAll2[_hi].files.length > 0) {
+                                    _msgsAll2[_hi].files.forEach(function(f) {
+                                        if ((f.isImage || f.type?.startsWith('image/')) && !_allHistoricalImages.some(ef => ef.name === f.name && ef.serverUrl === f.serverUrl)) {
+                                            _allHistoricalImages.push(f);
+                                        }
+                                    });
+                                }
+                            }
+                            if (_allHistoricalImages.length > currentFiles.length) {
+                                currentFiles = _allHistoricalImages;
+                                console.log('[analyze_image] 从历史消息收集到', currentFiles.length, '张图片');
+                            }
+                        }
+
                         // 如果仍然没有找到图片,尝试从聊天历史中查找(用户上传或AI生成的图片)
                         if (!currentFiles.length && chats[chatId]) {
                             let msgs = chats[chatId].messages;
@@ -1399,6 +1500,38 @@
                         // 按索引选择图片
                         var imageFiles = currentFiles.filter(f => f.isImage || f.type?.startsWith('image/'));
                         var imageFile = (imageFiles.length > imgIdx) ? imageFiles[imgIdx] : imageFiles[0];
+
+                        // ★ 修复: imageFile.serverUrl 为空时, 从聊天历史中按文件名查找完整 serverUrl
+                        if (imageFile && (!imageFile.serverUrl || imageFile.serverUrl.length < 5) && imageFile.name && chats[chatId]) {
+                            var _targetName = imageFile.name;
+                            var _msgsAll = chats[chatId].messages;
+                            // 方法1: 从其他消息的 files 数组中按文件名匹配
+                            for (let _mi = _msgsAll.length - 1; _mi >= 0; _mi--) {
+                                var _mFiles = _msgsAll[_mi].files;
+                                if (_mFiles && _mFiles.length > 0) {
+                                    var _match = _mFiles.find(function(ff) { return ff.name === _targetName && ff.serverUrl && ff.serverUrl.length > 5; });
+                                    if (_match) {
+                                        imageFile.serverUrl = _match.serverUrl;
+                                        console.log('[analyze_image] 从历史消息补全 serverUrl:', _targetName, '->', _match.serverUrl);
+                                        break;
+                                    }
+                                }
+                            }
+                            // 方法2: 仍无 serverUrl, 从消息正文中提取 URL (格式: 🌐 URL: /oneapichat/uploads/...)
+                            if (!imageFile.serverUrl || imageFile.serverUrl.length < 5) {
+                                for (let _mi2 = _msgsAll.length - 1; _mi2 >= 0; _mi2--) {
+                                    var _content2 = _msgsAll[_mi2].text || _msgsAll[_mi2].content || '';
+                                    if (typeof _content2 === 'string' && _content2.indexOf(_targetName) !== -1) {
+                                        var _urlMatch = _content2.match(/[🌐\s]*URL:\s*(\/[^\s\)]+\.(?:jpeg|jpg|png|webp|gif))/i);
+                                        if (_urlMatch && _urlMatch[1]) {
+                                            imageFile.serverUrl = _urlMatch[1];
+                                            console.log('[analyze_image] 从消息正文提取 serverUrl:', _targetName, '->', _urlMatch[1]);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         if (!imageFile) {
                             toolResult = { error: '未找到可分析的图片,请确保用户已上传图片。' };
@@ -1424,44 +1557,217 @@
                                         if (_stImg) _stImg.textContent = '🖼️ 正在分析第' + (imgIdx + 1) + '/' + imageFiles.length + '张图片...';
                                     }
                                 }
-                                // ★ 根据 API 类型选择最佳图片源:
-                                // 直连 API (MiniMax) 需要 data: URL,否则会报 invalid image URL
-                                // MCP 代理可以用 HTTP URL
-                                var _visUrl = localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '/mcp';
-                                var _isDirectVision = _visUrl.toLowerCase().indexOf('/mcp') === -1;
-                                var analyzeInput;
-                                if (_isDirectVision) {
-                                    // 直连模式: 优先 base64 content, HTTP URL 会导致 MiniMax 报错
-                                    analyzeInput = imageFile.content || '';
-                                    if ((!analyzeInput || !analyzeInput.startsWith('data:')) && imageFile.serverUrl && imageFile.serverUrl.length > 3) {
-                                        var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
-                                        analyzeInput = fullUrl;
+                                // ★ 检测视觉提供商
+                                var _visProvider = localStorage.getItem('visionProvider') || '';
+                                var _visApiKey = '';
+                                var _visApiUrl = '';
+                                var _visModel = '';
+                                console.log('[analyze_image] 视觉提供商:', _visProvider, '图片:', imageFile.name, '有content:', !!(imageFile.content && imageFile.content.length > 10), 'serverUrl:', imageFile.serverUrl);
+                                if (_visProvider === 'xai') {
+                                    _visApiKey = await decrypt(localStorage.getItem('visionApiKeyXAI') || '');
+                                    _visApiUrl = localStorage.getItem('visionApiUrlXAI') || 'https://api.x.ai/v1';
+                                    _visModel = localStorage.getItem('visionModel') || 'grok-4.5';
+                                    console.log('[analyze_image] xAI Key:', _visApiKey ? 'YES(' + _visApiKey.substring(0, 8) + '...)' : 'NO');
+                                    // ★ xAI Key 为空时, 直接从服务器获取配置 (绕过 loadConfigFromServer 守卫)
+                                    if (!_visApiKey) {
+                                        console.log('[analyze_image] xAI Key 为空, 直接从服务器获取配置...');
+                                        try {
+                                            var _cfgResp = await fetch('/oneapichat/api/chat.php?action=get_config&auth_token=' + encodeURIComponent(window.getAuthToken() || ''), { cache: 'no-store' });
+                                            if (_cfgResp.ok) {
+                                                var _cfgData = await _cfgResp.json();
+                                                if (_cfgData.visionApiKeyXAI) {
+                                                    localStorage.setItem('visionApiKeyXAI', _cfgData.visionApiKeyXAI);
+                                                    _visApiKey = await decrypt(_cfgData.visionApiKeyXAI);
+                                                    console.log('[analyze_image] 服务器获取 xAI Key 成功:', _visApiKey ? _visApiKey.substring(0, 8) + '...' : 'FAIL');
+                                                }
+                                                if (_cfgData.visionApiUrlXAI) { localStorage.setItem('visionApiUrlXAI', _cfgData.visionApiUrlXAI); _visApiUrl = _cfgData.visionApiUrlXAI; }
+                                            }
+                                        } catch(_cfgErr) { console.warn('[analyze_image] 服务器获取配置失败:', _cfgErr.message); }
                                     }
-                                    // ★ iPhone等上传文件: serverUrl缺失时从文件名构造URL
-                                    if ((!analyzeInput || analyzeInput.length < 10) && imageFile.name) {
-                                        var _fn2 = imageFile.name;
-                                        if (/^img_[a-f0-9]+\.\w+$/i.test(_fn2) || /^IMG_\d+\.\w+$/i.test(_fn2)) {
-                                            analyzeInput = window.location.origin + '/oneapichat/uploads/anonymous/' + _fn2;
+                                    if (!_visApiKey) console.warn('[analyze_image] ⚠️ xAI 提供商已选择但未配置 API Key, 请在设置中填写 visionApiKeyXAI');
+                                } else if (_visProvider === 'openai') {
+                                    _visApiKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
+                                    _visApiUrl = localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1';
+                                    _visModel = localStorage.getItem('visionModel') || 'gpt-4o';
+                                    console.log('[analyze_image] OpenAI Key:', _visApiKey ? 'YES(' + _visApiKey.substring(0, 8) + '...)' : 'NO');
+                                    // ★ OpenAI Key 为空时, 直接从服务器获取配置
+                                    if (!_visApiKey) {
+                                        console.log('[analyze_image] OpenAI Key 为空, 直接从服务器获取配置...');
+                                        try {
+                                            var _cfgResp2 = await fetch('/oneapichat/api/chat.php?action=get_config&auth_token=' + encodeURIComponent(window.getAuthToken() || ''), { cache: 'no-store' });
+                                            if (_cfgResp2.ok) {
+                                                var _cfgData2 = await _cfgResp2.json();
+                                                if (_cfgData2.visionApiKeyOpenAI) {
+                                                    localStorage.setItem('visionApiKeyOpenAI', _cfgData2.visionApiKeyOpenAI);
+                                                    _visApiKey = await decrypt(_cfgData2.visionApiKeyOpenAI);
+                                                    console.log('[analyze_image] 服务器获取 OpenAI Key 成功:', _visApiKey ? _visApiKey.substring(0, 8) + '...' : 'FAIL');
+                                                }
+                                                if (_cfgData2.visionApiUrlOpenAI) { localStorage.setItem('visionApiUrlOpenAI', _cfgData2.visionApiUrlOpenAI); _visApiUrl = _cfgData2.visionApiUrlOpenAI; }
+                                            }
+                                        } catch(_cfgErr2) { console.warn('[analyze_image] 服务器获取配置失败:', _cfgErr2.message); }
+                                    }
+                                    if (!_visApiKey) console.warn('[analyze_image] ⚠️ OpenAI 提供商已选择但未配置 API Key, 请在设置中填写 visionApiKeyOpenAI');
+                                } else {
+                                    console.log('[analyze_image] ⚠️ 未配置视觉提供商或自定义, 走 MiniMax MCP');
+                                }
+                                var analyzeInput;
+                                var _xaiHandled = false;
+                                // ★ xAI/OpenAI 视觉提供商: 强制 base64, 走 proxyFetch
+                                if ((_visProvider === 'xai' || _visProvider === 'openai') && _visApiKey) {
+                                    analyzeInput = imageFile.content || '';
+                                    if (!analyzeInput.startsWith('data:')) {
+                                        // ★ 优先用服务端代理获取 base64 (可靠, 不依赖浏览器下载)
+                                        if (imageFile.serverUrl && imageFile.serverUrl.length > 3) {
+                                            try {
+                                                var _proxyPath = imageFile.serverUrl.startsWith('http')
+                                                    ? imageFile.serverUrl.replace(/^https?:\/\/[^\/]+/, '')
+                                                    : imageFile.serverUrl;
+                                                console.log('[analyze_image] 尝试服务端代理:', _proxyPath);
+                                                var _proxyResp = await fetch('/oneapichat/api/image_proxy.php?action=get&path=' + encodeURIComponent(_proxyPath) + '&auth_token=' + encodeURIComponent(window.getAuthToken() || ''));
+                                                console.log('[analyze_image] 代理响应状态:', _proxyResp.status);
+                                                if (_proxyResp.ok) {
+                                                    var _proxyData = await _proxyResp.json();
+                                                    console.log('[analyze_image] 代理返回:', _proxyData.success ? '成功' : '失败', _proxyData.error || '');
+                                                    if (_proxyData.success && _proxyData.dataUrl) {
+                                                        analyzeInput = _proxyData.dataUrl;
+                                                        console.log('[analyze_image] 通过服务端代理获取图片成功:', imageFile.name, '(' + (_proxyData.size / 1024).toFixed(0) + 'KB)');
+                                                    }
+                                                } else {
+                                                    var _proxyErrText = await _proxyResp.text().catch(function() { return ''; });
+                                                    console.warn('[analyze_image] 代理HTTP错误:', _proxyResp.status, _proxyErrText.substring(0, 200));
+                                                }
+                                            } catch(_proxyErr) {
+                                                console.warn('[analyze_image] 服务端代理失败:', _proxyErr.message);
+                                            }
+                                        } else {
+                                            console.warn('[analyze_image] ⚠️ 无 serverUrl, 无法获取图片');
+                                        }
+                                        // 降级: 浏览器直接下载
+                                        if (!analyzeInput.startsWith('data:') && imageFile.serverUrl && imageFile.serverUrl.length > 3) {
+                                            var _dlUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
+                                            try {
+                                                var _dlResp = await window.proxyFetch(_dlUrl);
+                                                var _dlBlob = await _dlResp.blob();
+                                                analyzeInput = await new Promise(function(r) {
+                                                    var fr = new FileReader();
+                                                    fr.onload = function() { r(fr.result); };
+                                                    fr.readAsDataURL(_dlBlob);
+                                                });
+                                            } catch(_dlErr) {
+                                                console.warn('[analyze_image] 浏览器下载也失败:', _dlErr.message);
+                                            }
                                         }
                                     }
-                                } else {
-                                    // MCP 代理: 优先服务器 URL
-                                    analyzeInput = imageFile.content || '';
-                                    if (imageFile.serverUrl && typeof imageFile.serverUrl === 'string' && imageFile.serverUrl.length > 3) {
+                                    if (analyzeInput && analyzeInput.startsWith('data:')) {
+                                        try {
+                                            var _visContent = [
+                                                { type: 'text', text: focus || '请详细描述这张图片的内容,包括物体、场景、文字等可见信息。' },
+                                                { type: 'image_url', image_url: { url: analyzeInput, detail: 'auto' } }
+                                            ];
+                                            var _visReqBody = JSON.stringify({ model: _visModel, messages: [{ role: 'user', content: _visContent }], max_tokens: 2048, stream: false });
+                                            var _visResp = await window.proxyFetch(_visApiUrl.replace(/\/$/, '') + '/chat/completions', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _visApiKey },
+                                                body: _visReqBody
+                                            });
+                                            // ★ xAI/OpenAI 请求失败 (可能因中国大陆网络限制), 自动启用代理并重试
+                                            if (!_visResp.ok && _visResp.status !== 401 && _visResp.status !== 403) {
+                                                var _wasProxyEnabled = window.isProxyEnabled && window.isProxyEnabled();
+                                                if (!_wasProxyEnabled && typeof window.toggleProxy === 'function' && typeof setChecked === 'function') {
+                                                    console.log('[analyze_image] API 请求失败 (' + _visResp.status + '), 尝试启用代理重试...');
+                                                    setChecked('proxyToggle', true);
+                                                    window.toggleProxy();
+                                                    try {
+                                                        var _visResp2 = await window.proxyFetch(_visApiUrl.replace(/\/$/, '') + '/chat/completions', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _visApiKey },
+                                                            body: _visReqBody
+                                                        });
+                                                        if (_visResp2.ok) _visResp = _visResp2;
+                                                    } catch(e) {}
+                                                }
+                                            }
+                                            if (_visResp.ok) {
+                                                var _visData = await _visResp.json();
+                                                var _visResult = _visData.choices && _visData.choices[0] && _visData.choices[0].message && _visData.choices[0].message.content;
+                                                if (_visResult) {
+                                                    toolResult = { result: _visResult };
+                                                    _xaiHandled = true;
+                                                    // 缓存
+                                                    try {
+                                                        if (chatId && chats[chatId]) {
+                                                            if (!chats[chatId].imageAnalyses) chats[chatId].imageAnalyses = [];
+                                                            var _cacheStr = '【' + (imageFile.name || '图片' + imgIdx) + '】\n' + _visResult;
+                                                            if (chats[chatId].imageAnalyses.indexOf(_cacheStr) === -1) chats[chatId].imageAnalyses.push(_cacheStr);
+                                                            slimSaveChats();
+                                                        }
+                                                    } catch(e2) {}
+                                                }
+                                            } else {
+                                                console.warn('[analyze_image] xAI API 返回非 OK:', _visResp.status);
+                                            }
+                                        } catch(_xaiErr) {
+                                            console.warn('[analyze_image] xAI 请求失败:', _xaiErr.message);
+                                        }
+                                    }
+                                }
+                                // ★ 默认: MiniMax MCP / 直连模式 (仅当 xAI 未成功时执行)
+                                if (!_xaiHandled) {
+                                var _visUrl = localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '/mcp';
+                                var _isDirectVision = _visUrl.toLowerCase().indexOf('/mcp') === -1;
+                                analyzeInput = imageFile.content || '';
+                                // ★ content 被剥离时(刷新后大图), 优先用服务端代理获取 base64 (从磁盘读取, 不依赖浏览器下载)
+                                if ((!analyzeInput || !analyzeInput.startsWith('data:')) && imageFile.serverUrl && imageFile.serverUrl.length > 3) {
+                                    var _proxyPath = imageFile.serverUrl.startsWith('http')
+                                        ? imageFile.serverUrl.replace(/^https?:\/\/[^\/]+/, '')
+                                        : imageFile.serverUrl;
+                                    try {
+                                        var _proxyResp2 = await fetch('/oneapichat/api/image_proxy.php?action=get&path=' + encodeURIComponent(_proxyPath) + '&auth_token=' + encodeURIComponent(window.getAuthToken() || ''));
+                                        if (_proxyResp2.ok) {
+                                            var _proxyData2 = await _proxyResp2.json();
+                                            if (_proxyData2.success && _proxyData2.dataUrl) {
+                                                analyzeInput = _proxyData2.dataUrl;
+                                                console.log('[analyze_image] MiniMax路径-服务端代理获取图片成功:', imageFile.name, '(' + (_proxyData2.size / 1024).toFixed(0) + 'KB)');
+                                            } else {
+                                                console.warn('[analyze_image] MiniMax路径-代理返回失败:', _proxyData2.error || '未知错误');
+                                            }
+                                        } else {
+                                            var _proxyErrText2 = await _proxyResp2.text().catch(function() { return ''; });
+                                            console.warn('[analyze_image] MiniMax路径-代理HTTP错误:', _proxyResp2.status, _proxyErrText2.substring(0, 200));
+                                        }
+                                    } catch(_proxyErr2) {
+                                        console.warn('[analyze_image] MiniMax路径-服务端代理失败:', _proxyErr2.message);
+                                    }
+                                }
+                                // ★ 代理失败且非 base64: 直连模式用 URL (analyzeImage 会下载), MCP 模式也用 URL (服务端下载)
+                                if (!analyzeInput.startsWith('data:')) {
+                                    if (imageFile.serverUrl && imageFile.serverUrl.length > 3) {
                                         var fullUrl = imageFile.serverUrl.startsWith('http') ? imageFile.serverUrl : window.location.origin + imageFile.serverUrl;
                                         analyzeInput = fullUrl;
-                                    }
-                                    // ★ iPhone上传: serverUrl可能缺失,从文件名构造URL
-                                    if ((!analyzeInput || analyzeInput.length < 10) && imageFile.name) {
-                                        var _fn = imageFile.name;
-                                        // 匹配上传格式: img_<hex>.ext 或 IMG_*.jpeg
-                                        if (/^img_[a-f0-9]+\.\w+$/i.test(_fn) || /^IMG_\d+\.\w+$/i.test(_fn)) {
-                                            analyzeInput = window.location.origin + '/oneapichat/uploads/anonymous/' + _fn;
+                                    } else if (imageFile.name) {
+                                        // ★ 按文件名 hash 在聊天历史中查找真实 serverUrl (可能跨消息)
+                                        var _fn2 = imageFile.name;
+                                        if (/^img_[a-f0-9]+\.\w+$/i.test(_fn2) || /^IMG_\d+\.\w+$/i.test(_fn2)) {
+                                            // 尝试从所有消息的 files 中找同名文件
+                                            var _allMsgs = chats[chatId]?.messages || [];
+                                            for (let _si = _allMsgs.length - 1; _si >= 0; _si--) {
+                                                var _sf = _allMsgs[_si].files || [];
+                                                var _sfMatch = _sf.find(function(ff) { return ff.name === _fn2 && ff.serverUrl && ff.serverUrl.length > 10; });
+                                                if (_sfMatch) {
+                                                    analyzeInput = _sfMatch.serverUrl.startsWith('http') ? _sfMatch.serverUrl : window.location.origin + _sfMatch.serverUrl;
+                                                    break;
+                                                }
+                                            }
+                                            // 最终回退: 用 anonymous 前缀 (旧版兼容)
+                                            if (!analyzeInput.startsWith('http') && !analyzeInput.startsWith('data:')) {
+                                                analyzeInput = window.location.origin + '/oneapichat/uploads/anonymous/' + _fn2;
+                                            }
                                         }
                                     }
                                 }
                                 var analyzeResult = await window.analyzeImage(analyzeInput, focus);
                                 toolResult = { result: analyzeResult };
+                                } // ← 结束 if (!_xaiHandled)
                                 // ★ 缓存工具调用的分析结果,后续追问无需重新分析
                                 try {
                                     if (chatId && chats[chatId]) {
@@ -1564,6 +1870,110 @@
                                         }
                                     } catch(_qrDomErr3) {}
                                 }
+                            }
+                        });
+                    } else if (func.name === 'netdisk_login') {
+                        // ★ 网盘扫码登录: 独立QR行(聊天消息) + 弹窗(辅助)
+                        console.log('[netdisk_login] 处理器被调用, args:', JSON.stringify(args));
+                        toolResult = await _mcpExecute(func.name, args, function(res) {
+                            console.log('[netdisk_login] _mcpExecute回调被调用, res:', JSON.stringify(res).substring(0, 200));
+                            var _qrB64 = res.qr_image_base64 || res.success_image || null;
+                            delete pendingMsg.generatedImage;
+                            delete pendingMsg.generatedImages;
+                            if (res.qr_image_base64) delete res.qr_image_base64;
+                            if (res.qr_image_url) delete res.qr_image_url;
+
+                            var _serviceName = (args && args.service) || 'baidu';
+                            var _actionName = (args && args.action) || '';
+                            var _qrTitle = _serviceName === 'baidu' ? '百度网盘' : (_serviceName === 'quark' ? '夸克网盘' : '阿里云盘');
+                            var _hint = '扫码确认后自动完成登录';
+
+                            // ★ 关键反馈: 二维码已由前端展示, 必须让模型知道, 否则它会因为看不到
+                            //   base64 而反复重新生成二维码(曾导致每次 qr 都杀掉上一张码 → 永远登不上)
+                            if (_actionName === 'qr') {
+                                res.notice = '【系统提示】二维码已由前端单独展示给用户(二维码图片base64/URL已从返回中移除以节省token, 聊天界面已显示二维码)。' +
+                                    '请勿重复调用qr或重新生成二维码! 请直接调用 poll(service=' + _serviceName + ')持续轮询等待扫码。' +
+                                    'poll返回 status=waiting 是正常状态, 表示用户尚未扫码, 需继续poll直到 status=logged_in。';
+                            } else if (_actionName === 'poll' && res.status === 'waiting') {
+                                res.notice = '【系统提示】用户尚未扫码(status=waiting, 正常状态)。请继续调用 poll 等待, 不要重新生成二维码。';
+                            }
+
+                            if (_qrB64) {
+                                // ★ 方式1: 独立QR行(聊天消息中, 持久可见)
+                                try {
+                                    var _qrCont = (typeof $ !== 'undefined' && $.chatMessagesContainer) || document.querySelector('#chat-messages');
+                                    if (_qrCont) {
+                                        _qrCont.querySelectorAll('[data-qr-login]').forEach(function(el) { el.remove(); });
+                                        _qrCont.querySelectorAll('.bubble img[src*="base64"], .bubble img[src*="baidu_qr"], .bubble img[src*="quark_qr"], .bubble img[src*="aliyun_qr"], .generated-images-container img').forEach(function(el) {
+                                            if (el.src && (el.src.includes('base64') || el.src.includes('_qr'))) {
+                                                var wrap = el.closest('.generated-images-container') || el.parentElement;
+                                                if (wrap) wrap.remove();
+                                            }
+                                        });
+                                        var _qrRow = document.createElement('div');
+                                        _qrRow.className = 'message-row assistant';
+                                        _qrRow.setAttribute('data-qr-login', '1');
+                                        _qrRow.innerHTML = '<div class="bubble assistant" style="text-align:center;padding:12px;">' +
+                                            '<div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text-primary,#1a1a1a);">📷 ' + _qrTitle + '扫码登录</div>' +
+                                            '<div style="margin-bottom:10px;font-size:12px;color:var(--text-secondary,#666);">请用' + _qrTitle + 'APP扫描二维码</div>' +
+                                            '<img src="' + _qrB64 + '" style="max-width:220px;border-radius:10px;display:block;margin:0 auto 10px;border:2px solid #e0e0e0;" />' +
+                                            '<div style="font-size:11px;color:var(--text-secondary,#999);">' + _hint + '</div>' +
+                                            '</div>';
+                                        _qrCont.appendChild(_qrRow);
+                                        if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                        pendingMsg._hasQrRow = true;
+                                        if (chats[chatId]) {
+                                            var _bmi = chats[chatId].messages.findIndex(m => m === pendingMsg);
+                                            if (_bmi !== -1) chats[chatId].messages[_bmi]._hasQrRow = true;
+                                        }
+                                        console.log('[netdisk_login] 独立QR行已注入');
+                                    }
+                                } catch(_qrDomErr) { console.error('[netdisk_login] QR row error:', _qrDomErr); }
+
+                                // ★ 方式2: 弹窗显示(辅助提醒)
+                                try {
+                                    var _overlay = document.getElementById('qr-popup-overlay');
+                                    if (_overlay) {
+                                        document.getElementById('qr-popup-img').src = _qrB64;
+                                        document.getElementById('qr-popup-title').textContent = '📷 ' + _qrTitle + '扫码登录';
+                                        document.getElementById('qr-popup-desc').textContent = '请用' + _qrTitle + 'APP扫描二维码';
+                                        document.getElementById('qr-popup-hint').textContent = _hint;
+                                        _overlay.style.display = 'flex';
+                                        console.log('[netdisk_login] 弹窗已显示');
+                                    } else {
+                                        console.log('[netdisk_login] 弹窗不存在, 创建临时弹窗');
+                                        var _tmpOverlay = document.createElement('div');
+                                        _tmpOverlay.id = 'qr-popup-tmp';
+                                        _tmpOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+                                        _tmpOverlay.innerHTML = '<div style="background:#fff;border-radius:16px;padding:24px;text-align:center;max-width:340px;">' +
+                                            '<div style="font-size:18px;font-weight:bold;margin-bottom:8px;">📷 ' + _qrTitle + '扫码登录</div>' +
+                                            '<div style="font-size:13px;color:#666;margin-bottom:16px;">请用' + _qrTitle + 'APP扫描二维码</div>' +
+                                            '<img src="' + _qrB64 + '" style="width:220px;height:220px;border-radius:12px;display:block;margin:0 auto 16px;" />' +
+                                            '<div style="font-size:12px;color:#999;margin-bottom:12px;">' + _hint + '</div>' +
+                                            '<button onclick="this.closest(\'#qr-popup-tmp\').remove()" style="background:#1a73e8;color:#fff;border:none;border-radius:8px;padding:10px 28px;cursor:pointer;">关闭</button>' +
+                                        '</div>';
+                                        document.body.appendChild(_tmpOverlay);
+                                    }
+                                } catch(e) { console.error('QR popup error:', e); }
+                            } else if (res.status === 'logged_in' || res.valid) {
+                                // ★ 登录成功: 隐藏弹窗 + 更新独立QR行为成功状态
+                                try {
+                                    var _ov = document.getElementById('qr-popup-overlay');
+                                    if (_ov) _ov.style.display = 'none';
+                                    var _tmp = document.getElementById('qr-popup-tmp');
+                                    if (_tmp) _tmp.remove();
+                                    var _qrCont2 = (typeof $ !== 'undefined' && $.chatMessagesContainer) || document.querySelector('#chat-messages');
+                                    if (_qrCont2) {
+                                        var _qrRow2 = _qrCont2.querySelector('[data-qr-login]');
+                                        if (_qrRow2) {
+                                            var _bub = _qrRow2.querySelector('.bubble');
+                                            if (_bub) {
+                                                _bub.innerHTML = '<div style="font-size:32px;margin-bottom:8px;">✅</div><div style="font-size:14px;font-weight:500;color:var(--text-primary,#1a1a1a);">' + _qrTitle + '登录成功</div>';
+                                            }
+                                        }
+                                    }
+                                    console.log('[netdisk_login] 登录成功, QR行已更新');
+                                } catch(e) {}
                             }
                         });
                     } else if (func.name === 'chaoxing_qr_login') {
@@ -1804,7 +2214,6 @@
                 // ★ MCP 统一执行代理 — 通用 PHP→MCP 转发
                 async function _mcpExecute(toolName, args, onResult) {
                     var _mcpUrl = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat/api') + '/engine_api.php?action=mcp_proxy';
-                    // ★ 使用调用方传入的 abortSignal（如果存在），否则 120s 超时
                     var _signal = (typeof abortSignal !== 'undefined' && abortSignal) ? abortSignal : AbortSignal.timeout(300000);
                     var _resp = await fetch(_mcpUrl, {
                         method: 'POST',
@@ -1814,11 +2223,56 @@
                     });
                     var _data = await _resp.json();
                     if (_data.error) return { error: _data.error };
+                    // ★ _data.result 可能是JSON字符串, 需要解析
                     var _res = _data.result;
+                    if (typeof _res === 'string') {
+                        try { _res = JSON.parse(_res); } catch(e) {}
+                    }
                     if (typeof onResult === 'function') onResult(_res);
                     if (typeof _res === 'object') {
                         return { result: JSON.stringify(_res, null, 2), _mcpRaw: _res };
                     }
                     return { result: String(_res) };
                 }
+
+// ==================== Plan 模式审批横幅 ====================
+
+/**
+ * 在计划面板上方创建审批横幅（Plan 模式专用）
+ * @param {number} taskCount - 任务数量
+ */
+window._createPlanApprovalBanner = function(taskCount) {
+    // 避免重复创建
+    var existing = document.getElementById('planApprovalBanner');
+    if (existing) existing.remove();
+
+    var panel = document.getElementById('flowPanel');
+    if (!panel) return;
+
+    var banner = document.createElement('div');
+    banner.id = 'planApprovalBanner';
+    banner.className = 'plan-approval-banner';
+    banner.innerHTML =
+        '<div class="plan-approval-text">' +
+            '<span class="plan-approval-icon">📋</span>' +
+            '计划已生成 — 共 <strong>' + taskCount + '</strong> 个步骤' +
+        '</div>' +
+        '<div class="plan-approval-actions">' +
+            '<button class="plan-btn plan-btn-approve" onclick="window.approvePlan()">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ' +
+                '同意执行' +
+            '</button>' +
+            '<button class="plan-btn plan-btn-modify" onclick="window.rejectPlan()">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> ' +
+                '修改计划' +
+            '</button>' +
+            '<button class="plan-btn plan-btn-cancel" onclick="window.cancelPlan()">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> ' +
+                '取消' +
+            '</button>' +
+        '</div>';
+
+    // 插入到 flowPanel 最前面
+    panel.insertBefore(banner, panel.firstChild);
+};
 

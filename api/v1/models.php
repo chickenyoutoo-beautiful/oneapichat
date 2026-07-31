@@ -74,8 +74,8 @@ $providers = [
     'doubao'    => ['label' => '字节豆包',       'baseUrl' => 'https://ark.cn-beijing.volces.com/api/v3'],
     'mimo'      => ['label' => '小米 MiMo',       'baseUrl' => 'https://api.xiaomimimo.com/v1'],
     'openrouter'=> ['label' => 'OpenRouter',     'baseUrl' => 'https://openrouter.ai/api/v1'],
-    'opencode'  => ['label' => 'OpenCode',       'baseUrl' => 'https://api.opencode.ai/v1'],
     'llamacpp'  => ['label' => '本地模型',       'baseUrl' => 'https://localmodels.naujtrats.xyz/v1'],
+    'longcat'   => ['label' => 'LongCat',        'baseUrl' => 'https://api.longcat.chat/openai/v1'],
     'custom'    => ['label' => '自定义',         'baseUrl' => ''],
 ];
 
@@ -115,12 +115,12 @@ $providerKeyMap = [
     'zhipu' => 'apiKeyZhipu',         'qwen' => 'apiKeyQwen',
     'moonshot' => 'apiKeyMoonshot',   'doubao' => 'apiKeyDoubao',
     'mimo' => 'apiKeyMiMo',           'openrouter' => 'apiKeyOpenRouter',
-    'opencode' => 'apiKeyOpenCode',   'llamacpp' => 'apiKeyLlamaCpp',
-    'custom' => 'apiKeyCustom',
+    'llamacpp' => 'apiKeyLlamaCpp',
+    'longcat' => 'apiKeyLongCat',     'custom' => 'apiKeyCustom',
 ];
 
 // 排除中转/聚合类 Provider（非原生 API）
-$excludedProviders = ['openrouter', 'opencode'];
+$excludedProviders = ['openrouter'];
 
 foreach ($providerKeyMap as $providerId => $keyName) {
     if (in_array($providerId, $excludedProviders)) continue;
