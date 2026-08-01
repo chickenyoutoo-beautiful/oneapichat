@@ -19,10 +19,12 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
 $uri = $_SERVER['REQUEST_URI'] ?? '';
+// ★ 剥离 query string — REQUEST_URI 包含 ?xxx=yyy, 正则 $ 锚点会匹配失败
+$path = parse_url($uri, PHP_URL_PATH) ?: $uri;
 $method = $_SERVER['REQUEST_METHOD'];
 
 // ── 1. OAuth 发现端点 ──
-if (preg_match('#/\.well-known/(oauth-authorization-server|openid-configuration)#', $uri)) {
+if (preg_match('#/\.well-known/(oauth-authorization-server|openid-configuration)#', $path)) {
     $base = 'https://naujtrats.xyz/oneapichat/oauth';
     echo json_encode([
         'issuer'                                => 'https://naujtrats.xyz/oneapichat',
@@ -40,7 +42,7 @@ if (preg_match('#/\.well-known/(oauth-authorization-server|openid-configuration)
 }
 
 // ── 2. 客户端注册端点 (Dynamic Client Registration) ──
-if (preg_match('#/oauth/register$#', $uri) && $method === 'POST') {
+if (preg_match('#/oauth/register$#', $path) && $method === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
     $clientId = 'mcp_' . bin2hex(random_bytes(16));
     echo json_encode([
@@ -54,7 +56,7 @@ if (preg_match('#/oauth/register$#', $uri) && $method === 'POST') {
 }
 
 // ── 3. Token 端点 ──
-if (preg_match('#/oauth/token$#', $uri) && $method === 'POST') {
+if (preg_match('#/oauth/token$#', $path) && $method === 'POST') {
     // 个人服务器: 直接签发 Token（无需验证 client，信任本地连接）
     // 支持 grant_type: client_credentials, authorization_code, refresh_token
     $grantType = $_POST['grant_type'] ?? '';
@@ -77,7 +79,7 @@ if (preg_match('#/oauth/token$#', $uri) && $method === 'POST') {
 }
 
 // ── 4. 授权端点 (Authorization Code 流程) ──
-if (preg_match('#/oauth/authorize$#', $uri)) {
+if (preg_match('#/oauth/authorize$#', $path)) {
     // 个人服务器: 直接生成 code 并重定向回 redirect_uri
     $redirectUri = $_GET['redirect_uri'] ?? '';
     $state = $_GET['state'] ?? '';
