@@ -46,6 +46,7 @@ if (!is_array($req)) {
 // 无 token 也允许访问 (个人服务器), 自动回退到最近活跃用户
 $bearerToken = extractBearerToken();
 $authenticated = false;
+$userId = '';
 if ($bearerToken) {
     // OAuth token (oat-*) — 直接信任
     if (str_starts_with($bearerToken, 'oat-')) {
