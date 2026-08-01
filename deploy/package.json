@@ -1,6 +1,6 @@
 {
   "name": "oneapichat-client",
-  "version": "2.5.7",
+  "version": "3.4.0",
   "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
   "scripts": {
@@ -43,7 +43,7 @@
       "uninstallerIcon": "../public/resource/icon-256.ico"
     },
     "linux": {
-      "target": "AppImage",
+      "target": ["AppImage", "deb"],
       "icon": "../public/resource/icon-512.png",
       "artifactName": "OneAPIChat-${version}-linux-x64.${ext}"
     },
