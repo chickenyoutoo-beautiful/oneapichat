@@ -3,6 +3,7 @@
   "version": "3.4.0",
   "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
+  "homepage": "https://github.com/chickenyoutoo-beautiful/oneapichat",
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win --x64",
@@ -45,7 +46,9 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "icon": "../public/resource/icon-512.png",
-      "artifactName": "OneAPIChat-${version}-linux-x64.${ext}"
+      "artifactName": "OneAPIChat-${version}-linux-x64.${ext}",
+      "maintainer": "chickenyoutoo-beautiful <xyq070519@gmail.com>",
+      "category": "Network"
     },
     "mac": {
       "target": "dmg",
@@ -54,7 +57,10 @@
     }
   },
   "keywords": ["chat", "ai", "oneapi", "desktop", "electron"],
-  "author": "naujtrats",
+  "author": {
+    "name": "chickenyoutoo-beautiful",
+    "email": "xyq070519@gmail.com"
+  },
   "license": "MIT",
   "dependencies": {
     "electron-updater": "^6.6.2"
