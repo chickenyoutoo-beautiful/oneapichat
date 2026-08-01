@@ -148,6 +148,10 @@ switch ($method) {
         if ($rawTools !== null) {
             // ★ 修复 analyze_image schema: 补充 image_url/image_path/focus 参数
             $rawTools = fixAnalyzeImageSchema($rawTools);
+            // ★ 关键: 响应 id 必须匹配请求 id, 否则 JSON-RPC 客户端丢弃响应导致超时
+            if ($reqId !== null) {
+                $rawTools = preg_replace('/"id"\s*:\s*\d+/', '"id":' . (int)$reqId, $rawTools, 1);
+            }
             header('Content-Type: application/json; charset=utf-8');
             echo $rawTools;
             exit;
