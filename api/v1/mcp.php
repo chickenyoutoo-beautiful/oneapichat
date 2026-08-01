@@ -24,7 +24,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// 仅接受 POST (MCP Streamable HTTP 的 JSON-RPC 请求)
+// ── GET 请求: Streamable HTTP 的 SSE 事件流模式 ──
+// Claude Code / 标准 MCP 客户端在 initialize 后会用 GET 打开事件流。
+// 必须返回挂起的 text/event-stream, 而不是 405 — 否则客户端反复重试直到超时。
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Content-Type: text/event-stream; charset=utf-8');
+    header('Cache-Control: no-cache, no-transform');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');  // ★ 禁用 nginx 缓冲, SSE 即时输出
+    @ob_end_flush();
+    echo ": connected\n\n";
+    flush();
+    // 保持连接: 每 15s 发心跳, 直到客户端断开
+    $deadline = time() + 300;  // 最长挂起 5 分钟
+    while (!connection_aborted() && time() < $deadline) {
+        echo ": keepalive\n\n";
+        flush();
+        sleep(15);
+    }
+    exit;
+}
+
+// 其他非 POST 方法 → 405 (客户端应回退纯 POST 模式)
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendJsonRpcError(null, -32600, 'Method not allowed, use POST');
     exit;
