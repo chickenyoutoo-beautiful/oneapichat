@@ -324,6 +324,9 @@ function fixAnalyzeImageSchema(string $jsonStr): string {
         $tools[] = getAnalyzeImageFullSchema();
     }
     $data['result']['tools'] = $tools;
+    // ★ 关键: json_decode(..., true) 把空对象 {} 又变回空数组 [],
+    // 必须重新跑 fixEmptyArrays 把空 properties 恢复为 stdClass({})
+    $data = fixEmptyArrays($data);
     return json_encode($data, JSON_UNESCAPED_UNICODE);
 }
 
