@@ -5,8 +5,12 @@ const config: CapacitorConfig = {
   appName: 'OneAPIChat',
   webDir: '../public',
 
-  // 服务器地址配置（运行时可通过 Preferences 持久化）
-  serverUrl: 'https://naujtrats.xyz/oneapichat/',
+  // ★ 远程服务器模式：WebView 直接从服务器加载页面（与 Electron 一致）
+  server: {
+    url: 'https://naujtrats.xyz/oneapichat/',
+    // Android WebView 的 Origin 为 capacitor://localhost，需加入 CORS 白名单
+    androidScheme: 'https',
+  },
 
   android: {
     buildType: 'release',
