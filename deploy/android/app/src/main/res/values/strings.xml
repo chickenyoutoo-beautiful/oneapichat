@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OneAPIChat</string>
+    <string name="title_activity_main">OneAPIChat</string>
+    <string name="package_name">com.oneapichat.client</string>
+    <string name="custom_url_scheme">com.oneapichat.client</string>
+</resources>

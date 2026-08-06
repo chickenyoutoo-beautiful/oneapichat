@@ -105,3 +105,7 @@ quark_qr.png
 # Task files
 # tasks.json
 # tasks/ 
+
+# Android APK 构建产物
+*.apk
+deploy/android/app/build/outputs/
