@@ -162,6 +162,45 @@ function syncAuthToken(token) {
 const MOBILE_BREAKPOINT = 786;
 const MAX_FILE_SIZE = 4096 * 1024 * 1024;
 
+// ★ 统一提取缓存命中 token 数 — 兼容所有主流模型的 usage 格式
+//   DeepSeek:  usage.prompt_cache_hit_tokens
+//   OpenAI:    usage.prompt_tokens_details.cached_tokens
+//   Anthropic: usage.cache_read_input_tokens (缓存写入 cache_creation_input_tokens 不算命中)
+//   Gemini:    usage.promptTokensDetails[].cachedTokenCount
+//   Grok/xAI:  usage.cached_tokens (顶层)
+window._extractCacheHit = function(usage) {
+    if (!usage || typeof usage !== 'object') return 0;
+    if (Number(usage.prompt_cache_hit_tokens) > 0) return Number(usage.prompt_cache_hit_tokens) || 0;
+    if (usage.prompt_tokens_details) {
+        var _c = Number(usage.prompt_tokens_details.cached_tokens) || Number(usage.prompt_tokens_details.cached) || 0;
+        if (_c > 0) return _c;
+    }
+    if (Number(usage.cache_read_input_tokens) > 0) return Number(usage.cache_read_input_tokens) || 0;
+    if (Array.isArray(usage.promptTokensDetails)) {
+        var _sum = 0;
+        usage.promptTokensDetails.forEach(function(d) {
+            if (d && Number(d.cachedTokenCount) > 0) _sum += Number(d.cachedTokenCount);
+        });
+        if (_sum > 0) return _sum;
+    }
+    if (Number(usage.cached_tokens) > 0) return Number(usage.cached_tokens) || 0;
+    return 0;
+};
+// ★ 统一提取提示词 token 数 (缓存命中率的基数)
+window._extractPromptTokens = function(usage) {
+    if (!usage || typeof usage !== 'object') return 0;
+    var _pt = Number(usage.prompt_tokens) || 0;
+    if (_pt > 0) return _pt;
+    if (Number(usage.input_tokens) > 0) return Number(usage.input_tokens);
+    if (Number(usage.inputTokenCount) > 0) return Number(usage.inputTokenCount);
+    if (usage.promptTokensDetails && Array.isArray(usage.promptTokensDetails)) {
+        var _s = 0;
+        usage.promptTokensDetails.forEach(function(d) { if (d && Number(d.tokenCount) > 0) _s += Number(d.tokenCount); });
+        if (_s > 0) return _s;
+    }
+    return 0;
+};
+
 // ==== extracted from main.js L542-L544 ====
 const SEARCH_PROXY = 'https://search.naujtrats.xyz'; // GCP代理(国内绕过GFW)
 const FETCH_PROXY = '/oneapichat/api/fetch.php';  // ★ 网页内容抓取代理
@@ -453,6 +492,13 @@ let chats = JSON.parse(localStorage.getItem("chats") || "{}");
 const AGENT_CHAT_ID = '_agent_main';
 let lastNormalChatId = localStorage.getItem('lastNormalChatId') || null;
 
+// ★ 判断聊天是否属于 Agent 域（主会话 _agent_main、归档会话 _agent_old_*、子代理会话 _agent_sub_*）
+//   历史列表严格分隔、恢复路径、任务路由统一使用，禁止各处内联判断
+window.isAgentChat = function(id) {
+    return id === AGENT_CHAT_ID ||
+        (typeof id === 'string' && (id.indexOf('_agent_old_') === 0 || id.indexOf('_agent_sub_') === 0));
+};
+
 // ★ 搜索按钮状态 (agent.js → 迁至 core.js 避免懒加载导致 ReferenceError)
 function getSearchButtonIcon(checked) {
     return checked
@@ -465,6 +511,8 @@ function updateSearchButtonState(checked) {
     btn.innerHTML = getSearchButtonIcon(checked);
     btn.classList.toggle('text-blue-600', checked);
     btn.classList.toggle('dark:text-blue-400', checked);
+    btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
+    btn.title = checked ? '关闭联网搜索' : '开启联网搜索';
 }
 
 function createSearchToggleButton() {
@@ -475,6 +523,8 @@ function createSearchToggleButton() {
     btn.id = 'searchQuickToggle';
     btn.type = 'button';
     btn.className = 'p-2 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition';
+    btn.setAttribute('aria-label', '切换联网搜索');
+    btn.setAttribute('aria-pressed', 'false');
     btn.innerHTML = getSearchButtonIcon(false);
     btn.onclick = function(e) {
         e.preventDefault();

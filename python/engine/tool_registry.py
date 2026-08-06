@@ -262,7 +262,7 @@ def _default_tools() -> list[ToolDef]:
         ),
         ToolDef(
             name="server_exec",
-            description="在服务器上执行 shell 命令并返回输出。",
+            description="在服务器上执行 shell 命令并返回输出。参数名必须是 cmd(不要用 command);命令内含双引号时请用 shell 单引号或反斜杠转义。",
             capabilities={Capability.ExecutesCode, Capability.RequiresApproval},
             approval=ApprovalKind.REQUIRED,
             parameters={

@@ -438,12 +438,22 @@ function compressChatsForStorage(chatsObj) {
                     msg._webFetchUrls = msg._webFetchUrls.slice(0, 10);
                 }
                 // ★ 剥离内联 base64 图片数据（保留 URL，清除 data: 前缀的原始数据）
-                if (msg.generatedImage && msg.generatedImage.startsWith('data:')) {
-                    msg.generatedImage = '';
+                // 兼容新旧格式: 旧格式是字符串URL, 新格式是对象 {url, prompt, model, aspect_ratio, timestamp}
+                if (msg.generatedImage) {
+                    var _imgUrl = typeof msg.generatedImage === 'string' ? msg.generatedImage : (msg.generatedImage.url || '');
+                    if (_imgUrl.startsWith('data:')) {
+                        msg.generatedImage = '';
+                    }
                 }
                 if (msg.generatedImages && msg.generatedImages.length > 0) {
                     msg.generatedImages = msg.generatedImages.map(function(gi) {
-                        return (gi && typeof gi === 'string' && gi.startsWith('data:')) ? '' : gi;
+                        if (!gi) return null;
+                        // 新格式: 对象 {url, ...}
+                        if (typeof gi === 'object' && gi.url) {
+                            return gi.url.startsWith('data:') ? null : gi;
+                        }
+                        // 旧格式: 字符串 URL
+                        return gi.startsWith('data:') ? null : gi;
                     }).filter(Boolean);
                 }
                 // ★ 剥离用户上传文件中的 base64 content（保留元数据 + 适中小图片）
@@ -544,19 +554,16 @@ function saveChatsDebounced(wait = 300) {
 
 function renderChatHistory() {
     var list = getEl('chatHistoryList');
-    if (!list) return;
+    if (!list) { console.log('[renderChatHistory] list元素不存在'); return; }
+    // ★ 严格分隔: Agent 视图(agent/yolo 模式)只显示 Agent 会话,普通视图只显示普通聊天
+    //   _agent_main(当前会话) + _agent_old_*(归档会话) 归 Agent 域,chat_* 归普通域
+    var _isAgentView = isAgentToolsActive();
     // ★ 登录用户只显示自己账号的聊天记录
     var _uid = localStorage.getItem('authUserId') || '';
     var _chatIds = Object.keys(chats).filter(function(id) {
-        if (id === AGENT_CHAT_ID) return false;
+        if (isAgentChat(id) !== _isAgentView) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
     });
-    // ★ 如果过滤后为空但有 _agent_main（Agent 模式），也显示它
-    if (_chatIds.length === 0 && chats['_agent_main']) {
-        _chatIds = ['_agent_main'];
-    }
-    // ★ 兜底: 如果过滤后为空但有userId,从 localStorage 重新加载
-    if (_chatIds.length === 0 && chats['_agent_main']) { _chatIds = ['_agent_main']; }
     if (_chatIds.length === 0 && _uid) {
         var _cached = localStorage.getItem('chats');
         if (_cached) {
@@ -565,7 +572,7 @@ function renderChatHistory() {
                 if (_parsed && Object.keys(_parsed).length > 0) {
                     chats = _parsed;
                     _chatIds = Object.keys(chats).filter(function(id) {
-                        if (id === AGENT_CHAT_ID || id === '_agent_main') return false;
+                        if (isAgentChat(id) !== _isAgentView) return false;
                         return !_uid || !chats[id].userId || chats[id].userId === _uid;
                     });
                 }
@@ -580,15 +587,45 @@ function renderChatHistory() {
         // ★ 时间相同时按聊天ID降序稳定排序,避免刷新后乱跳
         return a < b ? 1 : (a > b ? -1 : 0);
     });
-    list.innerHTML = _chatIds.map(id => {
-        var _isBgRunning = isTypingMap[id] && id !== currentChatId;
-        var _bgDot = _isBgRunning ? '<span class="bg-running-dot" title="后台生成中" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px;animation:bg-pulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>' : '';
-        return `
-        <div onclick="window.loadChat('${id}')" class="group flex items-center justify-between p-2 rounded-xl cursor-pointer transition ${id === currentChatId ? 'bg-white dark:bg-gray-800 shadow-sm text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'}">
-            <span class="truncate text-sm" style="display:flex;align-items:center;">${_bgDot}${escapeHtml(chats[id].title)}</span>
-            <button onclick="window.deleteChat(event, '${id}')" class="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
-        </div>
-    `}).join('');
+    // ★ 史诗级 v2: 按更新时间分组渲染 (今天/昨天/更早) + 对话图标
+    var _now = new Date();
+    var _dayStart = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()).getTime();
+    var _ydayStart = _dayStart - 86400000;
+    var _groups = [];
+    var _curGroup = null;
+    _chatIds.forEach(function(id) {
+        var _t = chats[id].updated_at || chats[id].time || 0;
+        var _g = _t >= _dayStart ? '今天' : (_t >= _ydayStart ? '昨天' : '更早');
+        if (!_curGroup || _curGroup.name !== _g) {
+            _curGroup = { name: _g, items: [] };
+            _groups.push(_curGroup);
+        }
+        _curGroup.items.push(id);
+    });
+    list.innerHTML = _groups.map(function(grp) {
+        var _itemsHtml = grp.items.map(function(id) {
+            var _isBgRunning = isTypingMap[id] && id !== currentChatId;
+            var _bgDot = _isBgRunning ? '<span class="bg-running-dot" title="后台生成中" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px;animation:bg-pulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>' : '';
+            var _active = id === currentChatId;
+            // ★ _agent_main 是 Agent 模式当前主会话,不渲染删除按钮
+            //   (删除会写 _deletedChatIds 墓碑,而 setAgentMode/createNewChat 又持续重建本地副本 → 服务器永不回同步)
+            var _delBtn = (id === AGENT_CHAT_ID)
+                ? ''
+                : '<button onclick="window.deleteChat(event, \'' + id + '\')" class="chat-history-del" title="删除对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>';
+            // ★ Agent 视图: 归档会话标题去掉 📦 前缀(历史列表已按域分隔,前缀冗余)
+            //   子代理会话标题去掉 🤖 前缀(已用域分隔区分)
+            var _title = chats[id].title || '';
+            if (_isAgentView && id !== AGENT_CHAT_ID && isAgentChat(id)) {
+                _title = _title.replace(/^📦\s*/, '').replace(/^🤖\s*/, '');
+            }
+            return `
+            <div onclick="window.loadChat('${id}')" class="chat-history-item${_active ? ' active' : ''}" title="${escapeHtml(chats[id].title)}">
+                <span class="chat-history-title truncate">${_bgDot}${escapeHtml(_title)}</span>
+                ${_delBtn}
+            </div>`;
+        }).join('');
+        return '<div class="chat-history-group"><div class="chat-history-group-label">' + grp.name + '</div>' + _itemsHtml + '</div>';
+    }).join('');
 }
 
 const RAG_ENABLED = localStorage.getItem('ragEnabled') !== 'false';
@@ -627,6 +664,17 @@ window.deleteChat = async function (e, id) {
     delete isTypingMap[id];
     delete activeBubbleMap[id];
     delete userAbortMap[id];
+    try {
+        if (window.ResumeStream) {
+            if (typeof window.ResumeStream.cancelActive === 'function') window.ResumeStream.cancelActive(id);
+            if (typeof window.ResumeStream.complete === 'function') window.ResumeStream.complete(id);
+        }
+    } catch(_resumeDeleteError) {}
+    // ★ 子代理会话：同步清理 localStorage 聊天记录
+    if (id && id.indexOf('_agent_sub_') === 0) {
+        var _agentName = id.substring('_agent_sub_'.length);
+        localStorage.removeItem('agent_chat_' + _agentName);
+    }
     _deletedChatIds[id] = true;
     delete chats[id];
 
@@ -640,22 +688,34 @@ window.deleteChat = async function (e, id) {
     // ★ 后台同步删除到服务器（不阻塞 UI）
     _syncDeleteToServer(id).catch(function(){});
 
-    // ★ 只检查当前用户的聊天数量,忽略其他用户的残留
+    // ★ 多端同步 (2026-08-02): 广播 chat:deleted 事件, 其他在线端立即删除本地副本并标记,
+    //   防止其他端内存中的旧 chats 通过 POST all 把已删会话写回服务器
+    //   (服务器端另有 deleted 墓碑机制兜底最终一致性)
+    if (typeof window._broadcastEvent === 'function') {
+        window._broadcastEvent('chat:deleted', { chat_id: id });
+    }
+
+    // ★ 只检查当前用户且与当前模式同域的聊天数量(严格分隔:普通视图只统计普通聊天,Agent 视图只统计 Agent 会话)
     var _uid = localStorage.getItem('authUserId') || '';
+    var _delAgentView = isAgentToolsActive();
     var myKeys = Object.keys(chats).filter(function(k) {
-        // ★ _agent_main 是 Agent 模式的持久会话，不算"空"
+        if (isAgentChat(k) !== _delAgentView) return false;
         return !_uid || !chats[k].userId || chats[k].userId === _uid;
     });
-    // ★ 如果所有普通会话都被删除但 _agent_main 存在，切到它
-    if (myKeys.length) loadChat(myKeys[myKeys.length - 1]);
-    else if (chats['_agent_main']) loadChat('_agent_main');
+    // ★ 删除后切换到同域最近会话;无则新建(普通模式建普通聊天,Agent 模式建新 _agent_main)
+    if (myKeys.length) {
+        myKeys.sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); });
+        loadChat(myKeys[0]);
+    }
     else createNewChat();
     renderChatHistory();
 };
 
 window.createNewChat = function () {
     // ★ Agent 模式 /new: 归档旧 _agent_main 为子代理会话
-    if (currentChatId === '_agent_main' && chats['_agent_main'] && chats['_agent_main'].messages.length > 1) {
+    //   只要 Agent 模式下主会话有内容就归档(不论当前打开的是哪个聊天),
+    //   防止在归档会话/其他聊天中按 /new 时旧主会话被静默覆盖丢失
+    if (getAgentMode() !== 'off' && chats['_agent_main'] && chats['_agent_main'].messages.length > 1) {
         var _archiveId = '_agent_old_' + Date.now();
         var _oldTitle = chats['_agent_main'].title || 'Agent 会话';
         // 提取对话摘要作为标题
@@ -680,6 +740,11 @@ window.createNewChat = function () {
             updated_at: Date.now(),
             messages: [{ role: 'system', content: _sysPrompt }]
         };
+        // ★ 防御: 清除历史遗留的 _agent_main 删除墓碑(否则服务器端永远跳过该 id 的同步)
+        if (_deletedChatIds && _deletedChatIds['_agent_main']) {
+            delete _deletedChatIds['_agent_main'];
+            try { localStorage.setItem('_deletedChatIds', JSON.stringify(_deletedChatIds)); } catch(e) {}
+        }
         saveChats();
         loadChat('_agent_main');
         renderChatHistory();
@@ -725,6 +790,18 @@ window.loadChat = async function (id) {
     // 切换 currentChatId
     currentChatId = id;
     localStorage.setItem('lastChatId', id);
+    // 可恢复状态必须在清理 partial 之前接管 typing 标记，否则刷新时目标气泡
+    // 会先被 loadChat 删除，只能等下一个 token 才重新出现。
+    var _hasResumeState = false;
+    // ★ 子代理会话只读，跳过可恢复流续接
+    if (chats[id] && chats[id]._agentSub) {
+        _hasResumeState = false;
+    } else try {
+        _hasResumeState = localStorage.getItem('_streamStopped_' + id) !== '1' &&
+            window.ResumeStream && typeof window.ResumeStream.hasPending === 'function' &&
+            window.ResumeStream.hasPending(id);
+        if (_hasResumeState) isTypingMap[id] = true;
+    } catch(e) {}
     // ★ 初始加载或切换后：同步临时授权状态(确保横幅正确显示/隐藏)
     if (window._tempAgentGranted && window._tempAgentChatId === id) {
         if (typeof _updateTempGrantBanner === 'function') _updateTempGrantBanner(true);
@@ -753,6 +830,8 @@ window.loadChat = async function (id) {
 
     // ★ 彻底清空DOM: innerHTML + removeChild双重保险
     while (container.firstChild) container.removeChild(container.firstChild);
+    // ★ 清除旧程序滚动标记(防止旧会话的 __lastAutoScrollTarget 误匹配新位置导致吸附失效)
+    if (typeof window.clearFollowState === 'function') window.clearFollowState();
     var prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
     applyParagraphPrefix(prefix);
 
@@ -776,7 +855,7 @@ window.loadChat = async function (id) {
     }
 
     // ★ WebSocket 续接：恢复上次未完成的流
-    if (localStorage.getItem('__enableResumeStream') === '1') {
+    if (localStorage.getItem('__enableResumeStream') !== '0') {
         try {
             var _savedSid = localStorage.getItem('_wsStreamId') || '';
             var _savedCnt = parseInt(localStorage.getItem('_wsChunkCount') || '0');
@@ -802,9 +881,8 @@ window.loadChat = async function (id) {
                 }
             }
         } catch(e) {}
-        if (chats[id] && chats[id].messages) {
-            chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
-        }
+        // 未建立 WebSocket 续接时不要删除 partial。HTTP/SSE ResumeStream 会用它
+        // 立即恢复首屏和工具状态；旧逻辑在真正恢复前先把目标消息清掉了。
     }
 
     // ★ 恢复刷新前未完成的流式消息(仅在开关关闭时使用旧方案兜底)
@@ -866,6 +944,10 @@ window.loadChat = async function (id) {
     if (!displayMsgs.length) {
         showWelcome();
     } else {
+        // ★ 性能: DocumentFragment 批量插入 + 大列表抑制逐条淡入动画(数百条消息不再逐条触发布局)
+        var _loadFrag = document.createDocumentFragment();
+        window._appendTarget = _loadFrag;
+        window._suppressRowAnim = displayMsgs.length > 25;
         displayMsgs.forEach((m, i) => {
             try {
             // ★ 原始消息索引(用于判断是否最后一条assistant)
@@ -950,12 +1032,31 @@ window.loadChat = async function (id) {
                 console.warn('[loadChat] 跳过损坏消息', i, m?.role, e.message);
             }
         });
+        window._appendTarget = null;
+        window._suppressRowAnim = false;
+        // ★ 批量插入完成后再挂载到容器(一次布局, 而非逐条)
+        container.appendChild(_loadFrag);
     }
 
     if (isTypingMap[id] && displayMsgs.length) {
-        activeBubbleMap[id] = container.lastElementChild?.querySelector('.bubble.assistant');
+        // 工具结果卡片可能是最后一个可见节点，不能据此认定流式目标不存在。
+        // 直接选择最后一个 assistant 气泡，刷新首帧即可挂载工具运行状态。
+        var _assistantBubbles = container.querySelectorAll('.bubble.assistant');
+        activeBubbleMap[id] = _assistantBubbles.length ? _assistantBubbles[_assistantBubbles.length - 1] : null;
     } else {
         delete activeBubbleMap[id];
+    }
+
+    if (_hasResumeState && window.ResumeStream) {
+        // 同步 hydration 先画已有快照/工具状态；网络续接随后异步启动。
+        try { window.ResumeStream.hydrate(id); } catch(e) {}
+        setTimeout(function() {
+            if (currentChatId === id && window.ResumeStream && typeof window.ResumeStream.resume === 'function') {
+                window.ResumeStream.resume(id).catch(function(err) {
+                    console.warn('[loadChat] ResumeStream resume failed:', err && err.message || err);
+                });
+            }
+        }, 0);
     }
 
     renderChatHistory();
@@ -1018,7 +1119,7 @@ window.loadChat = async function (id) {
                 }
                 this.style.transform = _anyHidden ? 'rotate(180deg)' : '';
                 this.title = _anyHidden ? '折叠' : '展开全部 (' + (_batch.length-1) + ' more)';
-                if (_anyHidden && $.chatBox) { $.chatBox.scrollTop = $.chatBox.scrollHeight; }
+                if (_anyHidden && $.chatBox && !userScrolled) { followToBottom($.chatBox); }
             };
             _bub.appendChild(_btn);
         });
@@ -1034,5 +1135,3 @@ function updateHeaderTitle() {
         $.chatTitle.textContent = chats[currentChatId].title || '新对话';
     }
 }
-
-

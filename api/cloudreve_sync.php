@@ -26,7 +26,19 @@ if (!$username || !$password) {
     echo json_encode(['success' => false, 'error' => '缺少用户名或密码']);
     exit;
 }
-$email = $email ?: "{$username}@naujtrats.xyz";
+// ★ v6 修复: email 缺省时从 users.json 取该用户注册的真实邮箱，
+//   不再用 {username}@naujtrats.xyz —— 那会创建与主页账号不一致的幽灵 Cloudreve 账号
+if (!$email) {
+    $usersFile = __DIR__ . '/../users/users.json';
+    $users = json_decode(@file_get_contents($usersFile), true) ?: [];
+    foreach ($users as $u) {
+        if (($u['username'] ?? '') === $username && !empty($u['email'])) {
+            $email = $u['email'];
+            break;
+        }
+    }
+}
+$email = $email ?: "{$username}@naujtrats.xyz"; // 最后兜底（无邮箱的账号）
 
 function cr_http(string $method, string $path, array $data = []): ?array {
     $ch = curl_init("http://127.0.0.1:5212/api/v4" . $path);

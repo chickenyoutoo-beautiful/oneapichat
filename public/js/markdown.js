@@ -2,15 +2,16 @@
 // 流式渲染、MarkdownRenderer 缓存、ChartRenderer (Mermaid)
 
 // ==== 流式渲染系统 ====
-// ★★★★★ 流式渲染优化 v2: 基于 RAF 的批量渲染 + 平滑滚动系统 ★★★★★
-// 参考: ChatGPT UI, Upstash smooth-streaming, Open WebUI rendering patterns
-// 核心优化:
-//   1. 数据层(textBuffer)与渲染层(DOM)分离
-//   2. RAF 批量渲染(16ms对齐显示刷新率),不再是每token触发innerHTML
-//   3. 滚动跟随与渲染统一到RAF循环,不再独立setInterval
-//   4. marked.parse仅在实际渲染时调用,流式期间保护KaTeX原文
+// ★★★★★ 流式渲染优化 v3: 增量渲染 — 稳定块只渲染一次, 仅尾部每帧更新 ★★★★★
+// 相比 v2 (每帧全量 marked.parse + 整块 innerHTML 重写) 的改进:
+//   1. 稳定前缀(以 \n\n 为界的完整块)只渲染一次并追加, 不再反复重解析 → O(n) 而非 O(n²)
+//   2. 未闭合构造(代码围栏/$$ 数学块)状态跟踪: 闭合后整块固化, 期间以实时代码预览显示
+//   3. 流式图片只创建一次(loading=lazy, decoding=async), 不再每帧销毁重建
+//   4. 选区/滚动位置在稳定区不再被 innerHTML 重建破坏
+//   5. 流结束 cleanupStreamState 收敛: 增量结构展开为常规 markdown-body 结构(最终态与旧版一致)
+//   6. 滚动跟随统一走 scroll-follow.js 的 followToBottom (修复 CSS smooth 冲突)
 
-let _streamState = {};  // { chatId: { text, rafId, lastRenderLen, lastTime, bubble } }
+let _streamState = {};  // { chatId: { text, rafId, lastRenderLen, lastTime, bubble, stableLen, fence, fenceLang, fenceStart, mathOpen, mathStart } }
 
 function applyStreamRender(chatId, fullText) {
     var st = _streamState[chatId];
@@ -21,8 +22,18 @@ function applyStreamRender(chatId, fullText) {
             lastRenderLen: 0,
             lastTime: 0,
             bubble: activeBubbleMap[chatId],
-            tickCount: 0
+            tickCount: 0,
+            // ★ 增量渲染状态: 稳定前缀 + 未闭合构造跟踪
+            stableLen: 0,       // 已固化渲染的字符数
+            fence: null,        // 未闭合代码围栏标记 ('```' / '~~~'), null=无
+            fenceLang: '',      // 未闭合围栏的语言
+            fenceStart: 0,      // 围栏起始索引(用于闭合后整块固化)
+            mathOpen: false,    // 未闭合 $$ 块
+            mathStart: 0,       // 数学块起始索引
+            autoFenceLogged: false  // 自动包裹 mermaid 日志去重
         };
+        // ★ 修复: 流式渲染开始即移除 typing 三点动画 (保 resume 路径不残留)
+        if (st.bubble) st.bubble.classList.remove('typing');
     }
     st.text = fullText;
     st.bubble = activeBubbleMap[chatId] || st.bubble;
@@ -43,28 +54,20 @@ function applyStreamRender(chatId, fullText) {
             var isAlive = bubble && document.body.contains(bubble);
             var isTyping = isTypingMap[chatId];
             if (!isAlive || !isTyping) {
-                // 气泡被移除或流已停止,清除状态
-                isAutoScrolling = false;
-                streamingScrollLock = false;
-                cancelAnimationFrame(st2.rafId);
-                delete _streamState[chatId];
+                // 气泡被移除或流已停止 → 收尾清理(增量→完整渲染收敛 + 移除 streaming 光标)
+                cleanupStreamState(chatId);
                 return;
             }
             // 执行一次渲染
             _flushStreamRender_batched(chatId, st2);
             // 滚动跟随: 标准ChatGPT模式 — 仅当用户处于底部时自动滚动
-            // ★ 位置匹配法: 记录程序化滚动目标, scroll事件中匹配则忽略(防自触发)
+            // ★ 统一走 followToBottom (程序滚动三重防误判, 见 scroll-follow.js)
             if ($.chatBox && !userScrolled) {
-                var _box = $.chatBox;
-                var _target = _box.scrollHeight;
-                _box.scrollTop = _target;
-                window.__lastAutoScrollTarget = _target;  // scroll事件中用于识别
+                followToBottom($.chatBox);
             }
-            // 更新浮动按钮
-            if ($.chatBox && $.scrollToBottomBtn) {
-                var _dist2 = $.chatBox.scrollHeight - $.chatBox.scrollTop - $.chatBox.clientHeight;
-                if (_dist2 > 200) $.scrollToBottomBtn.classList.add('visible');
-                else $.scrollToBottomBtn.classList.remove('visible');
+            // 跟随期间隐藏回到底部按钮(用户脱离时由 scroll 监听器显示)
+            if ($.chatBox && $.scrollToBottomBtn && !userScrolled) {
+                $.scrollToBottomBtn.classList.remove('visible');
             }
             if (isTyping) {
                 st2.rafId = requestAnimationFrame(_streamLoop);
@@ -88,42 +91,205 @@ function _flushStreamRender_batched(chatId, st) {
     var prevH = mb.offsetHeight;
     if (prevH > 40) mb.style.minHeight = prevH + 'px';
     try {
-        // ★ 渲染 + 高亮: hljs.highlight() 字符串 API 不受 detached DOM 影响
-        var _html = _renderMarkdownWithMath_cached(autoLinkURLs(text), st);
-        // ★ 链式输出: 每轮独立气泡, 无需拼接旧 HTML
-        mb.innerHTML = _html;
-        // ★ 流式过程中不渲染 Mermaid — 保留为代码块，避免渲染中 SVG 突然撑大气泡导致页面抖动
-        // 代码高亮正常执行，mermaid 块已被 :not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"]) 排除
-        // 流结束后由 _triggerPostRender 统一批量渲染所有 Mermaid 图表
-        // ★ 代码高亮（排除 mermaid — hljs 无此语言模块，会报 WARN）
-        if (typeof hljs !== 'undefined') {
-            try {
-                var _blocks = mb.querySelectorAll('pre code[class*="language-"]:not(.hljs):not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"])');
-                for (var _bi = 0; _bi < _blocks.length && _bi < 20; _bi++) {
-                    try {
-                        var _lang = (_blocks[_bi].className || '').match(/language-(\S+)/);
-                        if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
-                        hljs.highlightElement(_blocks[_bi]);
-                    } catch(e) {}
-                }
-            } catch(e) { /* 高亮失败不影响渲染 */ }
-        }
-        // ★ 隐藏流式渲染中加载失败的图片(模型可能在文本中引用过期的CDN URL)
-        mb.querySelectorAll('img').forEach(function(_img) {
-            if (!_img._hasOnerror) {
-                _img._hasOnerror = true;
-                _img.addEventListener('error', function() { this.style.display = 'none'; });
-            }
-        });
+        // ★ v3 增量渲染: 稳定块追加一次, 仅尾部每帧更新
+        _renderIncremental(mb, st);
     } catch(e) {
-        mb.textContent = text;
+        // ★ 增量渲染异常 → 回退整块渲染(保证内容可见)
+        try { mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(text), st); }
+        catch(e2) { mb.textContent = text; }
     }
     requestAnimationFrame(function() { mb.style.minHeight = ''; });
 }
 
+// ★ 增量渲染核心: markdown-body 拆为 [稳定区 md-stable] + [尾部 md-tail]
+//   稳定区只追加不重建(保留 img 节点/选区); 尾部每帧整体替换(仅未完成块, 成本低)
+function _renderIncremental(mb, st) {
+    var text = st.text;
+    var stableEl = mb._mdStableEl, tailEl = mb._mdTailEl;
+    if (!stableEl) {
+        mb.innerHTML = '';
+        stableEl = mb._mdStableEl = document.createElement('div');
+        stableEl.className = 'md-stable';
+        tailEl = mb._mdTailEl = document.createElement('div');
+        tailEl.className = 'md-tail';
+        mb.appendChild(stableEl);
+        mb.appendChild(tailEl);
+    }
+    // ★ 文本缩短(think 块闭合/MiniMax 去重会修剪文本) → 重置增量状态
+    if (text.length < st.stableLen) {
+        st.stableLen = 0;
+        st.fence = null; st.fenceLang = ''; st.mathOpen = false;
+        stableEl.innerHTML = '';
+    }
+    // 1) 推进稳定前缀: 新固化的完整块直接 append 到稳定区
+    var chunksStart = stableEl.children.length;
+    _advanceStable(st, text, stableEl);
+    // 2) 尾部渲染(未完成块, 每帧替换)
+    var tail = text.slice(st.stableLen);
+    var tailHtml = _renderStreamTail(tail, st);
+    if (tailEl.innerHTML !== tailHtml) tailEl.innerHTML = tailHtml;
+    // 3) 新稳定块后处理: 代码高亮 + 图片懒加载/失败隐藏
+    var children = stableEl.children;
+    for (var _i = chunksStart; _i < children.length; _i++) {
+        _postProcessChunk(children[_i]);
+    }
+}
+
+// ★ 推进稳定前缀: 以 \n\n 为界、且不处于未闭合围栏/数学块中的完整段可直接固化
+//   返回新增的稳定块数(供后处理定位)
+function _advanceStable(st, text, stableEl) {
+    var pos = st.stableLen;
+    var guard = 0;
+    while (pos < text.length && guard++ < 100) {
+        if (st.fence) {
+            // ===== 围栏模式: 找闭合标记, 闭合后整个围栏(含内容)作为单元固化 =====
+            // ★ 从开头围栏之后开始搜: pos==stableLen==fenceStart 指向开头 ```,
+            //   直接从 pos 搜会匹配到开头围栏本身 → 代码块退化成裸 ``` 文本
+            var closeIdx = text.indexOf(st.fence, pos + st.fence.length);
+            if (closeIdx === -1) break;                    // 未闭合 → 留在尾部实时预览
+            var unitEnd = closeIdx + st.fence.length;
+            _appendStableChunk(stableEl, text.slice(st.fenceStart, unitEnd), st);
+            st.fence = null; st.fenceLang = '';
+            pos = unitEnd;
+            st.stableLen = pos;
+            continue;
+        }
+        if (st.mathOpen) {
+            // ===== 数学块模式: 找闭合 $$, 闭合后整块固化 =====
+            // ★ 同样跳过开头的 $$ (pos 指向 mathStart)
+            var closeMath = text.indexOf('$$', pos + 2);
+            if (closeMath === -1) break;
+            _appendStableChunk(stableEl, text.slice(st.mathStart, closeMath + 2), st);
+            st.mathOpen = false;
+            pos = closeMath + 2;
+            st.stableLen = pos;
+            continue;
+        }
+        // ===== 干净模式: 只消费以 \n\n 结尾的完整段(文本结尾的未完成段留在尾部) =====
+        var nl = text.indexOf('\n\n', pos);
+        if (nl === -1) break;
+        var seg = text.slice(pos, nl);
+        if (!seg.trim()) { pos = nl + 2; st.stableLen = pos; continue; }  // 空行跳过
+        var scan = _scanSegmentMarkers(seg);
+        if (scan.fenceOpen) {
+            // 段内开了未闭合围栏 → 固化围栏之前的部分, 剩余交给围栏模式
+            var pre = seg.slice(0, scan.fenceStart);
+            if (pre.trim()) _appendStableChunk(stableEl, pre, st);
+            st.fence = '```';
+            st.fenceLang = scan.fenceLang;
+            st.fenceStart = pos + scan.fenceStart;
+            st.stableLen = st.fenceStart;
+            break;
+        }
+        if (scan.mathOpen) {
+            // 段内开了未闭合 $$ → 固化解密之前的干净部分, 剩余交给数学块模式
+            var pre2 = seg.slice(0, scan.mathStart);
+            if (pre2.trim()) _appendStableChunk(stableEl, pre2, st);
+            st.mathOpen = true;
+            st.mathStart = pos + scan.mathStart;
+            st.stableLen = st.mathStart;
+            break;
+        }
+        // 完整干净段 → 直接固化
+        _appendStableChunk(stableEl, seg, st);
+        pos = nl + 2;
+        st.stableLen = pos;
+    }
+}
+
+// ★ 段内标记扫描: 检测未闭合的代码围栏(```)和 $$ 数学块(围栏优先于数学)
+//   返回: { fenceOpen, fenceStart, fenceLang, mathOpen, mathStart }
+function _scanSegmentMarkers(seg) {
+    var res = { fenceOpen: false, fenceStart: -1, fenceLang: '', mathOpen: false, mathStart: -1 };
+    var i = 0, len = seg.length;
+    var inFence = false;
+    while (i < len) {
+        if (inFence) {
+            var close = seg.indexOf('```', i);
+            if (close === -1) break;              // 未闭合 → 段末仍在围栏内
+            inFence = false;
+            i = close + 3;
+            continue;
+        }
+        if (seg[i] === '`' && seg[i+1] === '`' && seg[i+2] === '`') {
+            inFence = true;
+            res.fenceStart = i;
+            var nl = seg.indexOf('\n', i + 3);
+            var langEnd = (nl === -1) ? len : nl;
+            res.fenceLang = seg.slice(i + 3, langEnd).trim().split(/\s+/)[0] || '';
+            i = (nl === -1) ? len : nl;           // 跳到语言行尾
+            continue;
+        }
+        if (seg[i] === '$' && seg[i+1] === '$') {
+            if (res.mathStart === -1) res.mathStart = i;
+            else res.mathStart = -1;              // 段内闭合
+            i += 2;
+            continue;
+        }
+        i++;
+    }
+    res.fenceOpen = inFence;
+    if (res.mathStart >= 0) { res.mathOpen = true; }
+    else { res.mathStart = -1; }
+    return res;
+}
+
+// ★ 尾部渲染: 未闭合围栏 → 实时代码块预览; 否则流式安全渲染(隐藏未闭合公式)
+//   超长尾部截断显示(完整文本仍在 st.text, 流结束收敛时全量渲染)
+function _renderStreamTail(tail, st) {
+    if (!tail) return '';
+    if (st.fence) {
+        var langAttr = st.fenceLang ? ' class="language-' + escapeHtml(st.fenceLang) + '"' : '';
+        return '<pre class="stream-fence"><code' + langAttr + '>' + escapeHtml(tail) + '</code></pre>';
+    }
+    if (tail.length > 4000) tail = tail.slice(0, 4000);
+    var shown = _hideIncompleteMath(tail);
+    if (!shown) return '';
+    return _renderMarkdownWithMath_cached(shown, st);
+}
+
+// ★ 固化一个稳定单元: 渲染为 HTML 并追加到稳定区(块级元素直接成为稳定区子节点)
+//   不引入包装 div — finalize 展开时节点直接上移, 结构与整块渲染完全一致
+function _appendStableChunk(stableEl, text, st) {
+    if (!text || !text.trim()) return null;
+    var html = _renderMarkdownWithMath_cached(text, st);
+    if (!html) return null;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    var frag = document.createDocumentFragment();
+    while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+    stableEl.appendChild(frag);
+    return stableEl.lastElementChild;
+}
+
+// ★ 稳定块后处理: 代码高亮(排除 mermaid) + 图片懒加载/失败隐藏
+function _postProcessChunk(root) {
+    if (!root) return;
+    if (typeof hljs !== 'undefined') {
+        try {
+            var _blocks = root.querySelectorAll('pre code[class*="language-"]:not(.hljs):not([class*="language-mermaid"]):not([class*="language-gantt"]):not([class*="language-dot"])');
+            for (var _bi = 0; _bi < _blocks.length && _bi < 20; _bi++) {
+                try {
+                    var _lang = (_blocks[_bi].className || '').match(/language-(\S+)/);
+                    if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
+                    hljs.highlightElement(_blocks[_bi]);
+                } catch(e) {}
+            }
+        } catch(e) { /* 高亮失败不影响渲染 */ }
+    }
+    root.querySelectorAll('img').forEach(function(_img) {
+        if (!_img.getAttribute('loading')) _img.setAttribute('loading', 'lazy');
+        if (!_img.getAttribute('decoding')) _img.setAttribute('decoding', 'async');
+        if (!_img._hasOnerror) {
+            _img._hasOnerror = true;
+            _img.addEventListener('error', function() { this.style.display = 'none'; });
+        }
+    });
+}
+
 // ★ 自动检测未加围栏的 mermaid 代码，补上 ```mermaid ``` 包裹
 // 模型有时会输出 mermaid 语法但忘记加代码围栏（尤其是 gantt 图）
-function _autoFenceMermaid(text) {
+function _autoFenceMermaid(text, st) {
     if (!text) return text;
     // ★ 检测不在 ``` 围栏内的 mermaid 块：以 mermaid 关键字开头，缩进，多行
     // 匹配：gantt / pie / graph / flowchart / sequenceDiagram 等关键字开头的段落
@@ -146,26 +312,48 @@ function _autoFenceMermaid(text) {
         var _after = _endMatch ? _rest.substring(_endMatch.index) : '';
         var _fenced = '\n\n```mermaid\n' + _match[3] + _blockBody.trimEnd() + '\n```\n' + _after;
         text = text.substring(0, _startIdx) + _fenced;
-        console.log('[Mermaid] 自动包裹未加围栏的 ' + (_match[3] || 'mermaid') + ' 代码块');
+        // ★ 流式增量渲染下每帧都会触发, 日志只记一次(避免刷屏)
+        if (!st || !st.autoFenceLogged) {
+            console.log('[Mermaid] 自动包裹未加围栏的 ' + (_match[3] || 'mermaid') + ' 代码块');
+            if (st) st.autoFenceLogged = true;
+        }
     } else if (_ganttMatch) {
         var _gBody = _ganttMatch[2];
         var _gStart = _ganttMatch.index + _ganttMatch[1].length;
         var _fencedGantt = '\n\n```mermaid\ngantt\n' + _gBody.trimEnd() + '\n```';
         text = text.substring(0, _gStart) + _fencedGantt + text.substring(_gStart + _gBody.length);
-        console.log('[Mermaid] 自动包裹未加围栏的 gantt 代码块 (title+section 特征)');
+        if (!st || !st.autoFenceLogged) {
+            console.log('[Mermaid] 自动包裹未加围栏的 gantt 代码块 (title+section 特征)');
+            if (st) st.autoFenceLogged = true;
+        }
     }
     return text;
 }
 
 // ★ 隐藏未闭合的公式(流式时避免原始LaTeX闪烁 → 界面抖动)
 // 从左到右扫描 $/$$ 配对, 截断末尾未闭合的公式
+// ★ v3: 代码围栏(```)内的 $ 不参与配对 — 修复 bash 命令 $ 被误截断的历史问题
 function _hideIncompleteMath(text) {
     var i = 0;
     var cutAt = -1;
     var inDisplay = false, displayOpenAt = -1;
     var inInline = false, inlineOpenAt = -1;
+    var inFence = false;
 
     while (i < text.length) {
+        // ★ 围栏优先: ``` 内的 $ 全部跳过
+        if (inFence) {
+            var _fc = text.indexOf('```', i);
+            if (_fc === -1) break;           // 围栏未闭合 → 剩余内容原样保留
+            inFence = false;
+            i = _fc + 3;
+            continue;
+        }
+        if (i + 2 < text.length && text[i] === '`' && text[i+1] === '`' && text[i+2] === '`') {
+            inFence = true;
+            i += 3;
+            continue;
+        }
         // 检测 $$ (优先, 因为包含两个$)
         if (i + 1 < text.length && text[i] === '$' && text[i+1] === '$') {
             if (inDisplay) {
@@ -211,7 +399,7 @@ function _renderMarkdownWithMath_cached(text, st) {
     if (!window.marked) return escapeHtml(text).replace(/\n/g, '<br>');
 
     // ★ 预处理: 检测未加围栏的 mermaid 代码块，自动补上包裹
-    text = _autoFenceMermaid(text);
+    text = _autoFenceMermaid(text, st);
 
     // ★ 隐藏未闭合公式: 流式时截断末尾不完整的 $...$ 避免 raw LaTeX 闪烁
     text = _hideIncompleteMath(text);
@@ -292,13 +480,53 @@ function _renderStreamMarkdown(text) {
     return _renderMarkdownWithMath(text);
 }
 
-// ★ 流结束时清理RAF状态(外部调用)
+// ★ 流结束时清理RAF状态 + 收敛增量结构(外部调用)
+// 收敛: 增量渲染的 [稳定区+尾部] 展开为常规 markdown-body 子节点,
+//       保证最终 DOM 结构与整块渲染完全一致(样式/前缀/mermaid 后处理不受影响)
 function cleanupStreamState(chatId) {
     var st = _streamState[chatId];
-    if (st && st.rafId) {
+    // ★ 修复: 即使 stream state 已被提前清理, 也确保移除 bubble 上的 typing 类
+    //   (resume 路径 JSON 快径可能未创建 _streamState, 但 bubble 仍带 typing)
+    if (!st) {
+        var _bub = activeBubbleMap[chatId];
+        if (_bub && _bub.classList.contains('typing')) _bub.classList.remove('typing', 'gen-active', 'streaming');
+        return;
+    }
+    if (st.rafId) {
         cancelAnimationFrame(st.rafId);
         st.rafId = null;
     }
+    try {
+        var bubble = st.bubble;
+        if (bubble && document.body.contains(bubble)) {
+            var mb = bubble.querySelector('.markdown-body');
+            if (mb) {
+                var stableEl = mb._mdStableEl;
+                if (stableEl && st.text) {
+                    // 剩余尾部也固化渲染(未以 \n\n 结尾的最后一个段落)
+                    var tail = st.text.slice(st.stableLen);
+                    if (tail && tail.trim()) _appendStableChunk(stableEl, tail, st);
+                    // 展开: 稳定区子节点直接上移为 markdown-body 子节点(保留 DOM 节点, img 不重载)
+                    var frag = document.createDocumentFragment();
+                    while (stableEl.firstChild) frag.appendChild(stableEl.firstChild);
+                    mb.innerHTML = '';
+                    mb.appendChild(frag);
+                    _postProcessChunk(mb);
+                    delete mb._mdStableEl;
+                    delete mb._mdTailEl;
+                } else if (st.text) {
+                    // 未进入增量模式(异常路径) → 整块渲染兜底
+                    mb.innerHTML = _renderMarkdownWithMath_cached(autoLinkURLs(st.text), st);
+                    _postProcessChunk(mb);
+                }
+            }
+            // ★ 修复 .streaming 光标类泄漏(旧版只加不删) — typing 一并清除,
+            //   否则 typing+streaming 同时命中会让等待三点(1.5em 宽)泄漏成粗彩色光标
+            bubble.classList.remove('streaming');
+            bubble.classList.remove('gen-active');
+            bubble.classList.remove('typing');
+        }
+    } catch (e) { /* 收尾失败不影响主流程 */ }
     delete _streamState[chatId];
 }
 
@@ -468,8 +696,7 @@ const MarkdownRenderer = {
                 // ★ 所有图渲染完成后，滚到底部（如果用户未手动上滑）
                 if (_pendingRenders <= 0 && $.chatBox && !userScrolled && currentChatId) {
                     setTimeout(function() {
-                        $.chatBox.scrollTop = $.chatBox.scrollHeight;
-                        window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
+                        followToBottom($.chatBox);
                     }, 50);
                 }
             });

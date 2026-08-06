@@ -1,6 +1,211 @@
 // stream-handler.js — 流式/非流式响应处理 v1.0 (提取自 main.js)
 // _backendSSEHandler / streamResponse / handleNonStream / handleError / autoDetectAndRetryImageUrlError
 
+// ★ 死循环检测统一埋点: 喂入正文/推理到会话级 LoopGuard, 硬触发(复读/推理死循环/无进展)则中止流
+// cancelReader 释放底层连接避免泄漏; 抛出的 LoopGuardError 由 main.js catch 链分发(不走非流式降级)
+function _guardFeed(chatId, fullText, reasoningText, cancelReader) {
+    var _lg = window.__loopGuardMap && window.__loopGuardMap[chatId];
+    if (!_lg) return;
+    if (fullText !== undefined && fullText !== null) _lg.feedText(fullText);
+    if (reasoningText !== undefined && reasoningText !== null) _lg.feedReasoning(reasoningText);
+    var _chk = _lg.check();
+    if (_chk && _chk.level === 'hard') {
+        console.warn('[LoopGuard] 流式中止:', _chk.type, _chk.reason);
+        try { if (typeof cancelReader === 'function') cancelReader(); } catch(_ce) {}
+        var _lgErr = new Error('检测到模型死循环已自动中止: ' + _chk.reason);
+        _lgErr.loopGuard = _chk;
+        _lgErr.name = 'LoopGuardError';
+        throw _lgErr;
+    }
+}
+
+// ★ 容错修复工具参数JSON(与 main.js/tools-exec.js 一致): 未转义引号/换行/截断
+if (!window.repairToolArguments) {
+    window.repairToolArguments = function(raw) {
+        if (typeof raw !== 'string') return '{}';
+        var out = '';
+        var inStr = false;
+        var hadInner = false;
+        for (var i = 0; i < raw.length; i++) {
+            var ch = raw.charAt(i);
+            if (!inStr) {
+                out += ch;
+                if (ch === '"') { inStr = true; hadInner = false; }
+                continue;
+            }
+            if (ch === '\\') {
+                out += ch;
+                if (i + 1 < raw.length) { out += raw.charAt(i + 1); i++; }
+                continue;
+            }
+            if (ch === '\n') { out += '\\n'; continue; }
+            if (ch === '\r') { out += '\\r'; continue; }
+            if (ch === '\t') { out += '\\t'; continue; }
+            if (ch.charCodeAt(0) < 32) { out += ' '; continue; }
+            if (ch === '"') {
+                var j = i + 1;
+                while (j < raw.length && (raw.charAt(j) === ' ' || raw.charAt(j) === '\t')) j++;
+                var nxt = j < raw.length ? raw.charAt(j) : '';
+                if (nxt === ',') {
+                    var k = j + 1;
+                    while (k < raw.length && (raw.charAt(k) === ' ' || raw.charAt(k) === '\t')) k++;
+                    var afterComma = k < raw.length ? raw.charAt(k) : '';
+                    if (afterComma === '"' || afterComma === '}' || afterComma === ']' || afterComma === '') {
+                        if (hadInner) {
+                            out += '\\"'; out += '"'; inStr = false;
+                        } else {
+                            out += '"'; inStr = false;
+                        }
+                    } else {
+                        out += '\\"'; hadInner = true;
+                    }
+                } else if (nxt === '}' || nxt === ']' || nxt === ':' || nxt === '') {
+                    out += '"';
+                    inStr = false;
+                } else {
+                    out += '\\"'; hadInner = true;
+                }
+                continue;
+            }
+            out += ch;
+        }
+        if (inStr) out += '"';
+        var ob = (out.match(/\{/g) || []).length;
+        var cb = (out.match(/\}/g) || []).length;
+        while (cb < ob) { out += '}'; cb++; }
+        return out;
+    };
+}
+
+// ★ XML 实体反转义
+function _xmlUnescape(s) {
+    if (!s) return '';
+    return s
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&');
+}
+
+// ★ 确保气泡内有推理面板 — 不存在则创建，存在则更新内容
+//   统一 Anthropic/OpenAI 双路径调用，返回 details 元素（或 null）。
+window._ensureReasoningPanel = function(bubble, text) {
+    if (!bubble) return null;
+    var det = bubble.querySelector('details.reasoning-details');
+    if (!det) {
+        det = document.createElement('details');
+        det.className = 'reasoning-details';
+        det.open = true;
+        det.innerHTML = '<summary>深度思考</summary><div class="reasoning-content"></div>';
+        var md = bubble.querySelector('.markdown-body');
+        bubble.insertBefore(det, md);  // ★ 统一为 .markdown-body 之前（兄弟节点）
+    }
+    var rc = det.querySelector('.reasoning-content');
+    if (rc && text !== undefined) rc.textContent = text;
+    return det;
+};
+
+// ★ 隐藏推理模式: 在气泡内追加「思考中」小指示条 (替代被隐藏的推理块)
+function _ensureReasoningChip(bubble) {
+    if (!bubble || bubble.querySelector('.reasoning-thinking')) return;
+    if (typeof window.isHideReasoning !== 'function' || !window.isHideReasoning()) return;
+    var _chip = document.createElement('div');
+    _chip.className = 'reasoning-thinking';
+    _chip.innerHTML = '<span class="reasoning-thinking-dot"></span>思考中';
+    bubble.appendChild(_chip);
+}
+
+// ★ 无正文空气泡美化: 渲染灰色 (empty) 占位 (推理-only / 工具-only 消息)
+window._ensureEmptyBubbleHint = function(bubble, pendingMsg) {
+    if (!bubble) return;
+    var _md = bubble.querySelector('.markdown-body');
+    if (!_md) return;
+    if (_md.textContent.trim() || bubble.querySelector('.empty-response-hint')) return;
+    var _hint = document.createElement('div');
+    _hint.className = 'empty-response-hint';
+    _hint.textContent = '(empty)';
+    _md.appendChild(_hint);
+};
+
+// ★ 从文本中解析 MiniMax/模型输出的文本格式工具调用
+// 支持: <minimax:tool_call><invoke name="x"><parameter name="k" string="true">v</parameter></invoke></minimax:tool_call>
+//       裸 <invoke name="x">...</invoke>
+//       [TOOL_CALL]{tool => "x", args => {--key "v"}}[/TOOL_CALL]
+function _extractTextToolCalls(fullText) {
+    var toolCalls = [];
+    if (!fullText || typeof fullText !== 'string') return { fullText: fullText || '', toolCalls: toolCalls };
+    if (!fullText.includes('<minimax:tool_call>') && !fullText.includes('<invoke') && !fullText.includes('[TOOL_CALL]')) {
+        return { fullText: fullText, toolCalls: toolCalls };
+    }
+
+    function _pushCall(funcName, args) {
+        toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
+    }
+
+    // 格式1: <minimax:tool_call> 包裹
+    var xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
+    var xmlMatch;
+    while ((xmlMatch = xmlRegex.exec(fullText)) !== null) {
+        var invokeMatch = xmlMatch[1].match(/<invoke\s+[^>]*name\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/invoke>/);
+        if (!invokeMatch) continue;
+        var funcName = invokeMatch[1] || invokeMatch[2];
+        var args = {};
+        var paramRegex = /<parameter\s+[^>]*name\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/parameter>/g;
+        var pMatch;
+        while ((pMatch = paramRegex.exec(invokeMatch[3])) !== null) {
+            var paramName = pMatch[1] || pMatch[2];
+            var paramValue = _xmlUnescape(pMatch[3].trim());
+            try { paramValue = JSON.parse(paramValue); } catch(e) {}
+            args[paramName] = paramValue;
+        }
+        _pushCall(funcName, args);
+    }
+
+    // 格式3: 裸 <invoke> (模型有时省略 <minimax:tool_call> 包裹)
+    if (!toolCalls.length && fullText.includes('<invoke')) {
+        var bareRegex = /<invoke\s+[^>]*name\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/invoke>/g;
+        var bareMatch;
+        while ((bareMatch = bareRegex.exec(fullText)) !== null) {
+            var funcName2 = bareMatch[1] || bareMatch[2];
+            var args2 = {};
+            var paramRegex2 = /<parameter\s+[^>]*name\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/parameter>/g;
+            var pMatch2;
+            while ((pMatch2 = paramRegex2.exec(bareMatch[3])) !== null) {
+                var pn2 = pMatch2[1] || pMatch2[2];
+                var pv2 = _xmlUnescape(pMatch2[3].trim());
+                try { pv2 = JSON.parse(pv2); } catch(e) {}
+                args2[pn2] = pv2;
+            }
+            _pushCall(funcName2, args2);
+        }
+    }
+
+    // 格式2: [TOOL_CALL]
+    var tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
+    var tcMatch;
+    while ((tcMatch = tcRegex.exec(fullText)) !== null) {
+        var funcName3 = tcMatch[1];
+        var argsBlock = tcMatch[2];
+        var args3 = {};
+        var paramRegex3 = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+        var pMatch3;
+        while ((pMatch3 = paramRegex3.exec(argsBlock)) !== null) {
+            var pn3 = pMatch3[1];
+            var pv3 = pMatch3[2] !== undefined ? pMatch3[2] : (pMatch3[3] !== undefined ? pMatch3[3] : pMatch3[4]);
+            args3[pn3] = pv3;
+        }
+        _pushCall(funcName3, args3);
+    }
+
+    // 清理工具调用标记,保留正文/思考
+    fullText = fullText.replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '').trim();
+    fullText = fullText.replace(/<invoke\s+[^>]*name\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/invoke>/g, '').trim();
+    fullText = fullText.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '').trim();
+    return { fullText: fullText, toolCalls: toolCalls };
+}
+
 // ★ 后端 SSE 处理器:接收 SSE 流式事件,转换为 streamResponse 兼容格式
 // SSE 格式: "event: TYPE\ndata: JSON\n\n"
 // 解析时需要识别 "event:" 行来确定事件类型
@@ -71,11 +276,15 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                             fullText = fullText.substring(reasoningText.length).trim();
                         }
                         applyStreamRender(chatId, fullText);
+                        // ★ 死循环检测: 正文复读/无进展检测
+                        _guardFeed(chatId, fullText, null, function() { try { reader.cancel(); } catch(_ce) {} });
                     }
                 } else if (currentEventType === 'reasoning' || event.type === 'reasoning') {
                     var rd = event.delta || event.reasoning || '';
                     if (rd) {
                         reasoningText += rd;
+                        // ★ 死循环检测: 推理死循环检测
+                        _guardFeed(chatId, null, reasoningText, function() { try { reader.cancel(); } catch(_ce) {} });
                         var cb = activeBubbleMap[chatId];
                         if (cb) {
                             var det = cb.querySelector('details.reasoning-details');
@@ -86,12 +295,13 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                                 det.innerHTML = '<summary>深度思考</summary><div class="reasoning-content"></div>';
                                 var mb2 = cb.querySelector('.markdown-body');
                                 if (mb2) cb.insertBefore(det, mb2);
+                                _ensureReasoningChip(cb);
                             }
                             det.querySelector('.reasoning-content').textContent = reasoningText;
                             // 思考增长直接强制跟底(绕过 autoScrollToBottom 的距离阈值)
                             requestAnimationFrame(function() {
                                 if ($.chatBox && !userScrolled) {
-                                    $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                    followToBottom($.chatBox);
                                 }
                             });
                         }
@@ -120,7 +330,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     // 工具调用出现时直接强制跟底
                     requestAnimationFrame(function() {
                         if ($.chatBox && !userScrolled) {
-                            $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                            followToBottom($.chatBox);
                         }
                     });
                 } else if (currentEventType === 'done' || event.type === 'done') {
@@ -200,6 +410,7 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                     _detSSE.innerHTML = '<summary>深度思考</summary><div class="reasoning-content"></div>';
                     var _mbSSE = _cbSSE.querySelector('.markdown-body');
                     if (_mbSSE) _cbSSE.insertBefore(_detSSE, _mbSSE);
+                                    _ensureReasoningChip(_cbSSE);
                 }
                 var _rcSSE = _detSSE.querySelector('.reasoning-content');
                 if (_rcSSE) _rcSSE.textContent = reasoningText;
@@ -244,6 +455,9 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
 async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDelay) {
     var reader = res.body.getReader();
+    // ★ 本流专属气泡: 禁止中途重读共享 activeBubbleMap — 新消息会替换 map 条目,
+    //   旧流结束时若读 map 会误清新气泡的 typing/漏清自己的 (呼吸线滞留旧气泡的根因)
+    var _ownedBubble = activeBubbleMap[chatId] || null;
     var decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
@@ -301,6 +515,10 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     try {
                         var jd = JSON.parse(ljson);
                         var dd = jd.choices?.[0]?.delta || jd.choices?.[0]?.message;
+                        // ★ 截断防护: finish_reason=length 说明输出被截断, 末尾 tool_calls 不可靠
+                        if (jd.choices && jd.choices[0] && jd.choices[0].finish_reason === 'length') {
+                            streamAborted = true;
+                        }
                         // ★ 严格区分 content 和 reasoning，不互相污染
                         if (dd && dd.content && String(dd.content).trim()) {
                             fullText += dd.content;
@@ -317,6 +535,13 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                         if (jd.usage) usage = jd.usage;
                     } catch(e2) {}
+                    // ★ 残留 buffer 中的错误响应 (如 LongCat 无换行结尾的 {"error":...})
+                    //   必须在 try 外检测: catch(e2){} 会吞掉一切异常, 放 try 内等于没抛
+                    if (jd && (jd.error || (jd.status && jd.status >= 400))) {
+                        var _errDetail2 = jd.detail || jd.error || JSON.stringify(jd);
+                        var _errMsg2 = typeof _errDetail2 === 'string' ? _errDetail2 : (_errDetail2.message || JSON.stringify(_errDetail2));
+                        throw new Error('[Provider ' + (jd.status || 200) + '] ' + _errMsg2);
+                    }
                 }
             }
             // Done分支: 对fullText做最后一次思考标签清理(避免流式结束后的残留)
@@ -415,6 +640,10 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     }
 
                     var delta = data.choices?.[0]?.delta;
+                    // ★ 截断防护: finish_reason=length 说明输出被截断(常见于上下文/长度上限)
+                    if (data.choices && data.choices[0] && data.choices[0].finish_reason === 'length') {
+                        streamAborted = true;
+                    }
                     // 如果 delta 为空,跳过此条数据（但已捕获usage）
                     if (!delta) {
                         continue;
@@ -574,9 +803,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     var hasReasoningContent = delta.reasoning_content !== undefined && delta.reasoning_content !== null && delta.reasoning_content !== '';
 
                     if (!placeholderCleared && (hasReasoningContent || hasReasoningDetails || delta.content !== undefined)) {
-                        var currentBubble = activeBubbleMap[chatId];
+                        var currentBubble = _ownedBubble;
                         if (currentBubble && document.body.contains(currentBubble)) {
                             currentBubble.querySelector('.search-status')?.remove();
+                            // ★ 答案开始输出: 清掉工具执行完成后的残留总结行 (实时逐行状态保留到本轮结束)
+                            var _tcLines = currentBubble.querySelector('.tool-call-lines');
+                            if (_tcLines) _tcLines.remove();
                         }
                         placeholderCleared = true;
                     }
@@ -588,20 +820,14 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 reasoningText += detail.text;
                             }
                         }
+                        // ★ 死循环检测: 推理死循环(正文为空 + 推理复读)
+                        _guardFeed(chatId, null, reasoningText, function() { try { reader.cancel(); } catch(_ce) {} });
                         pendingMsg.reasoning = reasoningText;
                         if (currentChatId === chatId) {
-                            var currentBubble = activeBubbleMap[chatId];
-                            if (currentBubble) {
-                                let details = currentBubble.querySelector('details.reasoning-details');
-                                if (!details) {
-                                    details = document.createElement('details');
-                                    details.className = 'reasoning-details';
-                                    details.open = true;
-                                    details.innerHTML = `<summary>深度思考</summary><div class="reasoning-content"></div>`;
-                                    var markdownBody = currentBubble.querySelector('.markdown-body');
-                                    currentBubble.insertBefore(details, markdownBody);
-                                }
-                                details.querySelector('.reasoning-content').textContent = reasoningText;
+                            var currentBubble = _ownedBubble;
+                            if (currentBubble && typeof window._ensureReasoningPanel === 'function') {
+                                var _detR = window._ensureReasoningPanel(currentBubble, reasoningText);
+                                if (_detR) _ensureReasoningChip(currentBubble);
                             }
                         }
                         // ★ 思考内容滚动追踪 - RAF节流,避免每token都触发scroll
@@ -609,27 +835,21 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                             var _now2 = performance.now();
                             if (!window._lastThinkingScroll || _now2 - window._lastThinkingScroll > 32) {
                                 window._lastThinkingScroll = _now2;
-                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                followToBottom($.chatBox);
                             }
                         }
                         // 无延迟: 立即渲染
                     } else if (hasReasoningContent) {
                         // 普通字符串格式 reasoning_content
                         reasoningText += String(delta.reasoning_content);
+                        // ★ 死循环检测: 推理死循环(正文为空 + 推理复读)
+                        _guardFeed(chatId, null, reasoningText, function() { try { reader.cancel(); } catch(_ce) {} });
                         pendingMsg.reasoning = reasoningText;
                         if (currentChatId === chatId) {
-                            var currentBubble = activeBubbleMap[chatId];
-                            if (currentBubble) {
-                                let details = currentBubble.querySelector('details.reasoning-details');
-                                if (!details) {
-                                    details = document.createElement('details');
-                                    details.className = 'reasoning-details';
-                                    details.open = true;
-                                    details.innerHTML = `<summary>深度思考</summary><div class="reasoning-content"></div>`;
-                                    var markdownBody = currentBubble.querySelector('.markdown-body');
-                                    currentBubble.insertBefore(details, markdownBody);
-                                }
-                                details.querySelector('.reasoning-content').textContent = reasoningText;
+                            var currentBubble = _ownedBubble;
+                            if (currentBubble && typeof window._ensureReasoningPanel === 'function') {
+                                var _detR = window._ensureReasoningPanel(currentBubble, reasoningText);
+                                if (_detR) _ensureReasoningChip(currentBubble);
                             }
                         }
                         // ★ 思考内容滚动追踪 - RAF节流
@@ -637,7 +857,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                             var _now3 = performance.now();
                             if (!window._lastThinkingScroll || _now3 - window._lastThinkingScroll > 32) {
                                 window._lastThinkingScroll = _now3;
-                                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                followToBottom($.chatBox);
                             }
                         }
                     }
@@ -675,6 +895,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                         fullText += textContent;
                         fullText = fullText.replace(/\[object Object\]/g, '');
+                        // ★ 死循环检测: 正文复读/无进展检测
+                        _guardFeed(chatId, fullText, null, function() { try { reader.cancel(); } catch(_ce) {} });
 
                         // ★ 实时提取 <think> 和 (think) 块到思考区
                         // ★ 关键修复: 只用完整闭合标签，不用 $ 兜底（流式中未闭合会导致全部内容被吞）
@@ -735,7 +957,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
 
                         if (currentChatId === chatId) {
-                            var currentBubble = activeBubbleMap[chatId];
+                            var currentBubble = _ownedBubble;
                             if (currentBubble) {
                                 if (!hasContent) {
                                     // 不移除 typing，改加生成活跃标记让光晕持续
@@ -759,12 +981,11 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 var _renderText = typeof _t !== 'undefined' ? _t : fullText;
                                 applyStreamRender(chatId, _renderText);
                                 // AI流式回复时,如果用户没有主动滚动上查,则跟随滚动
+                                // ★ v3: 滚动跟随由 markdown.js RAF 渲染循环统一执行(followToBottom),
+                                //   这里移除每 chunk 直写 scrollTop(未节流且与渲染循环重复触发)
                                 var _isFirstContent = !window._streamContentRendered;
                                 if (_isFirstContent) {
                                     window._streamContentRendered = true;
-                                }
-                                if (!userScrolled) {
-                                    $.chatBox.scrollTop = $.chatBox.scrollHeight;
                                 }
                             }
                         }
@@ -805,13 +1026,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                 try {
                     currentToolCall.function.arguments = JSON.parse(argsStr);
                 } catch (e) {
-                    // 尝试修复截断的JSON:补全缺失的引号和括号
-                    var fixedStr = argsStr;
-                    var quoteCount = (fixedStr.match(/"/g) || []).length;
-                    if (quoteCount % 2 !== 0) fixedStr += '"';
-                    var openBraces = (fixedStr.match(/\{/g) || []).length;
-                    var closeBraces = (fixedStr.match(/\}/g) || []).length;
-                    while (closeBraces < openBraces) { fixedStr += '}'; closeBraces++; }
+                    // ★ 尝试修复截断/未转义引号的JSON
+                    var fixedStr = repairToolArguments(argsStr);
 
                     try {
                         currentToolCall.function.arguments = JSON.parse(fixedStr);
@@ -864,11 +1080,11 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
 
     // 如果全部解析失败且无任何内容,给用户提示
     if (!fullText && !reasoningText && !toolCalls.length && parseErrors > 0) {
-        var currentBubble = activeBubbleMap[chatId];
+        var currentBubble = _ownedBubble;
         if (currentBubble && document.body.contains(currentBubble)) {
             // ★ 链式模式不清空气泡
             if (!window._chainMode) currentBubble.querySelector('.markdown-body').innerHTML = `<span style="color:#ef4444">⚠️ 部分响应解析失败,可能是 API 返回格式不兼容。</span>`;
-            currentBubble.classList.remove('typing', 'gen-active');
+            currentBubble.classList.remove('typing', 'gen-active', 'streaming');
         }
     }
     if (toolCalls.length > 0) {
@@ -880,7 +1096,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     }
     // 流结束时关闭思考区折叠
     if (reasoningText && currentChatId === chatId) {
-        var _cb2 = activeBubbleMap[chatId];
+        var _cb2 = _ownedBubble;
         if (_cb2) {
             var _det4 = _cb2.querySelector('details.reasoning-details');
             if (_det4) _det4.open = true;
@@ -889,7 +1105,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     // ★ 流式已经实时渲染了数学公式,不需要再次渲染
     // ★ 流结束时,如果 pendingMsg 中有生成的图片,渲染到气泡
     if (currentChatId === chatId) {
-        var _streamBubble = activeBubbleMap[chatId];
+        var _streamBubble = _ownedBubble;
         if (_streamBubble && pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
             if (!_streamBubble.querySelector('.generated-images-container')) {
                 var _imgContStream = document.createElement('div');
@@ -951,55 +1167,35 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         pendingMsg.content = reasoningText;
     }
 
+    // ★ 隐藏思考+工具调用场景: 当推理被隐藏且只有工具调用(无正文)时,
+    //   气泡内只剩隐藏的 reasoning-details + 空 markdown-body → 看起来是空气泡。
+    //   注入一个轻量占位元素(工具卡片创建后由 main.js 移除), 避免视觉上的空洞。
+    if (toolCalls.length > 0 && !fullText && currentChatId === chatId) {
+        var _phBubble = _ownedBubble;
+        if (_phBubble && document.body.contains(_phBubble)) {
+            var _mdBody = _phBubble.querySelector('.markdown-body');
+            if (_mdBody && !_mdBody.querySelector('.tool-executing-placeholder')) {
+                var _ph = document.createElement('div');
+                _ph.className = 'tool-executing-placeholder';
+                _ph.innerHTML = '<span class="tool-executing-dot"></span> 正在执行工具...';
+                _mdBody.appendChild(_ph);
+            }
+        }
+    }
+
     // ★ MiniMax/模型兼容: 从 content 中解析文本格式的工具调用
-    // 支持三种格式: <minimax:tool_call> XML, [TOOL_CALL] 括号格式
-    if (!toolCalls.length && fullText && (fullText.includes('<minimax:tool_call>') || fullText.includes('[TOOL_CALL]'))) {
-        console.log('[ToolCall] 检测到文本格式工具调用,开始解析...');
-
-        // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
-        var xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
-        let xmlMatch;
-        while ((xmlMatch = xmlRegex.exec(fullText)) !== null) {
-            var invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
-            if (invokeMatch) {
-                var funcName = invokeMatch[1];
-                var args = {};
-                var paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
-                let pMatch;
-                while ((pMatch = paramRegex.exec(invokeMatch[2])) !== null) {
-                    var paramName = pMatch[1];
-                    let paramValue = pMatch[2].trim();
-                    try { paramValue = JSON.parse(paramValue); } catch(e) {}
-                    args[paramName] = paramValue;
-                }
-                toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
-                console.log('[ToolCall] XML格式 提取:', funcName, args);
-            }
+    if (!toolCalls.length && fullText) {
+        var _txtRes = _extractTextToolCalls(fullText);
+        fullText = _txtRes.fullText;
+        if (_txtRes.toolCalls.length) {
+            toolCalls = toolCalls.concat(_txtRes.toolCalls);
+            console.log('[ToolCall] 文本格式提取 ' + _txtRes.toolCalls.length + ' 个:', _txtRes.toolCalls.map(function(t){return t.function.name;}).join(','));
         }
-
-        // 格式2: [TOOL_CALL]\n{tool => "web_search", args => {--query "xxx"}}\n[/TOOL_CALL]
-        var tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
-        let tcMatch;
-        while ((tcMatch = tcRegex.exec(fullText)) !== null) {
-            var funcName = tcMatch[1];
-            var argsBlock = tcMatch[2];
-            var args = {};
-            var paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
-            let pMatch;
-            while ((pMatch = paramRegex.exec(argsBlock)) !== null) {
-                var paramName = pMatch[1];
-                var paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
-                args[paramName] = paramValue;
-            }
-            toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
-            console.log('[ToolCall] TOOL_CALL格式 提取:', funcName, args);
-        }
-
-        // 清理: 移除所有工具调用标记,保留前面的思考文本
-        fullText = fullText.replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '').trim();
-        fullText = fullText.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '').trim();
         if (!fullText && reasoningText) { fullText = reasoningText; }
     }
+
+    // ★ 死循环检测: 流结束前补检一次(尾部内容可能未达节流阈值)
+    _guardFeed(chatId, fullText, reasoningText, null);
 
     return { fullText, reasoningText, usage, toolCalls, streamAborted };
 }
@@ -1009,6 +1205,11 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     if (!res.ok) {
         // 对于错误响应,不要尝试读取 body
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    // ★ 答案输出前: 清掉工具执行完成后的残留总结行
+    if (currentBubble && document.body.contains(currentBubble)) {
+        var _tcLinesNS = currentBubble.querySelector('.tool-call-lines');
+        if (_tcLinesNS) _tcLinesNS.remove();
     }
 
     let data;
@@ -1061,6 +1262,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
     var msg = choice.message || {};
     var st = (v) => (v !== null && v !== undefined && typeof v === 'string') ? v : null;
     let fullText = '';
+    let reasoningText = '';  // ★ 提前声明,死循环检测埋点使用
     var _generatedImages = [];  // ★ 提前声明,供 content 数组提取图片使用
     if (msg.content !== undefined && msg.content !== null) {
         if (typeof msg.content === 'string') {
@@ -1118,23 +1320,25 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         if (data.url && data.url.startsWith('data:image')) _generatedImages.push(data.url);
     }
     console.log('[ImageModel] extracted images:', _generatedImages.length);
-    // ★ 同步到 pendingMsg,供后续渲染使用
+    // ★ 同步到 pendingMsg,供后续渲染使用 — 统一为对象格式 {url, prompt, model, aspect_ratio, timestamp}
     if (_generatedImages.length > 0) {
         if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
+        var _hnsModel = localStorage.getItem('imageModel_' + (localStorage.getItem('imageProvider') || 'minimax')) || '';
         for (var _gi = 0; _gi < _generatedImages.length; _gi++) {
-            if (pendingMsg.generatedImages.indexOf(_generatedImages[_gi]) === -1) {
-                pendingMsg.generatedImages.push(_generatedImages[_gi]);
-                if (_gi === 0) pendingMsg.generatedImage = _generatedImages[_gi];
+            var _imgUrl = _generatedImages[_gi];
+            // ★ 构建带元数据的对象 (与 tools-exec.js 格式一致)
+            var _metaHns = window.buildImageMeta(_imgUrl, '', { model: _hnsModel, aspect_ratio: '' });
+            if (pendingMsg.generatedImages.indexOf(_metaHns) === -1) {
+                pendingMsg.generatedImages.push(_metaHns);
+                if (_gi === 0) pendingMsg.generatedImage = _metaHns;
                 // ★ 上传到服务器,确保刷新后图片不消失 (直接生成路径,同步等待)
-                var _imgHns = _generatedImages[_gi];
-                if (_imgHns && !_imgHns.startsWith(window.location.origin) && !_imgHns.startsWith('/oneapichat')) {
+                if (_imgUrl && !_imgUrl.startsWith(window.location.origin) && !_imgUrl.startsWith('/oneapichat')) {
                     try {
-                        var _srvUrlHns = await uploadImageToServer(_imgHns);
+                        var _srvUrlHns = await uploadImageToServer(_imgUrl);
                         if (_srvUrlHns) {
                             console.log('[ImageModel] 图片已上传到服务器:', _srvUrlHns);
-                            pendingMsg.generatedImages[_gi] = _srvUrlHns;
-                            if (pendingMsg.generatedImage === _imgHns) pendingMsg.generatedImage = _srvUrlHns;
-                            _generatedImages[_gi] = _srvUrlHns;  // ★ 同时更新返回数组
+                            _metaHns.url = _srvUrlHns;
+                            _generatedImages[_gi] = _srvUrlHns;
                         }
                     } catch(e) {
                         console.warn('[ImageModel] 上传直接生成图片失败:', e.message);
@@ -1145,55 +1349,31 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         // ★ 图片已保存为服务器URL,立即持久化到 localStorage 防止刷新丢失
         slimSaveChats();
     }
-    let reasoningText = '';
     let toolCalls = msg.tool_calls || [];
 
+    // ★ 截断防护: 非流式响应 finish_reason=length 时, 空参数/残缺 tool_calls 不可靠, 丢弃
+    if (choice.finish_reason === 'length' && toolCalls.length > 0) {
+        var _beforeFilter = toolCalls.length;
+        toolCalls = toolCalls.filter(function(tc) {
+            try {
+                var _a = tc && tc.function && tc.function.arguments;
+                var _o = (typeof _a === 'string') ? JSON.parse(_a || '{}') : (_a || {});
+                return _o && typeof _o === 'object' && Object.keys(_o).length > 0;
+            } catch(e) { return false; }
+        });
+        if (toolCalls.length !== _beforeFilter) {
+            console.warn('[NonStream] 响应被截断(finish_reason=length), 丢弃 ' + (_beforeFilter - toolCalls.length) + ' 个空参数工具调用');
+        }
+    }
+
     // ★ MiniMax/模型兼容: 从 content 中解析文本格式的工具调用
-    // 支持三种格式: <minimax:tool_call> XML, [TOOL_CALL] 括号格式
-    if (!toolCalls.length && fullText && (fullText.includes('<minimax:tool_call>') || fullText.includes('[TOOL_CALL]'))) {
-        console.log('[ToolCall非流式] 检测到文本格式工具调用,开始解析...');
-
-        // 格式1: <minimax:tool_call><invoke name="xxx"><parameter name="x">v</parameter></invoke></minimax:tool_call>
-        var xmlRegex = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/g;
-        let xmlMatch;
-        while ((xmlMatch = xmlRegex.exec(fullText)) !== null) {
-            var invokeMatch = xmlMatch[1].match(/<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/);
-            if (invokeMatch) {
-                var funcName = invokeMatch[1];
-                var args = {};
-                var paramRegex = /<parameter name="([^"]+)">([^<]*)<\/parameter>/g;
-                let pMatch;
-                while ((pMatch = paramRegex.exec(invokeMatch[2])) !== null) {
-                    var paramName = pMatch[1];
-                    let paramValue = pMatch[2].trim();
-                    try { paramValue = JSON.parse(paramValue); } catch(e) {}
-                    args[paramName] = paramValue;
-                }
-                toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
-                console.log('[ToolCall非流式] XML格式 提取:', funcName, args);
-            }
+    if (!toolCalls.length && fullText) {
+        var _txtRes = _extractTextToolCalls(fullText);
+        fullText = _txtRes.fullText;
+        if (_txtRes.toolCalls.length) {
+            toolCalls = toolCalls.concat(_txtRes.toolCalls);
+            console.log('[ToolCall非流式] 文本格式提取 ' + _txtRes.toolCalls.length + ' 个:', _txtRes.toolCalls.map(function(t){return t.function.name;}).join(','));
         }
-
-        // 格式2: [TOOL_CALL]\n{tool => "web_search", args => {--query "xxx"}}\n[/TOOL_CALL]
-        var tcRegex = /\[TOOL_CALL\]\s*\{tool\s*=>\s*"([^"]+)"[^}]*args\s*=>\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\}[\s\S]*?\[\/TOOL_CALL\]/g;
-        let tcMatch;
-        while ((tcMatch = tcRegex.exec(fullText)) !== null) {
-            var funcName = tcMatch[1];
-            var argsBlock = tcMatch[2];
-            var args = {};
-            var paramRegex = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
-            let pMatch;
-            while ((pMatch = paramRegex.exec(argsBlock)) !== null) {
-                var paramName = pMatch[1];
-                var paramValue = pMatch[2] !== undefined ? pMatch[2] : (pMatch[3] !== undefined ? pMatch[3] : pMatch[4]);
-                args[paramName] = paramValue;
-            }
-            toolCalls.push({ id: 'call_mm_' + Date.now() + '_' + toolCalls.length, type: 'function', function: { name: funcName, arguments: JSON.stringify(args) } });
-            console.log('[ToolCall非流式] TOOL_CALL格式 提取:', funcName, args);
-        }
-
-        fullText = fullText.replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '').trim();
-        fullText = fullText.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '').trim();
     }
 
     var usage = data.usage;
@@ -1244,17 +1424,24 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 
     if (currentChatId === chatId && currentBubble) {
         try {
-        currentBubble.classList.remove('typing', 'gen-active');
+        currentBubble.classList.remove('typing', 'gen-active', 'streaming');
+        var _rtChip = currentBubble.querySelector('.reasoning-thinking');
+        if (_rtChip) _rtChip.remove();
+        // ★ 无正文空气泡美化
+        window._ensureEmptyBubbleHint(currentBubble, pendingMsg);
         var markdownBody = currentBubble.querySelector('.markdown-body');
         if (markdownBody) {
             // ★ 链式模式不清空气泡(保留历史链段)
             if (!window._chainMode) markdownBody.innerHTML = '';
-            if (reasoningText) {
-                var _det = document.createElement('details');
-                _det.className = 'reasoning-details';
-                _det.open = true;
-                _det.innerHTML = '<summary>💭 深度思考</summary><div class="reasoning-content">' + reasoningText.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
-                markdownBody.appendChild(_det);
+            if (reasoningText && typeof window._ensureReasoningPanel === 'function') {
+                window._ensureReasoningPanel(currentBubble, reasoningText);
+            }
+            // ★ 隐藏思考+工具调用占位: 非流式路径同样注入占位元素
+            if (toolCalls.length > 0 && !fullText && !markdownBody.querySelector('.tool-executing-placeholder')) {
+                var _phNS = document.createElement('div');
+                _phNS.className = 'tool-executing-placeholder';
+                _phNS.innerHTML = '<span class="tool-executing-dot"></span> 正在执行工具...';
+                markdownBody.appendChild(_phNS);
             }
             if (fullText) {
                 var contentEl = document.createElement('div');
@@ -1265,7 +1452,7 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
             // ★ 操作按钮由 appendMessage 统一管理,不重复创建
             // ★ 流式完成:滚到底部(图表可能已延迟渲染导致高度变化)
             setTimeout(function _scrollAfterRender() {
-                if (!userScrolled) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                if (!userScrolled) followToBottom($.chatBox);
             }, 200);
             // ★ 非流式响应完成:如果有生成的图片,渲染到气泡
             if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0 && !currentBubble.querySelector('.generated-images-container')) {
@@ -1299,7 +1486,14 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
         }
     }
 
-    return { fullText, reasoningText, usage, toolCalls, generatedImages: _generatedImages };
+    // ★ 死循环检测: 非流式全文检测(复读/无进展/推理死循环, 此时 fullText+reasoningText 均已提取完整)
+    _guardFeed(chatId, fullText, reasoningText, null);
+
+    // ★ 返回时将 generatedImages 统一为对象格式 {url, prompt, model, aspect_ratio, timestamp}
+    var _genImgObjs = _generatedImages.map(function(url) {
+        return (typeof url === 'object' && url.url) ? url : window.buildImageMeta(url, '', { model: _hnsModel, aspect_ratio: '' });
+    });
+    return { fullText, reasoningText, usage, toolCalls, generatedImages: _genImgObjs };
 }
 
 function handleError(e, chatId, pendingMsg, currentBubble) {
@@ -1326,7 +1520,7 @@ function handleError(e, chatId, pendingMsg, currentBubble) {
     }
     saveChats();
     if (currentChatId === chatId && currentBubble) {
-        currentBubble.classList.remove('typing', 'gen-active');
+        currentBubble.classList.remove('typing', 'gen-active', 'streaming');
         // 配置面板编辑时不显示错误,避免频繁报错
         if (!configPanelInteracting) {
             var errorMsg = e.name === 'AbortError' ? '⚠️ 请求已停止或超时。' : ('❌ 错误: ' + escapeHtml(e.message || ''));

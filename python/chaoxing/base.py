@@ -48,6 +48,10 @@ def init_session(isVideo: bool = False, isAudio: bool = False):
         _cached_session.mount('https://', HTTPAdapter(max_retries=3))
         _cached_session.headers = gc.HEADERS
         _cached_session.cookies.update(use_cookies())
+    else:
+        # ★ 磁盘 Cookie 可能被本进程 login()/其他进程(扫码登录等)更新，每次合并最新文件 Cookie
+        #   (同名 Cookie 覆盖，异名保留，安全幂等)
+        _cached_session.cookies.update(use_cookies())
     return _cached_session
 
 
@@ -87,6 +91,10 @@ class Chaoxing:
         resp = _session.post(_url, headers=gc.HEADERS, data=_data)
         if resp and resp.json()["status"] == True:
             save_cookies(_session)
+            # ★ 失效缓存的默认 session：否则后续 init_session() 仍返回持有旧 Cookie 的 session，
+            #   导致「登录成功但课程列表依然为空」的假象（Cookie 已更新到磁盘但缓存 session 不感知）
+            global _cached_session
+            _cached_session = None
             logger.info("登录成功...")
             return {"status": True, "msg": "登录成功"}
         else:

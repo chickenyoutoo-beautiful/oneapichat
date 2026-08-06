@@ -10,8 +10,16 @@ window.analyzeImage = async function(imageInput, focus) {
     if (typeof imageInput !== 'string' || !imageInput) {
         imageInput = '';
     }
-    // 获取配置
-    var storedVisionUrl = localStorage.getItem('visionApiUrl');
+    // 获取配置 (★ 感知提供商: custom 使用独立存储的 Key/URL)
+    var _visProvider = localStorage.getItem('visionProvider') || '';
+    var storedVisionUrl, storedVisionKey;
+    if (_visProvider === 'custom') {
+        storedVisionUrl = localStorage.getItem('visionApiUrlCustom');
+        storedVisionKey = localStorage.getItem('visionApiKeyCustom');
+    } else {
+        storedVisionUrl = localStorage.getItem('visionApiUrl');
+        storedVisionKey = localStorage.getItem('visionApiKey');
+    }
     var visionApiUrl = storedVisionUrl || DEFAULT_CONFIG.visionApiUrl || '/mcp';
     // ★ 限流保护: 如果 60 秒内遇到过 Token Plan 限流,直接抛错不请求
     if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 30000) {
@@ -151,7 +159,7 @@ window.analyzeImage = async function(imageInput, focus) {
             var _reqWithModel = JSON.parse(JSON.stringify(requestBody));
             _reqWithModel.model = _visionModel;
             _fetchBody = JSON.stringify(_reqWithModel);
-            var _rawVisionKey = localStorage.getItem('visionApiKey') || '';
+            var _rawVisionKey = storedVisionKey || '';
             var _visionKey = '';
             try { _visionKey = await decrypt(_rawVisionKey) || _rawVisionKey; } catch(e) { _visionKey = _rawVisionKey; }
             if (_visionKey) {
@@ -419,6 +427,12 @@ window.generateImage = async (prompt, options = {}) => {
     if (imageProvider === 'openrouter') {
         return generateImageOpenRouter(prompt, options);
     }
+    if (imageProvider === 'openai') {
+        return generateImageOpenAI(prompt, options);
+    }
+    if (imageProvider === 'custom') {
+        return generateImageCustom(prompt, options);
+    }
 
     // ===== MiniMax (原有实现) =====
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
@@ -441,11 +455,23 @@ window.generateImage = async (prompt, options = {}) => {
         throw new Error('未配置图像生成API密钥,请在设置中填写');
     }
 
-    var imageModel = localStorage.getItem('imageModel') || 'image-01';
+    var imageModel = localStorage.getItem('imageModel_minimax') || localStorage.getItem('imageModel') || 'image-01';
+    // ★ 过滤 AI 传来的其他提供商模型名(如 openai/gpt-5.4-image-2),只使用 MiniMax 模型
+    var actualModel = imageModel;
+    if (options.model && options.model !== imageModel) {
+        var _m = options.model.toLowerCase();
+        var _isOtherProvider = (_m.indexOf('gpt-5.4-image') !== -1 || _m.indexOf('gpt-4o-image') !== -1 ||
+            _m.indexOf('gpt-image') !== -1 || _m.indexOf('dall-e') !== -1);
+        if (!_isOtherProvider) {
+            actualModel = options.model;
+        } else {
+            console.warn('[generateImage MiniMax] 忽略 AI 传来的其他提供商模型:', options.model, '使用配置模型:', imageModel);
+        }
+    }
     var apiUrl = baseUrl + '/image_generation';
     try {
         var body = {
-            model: options.model || imageModel,
+            model: actualModel,
             prompt: prompt,
             aspect_ratio: options.aspect_ratio || '1:1',
             seed: options.seed,
@@ -588,7 +614,8 @@ async function generateImageOpenRouter(prompt, options = {}) {
         throw new Error('未配置 OpenRouter API Key,请在设置-图像生成中填写');
     }
 
-    var configuredModel = localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    // ★ 优先读取提供商独立键,回退到通用 imageModel 键(兼容旧配置)
+    var configuredModel = localStorage.getItem('imageModel_openrouter') || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
     // ★ 当提供商为 OpenRouter 时,忽略 AI 传来的 MiniMax 模型名(如 image-01),强制使用配置的模型
     var actualModel = options.model || configuredModel;
     if (actualModel.indexOf('image-01') !== -1 || actualModel.indexOf('minimax') !== -1) {
@@ -659,16 +686,177 @@ async function generateImageOpenRouter(prompt, options = {}) {
     }
 }
 
+// ★ aspect_ratio → OpenAI size 映射
+function _aspectRatioToOpenAISize(aspectRatio, options) {
+    if (options.size) return options.size;
+    var map = {
+        '1:1': '1024x1024',
+        '16:9': '1792x1024',
+        '9:16': '1024x1792',
+        '4:3': '1024x1024',
+        '3:4': '1024x1024',
+        '21:9': '1792x1024'
+    };
+    return map[aspectRatio] || '1024x1024';
+}
+
+// ===== OpenAI 原生生图 (gpt-image-1 / DALL-E) =====
+// 端点: /v1/images/generations, 格式: {model, prompt, n, size, quality, response_format: 'b64_json'}
+async function generateImageOpenAI(prompt, options = {}) {
+    let baseUrl = (localStorage.getItem('imageBaseUrlOpenai') || 'https://api.openai.com/v1').replace(/\/$/, '');
+    if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
+    var rawKey = localStorage.getItem('imageApiKeyOpenai') || '';
+    let apiKey = '';
+    try { apiKey = await decrypt(rawKey) || ''; } catch(e) { console.error('[generateImageOpenAI] decrypt error:', e.message); }
+
+    if (!apiKey) throw new Error('未配置 OpenAI API Key,请在设置-图像生成中填写');
+
+    // ★ 过滤 AI 传来的其他提供商模型名,只使用 OpenAI 兼容模型
+    var _openaiModel = localStorage.getItem('imageModel_openai') || 'gpt-image-1';
+    var model = _openaiModel;
+    if (options.model && options.model !== _openaiModel) {
+        var _m = options.model.toLowerCase();
+        var _isOtherProvider = (_m.indexOf('image-01') !== -1 || _m.indexOf('minimax') !== -1 ||
+            _m.indexOf('gpt-5.4-image') !== -1 || _m.indexOf('gpt-4o-image') !== -1);
+        if (!_isOtherProvider) {
+            model = options.model;
+        } else {
+            console.warn('[generateImageOpenAI] 忽略 AI 传来的其他提供商模型:', options.model, '使用配置模型:', _openaiModel);
+        }
+    }
+    var apiUrl = baseUrl + '/images/generations';
+    var n = Math.min(options.n || 1, 10);
+    var size = _aspectRatioToOpenAISize(options.aspect_ratio || '1:1', options);
+
+    try {
+        var body = {
+            model: model,
+            prompt: prompt,
+            n: n,
+            size: size,
+            response_format: 'b64_json'
+        };
+        // gpt-image-1 支持 quality / background / moderation 参数
+        if (options.quality) body.quality = options.quality;
+        if (options.background) body.background = options.background;
+        if (options.moderation) body.moderation = options.moderation;
+
+        var response = await window.proxyFetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(900000)
+        });
+
+        if (!response.ok) {
+            var errText = await response.text().catch(function() { return response.statusText; });
+            throw new Error('OpenAI 生图请求失败 (' + response.status + '): ' + errText.substring(0, 300));
+        }
+
+        var data = await response.json();
+        if (data.error) throw new Error('OpenAI 错误: ' + (data.error.message || JSON.stringify(data.error)));
+
+        // 复用通用提取器 (支持 data.data[{b64_json, url}] 格式)
+        var images = _extractImagesFromResponse(data);
+        if (images.length === 0) throw new Error('OpenAI 未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
+
+        // 上传到服务器获取持久 URL
+        var _uploaded = [];
+        for (var _ui = 0; _ui < images.length; _ui++) {
+            var _srvUrl = await uploadImageToServer(images[_ui]);
+            _uploaded.push(_srvUrl || images[_ui]);
+        }
+        return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
+    } catch (e) {
+        console.error('[generateImageOpenAI] error:', e);
+        throw e;
+    }
+}
+
+// ===== 自定义提供商 (OpenAI 兼容 /v1/images/generations) =====
+async function generateImageCustom(prompt, options = {}) {
+    let baseUrl = (localStorage.getItem('imageBaseUrlCustom') || '').replace(/\/$/, '');
+    if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
+    var rawKey = localStorage.getItem('imageApiKeyCustom') || '';
+    let apiKey = '';
+    try { apiKey = await decrypt(rawKey) || ''; } catch(e) { console.error('[generateImageCustom] decrypt error:', e.message); }
+
+    if (!baseUrl) throw new Error('未配置自定义 API 地址,请在设置-图像生成中填写');
+    if (!apiKey) throw new Error('未配置自定义 API Key,请在设置-图像生成中填写');
+
+    // ★ 过滤 AI 传来的其他提供商模型名,只使用配置的模型
+    // 阻断范围: MiniMax(image-01/minimax) / OpenRouter(gpt-5.4-image/gpt-4o-image) / 所有 gpt-image-* 变体
+    // 自定义提供商用户已显式配置模型,AI 不应覆盖为其他 gpt-image 变体
+    var _customModel = localStorage.getItem('imageModel_custom') || '';
+    var model = _customModel;
+    if (options.model && options.model !== _customModel) {
+        var _m = options.model.toLowerCase();
+        var _isOtherProvider = (_m.indexOf('image-01') !== -1 || _m.indexOf('minimax') !== -1 ||
+            _m.indexOf('gpt-5.4-image') !== -1 || _m.indexOf('gpt-4o-image') !== -1 ||
+            _m.indexOf('gpt-image-') !== -1);
+        if (!_isOtherProvider) {
+            model = options.model;
+        } else {
+            console.warn('[generateImageCustom] 忽略 AI 传来的其他提供商模型:', options.model, '使用配置模型:', _customModel);
+        }
+    }
+    if (!model) throw new Error('未配置自定义模型名,请在图像生成的模型字段填写');
+
+    var apiUrl = baseUrl + '/images/generations';
+    var n = Math.min(options.n || 1, 10);
+    var size = _aspectRatioToOpenAISize(options.aspect_ratio || '1:1', options);
+
+    try {
+        var body = { model: model, prompt: prompt, n: n, size: size, response_format: 'b64_json' };
+        if (options.quality) body.quality = options.quality;
+
+        var response = await window.proxyFetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(900000)
+        });
+
+        if (!response.ok) {
+            var errText = await response.text().catch(function() { return response.statusText; });
+            throw new Error('自定义生图请求失败 (' + response.status + '): ' + errText.substring(0, 300));
+        }
+
+        var data = await response.json();
+        if (data.error) throw new Error('自定义 API 错误: ' + (data.error.message || JSON.stringify(data.error)));
+
+        var images = _extractImagesFromResponse(data);
+        if (images.length === 0) throw new Error('自定义 API 未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
+
+        var _uploaded = [];
+        for (var _ui = 0; _ui < images.length; _ui++) {
+            var _srvUrl = await uploadImageToServer(images[_ui]);
+            _uploaded.push(_srvUrl || images[_ui]);
+        }
+        return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
+    } catch (e) {
+        console.error('[generateImageCustom] error:', e);
+        throw e;
+    }
+}
+
 // ★ GPT Image 2 原生图生图 — chat/completions + 多图参考
 async function _gptImageI2I(prompt, primaryImage, options = {}) {
-    let baseUrl = (localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api').replace(/\/$/, '');
+    // ★ 优先使用用户当前配置的提供商(而非硬编码 OpenRouter)
+    var _i2iCurProvider = localStorage.getItem('imageProvider') || 'openrouter';
+    var _i2iIsCustom = (_i2iCurProvider === 'custom');
+    var _i2iBaseKey = _i2iIsCustom ? 'imageBaseUrlCustom' : 'imageBaseUrlOpenrouter';
+    var _i2iKeyKey  = _i2iIsCustom ? 'imageApiKeyCustom'  : 'imageApiKeyOpenrouter';
+    var _i2iDefUrl  = _i2iIsCustom ? '' : 'https://openrouter.ai/api';
+
+    let baseUrl = (localStorage.getItem(_i2iBaseKey) || _i2iDefUrl).replace(/\/$/, '');
     if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
-    var rawKey = localStorage.getItem('imageApiKeyOpenrouter') || '';
+    var rawKey = localStorage.getItem(_i2iKeyKey) || '';
     let apiKey = '';
     try { apiKey = await decrypt(rawKey) || ''; } catch(e) {}
-    if (!apiKey) throw new Error('未配置 OpenRouter API Key');
+    if (!apiKey) throw new Error('未配置 API Key(提供商: ' + _i2iCurProvider + ')');
 
-    var model = options.model || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    var model = options.model || localStorage.getItem('imageModel_' + _i2iCurProvider) || localStorage.getItem('imageModel_openrouter') || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
     var chatUrl = baseUrl + '/chat/completions';
     var n = options.n || 1;
     var aspectRatio = options.aspect_ratio || '1:1';
@@ -757,14 +945,26 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
     var _is_gpt_image = _i2i_model.includes('gpt-5.4-image') || _i2i_model.includes('gpt-4o-image') || _i2i_model.includes('gpt-image');
 
     // ★ GPT Image 2 原生支持图生图 — 用 chat/completions + 多图参考
-    if (_is_gpt_image && _i2i_provider === 'openrouter') {
+    // 支持 OpenRouter 和自定义提供商(用户可能配置了 chatgpt codex 等兼容端点)
+    if (_is_gpt_image && (_i2i_provider === 'openrouter' || _i2i_provider === 'custom')) {
         return await _gptImageI2I(prompt, image, options);
     }
 
-    // OpenRouter 其他模型降级为文生图
-    if (_i2i_provider === 'openrouter') {
+    // OpenRouter / 自定义 其他模型降级为文生图
+    if (_i2i_provider === 'openrouter' || _i2i_provider === 'custom') {
         return window.generateImage(prompt, options);
     }
+
+    // ★ OpenAI / 自定义 原生图生图 — /v1/images/edits
+    if (_i2i_provider === 'openai' || _i2i_provider === 'custom') {
+        try {
+            return await _openaiImageEdit(prompt, image, options);
+        } catch (e) {
+            console.warn('[_openaiImageEdit] 图生图失败,降级为文生图:', e.message);
+            return window.generateImage(prompt, options);
+        }
+    }
+
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
     var MAX_PROMPT_LEN = 1400;
     if (prompt.length > MAX_PROMPT_LEN) prompt = prompt.slice(0, MAX_PROMPT_LEN);
@@ -898,6 +1098,114 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
         console.error('Image i2i error:', e);
         throw e;
     }
+};
+
+// ★ OpenAI / 自定义 原生图生图 — /v1/images/edits (multipart form)
+async function _openaiImageEdit(prompt, image, options = {}) {
+    var provider = localStorage.getItem('imageProvider') || 'openai';
+    var isCustom = provider === 'custom';
+    let baseUrl = (localStorage.getItem(isCustom ? 'imageBaseUrlCustom' : 'imageBaseUrlOpenai') || (isCustom ? '' : 'https://api.openai.com/v1')).replace(/\/$/, '');
+    if (baseUrl && !baseUrl.endsWith('/v1')) baseUrl = baseUrl + '/v1';
+    var rawKey = localStorage.getItem(isCustom ? 'imageApiKeyCustom' : 'imageApiKeyOpenai') || '';
+    let apiKey = '';
+    try { apiKey = await decrypt(rawKey) || ''; } catch(e) {}
+
+    if (!baseUrl) throw new Error('未配置 API 地址');
+    if (!apiKey) throw new Error('未配置 API Key');
+
+    // ★ 图生图: 优先使用提供商独立键,回退通用键;AI 传来的模型名仅在不匹配已知其他提供商模型时采纳
+    var _editConfiguredModel = localStorage.getItem('imageModel_' + provider) || localStorage.getItem('imageModel') || 'gpt-image-1';
+    var model = _editConfiguredModel;
+    if (options.model && options.model !== _editConfiguredModel) {
+        var _em = options.model.toLowerCase();
+        var _isOtherProviderEdit = (_em.indexOf('image-01') !== -1 || _em.indexOf('minimax') !== -1 ||
+            _em.indexOf('gpt-5.4-image') !== -1 || _em.indexOf('gpt-4o-image') !== -1 ||
+            _em.indexOf('gpt-image-') !== -1);
+        if (!_isOtherProviderEdit) {
+            model = options.model;
+        }
+    }
+    var apiUrl = baseUrl + '/images/edits';
+    var size = _aspectRatioToOpenAISize(options.aspect_ratio || '1:1', options);
+    var n = Math.min(options.n || 1, 10);
+
+    // 将图片(data URL / URL / 相对路径)转为 Blob
+    var imageBlob;
+    if (image.startsWith('data:')) {
+        var parts = image.split(',');
+        var mimeMatch = parts[0].match(/:(.*?);/);
+        var mime = mimeMatch ? mimeMatch[1] : 'image/png';
+        var bstr = atob(parts[1]);
+        var u8arr = new Uint8Array(bstr.length);
+        for (var _bi = 0; _bi < bstr.length; _bi++) u8arr[_bi] = bstr.charCodeAt(_bi);
+        imageBlob = new Blob([u8arr], { type: mime });
+    } else {
+        // URL 或相对路径 → 先 fetch 下载
+        var imgUrl = image.startsWith('http') ? image : window.location.origin + image;
+        var imgResp = await window.proxyFetch(imgUrl);
+        if (!imgResp.ok) throw new Error('下载参考图失败: ' + imgResp.status);
+        imageBlob = await imgResp.blob();
+    }
+
+    // 构建 multipart form data
+    var formData = new FormData();
+    formData.append('image', imageBlob, 'image.png');
+    formData.append('model', model);
+    formData.append('prompt', prompt || '基于参考图生成新图片');
+    formData.append('n', String(n));
+    formData.append('size', size);
+    if (options.quality) formData.append('quality', options.quality);
+    if (options.mask_image && (options.mask_image.startsWith('data:') || options.mask_image.startsWith('http'))) {
+        formData.append('mask', options.mask_image.startsWith('data:') ? dataURLtoBlob(options.mask_image) : options.mask_image);
+    }
+
+    var response = await window.proxyFetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey },
+        body: formData,
+        signal: AbortSignal.timeout(900000)
+    });
+
+    if (!response.ok) {
+        var errText = await response.text().catch(function() { return response.statusText; });
+        throw new Error('图生图请求失败 (' + response.status + '): ' + errText.substring(0, 300));
+    }
+
+    var data = await response.json();
+    if (data.error) throw new Error('图生图错误: ' + (data.error.message || JSON.stringify(data.error)));
+
+    var images = _extractImagesFromResponse(data);
+    if (images.length === 0) throw new Error('图生图未返回图片,响应: ' + JSON.stringify(data).substring(0, 500));
+
+    var _uploaded = [];
+    for (var _ui = 0; _ui < images.length; _ui++) {
+        var _srvUrl = await uploadImageToServer(images[_ui]);
+        _uploaded.push(_srvUrl || images[_ui]);
+    }
+    return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
+}
+
+// ★ 辅助: data URL → Blob
+function dataURLtoBlob(dataUrl) {
+    var parts = dataUrl.split(',');
+    var mimeMatch = parts[0].match(/:(.*?);/);
+    var mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    var bstr = atob(parts[1]);
+    var u8arr = new Uint8Array(bstr.length);
+    for (var i = 0; i < bstr.length; i++) u8arr[i] = bstr.charCodeAt(i);
+    return new Blob([u8arr], { type: mime });
+}
+
+// ★ 构建带元数据的图片对象 — 统一存储格式
+window.buildImageMeta = function(url, prompt, options) {
+    return {
+        url: url,
+        prompt: prompt || '',
+        model: (options && options.model) || localStorage.getItem('imageModel_' + (localStorage.getItem('imageProvider') || 'minimax')) || '',
+        aspect_ratio: (options && options.aspect_ratio) || '1:1',
+        timestamp: Date.now(),
+        notes: (options && options.notes) || ''  // ★ 新增：用户备注
+    };
 };
 
 

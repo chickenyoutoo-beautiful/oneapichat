@@ -125,6 +125,7 @@ switch ($action) {
         $msg_id = urlencode($_GET['msg_id'] ?? '');
         $since = intval($_GET['since'] ?? 0);
         $stream_id = urlencode($_GET['stream_id'] ?? '');
+        $snapshot = intval($_GET['snapshot'] ?? 0);
         if (!$msg_id && !$stream_id) {
             http_response_code(400);
             echo json_encode(['error' => 'msg_id or stream_id required']);
@@ -137,7 +138,8 @@ switch ($action) {
         header('Cache-Control: no-cache');
         header('X-Accel-Buffering: no');
         $stream_url = $engine_url . '/engine/chat/stream?msg_id=' . $msg_id
-            . '&since=' . $since . '&stream_id=' . $stream_id . $userParam;
+            . '&since=' . $since . '&stream_id=' . $stream_id
+            . '&snapshot=' . $snapshot . $userParam;
         $ch = curl_init($stream_url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => false,
@@ -326,12 +328,36 @@ switch ($action) {
 
 
     case 'exec':
-        $cmd = $_GET['cmd'] ?? '';
+        $cmd = '';
         $timeout = intval($_GET['timeout'] ?? 60);
         $cwd = $_GET['cwd'] ?? '';
+        // ★ 复杂命令(含引号/特殊字符)用 POST JSON/raw body 传输,避免 URL 转义和长度限制
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $rawBody = file_get_contents('php://input');
+            if ($rawBody !== false && trim($rawBody) !== '') {
+                $parsed = json_decode($rawBody, true);
+                if (is_array($parsed)) {
+                    $cmd = $parsed['cmd'] ?? $parsed['command'] ?? '';
+                    if (isset($parsed['timeout'])) $timeout = intval($parsed['timeout']);
+                    if (isset($parsed['cwd'])) $cwd = $parsed['cwd'];
+                } else {
+                    $cmd = $rawBody;
+                }
+            }
+        }
+        if ($cmd === '') $cmd = $_GET['cmd'] ?? $_GET['command'] ?? '';
         if (!$cmd) { echo json_encode(['error' => '缺少cmd']); exit; }
-        $url = $engine_url . '/engine/exec?cmd=' . urlencode($cmd) . '&timeout=' . $timeout . '&cwd=' . urlencode($cwd);
-        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        $url = $engine_url . '/engine/exec?timeout=' . $timeout . '&cwd=' . urlencode($cwd) . $userParam;
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $cmd);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout + 10);
+        $resp = curl_exec($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+        echo $resp ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . $err]);
         break;
 
     case 'python':
@@ -1066,6 +1092,8 @@ switch ($action) {
             $vh_post = json_decode($vh_raw, true);
             if ($vh_post) $vh_args = array_merge($vh_args, $vh_post);
         }
+        // ★ 2026-08-03 云盘全面结合: 透传用户上下文, 下载完成自动同步到该用户云盘
+        if ($userId) $vh_args['user_id'] = $userId;
         $vh_ctx = stream_context_create(['http' => [
             'method' => 'POST',
             'header' => "Content-Type: application/json\r\n",
@@ -1095,6 +1123,8 @@ switch ($action) {
             $bili_post = json_decode($bili_raw, true);
             if ($bili_post) $bili_args = array_merge($bili_args, $bili_post);
         }
+        // ★ 2026-08-03 云盘全面结合: 透传用户上下文, 下载完成自动同步到该用户云盘
+        if ($userId) $bili_args['user_id'] = $userId;
         $bili_ctx = stream_context_create(['http' => [
             'method' => 'POST',
             'header' => "Content-Type: application/json\r\n",

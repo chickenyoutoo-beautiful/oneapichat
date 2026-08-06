@@ -23,6 +23,38 @@ function cleanImageUrl(url) {
     return url;
 }
 
+/**
+ * ★ 统一提取图片URL — 兼容新旧格式
+ * 旧格式: generatedImages = ["url1", "url2"]
+ * 新格式: generatedImages = [{url, prompt, model, aspect_ratio, timestamp}, ...]
+ */
+function getImageUrl(imgData) {
+    if (!imgData) return '';
+    if (typeof imgData === 'string') return imgData;
+    if (typeof imgData === 'object' && imgData.url) return imgData.url;
+    return '';
+}
+
+/**
+ * ★ 统一提取图片元数据 — 向后兼容
+ * 返回 { url, prompt, model, aspect_ratio, timestamp }
+ * 旧格式字符串返回 { url, prompt: '', model: '', aspect_ratio: '', timestamp: 0 }
+ */
+function getImageMeta(imgData) {
+    var url = getImageUrl(imgData);
+    if (typeof imgData === 'object' && imgData.url) {
+        return {
+            url: url,
+            prompt: imgData.prompt || '',
+            model: imgData.model || '',
+            aspect_ratio: imgData.aspect_ratio || '',
+            timestamp: imgData.timestamp || 0,
+            notes: imgData.notes || ''  // ★ 新增
+        };
+    }
+    return { url: url, prompt: '', model: '', aspect_ratio: '', timestamp: 0, notes: '' };
+}
+
 async function uploadImageToServer(imageInput) {
     try {
         var base64Data = imageInput;
@@ -203,7 +235,7 @@ const DEFAULT_CONFIG = {
     agentAutoDecision: true,
     agentProactive: false,
     agentMaxToolRounds: 50,
-    agentThinkingDepth: 'standard',
+    thinkingIntensity: 'medium',
     agentSystemPrompt: `你现在处于 Agent 模式,拥有增强自主能力。
 ## 子代理角色系统
 使用 delegate_task 时可以通过 role 参数选择子代理角色:

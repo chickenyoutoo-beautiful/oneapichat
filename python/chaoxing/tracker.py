@@ -12,23 +12,55 @@ class LearningTracker:
         self.phone = phone
         # ★ 确保 DB 文件和目录可写（以防 owner 不匹配导致 readonly 错误）
         self.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.DB_PATH))
+        self._ensure_writable()
+        self._init_db()
+
+    def _ensure_writable(self):
+        """写能力探测 + 自修复。
+
+        sqlite3.connect() 在只读文件上不抛错（SQLite 惰性降级为只读打开），
+        真正的 "attempt to write a readonly database" 出现在第一次写操作时——
+        因此用 CREATE/DROP 临时表主动触发真实写页面（只读库立即抛 OperationalError，探测后零残留）。
+        探测失败则尝试修复：目录 775 + 文件 664（chown 到 www-data 需 root 才有效），
+        修复后重连重测；仍失败抛出带修复命令的明确错误。
+        """
+        import os
+
+        def _probe():
+            self.conn.execute("CREATE TABLE IF NOT EXISTS __rw_probe (id INTEGER)")
+            self.conn.commit()
+            self.conn.execute("DROP TABLE IF EXISTS __rw_probe")
+            self.conn.commit()
+
         try:
-            self.conn = sqlite3.connect(str(self.DB_PATH))
+            _probe()
+            return
         except sqlite3.OperationalError as e:
-            if "readonly" in str(e).lower() or "permission" in str(e).lower():
-                # 尝试修复权限后重试
-                import os, pwd, grp
-                try:
+            if "readonly" not in str(e).lower() and "permission" not in str(e).lower():
+                raise
+            # 只读 → 尝试自修复（属主/root 才能生效；www-data 改不动别人的文件则保持原状）
+            try:
+                os.chmod(str(self.DB_PATH.parent), 0o775)
+                os.chmod(str(self.DB_PATH), 0o664)
+                if os.geteuid() == 0:
+                    import grp, pwd
                     www_uid = pwd.getpwnam('www-data').pw_uid
                     www_gid = grp.getgrnam('www-data').gr_gid
                     os.chown(str(self.DB_PATH), www_uid, www_gid)
-                    os.chmod(str(self.DB_PATH), 0o664)
-                except Exception:
-                    pass
-                self.conn = sqlite3.connect(str(self.DB_PATH))
-            else:
-                raise
-        self._init_db()
+                    os.chown(str(self.DB_PATH.parent), www_uid, www_gid)
+            except Exception:
+                pass
+            self.conn = sqlite3.connect(str(self.DB_PATH))
+            try:
+                _probe()
+                return
+            except sqlite3.OperationalError as e2:
+                raise sqlite3.OperationalError(
+                    f"learning_records.db 不可写 (uid={os.geteuid()}): {e2} — "
+                    f"请以 root 执行: chown www-data:www-data python/chaoxing/learning_records.db "
+                    f"&& chmod 664 python/chaoxing/learning_records.db && chmod 775 python/chaoxing/"
+                ) from e2
 
     def _init_db(self):
         self.conn.executescript("""

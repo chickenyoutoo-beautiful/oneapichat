@@ -302,12 +302,20 @@ if (_dd) document.documentElement.classList.add('dark');
                         <select id="tikuAIModel" class="flex-1 mt-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 outline-none">
                             <option value="deepseek-chat">deepseek-chat</option>
                         </select>
-                        <button onclick="syncModels()" class="shrink-0 mt-1 px-2 py-1 text-xs text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition">↻</button>
+                        <button id="syncModelsBtn" onclick="syncModels()" class="shrink-0 mt-1 px-2 py-1 text-xs text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition">↻</button>
                     </div>
                     <div class="flex items-center gap-2">
                         <label class="text-xs text-gray-500 shrink-0">API Key</label>
                         <input id="tikuAIKey" type="password" class="flex-1 mt-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 outline-none" placeholder="sk-xxx">
                         <button onclick="syncAIKey()" class="shrink-0 mt-1 px-2 py-1 text-xs text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition">同步</button>
+                    </div>
+                    <div class="flex items-center justify-between pt-1">
+                        <span class="text-xs text-gray-600 dark:text-gray-400">AI 联网搜索（Tavily）</span>
+                        <label class="switch"><input type="checkbox" id="tikuAISearch"><span class="slider"></span></label>
+                    </div>
+                    <div class="flex items-center gap-2" id="tikuAISearchKeyRow">
+                        <label class="text-xs text-gray-500 shrink-0">搜索 Key</label>
+                        <input id="tikuAISearchKey" type="password" class="flex-1 mt-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 outline-none" placeholder="tvly-xxx（同步主客户端自动带入）">
                     </div>
                 </div>
                 <!-- 自动提交答题 -->
@@ -1593,7 +1601,7 @@ function setStatus(text, cls) {
 
         $('tikuProvider').addEventListener('change', toggleTikuProvider);
 
-        async function syncModels() {
+        async function syncModels(baseUrlArg, keyArg) {
             var sel = $('tikuAIModel');
             var cached = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
             if (cached.length > 0) {
@@ -1601,16 +1609,35 @@ function setStatus(text, cls) {
                     return '<option value="' + m + '">' + m + '</option>';
                 }).join('');
             }
-            var key = await _getApiKey();
-            var baseUrl = _getBaseUrl();
+            // ★ 优先使用传入的服务器同步配置；未传时回退服务器 ai_sync，最后才用 localStorage
+            var key = keyArg || '';
+            var baseUrl = baseUrlArg || '';
+            if (!key || !baseUrl) {
+                try {
+                    const r = await fetch('/oneapichat/api/chaoxing_api.php?action=ai_sync&auth_token=' + encodeURIComponent(_getAuthToken()));
+                    const d = await r.json();
+                    const ai = d.ai || {};
+                    key = key || ai.api_key || '';
+                    baseUrl = baseUrl || ai.base_url || '';
+                } catch(e) {}
+            }
+            key = key || await _getApiKey();
+            baseUrl = baseUrl || _getBaseUrl();
             if (!key || !baseUrl) { showToast('已加载缓存列表（共' + (cached.length || 0) + '个）', 'info'); return; }
-            sel.innerHTML = sel.innerHTML || '<option>加载中...</option>';
+            // ★ 按钮 loading 反馈 — 让用户知道点击生效了
+            var btn = $('syncModelsBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; btn.style.opacity = '0.6'; }
+            sel.innerHTML = '<option>加载中...</option>';
             try {
-                var r = await fetch(baseUrl.replace(/\/+$/, '') + '/models', {
-                    headers: { 'Authorization': 'Bearer ' + key }
-                });
+                // ★ 走本地 PHP 代理绕过 CORS（chaoxing.html 单文件无法加载 proxyFetch）
+                var proxyUrl = '/oneapichat/api/chaoxing_api.php?action=models_proxy'
+                    + '&url=' + encodeURIComponent(baseUrl)
+                    + '&key=' + encodeURIComponent(key)
+                    + '&auth_token=' + encodeURIComponent(_getAuthToken());
+                var r = await fetch(proxyUrl);
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 var data = await r.json();
+                if (data.error) throw new Error(data.error);
                 var models = data.data || [];
                 if (models.length) {
                     sel.innerHTML = models.map(function(m) {
@@ -1620,24 +1647,41 @@ function setStatus(text, cls) {
                     var modelIds = models.map(function(m) { return m.id; });
                     localStorage.setItem('autoDetectedTextModels', JSON.stringify(modelIds));
                     showToast('已获取 ' + sel.options.length + ' 个模型', 'success');
+                } else {
+                    throw new Error('empty');
                 }
             } catch(e) {
-                if (cached.length > 0) showToast('已使用缓存模型列表', 'info');
+                if (cached.length > 0) showToast('刷新失败，已使用缓存列表（' + e.message + '）', 'info');
                 else sel.innerHTML = '<option value="deepseek-chat">deepseek-chat</option>';
+            } finally {
+                // ★ 恢复按钮状态
+                if (btn) { btn.disabled = false; btn.innerHTML = '↻'; btn.style.opacity = '1'; }
             }
         }
 
 
         async function syncAIKey() {
-            var key = await _getApiKey();
-            var url = _getBaseUrl();
-            if (key) {
-                $('tikuAIKey').value = key;
-                $('tikuAIUrl').value = url;
-                syncModels();
-                showToast('已同步API Key和模型列表', 'success');
-            } else {
-                showToast('未找到聊天API Key，请先在设置中配置', 'error');
+            // ★ 从服务器主客户端配置同步（users/{uid}_config.json，密钥后端解密），
+            //   不再依赖可能过时的 localStorage.apiKey/baseUrl
+            try {
+                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=ai_sync&auth_token=' + encodeURIComponent(_getAuthToken()));
+                const d = await r.json();
+                const ai = d.ai || {};
+                if (ai.api_key) {
+                    $('tikuAIKey').value = ai.api_key;
+                    if (ai.base_url) $('tikuAIUrl').value = ai.base_url;
+                    if (ai.model) $('tikuAIModel').value = ai.model;
+                    if (ai.search_key) {
+                        $('tikuAISearchKey').value = ai.search_key;
+                        $('tikuAISearch').checked = ai.search_enabled === '1';
+                    }
+                    await syncModels(ai.base_url || '', ai.api_key);
+                    showToast('已从主客户端同步 API Key/模型/搜索配置', 'success');
+                } else {
+                    showToast('服务器未保存主客户端配置，请先在聊天设置中保存配置', 'error');
+                }
+            } catch(e) {
+                showToast('同步失败：' + e.message, 'error');
             }
         }
 
@@ -1651,8 +1695,28 @@ function setStatus(text, cls) {
                 $('tikuSubmit').checked = d.submit !== false;
                 $('tikuTrue').value = d.true_list || '正确,对,√,是';
                 $('tikuFalse').value = d.false_list || '错误,错,×,否,不对,不正确';
-                $('tikuAIUrl').value = d.ai_base_url || _getBaseUrl();
-                $('tikuAIKey').value = d.ai_key || await _getApiKey() || '';
+                $('tikuAISearch').checked = d.ai_search === '1';
+                $('tikuAISearchKey').value = d.ai_search_key || '';
+                // ★ 刷课配置里没有 AI 配置时，优先从服务器主客户端配置同步（替代过时 localStorage）
+                var aiUrl = d.ai_base_url || '';
+                var aiKey = d.ai_key || '';
+                var aiModel = d.ai_model || '';
+                if (!aiUrl || !aiKey) {
+                    try {
+                        const r = await fetch('/oneapichat/api/chaoxing_api.php?action=ai_sync&auth_token=' + encodeURIComponent(_getAuthToken()));
+                        const s = await r.json();
+                        const ai = s.ai || {};
+                        aiUrl = aiUrl || ai.base_url || '';
+                        aiKey = aiKey || ai.api_key || '';
+                        aiModel = aiModel || ai.model || '';
+                        if (ai.search_key && !$('tikuAISearchKey').value) {
+                            $('tikuAISearchKey').value = ai.search_key;
+                            if (ai.search_enabled === '1') $('tikuAISearch').checked = true;
+                        }
+                    } catch(e) {}
+                }
+                $('tikuAIUrl').value = aiUrl || _getBaseUrl();
+                $('tikuAIKey').value = aiKey || '';
                 // 从聊天系统拉取模型列表
                 try {
                     var models = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
@@ -1663,7 +1727,7 @@ function setStatus(text, cls) {
                         }).join('');
                     }
                 } catch(e) {}
-                $('tikuAIModel').value = d.ai_model || localStorage.getItem('model') || 'deepseek-chat';
+                $('tikuAIModel').value = aiModel || localStorage.getItem('model') || 'deepseek-chat';
                 toggleTikuProvider();
             } catch(e) {}
         }
@@ -1682,6 +1746,8 @@ function setStatus(text, cls) {
                 params.append('ai_base_url', $('tikuAIUrl').value);
                 params.append('ai_model', $('tikuAIModel').value);
                 params.append('ai_key', $('tikuAIKey').value);
+                params.append('ai_search', $('tikuAISearch').checked ? '1' : '0');
+                params.append('ai_search_key', $('tikuAISearchKey').value);
             }
             try {
                 const r = await fetch('/oneapichat/api/chaoxing_api.php?action=save_tiku&' + params + '&auth_token=' + encodeURIComponent(_getAuthToken()));

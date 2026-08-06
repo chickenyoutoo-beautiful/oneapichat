@@ -148,26 +148,32 @@ class BrowserManager:
     async def navigate(self, url: str, timeout: int = 30000) -> dict:
         """导航到 URL"""
         await self._ensure_page()
+        # 代理链路瞬时故障容错: 代理节点抖动 (net::ERR_EMPTY_RESPONSE 等) 会令单次 goto
+        # 失败, 网络级错误自动重试 1 次 (800ms 退避); 非网络级错误不重试
+        last_error = None
+        for attempt in range(2):
+            try:
+                await self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+                if "net::ERR_" not in str(e) or attempt == 1:
+                    break
+                await asyncio.sleep(0.8)
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
             title = await self._page.title()
-            return {
+            result = {
                 "ok": True,
                 "url": self._page.url,
                 "title": title,
             }
-        except Exception as e:
-            # 超时后可能部分加载, 获取已有内容
-            try:
-                title = await self._page.title()
-                return {
-                    "ok": True,
-                    "url": self._page.url,
-                    "title": title,
-                    "warning": f"页面加载未完全完成: {str(e)}",
-                }
-            except Exception:
-                return {"ok": False, "error": f"导航失败: {str(e)}"}
+            if last_error:
+                # 重试后仍失败: 页面可能部分加载, 获取已有内容并告警
+                result["warning"] = f"页面加载未完全完成: {last_error!s}"
+            return result
+        except Exception:
+            return {"ok": False, "error": f"导航失败: {last_error!s}"}
 
     # ── 截图 ──────────────────────────────────────────
 

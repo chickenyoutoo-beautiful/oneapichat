@@ -225,11 +225,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($writeOk) {
         @chmod($filepath, 0644);  // 确保 engine 进程可读
         $url = '/oneapichat/uploads/' . $subDir . '/' . rawurlencode($filename);
+
+        // ★ 2026-08-03 云盘全面结合: 已登录用户上传的文件同步到其绑定的 Cloudreve 账号 OneAPIChat/uploads
+        //   失败不阻塞主流程（本地 URL 仍可用），仅记日志
+        $cloudreve = null;
+        if ($userId) {
+            require_once __DIR__ . '/cloudreve_lib.php';
+            $crResult = cr_importFile($userId, $filepath, 'uploads');
+            $cloudreve = [
+                'synced' => !empty($crResult['success']),
+                'path' => $crResult['cloudreve_path'] ?? '',
+                'source' => $crResult['source'] ?? '',
+                'error' => $crResult['error'] ?? null,
+            ];
+            if (empty($crResult['success'])) {
+                error_log('[cloudreve] upload.php 自动导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$filepath");
+            }
+        }
+
         echo json_encode([
             'url' => $url,
             'path' => $filepath,
             'size' => $finalSize,
-            'type' => $ext
+            'type' => $ext,
+            'cloudreve' => $cloudreve,
         ]);
     } else {
         http_response_code(500);

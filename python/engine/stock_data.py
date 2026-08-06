@@ -12,19 +12,23 @@ stock_data.py — A股数据引擎 v1.0
 """
 
 import json
+import math
 import os
+import re
 import time
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
 
+import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ── 配置 ──────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+# ★ parents[2]: 本文件在 python/engine/ 下, parent.parent 只到 python/ (老 bug: 图表存错目录)
+PROJECT_ROOT = Path(__file__).parents[2].resolve()
 CHART_DIR = PROJECT_ROOT / "uploads" / "stock_charts"
 CHART_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -54,8 +58,9 @@ def _get_session() -> requests.Session:
     with _session_lock:
         if _session is None:
             s = requests.Session()
+            # connect=0: 连接被拒/超时 (东财风控特征) 不重试立即失败, 让腾讯 fallback 尽快接管
             retry = Retry(
-                total=5, backoff_factor=1.5,
+                total=3, connect=0, read=0, backoff_factor=0.5,
                 status_forcelist=[500, 502, 503, 504],
                 allowed_methods=["GET"],
                 raise_on_status=False,
@@ -91,12 +96,28 @@ def _http_get(url: str, **kwargs) -> dict:
             r = s.get(url, timeout=timeout, proxies={"http": None, "https": None}, **kwargs)
             r.raise_for_status()
             data = r.json()
-            if data.get("rc") == 0 and not data.get("data"):
-                raise ValueError("Empty data from eastmoney")
+            rc = data.get("rc")
+            # rc 非 0 (如 102=参数失效/风控) 或 rc 0 但 data 为空 → 触发重试/兜底
+            if rc is not None and (rc != 0 or not data.get("data")):
+                raise ValueError(f"eastmoney bad response rc={rc}")
             return data
         except (requests.exceptions.ConnectionError, ValueError, requests.exceptions.RequestException):
             pass
-        # 直连失败回退 curl
+        # ★ 主域名失败回退 push2delay (东财风控降级服务器, 延时行情; 302 重定向也指向它)
+        alt_url = url.replace("push2.eastmoney.com", "push2delay.eastmoney.com") \
+                     .replace("push2his.eastmoney.com", "push2delay.eastmoney.com")
+        if alt_url != url:
+            try:
+                r = s.get(alt_url, timeout=timeout, proxies={"http": None, "https": None}, **kwargs)
+                r.raise_for_status()
+                data = r.json()
+                rc = data.get("rc")
+                if rc is not None and (rc != 0 or not data.get("data")):
+                    raise ValueError(f"eastmoney delay rc={rc}")
+                return data
+            except (requests.exceptions.ConnectionError, ValueError, requests.exceptions.RequestException):
+                pass
+        # 最后回退 curl
         return _http_get_curl(url)
 
     # 非东方财富: 走代理
@@ -104,8 +125,9 @@ def _http_get(url: str, **kwargs) -> dict:
         r = s.get(url, timeout=timeout, **kwargs)
         r.raise_for_status()
         data = r.json()
-        if data.get("rc") == 0 and not data.get("data"):
-            raise ValueError("Empty data from eastmoney")
+        rc = data.get("rc")
+        if rc is not None and (rc != 0 or not data.get("data")):
+            raise ValueError(f"eastmoney bad response rc={rc}")
         return data
     except (requests.exceptions.ConnectionError, ValueError, requests.exceptions.RequestException):
         pass
@@ -129,8 +151,8 @@ def _http_get_curl(url: str) -> dict:
         "-H", "Connection: close",
     ]
     try:
-        # 最多重试3次 (间隔5秒, 应对东方财富服务端限流/反爬)
-        for attempt in range(3):
+        # 最多重试2次 (间隔2秒); 风控时快速失败让腾讯 fallback 接管
+        for attempt in range(2):
             result = subprocess.run(
                 base_cmd + [url],
                 capture_output=True, text=True, timeout=30
@@ -140,8 +162,8 @@ def _http_get_curl(url: str) -> dict:
                     return json.loads(result.stdout)
                 except json.JSONDecodeError:
                     pass
-            if attempt < 2:
-                time.sleep(5)  # 5秒间隔, 避免触发限流
+            if attempt < 1:
+                time.sleep(2)
         return {"_error": f"curl failed after retries: {result.stderr[:80] or 'empty'}"}
     except Exception as e:
         return {"_error": f"curl exception: {str(e)[:100]}"}
@@ -163,6 +185,127 @@ def _cache_get(key: str):
 def _cache_set(key: str, data):
     with _cache_lock:
         _cache[key] = {"ts": time.time(), "data": data}
+
+
+# ── 腾讯行情 fallback ────────────────────────────────
+# 东方财富对高频访问 IP 间歇性风控 (push2 302→push2delay 延时行情, push2his 连接被拒)
+# 腾讯接口 (web.ifzq.gtimg.cn / qt.gtimg.cn) 无风控, 作为备用数据源
+
+
+def _to_tencent_symbol(symbol: str) -> str:
+    """股票代码 → 腾讯代码 (sh600519 / sz000001), 北交所等不支持返回空"""
+    s = symbol.strip()
+    if s.startswith(("sh", "sz")) and s[2:].isdigit():
+        return s
+    if s.startswith(("60", "68", "90", "11", "13")):
+        return f"sh{s}"
+    elif s.startswith(("00", "30", "20")):
+        return f"sz{s}"
+    return ""
+
+
+def _http_get_tencent(url: str, timeout: int = 15) -> dict:
+    """腾讯接口直连 (不走代理), 失败返回 {}"""
+    try:
+        s = _get_session()
+        r = s.get(url, timeout=timeout, proxies={"http": None, "https": None})
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return {}
+
+
+def _kline_tencent(symbol: str, period: str = "daily", count: int = 120,
+                   adjust: str = "qfq") -> list | None:
+    """腾讯 K 线 (东财风控时备用). 返回与东财 get_kline 相同的 rows 列表, 失败 None"""
+    tsym = _to_tencent_symbol(symbol)
+    if not tsym:
+        return None
+    tmap = {"daily": "day", "weekly": "week", "monthly": "month",
+            "5": "m5", "15": "m15", "30": "m30", "60": "m60"}
+    tperiod = tmap.get(period, "day")
+    if tperiod in ("m5", "m15", "m30", "m60"):
+        url = f"https://ifzq.gtimg.cn/appstock/app/kline/mkline?param={tsym},{tperiod},,{count}"
+        raw_key = tperiod
+    else:
+        fqt = {"qfq": "qfq", "hfq": "hfq", "": ""}.get(adjust, "qfq")
+        # 前/后复权: fqkline 返回 qfqday/hfqday; 不复权返回 day
+        # ★ 参数须为 6 字段 (symbol,period,起始日期,结束日期,count,adjust) — 4 字段会报 param error
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tsym},{tperiod},,,{count},{fqt}"
+        raw_key = "qfq" + tperiod if fqt == "qfq" else ("hfq" + tperiod if fqt == "hfq" else tperiod)
+    data = _http_get_tencent(url)
+    try:
+        node = data["data"][tsym]
+        raw = node.get(raw_key) or node.get(tperiod) or []
+    except Exception:
+        return None
+    if not raw:
+        return None
+    rows = []
+    for p in raw:
+        # 日K: [date,open,close,high,low,volume,...] / 分钟K: [datetime,open,close,high,low,volume,...]
+        # 注意: 日K第7个元素可能为 dict (含 amount/turnover 等附加字段)
+        try:
+            amount = 0.0
+            if len(p) > 6:
+                v6 = p[6]
+                if isinstance(v6, dict):
+                    amount = float(v6.get("amount", 0) or 0)
+                elif isinstance(v6, (int, float)):
+                    amount = float(v6)
+                elif isinstance(v6, str) and v6:
+                    amount = float(v6)
+            rows.append({
+                "date": p[0], "open": float(p[1]), "close": float(p[2]),
+                "high": float(p[3]), "low": float(p[4]), "volume": float(p[5]),
+                "amount": amount,
+            })
+        except (ValueError, IndexError, TypeError):
+            continue
+    return rows[-count:] if count > 0 else rows
+
+
+def _realtime_tencent(symbol: str) -> dict | None:
+    """腾讯实时行情 (东财风控时备用). 失败返回 None"""
+    tsym = _to_tencent_symbol(symbol)
+    if not tsym:
+        return None
+    try:
+        s = _get_session()
+        r = s.get(f"https://qt.gtimg.cn/q={tsym}", timeout=10,
+                  proxies={"http": None, "https": None})
+        r.raise_for_status()
+        # v_sh600519="1~贵州茅台~600519~1358.98~1350.60~1350.60~36147~...";
+        text = r.text
+        m = re.search(r'v_[a-z]+\d+="([^"]*)"', text)
+        if not m:
+            return None
+        f = m.group(1).split("~")
+        if len(f) < 40:
+            return None
+        price = float(f[3] or 0)
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "name": f[1],
+            "price": price,
+            "change_pct": round(float(f[32] or 0), 2),  # 涨跌幅%
+            "change_amt": round(float(f[31] or 0), 2),  # 涨跌额
+            "open": float(f[5] or 0),
+            "high": float(f[33] or 0),
+            "low": float(f[34] or 0),
+            "prev_close": float(f[4] or 0),
+            "volume": float(f[36] or 0),  # 手
+            "amount": float(f[37] or 0) * 10000,  # 元 (腾讯单位: 万)
+            "turnover": round(float(f[38] or 0), 2),  # 换手率%
+            "pe": float(f[39] or 0) or None,
+            "amplitude": round(float(f[43] or 0), 2),  # 振幅%
+            "market_cap": float(f[45] or 0) * 10000,  # 元
+            "float_cap": float(f[44] or 0) * 10000,  # 元
+            "source": "tencent",
+        }
+    except Exception:
+        return None
 
 
 # ── 代码 → secid 转换 ────────────────────────────────
@@ -211,9 +354,11 @@ def get_realtime(symbol: str) -> dict:
     )
     try:
         data = _http_get(url)
+        if data.get("_error"):
+            raise RuntimeError(data["_error"])
         d = data.get("data", {})
         if not d:
-            return {"ok": False, "error": f"未找到股票 {symbol}"}
+            raise RuntimeError(f"未找到股票 {symbol}")
 
         # 价格字段需要除以100 (东方财富精度系数)
         result = {
@@ -238,7 +383,12 @@ def get_realtime(symbol: str) -> dict:
         _cache_set(cache_key, result)
         return result
     except Exception as e:
-        return {"ok": False, "error": f"获取行情失败: {str(e)[:200]}"}
+        # ★ 东财风控时回退腾讯实时行情
+        t = _realtime_tencent(symbol)
+        if t:
+            _cache_set(cache_key, t)
+            return t
+        return {"ok": False, "error": f"获取行情失败: {str(e)[:200]} (东财与腾讯均不可用)"}
 
 
 # ═══════════════════════════════════════════════════════
@@ -271,16 +421,27 @@ def get_kline(symbol: str, period: str = "daily", start: str = "", end: str = ""
     if start and end:
         url += f"&beg={start}&end={end}"
     else:
-        # 用 lmt 参数指定条数
-        url = url.replace("&klt=", f"&lmt={count}&klt=")
+        # ★ 2026-08-03: 东财废弃 lmt 参数 (一律返回 rc:102), 改用 beg/end 拉取后截取末尾 count 条
+        # beg 按周期粗估放宽 (多拉数据由下方截取保证条数), 分钟线拉近 15 天即可
+        end_dt = datetime.now()
+        end = end_dt.strftime("%Y%m%d")
+        if klt in ("5", "15", "30", "60"):
+            beg = (end_dt - timedelta(days=15)).strftime("%Y%m%d")
+        elif klt == "102":  # weekly
+            beg = (end_dt - timedelta(days=count * 7 + 30)).strftime("%Y%m%d")
+        elif klt == "103":  # monthly
+            beg = (end_dt - timedelta(days=count * 31 + 30)).strftime("%Y%m%d")
+        else:  # daily
+            beg = (end_dt - timedelta(days=int(count * 1.8) + 30)).strftime("%Y%m%d")
+        url += f"&beg={beg}&end={end}"
 
     try:
         data = _http_get(url)
         if data.get("_error"):
-            return {"ok": False, "error": data["_error"]}
+            raise RuntimeError(data["_error"])
         raw = data.get("data", {})
         if not raw or not raw.get("klines"):
-            return {"ok": False, "error": f"未找到 {symbol} 的K线数据"}
+            raise RuntimeError(f"未找到 {symbol} 的K线数据 (rc={data.get('rc')})")
 
         rows = []
         for line in raw["klines"]:
@@ -292,6 +453,9 @@ def get_kline(symbol: str, period: str = "daily", start: str = "", end: str = ""
                 "change_pct": float(p[8]), "change_amt": float(p[9]),
                 "turnover": float(p[10]),
             })
+        # beg/end 模式可能多拉, 截取末尾 count 条
+        if count > 0 and len(rows) > count:
+            rows = rows[-count:]
 
         df = pd.DataFrame(rows)
         result = {
@@ -306,7 +470,27 @@ def get_kline(symbol: str, period: str = "daily", start: str = "", end: str = ""
         _cache_set(cache_key, result)
         return result
     except Exception as e:
-        return {"ok": False, "error": f"获取K线失败: {str(e)[:200]}"}
+        # ★ 东财风控/异常时回退腾讯行情 (东财对高频 IP 间歇性 302 延时/拒绝连接)
+        trowe = _kline_tencent(symbol, period, count, adjust)
+        if not trowe:
+            return {"ok": False, "error": f"获取K线失败: {str(e)[:150]} (东财与腾讯均不可用)"}
+        # 名称从腾讯实时行情补充 (K线响应无名称字段)
+        tname = ""
+        trt = _realtime_tencent(symbol)
+        if trt:
+            tname = trt.get("name", "")
+        result = {
+            "ok": True,
+            "symbol": symbol,
+            "name": tname,
+            "period": period,
+            "adjust": adjust,
+            "count": len(trowe),
+            "data": trowe,
+            "source": "tencent",
+        }
+        _cache_set(cache_key, result)
+        return result
 
 
 # ═══════════════════════════════════════════════════════
@@ -326,7 +510,7 @@ def get_sector_flow(sector_type: str = "2") -> dict:
         f"https://push2.eastmoney.com/api/qt/clist/get?"
         f"pn=1&pz=50&po=1&np=1&fltt=2&invt=2&"
         f"fid=f3&fs=m:90+t:{sector_type}&"
-        f"fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f22,f33,f11,f62,f128,f136,f115,f152,f124,f104,f105,f106"
+        f"fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f22,f33,f11,f62,f184,f128,f136,f115,f70,f152,f124,f104,f105,f106"
     )
     try:
         data = _http_get(url)
@@ -344,7 +528,7 @@ def get_sector_flow(sector_type: str = "2") -> dict:
                 "super_large_inflow": item.get("f128", 0),  # 超大单净流入
                 "large_inflow": item.get("f136", 0),  # 大单净流入
                 "mid_inflow": item.get("f115", 0),  # 中单净流入
-                "small_inflow": item.get("f62", 0),  # 小单净流入
+                "small_inflow": item.get("f70", 0),  # 小单净流入 (原误复制 f62=主力)
             })
         result = {"ok": True, "type": "行业" if sector_type == "2" else "概念", "data": sectors}
         _cache_set(cache_key, result)
@@ -564,11 +748,18 @@ def calc_indicators(symbol: str, count: int = 120) -> dict:
 
     # 取最近5条
     recent = df.tail(5)
+    # ★ NaN/±inf → None (starlette 用 allow_nan=False, NaN/inf 序列化抛 "Out of range float values" 500;
+    #   KDJ 除零产生 inf, MA60 前段不足窗口产生 NaN; 注意 float64 列无法存 None, 须 to_dict 后逐值替换)
+    rows = recent.to_dict(orient="records")
+    for row in rows:
+        for k, v in row.items():
+            if isinstance(v, float) and not math.isfinite(v):
+                row[k] = None
     result = {
         "ok": True,
         "symbol": kline["symbol"],
         "name": kline["name"],
-        "data": recent.to_dict(orient="records"),
+        "data": rows,
     }
     return result
 

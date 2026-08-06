@@ -50,55 +50,70 @@ window.onProviderChange = async function() {
         moonshot: 'moonshot-v1-8k', doubao: 'doubao-lite-32k', mimo: 'mimo-v2-flash',
         openrouter: 'openai/gpt-4o', longcat: 'LongCat-2.0', llamacpp: ''
     };
+    // ★ 有活动流式请求时, 仅更新 localStorage (下次发送生效), 不改 DOM 的 modelSelect.value
+    //   — 防止 .value 变化触发 select 的 change 事件 → saveConfig → fetchModels → 替换 innerHTML → 中断正在输出的模型
+    var _activeStreamChatId = window._activeStreamChatId;
     var sm = localStorage.getItem('model_' + provider) || '';
-    if (sm) { setVal('modelSelect', sm); localStorage.setItem('model', sm); }
+    if (sm) { if (!_activeStreamChatId) setVal('modelSelect', sm); localStorage.setItem('model', sm); }
     else {
         var _defModel = PROVIDER_DEFAULT_MODELS[provider] || '';
-        setVal('modelSelect', _defModel);
+        if (!_activeStreamChatId) setVal('modelSelect', _defModel);
         localStorage.setItem('model', _defModel);
+        // ★ 同时持久化默认模型到 model_{provider},确保切换回来时能记住 (即使未显式选择模型)
+        if (_defModel) localStorage.setItem('model_' + provider, _defModel);
     }
 
     _currentProvider = provider;
+    if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
     console.log('[PROVIDER] ->' + provider + ' key:' + (cleanKey ? '***' : 'empty') + ' url:' + getVal('baseUrl'));
     console.log('[PROVIDER] localStorage apiKey:', localStorage.getItem('apiKey') ? 'SET' : 'EMPTY');
     console.log('[PROVIDER] input apiKey.value:', getEl('apiKey')?.value ? 'SET' : 'EMPTY');
 
     // ★ 切换厂商后立即同步到服务器
     window._scheduleConfigSync();
-
-    // ★ 切换厂商后自动刷新模型列表(延迟让 UI 先更新)
-    setTimeout(function() {
-        if (typeof window.fetchModels === 'function') {
-            window.fetchModels(true).catch(function(){});
-        }
-    }, 200);
+    // ★ 注意: 不再在此处调用 fetchModels — 模型列表刷新统一在 saveConfig 时执行,
+    //   避免切换提供商时替换 modelSelect.innerHTML 中断正在生成的模型
 };
 function getCurrentApiKeyLSKey() {
     var p = getEl('baseUrlProvider')?.value || 'custom';
     return (API_PROVIDERS[p] || API_PROVIDERS.custom).keyLS;
 }
 
-// ★ 内容清洗: 防止 apply_chat_template 报错 'list object' has no attribute 'items'
-//    ★ 视觉模型例外: 含 image_url 的数组 content 必须保留, 否则图片无法传输
-window.sanitizeForLongCat = function(apiMessages) {
-    console.warn('[sanitize] msgs=' + apiMessages.length);
+// LongCat 统一识别：模型名、官方端点或 provider 任一命中即可。
+window.isLongCat = function(model, baseUrl, provider) {
+    if (model === undefined) model = typeof getVal === 'function' ? (getVal('modelSelect') || '') : '';
+    if (baseUrl === undefined) baseUrl = typeof getVal === 'function' ? (getVal('baseUrl') || '') : '';
+    if (provider === undefined) {
+        provider = (typeof getEl === 'function' && getEl('baseUrlProvider')?.value)
+            || localStorage.getItem('baseUrlProvider') || '';
+    }
+    return String(model || '').toLowerCase().includes('longcat')
+        || String(baseUrl || '').toLowerCase().includes('api.longcat.chat')
+        || String(provider || '').toLowerCase() === 'longcat';
+};
+
+// LongCat OpenAI 格式只接受纯文本 content，并且不接受历史消息中的
+// reasoning_content/reasoning_details 等非标准字段。该清洗必须只对 LongCat 生效。
+window.sanitizeForLongCat = function(apiMessages, options) {
+    options = options || {};
+    if (!Array.isArray(apiMessages)) return [];
+    if (!options.force && !window.isLongCat()) return apiMessages;
     var _fixed = 0;
     for (var i = 0; i < apiMessages.length; i++) {
         var m = apiMessages[i];
-        // content 必须是字符串, 数组则拼接文本部分
-        // ★ 但如果数组含 image_url, 说明是视觉模型, 保留数组不转换
+        if (!m || typeof m !== 'object') continue;
+        // 官方文档明确 LongCat-2.0 仅支持文本输入；图像块转为占位文本。
         if (Array.isArray(m.content)) {
-            var _hasImageUrl = m.content.some(function(c) { return c && c.type === 'image_url'; });
-            if (_hasImageUrl) {
-                console.warn('[sanitize] msg[' + i + '] role=' + m.role + ' content has image_url, KEEPING array for vision model');
-                continue;  // ★ 跳过视觉消息, 保留完整 image_url 数组
-            }
             _fixed++;
-            console.warn('[sanitize] msg[' + i + '] role=' + m.role + ' content is ARRAY, converting...');
             m.content = m.content.map(function(c) {
                 if (typeof c === 'string') return c;
                 if (c && typeof c === 'object') {
                     if (c.type === 'text') return c.text || '';
+                    if (c.type === 'image_url' || c.type === 'image') return '[图片]';
+                    if (c.type === 'video_url' || c.type === 'video') return '[视频]';
+                    if (c.type === 'tool_result') {
+                        return typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '');
+                    }
                     return '';
                 }
                 return '';
@@ -109,17 +124,15 @@ window.sanitizeForLongCat = function(apiMessages) {
             m.content = '(empty)';
             _fixed++;
         }
-        // 移除可能导致问题的字段
-        // ★ 保留 assistant 的 reasoning_content — DeepSeek 思考模式要求必须回传
-        //    (buildApiMessages 已仅在 assistant 消息上设置此字段)
-        //    空字符串也需保留: DeepSeek 要求一旦对话中出现过 reasoning,
-        //    后续所有 assistant 消息都必须带 reasoning_content (可为空)
-        if (m.role !== 'assistant') {
-            delete m.reasoning_content;
-        }
+        delete m.reasoning_content;
+        delete m.reasoning;
         delete m.reasoning_details;
         delete m._srcIndex;
         delete m._useVisionModel;
+        delete m._hadReasoning;
+        delete m.partial;
+        delete m._remove;
+        delete m._removeOrphan;
         // 确保 tool_calls 中的 arguments 是字符串
         if (m.tool_calls && Array.isArray(m.tool_calls)) {
             m.tool_calls = m.tool_calls.map(function(tc) {
@@ -130,7 +143,7 @@ window.sanitizeForLongCat = function(apiMessages) {
             });
         }
     }
-    if (_fixed > 0) console.warn('[sanitize] fixed ' + _fixed + ' issues');
+    if (_fixed > 0) console.log('[LongCat] 已将 ' + _fixed + ' 条非文本消息转为纯文本');
     return apiMessages;
 };
 
@@ -141,7 +154,7 @@ function logDebug(...args) {
 // 当主模型不支持视觉或视觉分析失败时, 用此函数先分析图片
 window._analyzeImagesWithVisionProvider = async function(files) {
     var provider = localStorage.getItem('visionProvider') || '';
-    if (!provider || provider === 'custom') return null; // 未配置视觉提供商
+    if (!provider) return null; // 未配置视觉提供商
 
     var apiKey, apiUrl, model;
     if (provider === 'xai') {
@@ -152,6 +165,10 @@ window._analyzeImagesWithVisionProvider = async function(files) {
         apiKey = await decrypt(localStorage.getItem('visionApiKeyOpenAI') || '');
         apiUrl = localStorage.getItem('visionApiUrlOpenAI') || 'https://api.openai.com/v1';
         model = localStorage.getItem('visionModel') || 'gpt-4o';
+    } else if (provider === 'custom') {
+        apiKey = await decrypt(localStorage.getItem('visionApiKeyCustom') || '');
+        apiUrl = localStorage.getItem('visionApiUrlCustom') || '';
+        model = localStorage.getItem('visionModel') || '';
     } else if (provider === 'minimax') {
         apiKey = await decrypt(localStorage.getItem('visionApiKey') || '');
         apiUrl = localStorage.getItem('visionApiUrl') || 'https://api.minimaxi.com/v1/coding_plan/vlm';
@@ -160,7 +177,7 @@ window._analyzeImagesWithVisionProvider = async function(files) {
         return null;
     }
 
-    if (!apiKey) return null; // 没有 API Key
+    if (!apiKey || !apiUrl) return null; // 没有 API Key 或地址
 
     // 提取图片文件
     var imageFiles = files.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
@@ -521,7 +538,9 @@ function checkStorageSpace() {
 }
 
 function cleanupOldChats(keep = 10) {
-    var ids = Object.keys(chats).sort((a, b) => (parseInt(a.split('_')[1]) || 0) - (parseInt(b.split('_')[1]) || 0));
+    // ★ Agent 域聊天(_agent_main/_agent_old_*)不参与清理: id 无时间戳解析成 NaN 会排最前被优先删除
+    var ids = Object.keys(chats).filter(id => !isAgentChat(id));
+    ids.sort((a, b) => (parseInt(a.split('_')[1]) || 0) - (parseInt(b.split('_')[1]) || 0));
     if (ids.length <= keep) return;
     ids.slice(0, ids.length - keep).forEach(id => delete chats[id]);
     saveChatsDebounced();
@@ -658,7 +677,7 @@ window.showDiffView = function(filename, oldCode, newCode, targetEl) {
 
     var wrapper = document.createElement('div');
     wrapper.className = 'diff-view-wrapper';
-    wrapper.style.cssText = 'margin:8px 0;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;overflow:hidden;font-family:monospace;font-size:13px;';
+    wrapper.style.cssText = 'margin:8px 0;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;overflow:hidden;font-family:var(--font-mono);font-size:13px;';
 
     // Header
     var header = document.createElement('div');
@@ -755,17 +774,22 @@ window.addCodeBlockButtons = function(container) {
         var editableLangs = ['python','js','javascript','ts','typescript','html','css','json','php','sh','bash','yaml','yml','toml','xml','sql','go','rust','java','c','cpp','rb','lua','swift','kt','md','markdown'];
         if (!lang || editableLangs.indexOf(lang) === -1) return;
 
-        var btn = document.createElement('button');
-        btn.className = 'code-apply-btn';
-        btn.textContent = '📋 Apply';
+        // ★ 修复: 不再绝对定位盖住复制按钮 — 整合进 .code-actions 容器
+        //   (attachCodeCopyButtons 已注入复制/运行按钮, top:4px right:4px z-index:5;
+        //    原 Apply 按钮同位置 z-index:10 会完全遮挡复制按钮)
+        var actions = pre.querySelector('.code-actions');
+        var btn = document.createElement('div');
+        btn.className = 'code-copy-btn code-apply-btn'; // 复用图标按钮样式, 跟随容器悬停显隐
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
         btn.title = '预览并应用代码编辑';
-        btn.style.cssText = 'position:absolute;top:4px;right:4px;padding:2px 8px;font-size:11px;background:rgba(59,130,246,0.9);color:#fff;border:none;border-radius:4px;cursor:pointer;z-index:10;opacity:0;transition:opacity 0.2s;';
-        pre.style.position = pre.style.position || 'relative';
-
-        btn.onmouseenter = function() { btn.style.opacity = '1'; };
-        btn.onmouseleave = function() { btn.style.opacity = '0'; };
-        pre.onmouseenter = function() { btn.style.opacity = '1'; };
-        pre.onmouseleave = function() { btn.style.opacity = '0'; };
+        if (actions) {
+            actions.appendChild(btn);
+        } else {
+            // 兜底: 老页面无容器时挂到 pre, 位置避开右上角(复制按钮下方)
+            btn.style.cssText = 'position:absolute;top:36px;right:8px;z-index:10;';
+            pre.style.position = pre.style.position || 'relative';
+            pre.appendChild(btn);
+        }
 
         btn.onclick = function() {
             var codeText = code.textContent || '';
@@ -791,8 +815,6 @@ window.addCodeBlockButtons = function(container) {
                     window.showDiffView(filename, '', codeText, pre.parentElement);
                 });
         };
-        pre.appendChild(btn);
     });
 };
-
 

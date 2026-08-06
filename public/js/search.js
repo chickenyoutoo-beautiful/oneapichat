@@ -411,3 +411,99 @@ function updateBubbleSearchStatus(bubble, status, isError = false) {
     statusDiv.appendChild(line);
 }
 
+
+// ★ 搜索标题滚动条 (v3.5): 替代工具卡片里的搜索结果详情块
+// 无背景, 多行窗口 + 上下左右渐隐, 显示每条结果的标题 + 域名
+// ★ 并行搜索批次累积: 短时间内多次调用会合并为一条滚动条 (最多 18 行)
+window.showSearchTicker = (function() {
+    var _pendingResults = [];
+    var _renderScheduled = false;
+
+    function _doRender() {
+        _renderScheduled = false;
+        var allResults = _pendingResults;
+        _pendingResults = [];
+        if (!allResults.length) return;
+
+        try {
+            // 移除旧的滚动条
+            document.querySelectorAll('.search-ticker').forEach(function(el) { el.remove(); });
+
+            // 合并所有累积的结果, 去重 (按 URL)
+            var seen = new Set();
+            var unique = [];
+            allResults.forEach(function(r) {
+                var key = r.url || r.title || '';
+                if (key && seen.has(key)) return;
+                seen.add(key);
+                unique.push(r);
+            });
+            var lines = unique.slice(0, 18).map(function(r, i) {
+                var host = '';
+                try { host = new URL(r.url || '').hostname.replace(/^www\./, ''); } catch(e) {}
+                return { title: r.title || '未命名结果', url: r.url || '', host: host };
+            });
+            if (!lines.length) return;
+
+            var ticker = document.createElement('div');
+            ticker.className = 'search-ticker';
+            var track = document.createElement('div');
+            track.className = 'search-ticker-track';
+
+            function makeLine(l, idx) {
+                var a = document.createElement('a');
+                a.className = 'search-ticker-line';
+                if (l.url) { a.href = l.url; a.target = '_blank'; a.rel = 'noopener'; }
+                var num = document.createElement('span');
+                num.className = 'search-ticker-num';
+                num.textContent = idx + 1;
+                var t = document.createElement('span');
+                t.textContent = l.title;
+                t.style.overflow = 'hidden';
+                t.style.textOverflow = 'ellipsis';
+                a.appendChild(num);
+                a.appendChild(t);
+                if (l.host) {
+                    var h = document.createElement('span');
+                    h.className = 'search-ticker-host';
+                    h.textContent = l.host;
+                    a.appendChild(h);
+                }
+                return a;
+            }
+            // 内容复制两份实现无缝循环
+            lines.forEach(function(l, i) { track.appendChild(makeLine(l, i)); });
+            lines.forEach(function(l, i) { track.appendChild(makeLine(l, i)); });
+            ticker.appendChild(track);
+
+            // 插入到当前助手气泡之后 (气泡外)
+            var bubble = (activeBubbleMap && activeBubbleMap[currentChatId]) || null;
+            if (!bubble || !document.body.contains(bubble)) {
+                // 兜底: 最近一条助手消息的气泡 (loadChat 后 activeBubbleMap 为空)
+                var rows = document.querySelectorAll('.message-row.assistant');
+                if (rows.length) bubble = rows[rows.length - 1].querySelector('.bubble.assistant') || null;
+            }
+            var wrapper = bubble ? (bubble.closest('.message-content-wrapper') || bubble.parentElement) : null;
+            if (wrapper) wrapper.appendChild(ticker);
+            else if (getEl('chatBox')) getEl('chatBox').appendChild(ticker);
+
+            // 动画时长: 每行 2.2s 快速滚动
+            track.style.animationDuration = (lines.length * 2.2) + 's';
+        } catch(e) {
+            console.warn('[SearchTicker] 渲染失败:', e.message);
+        }
+    }
+
+    return function(results) {
+        // 累积结果 (支持并行搜索批次多次调用合并为一条滚动条)
+        if (results && results.length) _pendingResults = _pendingResults.concat(results);
+        if (_renderScheduled) return;
+        _renderScheduled = true;
+        // 延迟一帧渲染, 让同批调用的结果都累积进来
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(function() { _doRender(); });
+        } else {
+            setTimeout(_doRender, 16);
+        }
+    };
+})();

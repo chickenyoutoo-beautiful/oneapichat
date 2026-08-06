@@ -78,6 +78,8 @@ function setAgentMode(mode) {
     } else if (mode === 'plan') {
         // ★ Plan: 蓝色进入特效
         playAgentEnterEffect('plan');
+        // ★ Plan 模式无聊天切换(停留在当前聊天): 动画播完即淡出
+        _dismissOverlayAfter('plan', null, 900, 2500);
         window._agentAnimLock = setTimeout(function() { window._agentAnimLock = null; }, 700);
     } else if (mode === 'off' && (prevMode === 'agent' || prevMode === 'yolo' || prevMode === 'plan')) {
         // ★ 切回 off: 退出特效(仅当从非 off 模式切换时)
@@ -100,25 +102,29 @@ function setAgentMode(mode) {
         var wasCollapsed = $.sidebar?.classList.contains('collapsed');
         if (!wasCollapsed) {
             $.sidebar?.classList.add('collapsed');
-            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
         }
-        // 保存当前普通聊天 ID
-        if (currentChatId && currentChatId !== '_agent_main') {
+        // 保存当前普通聊天 ID(归档 Agent 会话不算普通聊天)
+        if (currentChatId && !isAgentChat(currentChatId)) {
             lastNormalChatId = currentChatId;
             localStorage.setItem('lastNormalChatId', lastNormalChatId);
         }
         var agentId = '_agent_main';
+        var _enterLoad = null;
         if (!chats[agentId]) {
-            createAgentChat().then(function() {
+            _enterLoad = createAgentChat().then(function() {
                 _inheritChatContext(agentId);
-                loadChat(agentId);
+                return loadChat(agentId);
             });
         } else {
             if (chats[agentId].messages && chats[agentId].messages.length <= 1) {
                 _inheritChatContext(agentId);
             }
-            loadChat(agentId);
+            _enterLoad = loadChat(agentId);
         }
+        // ★ 遮罩等 Agent 聊天加载/渲染完成后再淡出(loadChat 是 async);
+        //   maxWait 1800 兜底 — 大会话渲染再久也不让遮罩长时间滞留(用户反馈切入太慢)
+        _dismissOverlayAfter(mode, _enterLoad, 750, 1800);
     } else if (mode === 'off') {
         // ★ 普通模式: 关闭所有 Agent 专属工具
         AGENT_TOOL_KEYS.forEach(function(k) { window.setToolEnabled(k, false); });
@@ -128,22 +134,28 @@ function setAgentMode(mode) {
             $.sidebar?.classList.remove('collapsed');
             if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
         }
-        // 切回普通模式: 恢复上次普通聊天
+        // 切回普通模式: 恢复上次普通聊天(归档 Agent 会话不算普通聊天)
         var restoreId = lastNormalChatId;
         if (!restoreId || !chats[restoreId]) {
             restoreId = Object.keys(chats).filter(function(id) {
-                return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
+                return !isAgentChat(id) && chats[id] && chats[id].messages && chats[id].messages.length > 0;
             }).sort(function(a,b) {
                 return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
             })[0];
         }
         if (restoreId && chats[restoreId]) {
-            // 等退出动画播完再切换（loadChat 内部会设置 currentChatId）
+            // ★ 立即恢复普通聊天(遮罩已不透明, 切换全程在遮罩后完成 —
+            //   原等 750ms 才 loadChat, 半透明遮罩下用户全程看见未切换的 Agent 会话/侧边栏)
             setTimeout(function() {
-                loadChat(restoreId);
+                var _exitLoad = loadChat(restoreId);
                 renderChatHistory();
                 updateHeaderTitle();
-            }, 750);
+                // ★ 遮罩等普通聊天加载完成后再淡出(loadChat 是 async)
+                _dismissOverlayAfter('exit:' + prevMode, _exitLoad, 500, 2000);
+            }, 120);
+        } else {
+            // ★ 无恢复聊天: 动画播完即淡出
+            _dismissOverlayAfter('exit:' + prevMode, null, 700, 1800);
         }
     }
     // plan 模式: 不碰侧边栏和聊天切换, 消息注入普通聊天
@@ -159,7 +171,12 @@ function setAgentMode(mode) {
         window._planState = 'exploring';
         window._planApproved = false;
         window._pendingPlanActions = [];
-        if (window._agentPlan) { window.dismissFlowPanel(); }
+    }
+    // ★ 切回普通模式时关闭计划面板(面板位于输入区, 不受 loadChat 影响, 必须主动清理)
+    //   计划可能在 agent/yolo/plan 任一模式下创建, 故 off 时统一Dismiss
+    //   ★ 排除临时授权恢复场景(点击 off 时 temp grant 会重新激活 Agent, 面板应保留)
+    if (mode === 'off' && !window._tempAgentGranted && window._agentPlan) {
+        window.dismissFlowPanel();
     }
     // 模式切换不弹 toast(已有横幅和绿点提示)
     if (typeof renderToolPanel === 'function') renderToolPanel();
@@ -222,6 +239,42 @@ function _clearAllAgentOverlays() {
     document.querySelectorAll('.agent-transition-overlay').forEach(function(el) { el.remove(); });
 }
 
+// ★ 遮罩淡出辅助: 等待「最短展示时间 + 底层聊天加载完成」后再淡出
+//   遮罩不再固定计时器自动消失 — 启动/关闭模式时底层 loadChat 是 async,
+//   大会话渲染可能超过原固定 900/650ms, 遮罩先消失聊天后加载会显得割裂;
+//   loadPromise 可空(无加载任务时按最短时间淡出); maxWait 兜底防加载异常导致遮罩永久滞留;
+//   快速切换模式时遮罩被清除/重建 → 通过元素引用比对放弃本次淡出
+function _dismissOverlayAfter(key, loadPromise, minWait, maxWait) {
+    var _entry = _agentOverlayMap[key];
+    if (!_entry || !_entry.el) return;
+    var _el = _entry.el;
+    var _settled = false;   // 底层加载完成(或兜底超时)
+    var _minDone = false;   // 最短展示时间已到(动画完整播完)
+    var _tryFade = function() {
+        if (!_settled || !_minDone) return;
+        var _e = _agentOverlayMap[key];
+        if (!_e || _e.el !== _el) return;  // 已被清除/替换(快速切换) → 放弃
+        var el = _el;
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.25s ease';
+        var _ft = setTimeout(function() { if (el.parentNode) el.remove(); delete _agentOverlayMap[key]; }, 250);
+        _e.timer = _ft;   // 淡出期仍可被 _clearAgentOverlay 清理
+        _e.el = null;
+    };
+    // 最短展示时间: 让进入/退出动画完整播完
+    setTimeout(function() { _minDone = true; _tryFade(); }, minWait || 900);
+    // 底层聊天加载完成: 再等一小帧(150ms)让渲染稳定(布局回流/图片占位)
+    var _p = loadPromise;
+    if (_p && typeof _p.then === 'function') {
+        var _onSettle = function() { _settled = true; setTimeout(_tryFade, 150); };
+        _p.then(_onSettle, _onSettle);
+    } else {
+        _settled = true;
+    }
+    // 兜底: 加载异常/卡死时强制淡出
+    setTimeout(function() { _settled = true; _tryFade(); }, maxWait || 3500);
+}
+
 function playAgentEnterEffect(mode) {
     _clearAllAgentOverlays();
     var isPlan = mode === 'plan';
@@ -273,8 +326,8 @@ function playAgentEnterEffect(mode) {
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    var enterTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.25s ease'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[mode]; }, 250); _agentOverlayMap[mode] = { el: overlay, timer: fadeTimer }; }, 900);
-    _agentOverlayMap[mode] = { el: overlay, timer: enterTimer };
+    // ★ 不再固定 900ms 自动淡出 — 由 setAgentMode 在 Agent 聊天加载完成后驱动(_dismissOverlayAfter)
+    _agentOverlayMap[mode] = { el: overlay, timer: null };
 }
 
 function playAgentExitEffect(mode) {
@@ -286,15 +339,17 @@ function playAgentExitEffect(mode) {
     overlay.className = 'agent-transition-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;pointer-events:none;';
     overlay.innerHTML = '' +
-        '<div style="position:absolute;inset:0;backdrop-filter:blur(6px) brightness(0.85);-webkit-backdrop-filter:blur(6px) brightness(0.85);background:rgba(0,0,0,0.15);animation:agent-exit-mask 0.5s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
+        // ★ 遮罩改为高不透明度(深色实底): 退出期间底层会话切换在遮罩后完成,
+        //   原 15% 黑+6px 模糊近乎透明, 用户能透见尚未切换的 Agent 会话与侧边栏, 视觉割裂
+        '<div style="position:absolute;inset:0;backdrop-filter:blur(10px) brightness(0.6);-webkit-backdrop-filter:blur(10px) brightness(0.6);background:rgba(15,23,42,0.88);animation:agent-exit-mask 0.5s ease forwards;will-change:opacity;transform:translateZ(0);"></div>' +
         '<div style="position:absolute;top:50%;left:50%;width:250vw;height:250vw;border-radius:50%;border:2px solid rgba(255,255,255,0.1);transform:translate(-50%,-50%);animation:agent-ring-collapse 0.5s cubic-bezier(0.5,0,0.8,0.4) forwards;"></div>' +
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
             '<div style="font-family:system-ui,sans-serif;font-size:42px;font-weight:600;letter-spacing:5px;color:rgba(255,255,255,0.7);opacity:0;animation:agent-exit-text 0.5s ease forwards;">' + exitWord + '</div>' +
         '</div>';
     document.body.appendChild(overlay);
     var exitKey = 'exit:' + mode;
-    var exitTimer = setTimeout(function() { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.2s'; var fadeTimer = setTimeout(function() { overlay.remove(); delete _agentOverlayMap[exitKey]; }, 200); _agentOverlayMap[exitKey] = { el: overlay, timer: fadeTimer }; }, 650);
-    _agentOverlayMap[exitKey] = { el: overlay, timer: exitTimer };
+    // ★ 不再固定 650ms 自动淡出 — 由 setAgentMode 在恢复聊天加载完成后驱动(_dismissOverlayAfter)
+    _agentOverlayMap[exitKey] = { el: overlay, timer: null };
 }
 
 // 兼容旧版 toggleAgentMode
@@ -329,13 +384,13 @@ function createAgentChat() {
 /** ★ 从当前普通聊天继承上下文到 Agent 聊天,实现任务接续 */
 function _inheritChatContext(agentId) {
     try {
-        // 找到最近活跃的普通聊天
+        // 找到最近活跃的普通聊天（归档 Agent 会话不算普通聊天）
         var normalChats = Object.keys(chats).filter(function(id) {
-            return id !== '_agent_main' && chats[id] && chats[id].messages && chats[id].messages.length > 0;
+            return !isAgentChat(id) && chats[id] && chats[id].messages && chats[id].messages.length > 0;
         }).sort(function(a, b) {
             return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
         });
-        var sourceId = currentChatId && currentChatId !== '_agent_main' ? currentChatId : normalChats[0];
+        var sourceId = currentChatId && !isAgentChat(currentChatId) ? currentChatId : normalChats[0];
         if (!sourceId || !chats[sourceId]) return;
 
         var sourceMsgs = chats[sourceId].messages;
@@ -537,20 +592,20 @@ window.refreshMemoryList = async function() {
         var data = await resp.json();
         var facts = (data.ok && data.facts) ? data.facts : [];
         if (facts.length === 0) {
-            listEl.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px;">暂无记忆</div>';
+            listEl.innerHTML = '<div class="memory-empty">暂无记忆</div>';
         } else {
             listEl.innerHTML = facts.map(function(f) {
                 var rel = escapeHtml(f.relation || 'fact');
                 var c = escapeHtml((f.content || '').substring(0, 60));
                 var fid = f.id || '';
-                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;font-size:11px;border-bottom:1px solid #f3f4f6;" class="dark:border-gray-700">' +
-                    '<span><b>' + rel + '</b>: ' + c + '</span>' +
-                    '<button onclick="window.deleteMemoryEntry(\'' + fid.replace(/'/g, "\\'") + '\')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;">✕</button>' +
+                return '<div class="memory-item">' +
+                    '<span class="memory-item-text"><b>' + rel + '</b>: ' + c + '</span>' +
+                    '<button onclick="window.deleteMemoryEntry(\'' + fid.replace(/'/g, "\\'") + '\')" class="memory-item-del" title="删除记忆">✕</button>' +
                 '</div>';
             }).join('');
         }
     } catch(e) {
-        listEl.innerHTML = '<div style="font-size:11px;color:#ef4444;text-align:center;padding:12px;">加载失败</div>';
+        listEl.innerHTML = '<div class="memory-empty" style="color:#ef4444;">加载失败</div>';
     }
     window._loadCloudMemories();
     window._loadCloudIdentity();
@@ -1072,9 +1127,13 @@ window.openAgentPanel = function() {
 
     if (isMobile()) {
         // 移动端:关配置面板,用遮罩
-        if (cp) cp.classList.remove('mobile-open');
+        if (cp && typeof window.closeConfigPanel === 'function') window.closeConfigPanel();
+        else if (cp) cp.classList.remove('mobile-open');
         ap.style.display = '';
         ap.classList.remove('hidden-panel');
+        ap.inert = false;
+        ap.setAttribute('aria-hidden', 'false');
+        document.querySelectorAll('button[onclick*="toggleAgentPanel"]').forEach(function(btn) { btn.setAttribute('aria-expanded', 'true'); });
         $.sidebarMask?.classList.add('active');
         lockBodyScroll(true);
         window.refreshAgentPanel();
@@ -1085,7 +1144,8 @@ window.openAgentPanel = function() {
 
     // 桌面端:先关配置面板
     if (cp && !cp.classList.contains('hidden-panel')) {
-        cp.classList.add('hidden-panel');
+        if (typeof window.closeConfigPanel === 'function') window.closeConfigPanel();
+        else cp.classList.add('hidden-panel');
     }
     // 确保 display 可见,然后移除隐藏类
     ap.style.display = '';
@@ -1093,6 +1153,9 @@ window.openAgentPanel = function() {
     requestAnimationFrame(function() {
         ap.classList.remove('hidden-panel');
     });
+    ap.inert = false;
+    ap.setAttribute('aria-hidden', 'false');
+    document.querySelectorAll('button[onclick*="toggleAgentPanel"]').forEach(function(btn) { btn.setAttribute('aria-expanded', 'true'); });
     // 清除非通知红点
     var dot = getEl('agentNotifDot');
     window.refreshAgentPanel();
@@ -1105,6 +1168,9 @@ window.closeAgentPanel = function() {
 
     if (isMobile()) {
         ap.classList.add('hidden-panel');
+        ap.inert = true;
+        ap.setAttribute('aria-hidden', 'true');
+        document.querySelectorAll('button[onclick*="toggleAgentPanel"]').forEach(function(btn) { btn.setAttribute('aria-expanded', 'false'); });
         $.sidebarMask?.classList.remove('active');
         lockBodyScroll(false);
         if (_agentPanelRefreshTimer) {
@@ -1115,6 +1181,9 @@ window.closeAgentPanel = function() {
     }
 
     ap.classList.add('hidden-panel');
+    ap.inert = true;
+    ap.setAttribute('aria-hidden', 'true');
+    document.querySelectorAll('button[onclick*="toggleAgentPanel"]').forEach(function(btn) { btn.setAttribute('aria-expanded', 'false'); });
     if (_agentPanelRefreshTimer) {
         clearInterval(_agentPanelRefreshTimer);
         _agentPanelRefreshTimer = null;
@@ -1137,47 +1206,47 @@ function startAgentPanelRefresh() {
             _agentPanelRefreshTimer = null;
             return;
         }
+        // ★ 429 退避:若上次被限流,延长等待
+        var backoff = window._agentListBackoff || 0;
+        if (backoff > 1000) {
+            window._agentListBackoff = Math.max(backoff - 1500, 1000); // 每轮递减
+            return;
+        }
         // 刷新代理列表
         window.refreshAgentPanel();
-        // 如果选中了代理,同步刷新聊天内容
-        if (_selectedAgentName) {
-            // ★ 保持选中状态,只更新内容(不覆盖已渲染的聊天历史)
-            var token = getAuthToken();
-            if (token) {
-                fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
-                    .then(function(r) { return r.json(); })
-                    .then(function(agents) {
-                        var a = agents[_selectedAgentName];
-                        var msgArea = getEl('agentChatMessages');
-                        if (!msgArea) return;
-                        if (!a) { return; }
-                        // ★ 只在 agent 状态变化时更新,避免闪烁
-                        var prevStatus = msgArea.getAttribute('data-status') || '';
-                        if (a.status === prevStatus && prevStatus === 'completed') return;
-                        msgArea.setAttribute('data-status', a.status || '');
-                        if (a.status === 'running') {
-                            var partial = a.result || '';
-                            if (partial) {
-                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                                    '<div class="text-xs text-green-500 font-medium mb-1">运行中</div>' +
-                                    '<div class="text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300" style="font-size:11px;max-height:200px;overflow-y:auto;">' + escapeHtml(partial.substring(0, 2000)) + '</div></div>';
-                            } else {
-                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-green-500 font-medium">运行中...</div></div>';
-                            }
-                        } else if (a.result) {
-                            if (prevStatus !== 'completed') {
-                                msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
-                                    '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(_selectedAgentName) + '</div>' +
-                                    '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div></div>';
-                                var key = 'agent_chat_' + _selectedAgentName;
-                                localStorage.setItem(key, JSON.stringify([{ role: 'assistant', content: a.result, time: Date.now() }]));
-                            }
-                        }
-                    }).catch(function() { /* 静默 */ });
+        // 如果选中了代理,复用已缓存的数据更新聊天内容(不再重复请求)
+        if (_selectedAgentName && window._agentListCache) {
+            var agents = window._agentListCache;
+            var a = agents[_selectedAgentName];
+            var msgArea = getEl('agentChatMessages');
+            if (msgArea) {
+                if (!a) { return; }
+                // ★ 只在 agent 状态变化时更新,避免闪烁
+                var prevStatus = msgArea.getAttribute('data-status') || '';
+                if (a.status === prevStatus && prevStatus === 'completed') return;
+                msgArea.setAttribute('data-status', a.status || '');
+                if (a.status === 'running') {
+                    var partial = a.result || '';
+                    if (partial) {
+                        msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
+                            '<div class="text-xs text-green-500 font-medium mb-1">运行中</div>' +
+                            '<div class="text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300" style="font-size:11px;max-height:200px;overflow-y:auto;">' + escapeHtml(partial.substring(0, 2000)) + '</div></div>';
+                    } else {
+                        msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant"><div class="text-xs text-green-500 font-medium">运行中...</div></div>';
+                    }
+                } else if (a.result) {
+                    if (prevStatus !== 'completed') {
+                        msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
+                            '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(_selectedAgentName) + '</div>' +
+                            '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div></div>';
+                        var key = 'agent_chat_' + _selectedAgentName;
+                        localStorage.setItem(key, JSON.stringify([{ role: 'assistant', content: a.result, time: Date.now() }]));
+                    }
+                }
             }
         }
 
-    }, 5000);
+    }, 15000); // ★ 15s 一轮,避免触发 nginx 限流
 }
 
 window.toggleAgentPanel = function() {
@@ -1253,11 +1322,37 @@ window._renderAgentList = function(agents, container) {
     }).join('');
 };
 
-window._refreshAllAgentLists = async function() {
+window._refreshAllAgentLists = async function(_opts) {
+    _opts = _opts || {};
     var token = getAuthToken();
     if (!token) return;
+    // ★ 防止并发重复请求:已有 in-flight 请求时静默跳过
+    if (_opts._inheritedAgents) {
+        // 调用方已持有 agents 数据,直接渲染不发请求
+        var inherited = _opts._inheritedAgents;
+        window._agentListCache = inherited;
+        window._agentListCacheTime = Date.now();
+        window._renderAgentList(inherited, getEl('agentSubList'));
+        window._renderAgentList(inherited, getEl('engineAgentList'));
+        var dptuiInh = getEl('agentSubListDptui');
+        if (dptuiInh && dptuiInh !== getEl('agentSubList')) window._renderAgentList(inherited, dptuiInh);
+        return;
+    }
+    if (window._agentListInFlight) return;
+    window._agentListInFlight = true;
     try {
         var r = await fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
+        // ★ 429 退避:nginx 限流时返回 HTML,不能直接 json()
+        if (r.status === 429) {
+            window._agentListBackoff = Math.min((window._agentListBackoff || 1000) * 2, 60000);
+            console.warn('[AgentPanel] 429 限流,退避 ' + window._agentListBackoff + 'ms');
+            return;
+        }
+        window._agentListBackoff = 1000; // 成功后重置
+        var ctype = r.headers.get('content-type') || '';
+        if (!ctype.includes('json')) {
+            throw new Error('引擎返回非 JSON 数据 (HTTP ' + r.status + ')');
+        }
         var agents = await r.json();
         // 验证返回的数据是有效对象
         if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
@@ -1282,6 +1377,8 @@ window._refreshAllAgentLists = async function() {
             window._agentListCache = {};
         }
         console.warn('[AgentPanel] 刷新失败:', e.message);
+    } finally {
+        window._agentListInFlight = false;
     }
 };
 
@@ -1432,6 +1529,9 @@ function _updateTempGrantBanner(active) {
     }
 }
 
+// ★ 侧边栏模式同步标记: 仅模式切换时强制收起/展开一次,
+//   避免状态刷新(心跳/SSE/通知)反复调用 updateAgentUI 覆盖用户手动展开的侧边栏
+var _lastSidebarSyncMode = null;
 function updateAgentUI() {
     var mode = getAgentMode();
     var isActive = mode !== 'off';  // ★ plan/agent/yolo 都算激活
@@ -1537,16 +1637,20 @@ function updateAgentUI() {
         }
     }
     // 更新 body class 用于 CSS 控制
-    // ★ 统一侧边栏：Agent/Plan/YOLO 收起, Off 展开
-    if (mode === 'off') {
-        if ($.sidebar?.classList.contains('collapsed')) {
-            $.sidebar.classList.remove('collapsed');
-            if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
-        }
-    } else {
-        if ($.sidebar && !$.sidebar.classList.contains('collapsed')) {
-            $.sidebar.classList.add('collapsed');
-            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+    // ★ 侧边栏初始状态: Agent/Plan/YOLO 收起, Off 展开
+    //   (仅模式切换时强制执行一次 — 用户在 Agent 模式手动展开的侧边栏不被状态刷新覆盖)
+    if (_lastSidebarSyncMode !== mode) {
+        _lastSidebarSyncMode = mode;
+        if (mode === 'off') {
+            if ($.sidebar?.classList.contains('collapsed')) {
+                $.sidebar.classList.remove('collapsed');
+                if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
+            }
+        } else {
+            if ($.sidebar && !$.sidebar.classList.contains('collapsed')) {
+                $.sidebar.classList.add('collapsed');
+                if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
+            }
         }
     }
     document.body.classList.toggle('agent-active', isActive);
@@ -1627,6 +1731,14 @@ window._setupAgentPopup = function() {
         }, 120);
     }
     updateBtnLabel();
+    if (mainBtn._agentPopupBound) return;
+    mainBtn._agentPopupBound = true;
+
+    var syncPopupAria = function() {
+        mainBtn.setAttribute('aria-expanded', popup.classList.contains('show') ? 'true' : 'false');
+    };
+    syncPopupAria();
+    new MutationObserver(syncPopupAria).observe(popup, { attributes: true, attributeFilter: ['class'] });
 
     var isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer:coarse)').matches;
 
@@ -2186,6 +2298,8 @@ window.addAgentToTask = function(taskId, agentName, role) {
         createdAt: Date.now()
     };
     console.log('[Task] ' + taskId + ' + 子代理: ' + agentName + ' (' + (role || 'general') + ')');
+    // ★ 显示子代理运行状态条
+    if (typeof window._updateSubAgentStatusBar === 'function') window._updateSubAgentStatusBar();
     return true;
 };
 
@@ -2245,6 +2359,8 @@ window.pushAgentResultToTask = function(taskId, agentName, status, result, error
 
     // 检查该任务是否所有子代理都完成了
     window._checkTaskCompletion(taskId);
+    // ★ 更新子代理运行状态条
+    if (typeof window._updateSubAgentStatusBar === 'function') window._updateSubAgentStatusBar();
 };
 
 /** ★ P0: 推送子代理结果(含结构化数据),由SSE agent:result事件直接调用 */
@@ -2264,6 +2380,8 @@ window.pushAgentResultToTaskWithStructured = function(agentName, status, result,
                 if (_t.agents[agentName]) _t.agents[agentName].status = ns;
                 console.log('[SSE] agent:result 推送 ' + agentName + ' 到任务 ' + _tId);
                 window._checkTaskCompletion(_tId);
+                // ★ 更新子代理运行状态条
+                if (typeof window._updateSubAgentStatusBar === 'function') window._updateSubAgentStatusBar();
                 return true;
             }
         }
@@ -2278,6 +2396,8 @@ window.pushAgentResultToTaskWithStructured = function(agentName, status, result,
     };
     // ★ 无论是否Agent模式,都触发子代理自动回复(普通聊天+Agent聊天统一处理)
     window.triggerAgentAutoReplyForSubAgent(agentName);
+    // ★ 更新子代理运行状态条
+    if (typeof window._updateSubAgentStatusBar === 'function') window._updateSubAgentStatusBar();
     return false;
 };
 
@@ -2311,7 +2431,9 @@ window._checkTaskCompletion = function(taskId) {
     
     // 清除超时
     if (task.timeout) { clearTimeout(task.timeout); task.timeout = null; }
-    // 所有子代理已完成,触发主代理回复
+    // ★ 所有子代理已完成 → 显示"已完成"提示
+    if (typeof window._showSubAgentStatusBarDone === 'function') window._showSubAgentStatusBarDone();
+    // 触发主代理回复
     window._triggerMainAgentForTask(taskId);
 };
 
@@ -2402,30 +2524,39 @@ window._triggerMainAgentForTask = function(taskId) {
 
         window.__internalAgentContext = null;
 
-        // ★ 切换到任务所在聊天(如果当前不在该聊天)
-        if (currentChatId !== chatId) {
-            console.log('[Task] 切换到任务所在聊天: ' + chatId);
-            currentChatId = chatId;
-            localStorage.setItem('lastChatId', chatId);
-            // 异步加载聊天UI(不阻塞发送)
-            if (typeof window.loadChat === 'function') {
-                setTimeout(function() { window.loadChat(chatId); }, 100);
+        // ★ 切换到任务所在聊天 — 仅当任务聊天与当前模式同域(严格分隔):
+        //   Agent 域任务只在 Agent 视图切换,普通聊天任务(plan/临时授权)只在非 Agent 视图切换;
+        //   跨域时既不切换也不发送 — 系统消息已无条件追加到任务聊天(saveChats 已执行),内容不丢
+        var _canSwitch = (typeof isAgentToolsActive === 'function') ? (isAgentToolsActive() === isAgentChat(chatId)) : true;
+        if (currentChatId !== chatId && !_canSwitch) {
+            console.log('[Task] 跨域任务完成,不切换不发送: chatId=' + chatId + ' mode=' + getAgentMode());
+            showToast('子代理已完成，可在 ' + (isAgentChat(chatId) ? 'Agent' : '普通') + ' 模式查看', 'info', 3000);
+        } else {
+            if (currentChatId !== chatId) {
+                console.log('[Task] 切换到任务所在聊天: ' + chatId);
+                currentChatId = chatId;
+                localStorage.setItem('lastChatId', chatId);
+                // 异步加载聊天UI(不阻塞发送)
+                if (typeof window.loadChat === 'function') {
+                    setTimeout(function() { window.loadChat(chatId); }, 100);
+                }
             }
-        }
 
-        // ★ 等 AI 空闲后再发送(如果忙则设置标记,在 finally 中触发)
-        var _sendSummary = function() {
-            if (!isTypingMap[chatId]) {
-                window.sendMessage(true, '请整合子代理结果并告知用户进展');
-                console.log('[Task] ' + taskId + ' 已触发主代理回复');
-                return true;
-            }
-            // AI 忙:设置标记,等当前 turn 的 finally 块触发
-            console.log('[Task] ' + taskId + ' 主代理忙,设置 pendingAgentReply 标记');
-            window._pendingAgentReply = true;
-            return false;
-        };
-        _sendSummary();
+            // ★ 等 AI 空闲后再发送(如果忙则设置标记,在 finally 中触发)
+            var _sendSummary = function() {
+                if (!isTypingMap[chatId]) {
+                    window.sendMessage(true, '请整合子代理结果并告知用户进展');
+                    console.log('[Task] ' + taskId + ' 已触发主代理回复');
+                    return true;
+                }
+                // AI 忙:设置标记,等当前 turn 的 finally 块触发
+                console.log('[Task] ' + taskId + ' 主代理忙,设置 pendingAgentReply 标记');
+                window._pendingAgentReply = true;
+                window._pendingAgentReplyChatId = chatId;
+                return false;
+            };
+            _sendSummary();
+        }
     }
     
     // 延迟标记引擎端通知已处理 + 清理
@@ -2449,6 +2580,103 @@ window.getRunningAgentsForTask = function(taskId) {
     return Object.keys(task.agents).filter(function(name) {
         return task.agents[name].status === 'running';
     });
+};
+
+// ==================== 子代理运行状态条 ====================
+
+/**
+ * 更新子代理运行状态条 (有子代理运行时显示,全部完成后自动消失)
+ * 显示信息: 运行中数量/总数 + 当前工具 + 步骤进度
+ */
+window._updateSubAgentStatusBar = function() {
+    var bar = getEl('subAgentStatusBar');
+    if (!bar) return;
+
+    // 收集所有任务中正在运行的子代理
+    var allRunning = [];
+    var allTotal = 0;
+    if (window._tasks && typeof window._tasks === 'object') {
+        for (var _tId in window._tasks) {
+            var _t = window._tasks[_tId];
+            if (!_t || !_t.agents) continue;
+            var _names = Object.keys(_t.agents);
+            _names.forEach(function(_n) {
+                allTotal++;
+                if (_t.agents[_n].status === 'running') {
+                    allRunning.push({
+                        name: _n,
+                        role: _t.agents[_n].role,
+                        tool: _t.agents[_n]._lastTool || '',
+                        step: _t.agents[_n]._step || 0,
+                        maxSteps: _t.agents[_n]._maxSteps || 0
+                    });
+                }
+            });
+        }
+    }
+
+    if (allRunning.length === 0) {
+        // 没有运行中的子代理 → 隐藏状态条
+        if (!bar.classList.contains('hidden')) {
+            bar.classList.add('hidden');
+        }
+        return;
+    }
+
+    // 有子代理在运行 → 显示状态条
+    bar.classList.remove('hidden');
+
+    // 更新计数
+    var countEl = getEl('subAgentStatusCount');
+    if (countEl) {
+        countEl.textContent = allRunning.length + '/' + allTotal;
+    }
+
+    // 更新详情文本 (显示第一个运行中的子代理信息)
+    var detailEl = getEl('subAgentStatusDetail');
+    if (detailEl) {
+        var _first = allRunning[0];
+        var _parts = [];
+        if (allRunning.length === 1) {
+            _parts.push('「' + _first.name + '」');
+        } else {
+            _parts.push('「' + _first.name + '」等 ' + allRunning.length + ' 个');
+        }
+        if (_first.tool) {
+            _parts.push('正在执行: ' + _first.tool);
+        }
+        if (_first.step > 0 && _first.maxSteps > 0) {
+            _parts.push('步骤 ' + _first.step + '/' + _first.maxSteps);
+        }
+        // 如果有多个运行中的,追加其他名称
+        if (allRunning.length > 1) {
+            var _others = allRunning.slice(1, 4).map(function(a) { return a.name; }).join(', ');
+            if (_others) _parts.push('其他: ' + _others);
+            if (allRunning.length > 4) _parts.push('...');
+        }
+        detailEl.textContent = _parts.join(' · ');
+    }
+};
+
+/** 子代理全部完成时的短暂"完成"提示 */
+window._showSubAgentStatusBarDone = function() {
+    var bar = getEl('subAgentStatusBar');
+    if (!bar) return;
+    bar.classList.remove('hidden');
+    bar.classList.add('done');
+    var textEl = bar.querySelector('.sub-agent-status-text');
+    if (textEl) textEl.textContent = '子代理已完成';
+    var detailEl = getEl('subAgentStatusDetail');
+    if (detailEl) detailEl.textContent = '结果已推送,正在整合...';
+    var countEl = getEl('subAgentStatusCount');
+    if (countEl) countEl.textContent = '✓';
+    // 2秒后隐藏
+    setTimeout(function() {
+        bar.classList.add('hidden');
+        bar.classList.remove('done');
+        if (textEl) textEl.textContent = '子代理运行中';
+        if (countEl) countEl.textContent = '0/0';
+    }, 2000);
 };
 
 // triggerAgentAutoReplyForSubAgent: 被 mainAgentReply 按钮和新通知系统调用
@@ -2497,7 +2725,15 @@ function _doTrigger(agentName) {
         }
     }
     // 降级: 无 task → 创建新 task 然后直接触发回复
-    var taskId = window.createTask('[系统] 子代理 ' + agentName + ' 完成', currentChatId);
+    // ★ 严格分隔: Agent 视图绑当前聊天(Agent 域); off 模式仅临时授权流程绑回当前聊天,
+    //   其余一律绑到 Agent 主会话,防止无主子代理结果注入普通聊天
+    var _triggerChatId = currentChatId;
+    var _agentActive = (typeof isAgentToolsActive === 'function') && isAgentToolsActive();
+    var _tempOk = window._tempAgentGranted && window._tempAgentChatId === currentChatId;
+    if (!_agentActive && !_tempOk) {
+        _triggerChatId = AGENT_CHAT_ID;
+    }
+    var taskId = window.createTask('[系统] 子代理 ' + agentName + ' 完成', _triggerChatId);
     var task = window._tasks[taskId];
     var stored = (window._pendingSubAgentResultsData || {})[agentName];
     task.agents[agentName] = { status: 'completed', role: 'general', createdAt: Date.now() };
@@ -2945,6 +3181,19 @@ window.deleteAgent = async function(name) {
         }
     });
     if (window._pendingSubAgentResultsData) { delete window._pendingSubAgentResultsData[name]; }
+    // ★ 清理 chats 中的子代理会话条目（侧边栏）
+    var _subChatId = '_agent_sub_' + name;
+    if (chats[_subChatId]) {
+        var _wasActive = (currentChatId === _subChatId);
+        delete chats[_subChatId];
+        if (typeof saveChats === 'function') saveChats();
+        if (typeof renderChatHistory === 'function') renderChatHistory();
+        // 如果当前正在查看该子代理会话，切到 _agent_main
+        if (_wasActive && typeof loadChat === 'function') {
+            if (chats['_agent_main']) loadChat('_agent_main');
+            else if (typeof createAgentChat === 'function') createAgentChat([]);
+        }
+    }
     // 立即更新 UI
     window._renderAgentList(window._agentListCache || {}, getEl('agentSubList'));
     window._renderAgentList(window._agentListCache || {}, getEl('engineAgentList'));
@@ -2982,7 +3231,14 @@ window.clearAllAgents = async function() {
         }
         window.refreshEngineStatus();
         window._refreshAllAgentLists();
-        alert('已清理 ' + deleted + ' 个子代理');
+        // ★ 清理所有子代理会话条目（侧边栏）
+        var _subKeys = Object.keys(chats).filter(function(k) { return k.indexOf('_agent_sub_') === 0; });
+        _subKeys.forEach(function(k) { delete chats[k]; });
+        if (_subKeys.length > 0) {
+            if (typeof saveChats === 'function') saveChats();
+            if (typeof renderChatHistory === 'function') renderChatHistory();
+        }
+        alert('已清理 ' + deleted + ' 个子代理' + (_subKeys.length > 0 ? ' 及 ' + _subKeys.length + ' 个侧边栏会话' : ''));
     } catch(e) {
         alert('清理失败: ' + e.message);
     }
@@ -3005,8 +3261,11 @@ window._startEngineAutoRefresh = function() {
 window.refreshEngineStatus = async function() {
     var dot = getEl('engineHealthDot');
     var text = getEl('engineHealthText');
+    var btn = document.querySelector('.engine-refresh-btn');
     if (!dot || !text) return;
 
+    // 按钮 loading 动画
+    if (btn) btn.classList.add('loading');
     dot.className = 'engine-status-dot offline';
     text.textContent = '检查中...';
 
@@ -3016,14 +3275,16 @@ window.refreshEngineStatus = async function() {
 
         if (data.ok || data.status === 'ok' || data.status === 'running') {
             dot.className = 'engine-status-dot online';
-            text.textContent = '🟢 引擎在线';
+            text.textContent = '引擎在线';
         } else {
             dot.className = 'engine-status-dot offline';
-            text.textContent = '🔴 引擎异常: ' + (data.message || '未知');
+            text.textContent = '引擎异常: ' + (data.message || '未知');
         }
     } catch(e) {
         dot.className = 'engine-status-dot offline';
-        text.textContent = '🔴 引擎离线 (' + e.message + ')';
+        text.textContent = '引擎离线 (' + e.message + ')';
+    } finally {
+        if (btn) btn.classList.remove('loading');
     }
 
     // 加载 cron 列表
@@ -3039,14 +3300,14 @@ window.refreshEngineStatus = async function() {
                 cronList.innerHTML = runningJobs.map(function(j) {
                     var next = j.next_run ? new Date(j.next_run * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--';
                     var name = escapeHtml(j.name);
-                    return '<div class="engine-status-item" style="display:flex;align-items:center;justify-content:space-between;"><div><span class="engine-status-dot running"></span><span style="font-size:11px;">' + name + '<br><span style="color:#9ca3af;">下次 ' + next + ' · 每' + j.interval + 's</span></span></div>' +
-                    '<button onclick="deleteCron(\'' + name + '\')" class="text-xs text-red-400 hover:text-red-600 transition px-2 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20" title="删除">✕</button></div>';
+                    return '<div class="engine-status-item"><div style="display:flex;align-items:center;justify-content:space-between;flex:1;"><div><span class="engine-status-dot running"></span><span style="font-size:11px;">' + name + '<br><span style="color:#9ca3af;">下次 ' + next + ' · 每' + j.interval + 's</span></span></div>' +
+                    '<button onclick="deleteCron(\'' + name + '\')" class="engine-cron-delete" title="删除">✕</button></div></div>';
                 }).join('');
             } else {
-                cronList.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">暂无活跃 cron 任务</div>';
+                cronList.innerHTML = '<div class="engine-empty-hint">暂无活跃 cron 任务</div>';
             }
         } catch(e) {
-            cronList.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">加载失败: ' + escapeHtml(e.message) + '</div>';
+            cronList.innerHTML = '<div class="engine-empty-hint">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
@@ -3061,7 +3322,7 @@ window.refreshEngineStatus = async function() {
             window._agentListCache = agentData;
             window._renderAgentList(agentData, agentList);
         } catch(e) {
-            agentList.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:4px;">加载失败: ' + escapeHtml(e.message) + '</div>';
+            agentList.innerHTML = '<div class="engine-empty-hint">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 };
@@ -3112,5 +3373,3 @@ window.updateParam = (type, val) => {
     }
     // 不自动保存,滑动时只更新显示
 };
-
-

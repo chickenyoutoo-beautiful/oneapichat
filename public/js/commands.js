@@ -11,7 +11,7 @@ window.parseCommand = function(text) {
     if (cmd === '/news') return { type: 'command', cmd: 'force_search', query: rest, kind: 'news' };
     if (cmd === '/image') return { type: 'command', cmd: 'force_search', query: rest, kind: 'images' };
     // 模式切换
-    if (cmd === '/mode' || cmd === '/agent') {
+    if (cmd === '/mode') {
         var m = (rest || 'agent').toLowerCase();
         if (['off','plan','agent','yolo'].indexOf(m) === -1) m = 'agent';
         return { type: 'command', cmd: 'set_mode', mode: m };
@@ -33,15 +33,23 @@ window.parseCommand = function(text) {
     if (cmd === '/export') return { type: 'command', cmd: 'export_chat' };
     // 记忆
     if (cmd === '/remember') return { type: 'command', cmd: 'remember', content: rest };
-    // ★ 新增命令 (Phase 3b)
+    // ★ Phase 3b 命令
     if (cmd === '/copy') return { type: 'command', cmd: 'copy' };
-    if (cmd === '/stop') return { type: 'command', cmd: 'stop_gen' };
+    if (cmd === '/stop' || cmd === '/abort') return { type: 'command', cmd: 'stop_gen' };
     if (cmd === '/diff') return { type: 'command', cmd: 'show_diff', args: rest };
     if (cmd === '/doctor') return { type: 'command', cmd: 'doctor' };
     if (cmd === '/context') return { type: 'command', cmd: 'show_context' };
     if (cmd === '/agents') return { type: 'command', cmd: 'list_agents' };
     if (cmd === '/agent') return { type: 'command', cmd: 'switch_agent_chat', agentName: rest };
-    if (cmd === '/color') return { type: 'command', cmd: 'set_color', theme: rest || 'auto' };
+    if (cmd === '/color' || cmd === '/theme') return { type: 'command', cmd: 'set_color', theme: rest || 'auto' };
+    // ★ Phase 4 新增命令
+    if (cmd === '/mcp') return { type: 'command', cmd: 'show_mcp' };
+    if (cmd === '/cost') return { type: 'command', cmd: 'show_cost' };
+    if (cmd === '/effort') return { type: 'command', cmd: 'set_effort', level: rest };
+    if (cmd === '/think') return { type: 'command', cmd: 'set_think', mode: rest };
+    if (cmd === '/queue') return { type: 'command', cmd: 'show_queue' };
+    if (cmd === '/attach') return { type: 'command', cmd: 'open_attach' };
+    if (cmd === '/folder') return { type: 'command', cmd: 'open_folder' };
     return null;
 }
 
@@ -304,11 +312,14 @@ window.handleSlashCommand = function(cmd) {
         try {
             var agResp = await fetch('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + token3);
             var agData = await agResp.json();
-            if (agData.agents && agData.agents.length > 0) {
-                var agList = agData.agents.map(function(a) {
-                    return '- `' + (a.name || a.id || '?') + '` [' + (a.status || '?') + '] ' + (a.task || '');
+            var agentList = agData.agents || [];
+            // ★ 缓存到全局供 @ 提及使用
+            window._cachedAgentList = agentList;
+            if (agentList.length > 0) {
+                var agList = agentList.map(function(a) {
+                    return '- `' + (a.name || a.id || '?') + '` [' + (a.status || '?') + '] ' + (a.role ? '(' + a.role + ') ' : '') + (a.task || '');
                 }).join('\n');
-                appendMessage('system', '## 🤖 活跃子代理\n' + agList);
+                appendMessage('system', '## 🤖 活跃子代理 (' + agentList.length + ')\n' + agList + '\n\n> 输入 `@` 可快速提及代理');
             } else {
                 appendMessage('system', '🤖 暂无活跃子代理');
             }
@@ -337,7 +348,8 @@ window.handleSlashCommand = function(cmd) {
                     title: '🤖 ' + _agentName,
                     userId: localStorage.getItem('authUserId') || '',
                     updated_at: Date.now(),
-                    messages: [{ role: 'system', content: _agSysPrompt }]
+                    messages: [{ role: 'system', content: _agSysPrompt }],
+                    _agentSub: true
                 };
                 // 从 localStorage 或 agent result 加载历史消息
                 var _agKey = 'agent_chat_' + _agentName;
@@ -359,21 +371,138 @@ window.handleSlashCommand = function(cmd) {
         }
     } else if (cmd.cmd === 'set_color') {
         // ★ 主题颜色切换
+        // ★ 统一 key: 主开关用 localStorage['dark'], 'theme' 仅作旧数据兼容
         var theme = cmd.theme || 'auto';
         var root = document.documentElement;
+        var _isDark = false;
         if (theme === 'dark') {
+            _isDark = true;
             root.classList.add('dark');
+            localStorage.setItem('dark', 'true');
             localStorage.setItem('theme', 'dark');
             showToast('🌙 深色模式', 'success', 2000);
         } else if (theme === 'light') {
             root.classList.remove('dark');
+            localStorage.setItem('dark', 'false');
             localStorage.setItem('theme', 'light');
             showToast('☀️ 浅色模式', 'success', 2000);
         } else {
-            root.classList.remove('dark');
+            // auto: 跟随系统(若无 matchMedia 则回退浅色)
+            _isDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : false;
+            root.classList.toggle('dark', _isDark);
+            localStorage.removeItem('dark');
             localStorage.setItem('theme', 'auto');
             showToast('🔄 自动模式（跟随系统）', 'success', 2000);
         }
+        // ★ 同步主题图标与 hljs 主题(与 ui.js toggleDarkMode 一致)
+        var _moon = getEl('moonPath'), _sun = getEl('sunPath');
+        _moon?.classList.toggle('hidden', _isDark);
+        _sun?.classList.toggle('hidden', !_isDark);
+        var _themeEl = getEl('hljsTheme');
+        if (_themeEl) _themeEl.href = _isDark ? 'lib/atom-one-dark.min.css' : 'lib/atom-one-light.min.css';
+        if (typeof applyDropdownTheme === 'function') applyDropdownTheme();
+    // ★ Phase 4: 新增命令处理
+    } else if (cmd.cmd === 'show_mcp') {
+        // ★ MCP 工具状态
+        showToast('🔌 加载 MCP 工具...', 'info', 2000);
+        try {
+            var mcpResp = await fetch('/oneapichat/api/v1/mcp.php?action=tools/list', { headers: { 'Accept': 'application/json' } });
+            var mcpData = await mcpResp.json();
+            var mcpTools = mcpData.tools || mcpData.result?.tools || [];
+            if (mcpTools.length > 0) {
+                // 按首段分组 (如 engine_*, server_*, cr_*)
+                var mcpGroups = {};
+                mcpTools.forEach(function(t) {
+                    var prefix = (t.name || '').split('_')[0] || 'other';
+                    if (!mcpGroups[prefix]) mcpGroups[prefix] = [];
+                    mcpGroups[prefix].push(t);
+                });
+                var mcpHtml = '## 🔌 MCP 工具 (' + mcpTools.length + ' 个)\n';
+                Object.keys(mcpGroups).sort().forEach(function(g) {
+                    mcpHtml += '\n### ' + g + ' (' + mcpGroups[g].length + ')\n';
+                    mcpGroups[g].slice(0, 20).forEach(function(t) {
+                        mcpHtml += '- `' + t.name + '` — ' + (t.description || '').substring(0, 60) + '\n';
+                    });
+                    if (mcpGroups[g].length > 20) mcpHtml += '- ... 还有 ' + (mcpGroups[g].length - 20) + ' 个\n';
+                });
+                appendMessage('system', mcpHtml);
+            } else {
+                appendMessage('system', '🔌 MCP 工具: 暂无或未配置');
+            }
+        } catch(e) {
+            // 降级: 从前端工具注册表统计
+            var toolCount = window.toolRegistry ? Object.keys(window.toolRegistry).length : 0;
+            appendMessage('system', '🔌 MCP 服务暂不可达: ' + e.message + '\n\n前端已注册工具: ' + toolCount + ' 个');
+        }
+    } else if (cmd.cmd === 'show_cost') {
+        // ★ 会话费用统计
+        var usage = window.sessionUsage || {};
+        var pt = usage.promptTokens || 0;
+        var ct = usage.completionTokens || 0;
+        var cacheHits = usage.cacheHitTokens || 0;
+        var cacheMiss = usage.cacheMissTokens || 0;
+        var cost = usage.totalCost || 0;
+        var toolCalls = usage.toolCalls || 0;
+        var cacheRate = pt > 0 ? (cacheHits / pt * 100).toFixed(1) : '0.0';
+        appendMessage('system', '## 💰 会话费用统计\n' +
+            '📥 输入 tokens: ' + pt.toLocaleString() + '\n' +
+            '📤 输出 tokens: ' + ct.toLocaleString() + '\n' +
+            '🔧 工具调用: ' + toolCalls + ' 次\n' +
+            '💾 缓存命中: ' + cacheHits.toLocaleString() + ' (' + cacheRate + '%)\n' +
+            '📝 缓存未命中: ' + cacheMiss.toLocaleString() + '\n' +
+            '💵 估算费用: ¥' + cost.toFixed(4) + '\n' +
+            '> 费率: 输入 ¥0.5/M · 输出 ¥2/M tokens');
+    } else if (cmd.cmd === 'set_effort') {
+        // ★ 设置思考强度 (统一 6 档 off~ultra，按模型能力映射到原生参数)
+        var level = (cmd.level || '').toLowerCase();
+        var validLevels = ['off', 'low', 'medium', 'high', 'max', 'ultra'];
+        if (!level) {
+            var cur = localStorage.getItem('thinkingIntensity') || 'medium';
+            appendMessage('system', '🧠 当前思考强度: `' + cur + '`\n\n用法: /effort <level>\n可选: off / low / medium / high / max / ultra\n\n> ultra 仅 Claude / DeepSeek V4 生效\n> 自动映射: OpenAI→reasoning_effort, Claude→output_config.effort, Gemini→thinking_level');
+            return;
+        }
+        if (validLevels.indexOf(level) === -1) {
+            appendMessage('system', '❌ 无效力度: ' + level + '\n可选: ' + validLevels.join(' / '));
+            return;
+        }
+        localStorage.setItem('thinkingIntensity', level);
+        // 同步到模型请求参数 + UI 选单
+        if (typeof window._applyReasonEffort === 'function') window._applyReasonEffort(level);
+        var _tiEl = document.getElementById('thinkingIntensity');
+        if (_tiEl) _tiEl.value = level;
+        if (typeof window._updateThinkingIntensityVisibility === 'function') window._updateThinkingIntensityVisibility();
+        showToast('🧠 思考强度: ' + level, 'success', 2000);
+    } else if (cmd.cmd === 'set_think') {
+        // ★ 切换深度思考 (off↔high 切换，适配统一思考强度系统)
+        var thinkMode = (cmd.mode || '').toLowerCase();
+        var _ti = localStorage.getItem('thinkingIntensity') || 'medium';
+        if (!thinkMode || thinkMode === 'auto') {
+            // 切换: 当前 off 则开到 high, 否则关闭
+            thinkMode = (_ti === 'off') ? 'on' : 'off';
+        }
+        var newLevel = (thinkMode === 'on' || thinkMode === '1' || thinkMode === 'true') ? 'high' : 'off';
+        localStorage.setItem('thinkingIntensity', newLevel);
+        var _tiEl2 = document.getElementById('thinkingIntensity');
+        if (_tiEl2) _tiEl2.value = newLevel;
+        if (typeof window._updateThinkingIntensityVisibility === 'function') window._updateThinkingIntensityVisibility();
+        showToast('💡 深度思考: ' + (newLevel === 'off' ? '关闭' : '开启 (high)'), 'success', 2000);
+    } else if (cmd.cmd === 'show_queue') {
+        // ★ 消息队列
+        var queue = window._messageQueue || [];
+        if (queue.length === 0) {
+            appendMessage('system', '📬 消息队列: 空');
+        } else {
+            var qList = queue.map(function(q, i) { return (i + 1) + '. ' + (q.text || '(无文本)').substring(0, 80); }).join('\n');
+            appendMessage('system', '## 📬 消息队列 (' + queue.length + ' 条)\n' + qList);
+        }
+    } else if (cmd.cmd === 'open_attach') {
+        // ★ 打开文件上传
+        var fileInput = $.fileInput || document.getElementById('fileInput');
+        if (fileInput) fileInput.click();
+    } else if (cmd.cmd === 'open_folder') {
+        // ★ 打开文件夹上传
+        var folderInput = document.getElementById('folderInput');
+        if (folderInput) folderInput.click();
     }
     })(); // end async wrapper
 }

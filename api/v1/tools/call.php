@@ -133,6 +133,11 @@ $mcpEndpoint = str_starts_with($toolName, 'bilibili_') ? '/mcp/bilibili/tools/ca
 $longRunningTools = ['chaoxing_qr_login', 'bilibili_qr_login', 'video_edit', 'generate_ppt', 'generate_docx', 'generate_xlsx', 'generate_pdf'];
 $timeout = in_array($toolName, $longRunningTools) ? 300 : 120;
 
+// ★ 2026-08-03 云盘全面结合: 透传用户上下文 (video_download/bili_download 等下载完成后自动同步到该用户云盘)
+if ($userId && in_array($toolName, ['video_download', 'bili_download', 'bili_download_dash', 'netdisk_download', 'netdisk_parse_and_download'])) {
+    $args['user_id'] = $userId;
+}
+
 $mcpCtx = stream_context_create(['http' => [
     'method' => 'POST',
     'header' => "Content-Type: application/json\r\n",

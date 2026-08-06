@@ -4,8 +4,8 @@
 // ==================== UI 工具 ====================
 window.autoResize = function (el) {
     el.style.height = 'auto';
-    // ★ 限制最大高度避免 rounded-full 背景溢出
-    var max = window.innerWidth <= 480 ? 80 : 100;
+    // ★ 与 CSS max-height:150px 保持一致(移动端 100px)
+    var max = window.innerWidth <= 480 ? 100 : 150;
     el.style.height = Math.min(el.scrollHeight, max) + 'px';
 };
 
@@ -96,7 +96,7 @@ window.showImageProcessingHint = function(chatId, files) {
 };
 
 // ==================== 工具调用状态行 (独立, 完成后3秒淡出) ====================
-window.showToolStatus = function(toolName, argPreview, status, chatId) {
+window.showToolStatus = function(toolName, argPreview, status, chatId, toolCallId) {
     // ★ 使用传入的 chatId 而非全局 currentChatId，避免跨会话工具状态泄露
     var _cid = chatId || currentChatId;
     if (!_cid) return;
@@ -122,6 +122,24 @@ window.showToolStatus = function(toolName, argPreview, status, chatId) {
             setTimeout(function() { if (tcContainer.parentNode) tcContainer.remove(); }, 250);
         }
         return;
+    }
+
+    // snapshot/hydration 可能被 loadChat、SSE 首包和重连连续触发。相同调用的
+    // 相同状态就地更新，避免必须等新输出以及反复执行“滑出再滑入”动画。
+    var existingSame = null;
+    tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
+        if (existingSame) return;
+        var sameId = toolCallId && old.dataset.tcId === String(toolCallId);
+        var sameLegacy = !toolCallId && old.dataset.tcName === toolName;
+        if ((sameId || sameLegacy) && old.dataset.tcStatus === status) existingSame = old;
+    });
+    if (existingSame) {
+        existingSame.classList.remove('tc-exit');
+        var existingName = existingSame.querySelector('.tool-call-name');
+        var existingArg = existingSame.querySelector('.tool-call-arg');
+        if (existingName) existingName.textContent = toolName;
+        if (existingArg) existingArg.textContent = (argPreview || '').substring(0, 40);
+        return existingSame;
     }
 
     // ★ 新工具启动: 灵动挤掉所有旧行(running + 已完成), 同名 running→success 替换
@@ -164,6 +182,9 @@ window.showToolStatus = function(toolName, argPreview, status, chatId) {
     line.className = cls;
     line.dataset.tcStatus = status;
     line.dataset.tcName = toolName;
+    if (toolCallId) line.dataset.tcId = String(toolCallId);
+    line.setAttribute('role', 'status');
+    line.setAttribute('aria-live', status === 'running' ? 'polite' : 'off');
     tcContainer.appendChild(line);
 
     // ★ 自动关联计划: 工具开始运行时，尝试匹配计划中的任务
@@ -204,25 +225,35 @@ function showToast(msg, type = 'info', dur = 3000) {
         container = document.createElement('div');
         container.id = 'toast-container';
         container.className = 'toast-container';
+        container.setAttribute('aria-live', 'polite');
+        container.setAttribute('aria-atomic', 'false');
         document.body.appendChild(container);
     }
     var toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    // SVG 图标(白描边渲染在类型色渐变圆内), 与 .toast-icon 的 CSS 变量色联动
+    var ICONS = {
+        success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+        error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+    };
     toast.innerHTML = `
-        <div class="toast-icon">${ { success: '✓', error: '✕', warning: '⚠', info: 'i' }[type] }</div>
+        <div class="toast-icon" aria-hidden="true">${ICONS[type] || ICONS.info}</div>
         <div class="toast-message">${escapeHtml(msg)}</div>
-        <button class="toast-close">&times;</button>
+        <button type="button" class="toast-close" aria-label="关闭通知">&times;</button>
     `;
-    toast.querySelector('.toast-close').onclick = () => {
+    var dismissed = false;
+    var dismiss = function() {
+        if (dismissed) return;
+        dismissed = true;
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(20px)';
         setTimeout(function() { toast.remove(); }, 200);
     };
-    setTimeout(function() {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(20px)';
-        setTimeout(function() { toast.remove(); }, 200);
-    }, dur);
+    toast.querySelector('.toast-close').onclick = dismiss;
+    setTimeout(dismiss, dur);
     container.appendChild(toast);
 }
 
@@ -230,25 +261,37 @@ function showToast(msg, type = 'info', dur = 3000) {
 // ⌨️ Slash Command Popup
 // ============================================================
 const SLASH_COMMANDS = [
+    // ── 搜索 ──
     { cmd: 'search', hint: '强制联网搜索', args: '[query]', icon: 'search', group: '搜索' },
     { cmd: 'news', hint: '搜索新闻', args: '[query]', icon: 'news', group: '搜索' },
     { cmd: 'image', hint: '搜索图片', args: '[query]', icon: 'image', group: '搜索' },
+    // ── Agent ──
     { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', icon: 'mode', group: 'Agent' },
     { cmd: 'model', hint: '切换 AI 模型', args: '[name]', icon: 'model', group: 'Agent' },
     { cmd: 'agents', hint: '列出活跃子代理', icon: 'agent', group: 'Agent' },
-    { cmd: 'retry', hint: '重新生成上一条回复', icon: 'retry', group: '对话' },
+    { cmd: 'mcp', hint: '查看 MCP 工具状态', icon: 'mcp', group: 'Agent' },
+    { cmd: 'effort', hint: '设置推理力度', args: '[low|medium|high|max]', icon: 'effort', group: 'Agent' },
+    { cmd: 'think', hint: '切换深度思考', args: '[on|off|auto]', icon: 'think', group: 'Agent' },
+    // ── 对话 ──
+    { cmd: 'new', hint: '新建对话', icon: 'new', group: '对话' },
     { cmd: 'clear', hint: '清空当前对话', icon: 'clear', group: '对话' },
     { cmd: 'compact', hint: '压缩对话上下文', icon: 'compact', group: '对话' },
-    { cmd: 'new', hint: '新建对话', icon: 'new', group: '对话' },
-    { cmd: 'export', hint: '导出聊天记录', icon: 'export', group: '对话' },
+    { cmd: 'retry', hint: '重新生成上一条回复', icon: 'retry', group: '对话' },
     { cmd: 'copy', hint: '复制最后 AI 回复', icon: 'copy', group: '对话' },
-    { cmd: 'remember', hint: '保存/查看记忆', args: '[key: content]', icon: 'config', group: '对话' },
+    { cmd: 'export', hint: '导出聊天记录', icon: 'export', group: '对话' },
     { cmd: 'stop', hint: '停止当前生成', icon: 'stop', group: '对话' },
+    { cmd: 'queue', hint: '查看消息队列', icon: 'queue', group: '对话' },
+    { cmd: 'remember', hint: '保存/查看记忆', args: '[key: content]', icon: 'config', group: '对话' },
+    // ── 上传 ──
+    { cmd: 'attach', hint: '上传文件 / 图片', icon: 'attach', group: '上传' },
+    { cmd: 'folder', hint: '上传整个文件夹', icon: 'folder', group: '上传' },
+    // ── 系统 ──
     { cmd: 'config', hint: '打开配置面板', icon: 'config', group: '系统' },
     { cmd: 'context', hint: '查看上下文用量', icon: 'context', group: '系统' },
+    { cmd: 'cost', hint: '查看会话费用统计', icon: 'cost', group: '系统' },
     { cmd: 'doctor', hint: '系统诊断检查', icon: 'doctor', group: '系统' },
     { cmd: 'diff', hint: '查看 Git/文件差异', icon: 'diff', group: '系统' },
-    { cmd: 'color', hint: '切换主题颜色', args: '[dark|light|auto]', icon: 'color', group: '系统' },
+    { cmd: 'theme', hint: '切换主题颜色', args: '[dark|light|auto]', icon: 'theme', group: '系统' },
     { cmd: 'logout', hint: '退出登录', icon: 'logout', group: '系统' },
     { cmd: 'help', hint: '显示所有命令', icon: 'help', group: '帮助' }
 ];
@@ -380,34 +423,237 @@ function hideSlashPopup() {
     }
 }
 
-// 自动滚动到底部(用于AI回复等场景)
+// ============================================================
+// 📌 @ Mention Popup — 输入 @ 时弹出代理/文件/工具选择
+// ============================================================
+window._mentionIdx = -1;
+window._mentionVisible = false;
+window._mentionTriggerPos = -1; // 光标处 @ 的起始位置
+
+function _positionMentionPopup() {
+    var popup = getEl('mentionPopup');
+    var inp = document.getElementById('userInput');
+    if (!popup || !inp) return;
+    var rect = inp.getBoundingClientRect();
+    popup.style.position = 'fixed';
+    popup.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+    popup.style.left = rect.left + 'px';
+    popup.style.width = rect.width + 'px';
+}
+
+/** 收集 @ 提及的候选列表 */
+function _collectMentionCandidates(query) {
+    var candidates = [];
+    // 1) 子代理 (从全局缓存读取)
+    var agents = window._cachedAgentList || [];
+    if (agents && agents.length) {
+        agents.forEach(function(a) {
+            var name = a.name || a.id || '';
+            if (!name) return;
+            candidates.push({
+                type: 'agent',
+                icon: '🤖',
+                cmd: name,
+                hint: '子代理 · ' + (a.role || 'general') + ' [' + (a.status || '?') + ']',
+                group: '子代理'
+            });
+        });
+    }
+    // 也检查 _agentListCache (agent.js 的格式)
+    var agentCache = window._agentListCache || {};
+    Object.keys(agentCache).forEach(function(name) {
+        var a = agentCache[name];
+        if (!a) return;
+        // 避免重复
+        if (candidates.some(function(c) { return c.cmd === name; })) return;
+        candidates.push({
+            type: 'agent',
+            icon: '🤖',
+            cmd: name,
+            hint: '子代理 · ' + (a.role || 'general') + ' [' + (a.status || '?') + ']',
+            group: '子代理'
+        });
+    });
+    // 2) 当前已上传/待发送的文件
+    if (pendingFiles && pendingFiles.length) {
+        pendingFiles.forEach(function(f, i) {
+            var isImg = f.isImage || (f.type && f.type.startsWith('image/'));
+            candidates.push({
+                type: 'file',
+                icon: isImg ? '🖼️' : '📄',
+                cmd: f.name,
+                hint: (isImg ? '图片' : '文件') + ' · ' + _formatFileSize(f.size),
+                group: '已附加文件',
+                index: i
+            });
+        });
+    }
+    // 3) 常用工具快捷引用
+    var tools = [
+        { cmd: 'web_search', hint: '联网搜索', icon: '🔍' },
+        { cmd: 'web_fetch', hint: '抓取网页', icon: '🌐' },
+        { cmd: 'analyze_image', hint: '分析图片', icon: '👁️' },
+        { cmd: 'parse_document', hint: '解析文档', icon: '📝' },
+        { cmd: 'server_exec', hint: '执行命令', icon: '⚙️' },
+    ];
+    tools.forEach(function(t) {
+        candidates.push({ type: 'tool', icon: t.icon, cmd: t.cmd, hint: '工具 · ' + t.hint, group: '工具' });
+    });
+    // 过滤
+    if (query) {
+        var q = query.toLowerCase();
+        candidates = candidates.filter(function(c) {
+            return c.cmd.toLowerCase().indexOf(q) >= 0 || c.hint.toLowerCase().indexOf(q) >= 0;
+        });
+    }
+    return candidates;
+}
+
+function handleMentionInput(el) {
+    var val = el.value;
+    var cursorPos = el.selectionStart || 0;
+    if (!val) { hideMentionPopup(); return; }
+    // 找到光标前最近的 @
+    var beforeCursor = val.substring(0, cursorPos);
+    var atIdx = beforeCursor.lastIndexOf('@');
+    if (atIdx < 0) { hideMentionPopup(); return; }
+    // @ 在开头且后面没有空格（即还在输入提及）
+    var afterAt = val.substring(atIdx + 1, cursorPos);
+    if (afterAt.indexOf(' ') >= 0) { hideMentionPopup(); return; }
+    // @ 前面必须是空格或开头（避免邮箱误触发）
+    if (atIdx > 0 && /\S/.test(val.substring(atIdx - 1, atIdx))) { hideMentionPopup(); return; }
+    window._mentionTriggerPos = atIdx;
+    updateMentionPopup(afterAt.toLowerCase());
+}
+
+function updateMentionPopup(query) {
+    var popup = getEl('mentionPopup');
+    var candidates = _collectMentionCandidates(query);
+    if (!popup) {
+        popup = document.createElement('div');
+        popup.id = 'mentionPopup';
+        popup.className = 'slash-popup'; // 复用 slash popup 样式
+        popup.style.opacity = '0';
+        popup.style.transform = 'translateY(8px)';
+        if (!popup.parentNode) document.body.appendChild(popup);
+    }
+    _positionMentionPopup();
+    if (!window.__mentionResizeBound) {
+        window.__mentionResizeBound = true;
+        window.addEventListener('resize', function() { if (window._mentionVisible) _positionMentionPopup(); });
+        window.addEventListener('scroll', function() { if (window._mentionVisible) _positionMentionPopup(); }, true);
+    }
+    if (candidates.length === 0) { hideMentionPopup(); return; }
+    var groups = {};
+    candidates.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
+    var html = '';
+    var idx = 0;
+    Object.keys(groups).forEach(function(g) {
+        html += '<div class=slash-popup-group>' + escapeHtml(g) + '</div>';
+        groups[g].forEach(function(m) {
+            html += '<div class="slash-popup-item' + (idx === 0 ? ' slash-item-highlight' : '') + '" data-type="' + m.type + '" data-cmd="' + escapeHtml(m.cmd) + '" data-index="' + (m.index ?? -1) + '">' +
+                '<span class="mention-item-icon">' + m.icon + '</span>' +
+                '<span class=slash-item-cmd>' + escapeHtml(m.cmd) + '</span>' +
+                '<span class=slash-item-hint>' + escapeHtml(m.hint) + '</span>' +
+            '</div>';
+            idx++;
+        });
+    });
+    html += '<div class=slash-popup-footer>↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
+    popup.innerHTML = html;
+    window._mentionIdx = 0;
+    window._mentionVisible = true;
+    popup.style.pointerEvents = 'auto';
+    popup.querySelectorAll('.slash-popup-item').forEach(function(item) {
+        item.addEventListener('click', function() {
+            selectMentionCommand(this.dataset.type, this.dataset.cmd, parseInt(this.dataset.index || '-1', 10));
+        });
+    });
+    requestAnimationFrame(function() {
+        popup.style.opacity = '1';
+        popup.style.transform = 'translateY(0)';
+    });
+}
+
+function navigateMentionPopup(dir) {
+    var popup = getEl('mentionPopup');
+    if (!popup || !window._mentionVisible) return;
+    var items = popup.querySelectorAll('.slash-popup-item');
+    if (items.length === 0) return;
+    var cur = popup.querySelector('.slash-item-highlight');
+    if (cur) cur.classList.remove('slash-item-highlight');
+    window._mentionIdx = (window._mentionIdx + dir + items.length) % items.length;
+    var target = items[window._mentionIdx];
+    target.classList.add('slash-item-highlight');
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function selectMentionCommand(type, cmd, index) {
+    var input = $.userInput;
+    if (!input) return;
+    var val = input.value;
+    var pos = window._mentionTriggerPos;
+    // 替换 @xxx 为选中的文本
+    var before = val.substring(0, pos);
+    var after = val.substring(input.selectionStart || val.length);
+    var insertText = '';
+    if (type === 'agent') {
+        insertText = '@' + cmd + ' ';
+    } else if (type === 'file') {
+        insertText = '[' + cmd + '] ';
+    } else if (type === 'tool') {
+        insertText = '@' + cmd + ' ';
+    } else {
+        insertText = cmd + ' ';
+    }
+    input.value = before + insertText + after;
+    var newPos = before.length + insertText.length;
+    input.setSelectionRange(newPos, newPos);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    hideMentionPopup();
+}
+
+function hideMentionPopup() {
+    var popup = getEl('mentionPopup');
+    if (popup) {
+        window._mentionVisible = false;
+        popup.style.opacity = '0';
+        popup.style.transform = 'translateY(8px)';
+        popup.style.pointerEvents = 'none';
+    }
+}
 
 // 自动滚动到底部(用于AI回复等场景)
 function autoScrollToBottom(reason) {
     if (!$.chatBox) return;
     const { scrollTop, scrollHeight, clientHeight } = $.chatBox;
     var distFromBottom = scrollHeight - scrollTop - clientHeight;
+    // ★ 用户已远离开底部(>1.5x视口)时不强制拉回(loadChat 除外)
     if (distFromBottom > clientHeight * 1.5 && reason !== 'loadChat') {
         if (reason !== 'streaming' || userScrolled) return;
     }
-    // ★ 位置匹配法: 标记程序化滚动目标,scroll事件中匹配则忽略
-    window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
-    if (distFromBottom > 200) {
-        $.chatBox.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
-    } else {
-        $.chatBox.scrollTop = $.chatBox.scrollHeight;
-    }
+    // ★ 统一走 followToBottom: 即时模式(避免 CSS smooth 与程序赋值冲突)
+    followToBottom($.chatBox);
 }
 
+// 回到底部按钮 — 用户主动行为, 允许平滑滚动
 window.scrollToBottom = () => {
-    window.__lastAutoScrollTarget = $.chatBox.scrollHeight;
-    $.chatBox?.scrollTo({ top: $.chatBox.scrollHeight, behavior: 'smooth' });
+    followToBottom($.chatBox, { smooth: true });
     userScrolled = false;
+    if ($.scrollToBottomBtn) $.scrollToBottomBtn.classList.remove('visible');
 };
 
 window.toggleDarkMode = function (init = false) {
-    let html = document.documentElement;
-    var dark = html.classList.toggle('dark');
+    var html = document.documentElement;
+    var storedDark = localStorage.getItem('dark');
+    // init=true 表示“同步已保存的主题”，不是再反转一次。
+    // 旧实现在 cancelConfig -> initializeConfig -> toggleDarkMode(true)
+    // 链路中会把深色变浅色，再点一次又反过来。
+    var dark = init
+        ? (storedDark === 'true' || (storedDark === null && localStorage.getItem('theme') === 'dark'))
+        : !html.classList.contains('dark');
+    html.classList.toggle('dark', dark);
     if (!init) localStorage.setItem('dark', dark);
     var moon = getEl('moonPath');
     var sun = getEl('sunPath');
@@ -440,34 +686,101 @@ function lockBodyScroll(lock) {
     }
 }
 
+function _setPanelAccessibility(panel, isOpen) {
+    if (!panel) return;
+    panel.inert = !isOpen;
+    panel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+}
+
+function _setToggleExpanded(selector, expanded) {
+    document.querySelectorAll(selector).forEach(function(btn) {
+        btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
+}
+
+function _syncConfigShellState(isOpen) {
+    var shell = document.querySelector('.main-shell') || document.querySelector('.flex-1.flex-col');
+    shell?.classList.toggle('config-open', !!isOpen && !isMobile());
+    _setPanelAccessibility($.configPanel, !!isOpen);
+    _setToggleExpanded('[data-panel-toggle="config"], button[onclick*="toggleConfigPanel"]', !!isOpen);
+}
+window._syncConfigShellState = _syncConfigShellState;
+
+window.closeConfigPanel = function() {
+    if (!$.configPanel) return;
+    $.configPanel.classList.remove('mobile-open');
+    $.configPanel.classList.add('hidden-panel');
+    $.sidebarMask?.classList.remove('active');
+    configPanelWasOpen = false;
+    _syncConfigShellState(false);
+    lockBodyScroll(false);
+};
+
+window._syncChatTitlePlacement = function(mobile) {
+    var title = $.chatTitle || getEl('chatTitle');
+    var header = document.querySelector('.app-header') || document.querySelector('header');
+    var chatBox = $.chatBox || getEl('chatBox');
+    if (!title || !header || !chatBox) return;
+    $.chatTitle = title;
+
+    if (mobile) {
+        title.dataset.mobile = '1';
+        title.className = 'chat-title chat-title-mobile';
+        if (title.parentElement !== chatBox) chatBox.prepend(title);
+    } else {
+        delete title.dataset.mobile;
+        title.className = 'chat-title';
+        var right = header.querySelector('.header-actions') || header.querySelector('.flex.items-center.gap-3');
+        if (title.parentElement !== header || title.nextElementSibling !== right) {
+            header.insertBefore(title, right || null);
+        }
+    }
+};
+
 window.closeAllSidebars = function () {
     $.sidebar?.classList.remove('mobile-open');
     $.configPanel?.classList.remove('mobile-open');
-    $.agentPanel?.classList.add('hidden-panel');
+    $.configPanel?.classList.add('hidden-panel');
+    if ($.agentPanel && !$.agentPanel.classList.contains('hidden-panel') && typeof window.closeAgentPanel === 'function') {
+        window.closeAgentPanel();
+    } else {
+        $.agentPanel?.classList.add('hidden-panel');
+    }
     $.sidebarMask?.classList.remove('active');
+    _setPanelAccessibility($.sidebar, !isMobile());
+    _setPanelAccessibility($.configPanel, false);
+    _setPanelAccessibility($.agentPanel, false);
+    _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', false);
+    _syncConfigShellState(false);
     lockBodyScroll(false);
 };
 
 window.toggleSidebar = () => {
-    // ★ Agent 模式: 禁止展开侧边栏
-    if (isAgentToolsActive()) {
-        showToast('Agent 模式下侧边栏已折叠', 'info', 2000);
-        return;
-    }
+    // ★ Agent 模式允许手动展开(侧边栏显示 Agent 会话历史, 与普通聊天严格分隔)
     if (isMobile()) {
         if ($.sidebar?.classList.contains('mobile-open')) {
             $.sidebar.classList.remove('mobile-open');
             $.sidebarMask?.classList.remove('active');
+            _setPanelAccessibility($.sidebar, false);
+            _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', false);
             lockBodyScroll(false);
         } else {
             $.sidebar?.classList.add('mobile-open');
             $.configPanel?.classList.remove('mobile-open');
+            $.configPanel?.classList.add('hidden-panel');
             $.sidebarMask?.classList.add('active');
+            _setPanelAccessibility($.sidebar, true);
+            _setPanelAccessibility($.configPanel, false);
+            _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', true);
+            _syncConfigShellState(false);
             lockBodyScroll(true);
         }
     } else {
         $.sidebar?.classList.toggle('collapsed');
-        if ($.sidebarToggle) $.sidebarToggle.style.display = $.sidebar?.classList.contains('collapsed') ? 'block' : 'none';
+        var sidebarOpen = !$.sidebar?.classList.contains('collapsed');
+        _setPanelAccessibility($.sidebar, sidebarOpen);
+        _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', sidebarOpen);
+        if ($.sidebarToggle) $.sidebarToggle.style.display = sidebarOpen ? 'none' : 'inline-flex';
     }
 };
 
@@ -479,16 +792,16 @@ window.toggleConfigPanel = () => {
     }
     if (isMobile()) {
         if ($.configPanel?.classList.contains('mobile-open')) {
-            $.configPanel.classList.remove('mobile-open');
-            $.sidebarMask?.classList.remove('active');
-            configPanelWasOpen = false;
-            lockBodyScroll(false);
+            window.closeConfigPanel();
         } else {
             $.configPanel?.classList.remove('hidden-panel');
             $.configPanel?.classList.add('mobile-open');
             $.sidebar?.classList.remove('mobile-open');
             $.sidebarMask?.classList.add('active');
+            configSnapshot = snapshotConfig();
             configPanelWasOpen = true;
+            _setPanelAccessibility($.sidebar, false);
+            _syncConfigShellState(true);
             lockBodyScroll(true);
         }
     } else {
@@ -501,7 +814,7 @@ window.toggleConfigPanel = () => {
             }
         }
         $.configPanel?.classList.toggle('hidden-panel');
-        document.querySelector(".flex-1.flex-col")?.classList.toggle("config-open", isOpening);
+        _syncConfigShellState(isOpening);
         // 打开时保存配置快照,关闭时清除
         if (isOpening) {
             configSnapshot = snapshotConfig();
@@ -528,64 +841,82 @@ window.toggleImageConfig = () => {
     $.fileInput?.click();
 };
 
-// 切换图像提供商(MiniMax / OpenRouter)时更新字段:可见性、密钥、提示
+// 切换图像提供商(MiniMax / OpenRouter / OpenAI / 自定义)时更新字段:可见性、密钥、提示
+// ★ 模型按提供商独立存储(imageModel_{provider}),切换时不丢失各提供商的模型
 async function toggleImageProviderFields() {
     var provider = getVal('imageProvider') || 'minimax';
-    var keyInput = getEl('imageApiKey');       // MiniMax Key 输入框
-    var urlInput = getEl('imageBaseUrl');       // MiniMax URL 输入框
-    var orKeyInput = getEl('imageApiKeyOpenrouter');  // OpenRouter Key 输入框
-    var orUrlInput = getEl('imageBaseUrlOpenrouter'); // OpenRouter URL 输入框
     var modelInput = getEl('imageModel');
     var hintEl = getEl('imageProviderHint');
 
-    // 切换前保存当前值到对应提供商的 localStorage 键
+    // ★ 字段映射:每个提供商对应一组 Key/URL 字段
+    var fields = {
+        minimax: ['imageKeyField', 'imageUrlField'],
+        openrouter: ['orKeyField', 'orUrlField'],
+        openai: ['oaiKeyField', 'oaiUrlField'],
+        custom: ['customKeyField', 'customUrlField']
+    };
+    // ★ 配置映射:每个提供商的 Key/URL localStorage 键 + 默认值 + 模型默认值
+    var cfg = {
+        minimax: { keyLS: 'imageApiKey', urlLS: 'imageBaseUrl', defUrl: 'https://api.minimaxi.com', defModel: 'image-01', placeholder: 'image-01' },
+        openrouter: { keyLS: 'imageApiKeyOpenrouter', urlLS: 'imageBaseUrlOpenrouter', defUrl: 'https://openrouter.ai/api', defModel: 'openai/gpt-5.4-image-2', placeholder: 'openai/gpt-5.4-image-2' },
+        openai: { keyLS: 'imageApiKeyOpenai', urlLS: 'imageBaseUrlOpenai', defUrl: 'https://api.openai.com/v1', defModel: 'gpt-image-1', placeholder: 'gpt-image-1' },
+        custom: { keyLS: 'imageApiKeyCustom', urlLS: 'imageBaseUrlCustom', defUrl: '', defModel: '', placeholder: '如: dall-e-3' }
+    };
+
+    // 切换前保存当前值到对应提供商的 localStorage 键 + 模型
     if (window._lastImageProvider && window._lastImageProvider !== provider) {
-        var _prevFinal = window._lastImageProvider;
-        if (_prevFinal === 'minimax') {
-            localStorage.setItem('imageApiKey', await encrypt(getVal('imageApiKey') || ''));
-            localStorage.setItem('imageBaseUrl', getVal('imageBaseUrl') || '');
-        } else {
-            localStorage.setItem('imageApiKeyOpenrouter', await encrypt(getVal('imageApiKeyOpenrouter') || ''));
-            localStorage.setItem('imageBaseUrlOpenrouter', getVal('imageBaseUrlOpenrouter') || '');
-        }
+        var _prev = window._lastImageProvider;
+        var _prevCfg = cfg[_prev] || cfg.minimax;
+        localStorage.setItem(_prevCfg.keyLS, await encrypt(getVal(_prevCfg.keyLS === 'imageApiKey' ? 'imageApiKey' :
+            _prevCfg.keyLS === 'imageApiKeyOpenrouter' ? 'imageApiKeyOpenrouter' :
+            _prevCfg.keyLS === 'imageApiKeyOpenai' ? 'imageApiKeyOpenai' : 'imageApiKeyCustom') || ''));
+        // 保存 URL
+        var _prevUrlFieldId = (_prev === 'minimax') ? 'imageBaseUrl' : (_prev === 'openrouter') ? 'imageBaseUrlOpenrouter' : (_prev === 'openai') ? 'imageBaseUrlOpenai' : 'imageBaseUrlCustom';
+        localStorage.setItem(_prevCfg.urlLS, getVal(_prevUrlFieldId) || '');
+        // ★ 保存当前模型到该提供商的独立键
+        if (modelInput) localStorage.setItem('imageModel_' + _prev, modelInput.value || '');
     }
     window._lastImageProvider = provider;
 
     // 切换字段可见性
-    var _miniFields = ['imageKeyField', 'imageUrlField'];
-    var _orFields = ['orKeyField', 'orUrlField'];
-    _miniFields.forEach(function(id) {
-        var el = getEl(id); if (el) el.style.display = provider === 'minimax' ? '' : 'none';
-    });
-    _orFields.forEach(function(id) {
-        var el = getEl(id); if (el) el.style.display = provider === 'openrouter' ? '' : 'none';
+    Object.keys(fields).forEach(function(k) {
+        var _visible = k === provider;
+        fields[k].forEach(function(id) {
+            var el = getEl(id); if (el) el.style.display = _visible ? '' : 'none';
+        });
     });
 
-    if (provider === 'openrouter') {
-        // 从 localStorage 恢复 OpenRouter 密钥
-        var _storedOrKeyFinal = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '') || '';
-        var _storedOrUrlFinal = localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api';
-        if (orKeyInput) orKeyInput.value = _storedOrKeyFinal !== 'not-needed' ? _storedOrKeyFinal : '';
-        if (orUrlInput) orUrlInput.value = _storedOrUrlFinal;
-        if (modelInput) {
-            modelInput.placeholder = 'openai/gpt-5.4-image-2';
-            var curModel = modelInput.value;
-            if (!curModel || curModel === 'image-01') modelInput.value = 'openai/gpt-5.4-image-2';
+    // 恢复当前提供商的配置值
+    var _curCfg = cfg[provider] || cfg.minimax;
+    var _keyFieldId = (provider === 'minimax') ? 'imageApiKey' : (provider === 'openrouter') ? 'imageApiKeyOpenrouter' : (provider === 'openai') ? 'imageApiKeyOpenai' : 'imageApiKeyCustom';
+    var _urlFieldId = (provider === 'minimax') ? 'imageBaseUrl' : (provider === 'openrouter') ? 'imageBaseUrlOpenrouter' : (provider === 'openai') ? 'imageBaseUrlOpenai' : 'imageBaseUrlCustom';
+    var _keyInput = getEl(_keyFieldId);
+    var _urlInput = getEl(_urlFieldId);
+    var _storedKey = await decrypt(localStorage.getItem(_curCfg.keyLS) || '') || '';
+    var _storedUrl = localStorage.getItem(_curCfg.urlLS) || _curCfg.defUrl;
+    if (_keyInput) _keyInput.value = _storedKey !== 'not-needed' ? _storedKey : '';
+    if (_urlInput) _urlInput.value = _storedUrl;
+    if (modelInput) {
+        modelInput.placeholder = _curCfg.placeholder;
+        // ★ 恢复模型优先级: 提供商独立键 > 输入框当前值(initializeConfig 已恢复) > 默认值
+        // 不直接回退到通用 imageModel 键,避免跨提供商串扰(如 OpenRouter 的 openai/gpt-5.4-image-2 泄漏到 custom)
+        var _savedModel = localStorage.getItem('imageModel_' + provider);
+        if (_savedModel === null || _savedModel === undefined) {
+            // 独立键不存在: 保留 initializeConfig 已恢复的值,仅当为空时用默认值
+            if (!modelInput.value) modelInput.value = _curCfg.defModel;
+        } else {
+            modelInput.value = _savedModel;
         }
-        if (hintEl) hintEl.textContent = 'OpenRouter: 使用 GPT Image 2。使用独立的 API Key,不影响频道聊天用的主 API Key。';
-    } else {
-        // 从 localStorage 恢复 MiniMax 密钥
-        var _storedMxKeyFinal = await decrypt(localStorage.getItem('imageApiKey') || '') || '';
-        var _storedMxUrlFinal = localStorage.getItem('imageBaseUrl') || 'https://api.minimaxi.com';
-        if (keyInput) keyInput.value = _storedMxKeyFinal !== 'not-needed' ? _storedMxKeyFinal : '';
-        if (urlInput) urlInput.value = _storedMxUrlFinal;
-        if (modelInput) {
-            modelInput.placeholder = 'image-01';
-            var curModel = modelInput.value;
-            if (!curModel || curModel === 'openai/gpt-5.4-image-2') modelInput.value = 'image-01';
-        }
-        if (hintEl) hintEl.textContent = 'MiniMax: 使用 image-01 模型,写实风格。使用独立 API Key,不影响主 API Key。';
     }
+
+    // ★ 提示文本
+    var hints = {
+        minimax: 'MiniMax: 使用 image-01 模型,写实风格。使用独立 API Key,不影响主 API Key。',
+        openrouter: 'OpenRouter: 使用 GPT Image 2。使用独立的 API Key,不影响主 API Key。',
+        openai: 'OpenAI: 使用 gpt-image-1 / DALL-E 系列。端点 /v1/images/generations。⚠️ 中国大陆需开启代理。',
+        custom: '自定义: 使用 OpenAI 兼容格式 (/v1/images/generations)。填写你的服务地址和模型名。CLIProxyAPI 可用: gpt-image-1.5, gpt-image-2, grok-imagine-image'
+    };
+    if (hintEl) hintEl.textContent = hints[provider] || '';
 
     // ★ 仅在用户切换提供商时保存(页面初始化时不触发saveConfig,避免覆盖服务器配置)
     if (window._isUserChangingProvider) {
@@ -615,13 +946,16 @@ window.onVisionProviderChange = async function() {
         } else if (window._lastVisionProvider === 'xai') {
             localStorage.setItem('visionApiKeyXAI', await encrypt(getVal('visionApiKeyXAI') || ''));
             localStorage.setItem('visionApiUrlXAI', getVal('visionApiUrlXAI') || 'https://api.x.ai/v1');
+        } else if (window._lastVisionProvider === 'custom') {
+            localStorage.setItem('visionApiKeyCustom', await encrypt(getVal('visionApiKeyCustom') || ''));
+            localStorage.setItem('visionApiUrlCustom', getVal('visionApiUrlCustom') || '');
         }
     }
     window._lastVisionProvider = provider;
     localStorage.setItem('visionProvider', provider);
-    
+
     // 切换字段可见性
-    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'] };
+    var fields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'], custom: ['visionCustomKeyField', 'visionCustomUrlField'] };
     Object.keys(fields).forEach(function(k) {
         fields[k].forEach(function(id) {
             var el = getEl(id); if (el) el.style.display = k === provider ? '' : 'none';
@@ -668,9 +1002,19 @@ window.onVisionProviderChange = async function() {
         if (urlInput) urlInput.value = _storedUrl;
         if (modelInput) modelInput.value = 'MiniMax-VL-01';
         if (hintEl) hintEl.textContent = 'MiniMax: 使用 coding-plan-vlm 端点的视觉理解能力。';
+    } else if (provider === 'custom') {
+        // 自定义: 恢复独立存储的 Key/URL
+        var _storedKeyC = await decrypt(localStorage.getItem('visionApiKeyCustom') || '') || '';
+        var _storedUrlC = localStorage.getItem('visionApiUrlCustom') || '';
+        var customKeyInput = getEl('visionApiKeyCustom');
+        var customUrlInput = getEl('visionApiUrlCustom');
+        if (customKeyInput) customKeyInput.value = _storedKeyC;
+        if (customUrlInput) customUrlInput.value = _storedUrlC;
+        if (modelInput) modelInput.value = '';
+        if (modelInput) modelInput.placeholder = '如: qwen-vl-plus, gpt-4o';
+        if (hintEl) hintEl.textContent = '自定义: 使用 OpenAI 兼容格式 (/v1/chat/completions + image_url)。填写你的服务地址、密钥和模型名。适用于 CLIProxyAPI、OneAPI、NewAPI 等中转服务。';
     } else {
-        // 自定义
-        if (hintEl) hintEl.textContent = '自定义: 设置自己的 API 地址和模型。';
+        if (hintEl) hintEl.textContent = '请选择视觉理解提供商。';
     }
     window.saveConfig();
 };
@@ -686,7 +1030,15 @@ function snapshotConfig() {
         'compress', 'threshold', 'compressModel', 'enableSearch', 'searchModel', 'searchProvider',
         'searchApiKey', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
         'aiSearchJudgeModel', 'aiSearchJudgePrompt', 'enableSearchOptimize', 'fontSize',
-        'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem'];
+        'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem',
+        'thinkingIntensity'];
+    // ★ 同时捕获 baseUrlProvider 和所有 model_{provider} 键,确保取消时能完整恢复厂商+模型
+    for (var _si = 0; _si < localStorage.length; _si++) {
+        var _sKey = localStorage.key(_si);
+        if (_sKey && (_sKey === 'baseUrlProvider' || _sKey.indexOf('model_') === 0) && keys.indexOf(_sKey) === -1) {
+            keys.push(_sKey);
+        }
+    }
     var snapshot = {};
     keys.forEach(key => {
         let val = localStorage.getItem(key);
@@ -705,7 +1057,15 @@ function restoreConfigSnapshot(snapshot) {
         'compress', 'threshold', 'compressModel', 'enableSearch', 'searchModel', 'searchProvider',
         'searchApiKey', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
         'aiSearchJudgeModel', 'aiSearchJudgePrompt', 'enableSearchOptimize', 'fontSize',
-        'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem'];
+        'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem',
+        'thinkingIntensity'];
+    // ★ 同时恢复 baseUrlProvider 和所有 model_{provider} 键 (与 snapshotConfig 对称)
+    for (var _ri = 0; _ri < localStorage.length; _ri++) {
+        var _rKey = localStorage.key(_ri);
+        if (_rKey && (_rKey === 'baseUrlProvider' || _rKey.indexOf('model_') === 0) && allKeys.indexOf(_rKey) === -1) {
+            allKeys.push(_rKey);
+        }
+    }
     allKeys.forEach(key => {
         if (snapshot.hasOwnProperty(key)) {
             localStorage.setItem(key, snapshot[key]);
@@ -722,7 +1082,7 @@ function restoreConfigSnapshot(snapshot) {
 window.cancelConfig = () => {
     if (!configSnapshot) {
         // 没有快照,直接关闭面板
-        $.configPanel?.classList.add('hidden-panel');
+        window.closeConfigPanel();
         configSnapshot = null;
         configPanelWasOpen = false;
         return;
@@ -730,7 +1090,7 @@ window.cancelConfig = () => {
     // 恢复配置
     restoreConfigSnapshot(configSnapshot);
     // 关闭面板
-    $.configPanel?.classList.add('hidden-panel');
+    window.closeConfigPanel();
     configSnapshot = null;
     configPanelWasOpen = false;
     showToast('已取消修改', 'info');
@@ -747,16 +1107,27 @@ const handleResize = debounce(() => {
 
     if (wasMobile === nowMobile) return;
 
-    // 只处理侧边栏,配置面板完全由用户手动控制,不自动关闭
+    // 抽屉跨断点时必须解除滚动锁并清理移动端状态；否则旋转设备后
+    // body 仍保持 overflow:hidden，页面看似“卡死”。
+    var configWasOpen = !!$.configPanel?.classList.contains('mobile-open');
+    $.sidebar?.classList.remove('mobile-open');
+    $.configPanel?.classList.remove('mobile-open');
+    $.sidebarMask?.classList.remove('active');
+    lockBodyScroll(false);
+    window._syncChatTitlePlacement(nowMobile);
+
     if (nowMobile) {
         $.sidebar?.classList.remove('mobile-open', 'collapsed');
-        $.sidebarMask?.classList.remove('active');
-        if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+        $.configPanel?.classList.add('hidden-panel');
+        _setPanelAccessibility($.sidebar, false);
+        _syncConfigShellState(false);
+        if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
     } else {
         $.sidebar?.classList.remove('mobile-open', 'collapsed');
-        $.sidebarMask?.classList.remove('active');
+        _setPanelAccessibility($.sidebar, true);
+        // 从打开的移动设置抽屉切到桌面时延续“设置已打开”的用户意图。
+        $.configPanel?.classList.toggle('hidden-panel', !configWasOpen);
+        _syncConfigShellState(configWasOpen);
         if ($.sidebarToggle) $.sidebarToggle.style.display = 'none';
     }
 }, 100);
-
-

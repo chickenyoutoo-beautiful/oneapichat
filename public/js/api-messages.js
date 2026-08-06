@@ -103,6 +103,8 @@ async function handleSearchFlow(chatId, text, forceSearch, queryText, history, s
             searchResults = await performWebSearch(searchQuery, signal, finalType);
             // 直接使用原始结果,不再优化
             var optimized = formatRawResults(searchResults);
+            // ★ 气泡外滚动展示搜索标题 (替代详情块)
+            if (window.showSearchTicker) window.showSearchTicker(searchResults);
             updateBubbleSearchStatus(bubble, '📝 搜索完成,正在生成回答...');
             if (getChecked('searchShowPromptToggle')) showToast('📝 搜索完成,正在生成回答...', 'info');
             return { searchPerformed: true, searchResults, optimized, searchError: null, searchType: finalType };
@@ -319,7 +321,9 @@ function buildApiMessages(chatId) {
             //    迭代消息时会尝试调用 .items() 导致 'list object' has no attribute 'items' 错误
             var _rc = msg.reasoning_content || msg.reasoning || '';
             if (_rc || msg._hadReasoning) {
-                var _isLongCat = (getVal('modelSelect') || '').toLowerCase().includes('longcat');
+                var _isLongCat = typeof window.isLongCat === 'function'
+                    ? window.isLongCat()
+                    : (getVal('modelSelect') || '').toLowerCase().includes('longcat');
                 if (!_isLongCat) {
                     _assistantMsg.reasoning_content = _rc;
                 }
@@ -546,7 +550,8 @@ function buildApiMessages(chatId) {
     }
     // ★ LongCat 清洗: 使用统一的 isLongCat() 检测 (同时检查模型名 + base URL + provider)
     //    apply_chat_template 不支持数组 content (会报 'list object' has no attribute 'items')
-    if (typeof window.sanitizeForLongCat === 'function') {
+    if (typeof window.isLongCat === 'function' && window.isLongCat()
+        && typeof window.sanitizeForLongCat === 'function') {
         apiMessages = window.sanitizeForLongCat(apiMessages);
     }
 

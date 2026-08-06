@@ -55,7 +55,7 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'save') 
 
     $allowedKeys = [
         'apiKey', 'baseUrl', 'model', 'systemPrompt',
-        'visionModel', 'visionApiUrl', 'visionApiKey',
+        'visionModel', 'visionApiUrl', 'visionApiKey', 'visionApiKeyCustom', 'visionApiUrlCustom',
         'imageModel', 'imageApiKey', 'imageBaseUrl', 'imageProvider',
         'temp', 'tokens', 'stream',
         'reasoningDelay', 'contentDelay', 'requestTimeout',

@@ -94,6 +94,9 @@ def _execute_workflow(name, user_id, get_ns, get_main_config, agent_roles, filte
             messages = [{"role": "user", "content": prompt}]
             step_max_rounds = agent_roles.get(step_role, agent_roles["general"])["max_rounds"]
             step_result_parts = []
+            # ★ 死循环检测: 重复/振荡 → 提前 break 停止调 API 烧 token
+            from engine.loop_guard import LoopGuard
+            _lg = LoopGuard()
             step_model = main_config.get("model", "") or "MiniMax-M2.7"
             if "api.minimaxi.com" in step_model and "minimax" not in step_model.lower():
                 step_model = "MiniMax-M2.7"
@@ -125,9 +128,22 @@ def _execute_workflow(name, user_id, get_ns, get_main_config, agent_roles, filte
                         "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                         for tc in msg.tool_calls]
                 messages.append(asst_msg)
+                _round_abort = False
                 for tc in msg.tool_calls:
+                    if _lg.record_tool_call(tc.function.name, tc.function.arguments) == "skip":
+                        # 重复/振荡: 注入提示并终止本轮工具链
+                        step_result_parts.append(f"[系统提示: 检测到{_lg.last_reason},步骤终止总结]")
+                        messages.append({"role": "tool", "tool_call_id": tc.id,
+                                         "content": f"【系统提示】系统检测到{_lg.last_reason},请立即停止调用工具并输出最终总结。"})
+                        _round_abort = True
+                        break
                     step_result_parts.append(f"[工具: {tc.function.name}]")
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": "工具已调用"})
+                if _round_abort:
+                    break
+                if _lg.record_round(had_content=bool(msg.content), tool_count=len(msg.tool_calls)) == "abort":
+                    step_result_parts.append(f"[系统检测到死循环: {_lg.last_reason},已终止步骤]")
+                    break
 
             step_output = "\n".join(step_result_parts)
         except Exception as e:

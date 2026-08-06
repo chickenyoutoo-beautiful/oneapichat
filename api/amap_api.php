@@ -89,6 +89,45 @@ function amap_get(string $url, array $params = []): array {
     return $data ?: ['status' => '0', 'info' => 'JSON 解析失败'];
 }
 
+// 高德路径规划结果摘要 (route/data → 便捷字段)
+function amap_route_summary(array $route): ?array {
+    $path = $route['paths'][0] ?? null;
+    if (!$path) return null;
+    return [
+        'distance' => intval($path['distance'] ?? 0),   // 米
+        'duration' => intval($path['duration'] ?? 0),   // 秒
+        'strategy' => $path['strategy'] ?? '',
+        'tolls' => $path['tolls'] ?? 0,
+        'steps' => count($path['steps'] ?? []),
+    ];
+}
+
+// POI 搜索取 poiId (高德 WIA schema 接口要求 poiId 必填)
+function amap_search_poi_id(string $key, string $name, string $lon = '', string $lat = ''): string {
+    if (empty($name)) return '';
+    $result = amap_get(AMAP_REST_BASE . '/place/text', [
+        'key' => $key, 'keywords' => $name, 'offset' => 5, 'page' => 1,
+    ]);
+    if (($result['status'] ?? '0') !== '1' || empty($result['pois'])) return '';
+    // 有坐标时优先选与坐标最接近的 POI
+    if ($lon !== '' && $lat !== '') {
+        $best = $result['pois'][0];
+        $bestDist = PHP_INT_MAX;
+        foreach ($result['pois'] as $poi) {
+            $loc = explode(',', $poi['location'] ?? '');
+            if (count($loc) !== 2) continue;
+            // 近似经纬度距离 (1度≈111km)
+            $d = (abs(floatval($loc[0]) - floatval($lon)) + abs(floatval($loc[1]) - floatval($lat))) * 111000;
+            if ($d < $bestDist) {
+                $bestDist = $d;
+                $best = $poi;
+            }
+        }
+        return $best['id'] ?? '';
+    }
+    return $result['pois'][0]['id'] ?? '';
+}
+
 // ═══ 路由分派 ═══
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
@@ -278,9 +317,18 @@ switch ($action) {
             'key' => $apiKey, 'origin' => $origin, 'destination' => $destination,
         ]);
         if (($result['status'] ?? '0') === '1') {
-            echo json_encode(amap_success(['data' => $result['routes'] ?? []]));
+            // ★ 骑行接口返回 data 字段 (驾车/步行是 route)
+            $data = $result['data'] ?? [];
+            echo json_encode(amap_success([
+                'data' => $data,
+                'summary' => amap_route_summary($data),
+            ]));
         } else {
-            echo json_encode(amap_error($result['info'] ?? '骑行路径规划失败'));
+            $info = $result['info'] ?? '骑行路径规划失败';
+            if ($info === 'SERVICE_NOT_AVAILABLE') {
+                $info = '骑行路径规划服务不可用 (需在高德开放平台开通「骑行路径规划」服务, 或该接口当前不可用)';
+            }
+            echo json_encode(amap_error($info));
         }
         break;
     }
@@ -317,7 +365,12 @@ switch ($action) {
             'key' => $apiKey, 'origin' => $origin, 'destination' => $destination,
         ]);
         if (($result['status'] ?? '0') === '1') {
-            echo json_encode(amap_success(['data' => $result['routes'] ?? []]));
+            // ★ 步行接口返回 route 单数字段 (原误取 routes 永远为空)
+            $route = $result['route'] ?? [];
+            echo json_encode(amap_success([
+                'data' => $route,
+                'summary' => amap_route_summary($route),
+            ]));
         } else {
             echo json_encode(amap_error($result['info'] ?? '路径规划失败'));
         }
@@ -336,7 +389,12 @@ switch ($action) {
             'key' => $apiKey, 'origin' => $origin, 'destination' => $destination,
         ]);
         if (($result['status'] ?? '0') === '1') {
-            echo json_encode(amap_success(['data' => $result['routes'] ?? []]));
+            // ★ 驾车接口返回 route 单数字段 (原误取 routes 永远为空)
+            $route = $result['route'] ?? [];
+            echo json_encode(amap_success([
+                'data' => $route,
+                'summary' => amap_route_summary($route),
+            ]));
         } else {
             echo json_encode(amap_error($result['info'] ?? '路径规划失败'));
         }
@@ -372,9 +430,18 @@ switch ($action) {
         }
         $result = amap_get(AMAP_REST_BASE . '/ip', ['key' => $apiKey, 'ip' => $ip]);
         if (($result['status'] ?? '0') === '1') {
+            // 高德对无定位数据的 IP (公共 DNS/内网地址等) 返回空数组而非字符串
+            $province = $result['province'] ?? '';
+            $city = $result['city'] ?? '';
+            if (is_array($province) || (empty($province) && is_array($city))) {
+                echo json_encode(amap_error('该 IP 无法定位 (高德 IP 库无数据, 公共 DNS/内网地址常见)', [
+                    'province' => '', 'city' => '', 'adcode' => '', 'rectangle' => '', 'isp' => '',
+                ]));
+                break;
+            }
             echo json_encode(amap_success([
-                'province' => $result['province'] ?? '',
-                'city' => $result['city'] ?? '',
+                'province' => $province,
+                'city' => $city,
                 'adcode' => $result['adcode'] ?? '',
                 'rectangle' => $result['rectangle'] ?? '',
                 'isp' => $result['isp'] ?? '',
@@ -428,9 +495,15 @@ switch ($action) {
 
     // ── 11. 个人地图小程序二维码 (WIA MCP) ──
     case 'schema_personal_map': {
-        $orgName = $_POST['orgName'] ?? '';
-        $lineList = $_POST['lineList'] ?? '';
-        $sceneType = intval($_POST['sceneType'] ?? 1);
+        // ★ 兼容 JSON body: 前端/MCP 以 application/json POST, PHP $_POST 解析不到
+        $rawBody = file_get_contents('php://input');
+        $jsonBody = $rawBody ? json_decode($rawBody, true) : null;
+        if (!is_array($jsonBody)) {
+            $jsonBody = [];
+        }
+        $orgName = $_POST['orgName'] ?? $jsonBody['orgName'] ?? '';
+        $lineList = $_POST['lineList'] ?? $jsonBody['lineList'] ?? '';
+        $sceneType = intval($_POST['sceneType'] ?? $jsonBody['sceneType'] ?? 1);
         if (empty($orgName) || empty($lineList)) {
             echo json_encode(amap_error('缺少参数: orgName 和 lineList'));
             break;
@@ -438,8 +511,38 @@ switch ($action) {
         if (is_string($lineList)) {
             $lineList = json_decode($lineList, true);
         }
+        if (!is_array($lineList)) {
+            echo json_encode(amap_error('lineList 必须是数组'));
+            break;
+        }
         if (!in_array($sceneType, [1, 2, 3], true)) {
             $sceneType = 1;
+        }
+        // ★ 2026-08: 高德 WIA 要求每个点 poiId 必填 (工具描述原标"可选"), 缺失时自动按名称搜索补全
+        // ⚠️ 不能用 `foreach ($line['pointInfoList'] ?? [] as &$pt)` — ?? 会值拷贝数组,
+        //    引用迭代绑定到副本, 赋值写不回原数组; 须经中间变量再写回
+        foreach ($lineList as &$line) {
+            $pts = $line['pointInfoList'] ?? [];
+            foreach ($pts as &$pt) {
+                if (empty($pt['poiId'])) {
+                    $pt['poiId'] = amap_search_poi_id($apiKey, $pt['name'] ?? '', $pt['lon'] ?? '', $pt['lat'] ?? '');
+                }
+            }
+            unset($pt);
+            $line['pointInfoList'] = $pts;  // ★ 显式写回
+        }
+        unset($line);
+        $missingPoi = [];
+        foreach ($lineList as $line) {
+            foreach ($line['pointInfoList'] ?? [] as $pt) {
+                if (empty($pt['poiId'])) {
+                    $missingPoi[] = $pt['name'] ?? '未命名地点';
+                }
+            }
+        }
+        if ($missingPoi) {
+            echo json_encode(amap_error('高德要求 poiId 必填, 且以下地点无法自动匹配, 请在 pointInfoList 中提供 poiId: ' . implode('、', array_unique($missingPoi))));
+            break;
         }
         $payload = [
             'channel' => '60000001',
@@ -478,6 +581,6 @@ switch ($action) {
     }
 
     default:
-        echo json_encode(amap_error("未知动作: {$action}。支持: geo, regeocode, text_search, around_search, direction_walking, direction_driving, direction_transit, ip_location, weather, district, schema_personal_map"));
+        echo json_encode(amap_error("未知动作: {$action}。支持: config, geo, regeocode, text_search, around_search, search_detail, direction_bicycling, direction_walking, direction_driving, direction_transit, distance, ip_location, weather, district, schema_personal_map"));
         break;
 }

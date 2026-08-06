@@ -136,7 +136,7 @@ ALL_TOOLS_DEF = [
         "type": "function",
         "function": {
             "name": "server_exec",
-            "description": "在服务器上执行终端命令。",
+            "description": "在服务器上执行终端命令。参数名必须是 cmd(不要用 command)。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,7 +151,7 @@ ALL_TOOLS_DEF = [
         "type": "function",
         "function": {
             "name": "server_python",
-            "description": "执行 Python 脚本。",
+            "description": "执行 Python 脚本。参数名必须是 script(不要用 code)。",
             "parameters": {
                 "type": "object",
                 "properties": {

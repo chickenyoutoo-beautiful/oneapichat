@@ -83,7 +83,7 @@ async function loadSearchConfig() {
     setChecked('ragToggle', ragChecked);
     window.RAG_ENABLED = ragChecked;
     // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
-    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') === '1');
+    setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') !== '0');
     setChecked('proxyToggle', localStorage.getItem('proxyEnabled') !== '0');  // 默认开启
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
@@ -166,7 +166,7 @@ window.toggleToolMode = function() {
     setChecked("searchToolCallToggle", !cur);
     localStorage.setItem("searchToolCall", !cur);
     updateToolModeBtn();
-    showToast(!cur ? "🔧 工具模式已开启" : "🔧 工具模式已关闭", "info", 1500);
+    showToast('工具模式已' + (!cur ? '开启' : '关闭'), "info", 1500);
 };
 
 window.updateToolModeBtn = function() {
@@ -186,6 +186,21 @@ window.initToolModeBtn = function() { updateToolModeBtn(); };
 // ★ Agent 模式切换
 let agentModeToolCallsMap = {};
 let sessionUsage = { promptTokens: 0, completionTokens: 0, totalCost: 0, prefixCacheHits: 0, toolCalls: 0, approvalsGranted: 0, approvalsRejected: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+
+// ★ 推理力度 (reasoning_effort) — 应用到模型请求
+window._applyReasonEffort = function(level) {
+    // 存储到 localStorage, 模型请求时读取
+    localStorage.setItem('reasonEffort', level);
+    // 更新 body 标记 (供 stream-handler 读取)
+    document.body.dataset.reasonEffort = level;
+    console.log('[ReasonEffort] 设置为:', level);
+};
+
+// ★ 深度思考开关
+window._toggleThinking = function(enabled) {
+    localStorage.setItem('enableThinking', enabled ? '1' : '0');
+    document.body.dataset.thinking = enabled ? '1' : '0';
+};
 
 // ==================== 增强用量追踪 ====================
 /** 按工具分类统计调用次数 */
@@ -227,7 +242,7 @@ const usageVisualizer = {
     maxCost = maxCost || 0.1; // 默认0.1刀
     var ratio = Math.min(sessionUsage.totalCost / maxCost, 1);
     var pct = (ratio * 100).toFixed(1);
-    return '<div class="usage-bar-container"><div class="usage-bar-label">💰 费用: $' + sessionUsage.totalCost.toFixed(4) + ' / $' + maxCost.toFixed(2) + '</div><div class="usage-bar-track"><div class="usage-bar-fill cost-bar" style="width:' + pct + '%"></div></div></div>';
+    return '<div class="usage-bar-container"><div class="usage-bar-label">' + _icon('dollar','usage-icon') + ' 费用: $' + sessionUsage.totalCost.toFixed(4) + ' / $' + maxCost.toFixed(2) + '</div><div class="usage-bar-track"><div class="usage-bar-fill cost-bar" style="width:' + pct + '%"></div></div></div>';
   },
   /** 渲染 Token 进度条 */
   tokenBar: function(maxTokens) {
@@ -235,7 +250,7 @@ const usageVisualizer = {
     var total = sessionUsage.promptTokens + sessionUsage.completionTokens;
     var ratio = Math.min(total / maxTokens, 1);
     var pct = (ratio * 100).toFixed(1);
-    return '<div class="usage-bar-container"><div class="usage-bar-label">🔤 Tokens: ' + total.toLocaleString() + ' / ' + maxTokens.toLocaleString() + '</div><div class="usage-bar-track"><div class="usage-bar-fill token-bar" style="width:' + pct + '%"></div></div></div>';
+    return '<div class="usage-bar-container"><div class="usage-bar-label">' + _icon('hash','usage-icon') + ' Tokens: ' + total.toLocaleString() + ' / ' + maxTokens.toLocaleString() + '</div><div class="usage-bar-track"><div class="usage-bar-fill token-bar" style="width:' + pct + '%"></div></div></div>';
   },
   /** 缓存命中提示 */
   cacheHint: function() {
@@ -243,14 +258,14 @@ const usageVisualizer = {
     if (totalCache === 0) return '';
     var rate = (sessionUsage.cacheHitTokens / totalCache * 100).toFixed(1);
     var color = rate > 50 ? '#10b981' : (rate > 20 ? '#f59e0b' : '#ef4444');
-    return '<div class="usage-cache-hint" style="color:' + color + '">💾 缓存命中率: ' + rate + '% (' + sessionUsage.cacheHitTokens.toLocaleString() + '/' + totalCache.toLocaleString() + ')</div>';
+    return '<div class="usage-cache-hint" style="color:' + color + '">' + _icon('database','usage-icon') + ' 缓存命中率: ' + rate + '% (' + sessionUsage.cacheHitTokens.toLocaleString() + '/' + totalCache.toLocaleString() + ')</div>';
   },
   /** 工具调用统计 */
   toolStatsDisplay: function() {
     var top = toolCallStats.getTopTools(5);
     if (top.length === 0) return '';
-    return '<div class="usage-tool-stats">🔧 常用工具:<br>' + top.map(function(e, i) {
-      return '<span class="tool-stat-item">#' + (i+1) + ' ' + e[0] + ' ✕' + e[1] + '</span>';
+    return '<div class="usage-tool-stats">' + _icon('wrench','usage-icon') + ' 常用工具:<br>' + top.map(function(e, i) {
+      return '<span class="tool-stat-item">#' + (i+1) + ' ' + e[0] + ' ×' + e[1] + '</span>';
     }).join(' ') + '</div>';
   },
   /** 完整用量面板 */
@@ -260,12 +275,12 @@ const usageVisualizer = {
       this.costBar() +
       this.tokenBar() +
       '<div style="font-size:11px;line-height:1.8;margin-top:4px;">' +
-      '📤 输入: ' + sessionUsage.promptTokens.toLocaleString() + ' tokens<br>' +
-      '📥 输出: ' + sessionUsage.completionTokens.toLocaleString() + ' tokens<br>' +
-      (sessionUsage.prefixCacheHits > 0 ? '💾 缓存命中: ' + sessionUsage.prefixCacheHits.toLocaleString() + ' tokens<br>' : '') +
+      _icon('login','usage-icon') + ' 输入: ' + sessionUsage.promptTokens.toLocaleString() + ' tokens<br>' +
+      _icon('logout','usage-icon') + ' 输出: ' + sessionUsage.completionTokens.toLocaleString() + ' tokens<br>' +
+      (sessionUsage.prefixCacheHits > 0 ? _icon('database','usage-icon') + ' 缓存命中: ' + sessionUsage.prefixCacheHits.toLocaleString() + ' tokens<br>' : '') +
       this.cacheHint() +
-      '🔧 工具调用: ' + sessionUsage.toolCalls + ' 次<br>' +
-      '✅ 已批准: ' + sessionUsage.approvalsGranted + ' ❌ 已拒绝: ' + sessionUsage.approvalsRejected +
+      _icon('wrench','usage-icon') + ' 工具调用: ' + sessionUsage.toolCalls + ' 次<br>' +
+      _icon('check','usage-icon') + ' 已批准: ' + sessionUsage.approvalsGranted + ' ' + _icon('x','usage-icon') + ' 已拒绝: ' + sessionUsage.approvalsRejected +
       '</div>' +
       this.toolStatsDisplay() +
       '</div>';
@@ -302,6 +317,24 @@ function _icon(name, cls) {
         gamepad: '<line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/>',
         chevron: '<polyline points="9 18 15 12 9 6"/>',
         box: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
+        flask: '<path d="M9 3h6M10 3v6L4 18a2 2 0 002 1h12a2 2 0 002-1l-6-9V3"/><path d="M7.5 14h9"/>',
+        link: '<path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>',
+        barchart: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
+        bot: '<rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>',
+        refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>',
+        save: '<path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+        dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>',
+        hash: '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
+        database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+        login: '<path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>',
+        logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+        check: '<polyline points="20 6 9 17 4 12"/>',
+        x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+        plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+        sparkle: '<path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>',
+        eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+        eyeoff: '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
+        warning: '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
     };
     return '<svg class="' + cls + '" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (icons[name] || '') + '</svg>';
 }
@@ -322,10 +355,27 @@ function _skillIcon(skillName) {
 window.renderToolPanel = function() {
     var container = document.getElementById('toolToggleContainer');
     if (!container) return;
-    var existingRows = container.querySelectorAll('.skill-card, .tools-category-section.dynamic');
-    existingRows.forEach(function(r) { r.remove(); });
+    // 所有动态内容只渲染到这个容器内。整体替换可保证多次异步刷新时不会累积标题或卡片。
+    var dynamicRoot = document.getElementById('toolPanelDynamic');
+    if (!dynamicRoot) {
+        dynamicRoot = document.createElement('div');
+        dynamicRoot.id = 'toolPanelDynamic';
+        var customSkillsHeader = container.querySelector('.custom-skills-header');
+        container.insertBefore(dynamicRoot, customSkillsHeader || container.firstChild);
+    }
 
-    var customSkillsEl = document.getElementById('customSkillsList');
+    // 清理旧版本曾直接插入父容器的残留节点，兼容页面未完整刷新的场景。
+    Array.prototype.slice.call(container.children).forEach(function(child) {
+        if (child === dynamicRoot) return;
+        if (child.classList.contains('skills-section-header')
+            || child.classList.contains('skills-section-desc')
+            || child.classList.contains('skill-card')
+            || child.classList.contains('tools-section-header')
+            || (child.classList.contains('tools-category-section') && child.classList.contains('dynamic'))) {
+            child.remove();
+        }
+    });
+
     var _agentOn = isAgentToolsActive();
     var _cats = (typeof window.resolveToolCategories === 'function')
         ? window.resolveToolCategories()
@@ -372,13 +422,29 @@ window.renderToolPanel = function() {
         var _disabled = cat.agentOnly && !_agentOn;
         var _enabledCount = _keys.filter(function(k) { return window.isToolEnabled(k); }).length;
         var catId = 'cat_' + catIdx;
+        var _isMcp = !!cat.isMcp;
 
         // Category header bar (collapsible)
-        rendered += '<div class="tools-category-section dynamic' + (_disabled ? ' tool-disabled' : '') + '">';
+        rendered += '<div class="tools-category-section dynamic' + (_disabled ? ' tool-disabled' : '') + (_isMcp ? ' mcp-cat-section' : '') + '">';
         rendered += '<div class="tools-cat-header" onclick="var s=document.getElementById(\'' + catId + '\');var a=this.querySelector(\'.cat-arrow\');if(s){s.classList.toggle(\'collapsed\');a.classList.toggle(\'rotated\');}">';
         rendered += '<span class="cat-arrow">' + _icon('chevron', 'cat-chevron-icon') + '</span> ';
         rendered += '<span class="tools-cat-label">' + cat.label + '</span>';
         rendered += '<span class="tools-cat-count">' + _enabledCount + '/' + _keys.length + '</span>';
+        // MCP 分类: 显示连接状态指示灯
+        if (_isMcp) {
+            var _srvStatus = '';
+            if (typeof window.loadMcpServers === 'function') {
+                var _srvs = window.loadMcpServers();
+                for (var _si = 0; _si < _srvs.length; _si++) {
+                    if (_srvs[_si].id === cat.mcpServerId) {
+                        _srvStatus = _srvs[_si].status;
+                        break;
+                    }
+                }
+            }
+            var _statusColor = _srvStatus === 'connected' ? '#22c55e' : (_srvStatus === 'connecting' ? '#f59e0b' : '#ef4444');
+            rendered += ' <span class="mcp-cat-status" title="服务器状态: ' + _srvStatus + '" style="color:' + _statusColor + '">' + '<svg width="8" height="8" viewBox="0 0 8 8" fill="' + _statusColor + '"><circle cx="4" cy="4" r="4"/></svg>' + '</span>';
+        }
         if (_disabled) rendered += ' <span class="cat-lock-icon">' + _icon('lock', '') + '</span>';
         rendered += '</div>';
 
@@ -393,20 +459,20 @@ window.renderToolPanel = function() {
             var warnClass = isDanger ? ' tool-warn' : '';
             var checked = window.isToolEnabled(key) ? ' checked' : '';
             var disabledAttr = _disabled ? ' disabled' : '';
-            rendered += '<div class="tool-toggle-row dynamic' + (_disabled ? ' tool-disabled' : '') + '" data-tool="' + key + '">';
+            rendered += '<div class="tool-toggle-row dynamic' + (_disabled ? ' tool-disabled' : '') + (_isMcp ? ' mcp-tool-row' : '') + '" data-tool="' + key + '">';
             rendered += '<span class="tool-toggle-name' + warnClass + '" title="' + label + '">' + label + '</span>';
+            // MCP 工具: 显示服务器来源标签
+            if (_isMcp && _meta && _meta.mcpServer) {
+                rendered += '<span class="server-tag">' + escapeHtml(_meta.mcpServer) + '</span>';
+            }
             rendered += '<label class="switch small"><input type="checkbox" id="tool_enabled_' + key + '" data-toolkey="' + key + '"' + checked + disabledAttr + '><span class="slider"></span></label>';
             rendered += '</div>';
         });
         rendered += '</div></div>';
     });
 
-    // Insert
-    if (customSkillsEl) {
-        customSkillsEl.insertAdjacentHTML('beforebegin', rendered);
-    } else {
-        container.insertAdjacentHTML('beforeend', rendered);
-    }
+    // 原子替换动态区域，renderToolPanel() 可安全重复调用。
+    dynamicRoot.innerHTML = rendered;
 
     if (typeof bindToolToggleEvents === 'function') bindToolToggleEvents();
     window.updateToolsActiveCount();
@@ -417,11 +483,17 @@ window.loadToolToggleStates = async function() {
     if (typeof window.loadSkills === 'function') {
         try { await window.loadSkills(); } catch(e) {}
     }
+    // ★ 初始化 MCP 服务器 (自动重连已保存的服务器)
+    if (typeof window.initMcpServers === 'function') {
+        try { await window.initMcpServers(); } catch(e) {}
+    }
     // 动态渲染工具面板
     window.renderToolPanel();
     // 自定义技能绑定
     if (typeof bindCustomSkillEvents === 'function') bindCustomSkillEvents();
     window.updateToolsActiveCount();
+    // 更新 MCP 服务器计数
+    if (typeof window.updateMcpServersCount === 'function') window.updateMcpServersCount();
 };
 
 // 保存工具开关到 localStorage (由 saveConfig 调用)
@@ -571,7 +643,7 @@ window.showCreateSkillDialog = function() {
     document.getElementById('skillDefinitionPreview').value = '';
     document.getElementById('skillGenerateStatus').textContent = '';
     document.getElementById('generateSkillBtn').disabled = false;
-    document.getElementById('generateSkillBtn').textContent = '🤖 AI 生成';
+    document.getElementById('generateSkillBtn').innerHTML = _icon('bot','btn-icon') + ' AI 生成';
 };
 
 window.closeCreateSkillDialog = function() {
@@ -609,7 +681,7 @@ window.generateSkillDefinition = async function() {
     if (!apiKey || !baseUrl) {
         showToast('请先配置 API Key 和 Base URL', 'error');
         btn.disabled = false;
-        btn.textContent = '🤖 AI 生成';
+        btn.innerHTML = _icon('bot','btn-icon') + ' AI 生成';
         document.getElementById('skillGenerateStatus').textContent = '';
         return;
     }
@@ -670,14 +742,14 @@ window.generateSkillDefinition = async function() {
 
         document.getElementById('skillDefinitionPreview').value = content;
         document.getElementById('skillPreviewArea').classList.remove('hidden');
-        document.getElementById('skillGenerateStatus').textContent = '✅ 生成完成,请检查并编辑后保存';
+        document.getElementById('skillGenerateStatus').innerHTML = _icon('check','status-icon') + ' 生成完成,请检查并编辑后保存';
     } catch(e) {
         showToast('生成失败: ' + e.message, 'error');
-        document.getElementById('skillGenerateStatus').textContent = '❌ 生成失败: ' + e.message;
+        document.getElementById('skillGenerateStatus').innerHTML = _icon('x','status-icon-error') + ' 生成失败: ' + e.message;
     }
 
     btn.disabled = false;
-    btn.textContent = '🤖 AI 生成';
+    btn.innerHTML = _icon('bot','btn-icon') + ' AI 生成';
 };
 
 // 保存自定义技能
@@ -739,7 +811,7 @@ window.saveCustomSkill = function() {
     window.renderCustomSkillsList();
     window.loadToolToggleStates();
     window.closeCreateSkillDialog();
-    showToast('技能 "' + name + '" 已保存 ✅', 'success');
+    showToast('技能 "' + name + '" 已保存', 'success');
 
     // 如果有登录,同步到服务器
     if (localStorage.getItem('authToken')) {
@@ -770,6 +842,415 @@ window.clearSkillPreview = function() {
 
 // ==================== END 工具/技能管理 ====================
 
+// ==================== MCP 服务器管理 ====================
+// MCP 服务器配置存储在 localStorage.mcp_servers (JSON 数组)
+// 每项: {id, name, transport, url, headers, status, tools_count, last_error, last_tools}
+
+window.loadMcpServers = function() {
+    try {
+        return JSON.parse(localStorage.getItem('mcp_servers') || '[]');
+    } catch(e) { return []; }
+};
+
+window.saveMcpServers = function(servers) {
+    localStorage.setItem('mcp_servers', JSON.stringify(servers));
+};
+
+window.saveMcpServer = function(cfg) {
+    var servers = window.loadMcpServers();
+    var existing = -1;
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].id === cfg.id) { existing = i; break; }
+    }
+    if (existing !== -1) {
+        servers[existing] = cfg;
+    } else {
+        servers.push(cfg);
+    }
+    window.saveMcpServers(servers);
+    return cfg;
+};
+
+window.deleteMcpServer = function(id) {
+    var servers = window.loadMcpServers().filter(function(s) { return s.id !== id; });
+    window.saveMcpServers(servers);
+    // 清理该服务器的工具注册
+    if (typeof toolRegistry !== 'undefined') {
+        var allNames = toolRegistry.getAllToolNames();
+        allNames.forEach(function(name) {
+            var meta = toolRegistry.get(name);
+            if (meta && meta.mcpServerId === id) {
+                toolRegistry.unregister(name);
+            }
+        });
+    }
+    // 刷新工具面板
+    if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+    if (typeof window.updateToolsActiveCount === 'function') window.updateToolsActiveCount();
+};
+
+// 测试 MCP 服务器连接
+window.testMcpServer = async function(id) {
+    var servers = window.loadMcpServers();
+    var srv = null;
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].id === id) { srv = servers[i]; break; }
+    }
+    if (!srv) return;
+
+    // 更新状态为连接中
+    srv.status = 'connecting';
+    srv.last_error = '';
+    window.saveMcpServer(srv);
+    window.renderMcpServerPanel();
+
+    try {
+        var resp = await window.proxyFetch('api/mcp_client.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'test',
+                name: srv.name,
+                transport: srv.transport,
+                url: srv.url,
+                headers: srv.headers || {},
+            }),
+        });
+
+        if (!resp.ok) {
+            throw new Error('HTTP ' + resp.status);
+        }
+
+        var data = await resp.json();
+        if (data.success) {
+            srv.status = 'connected';
+            srv.tools_count = data.tools_count || 0;
+            srv.server_name = data.server_name || '';
+            srv.last_error = '';
+            srv.last_tools = data.tools || [];
+            window.saveMcpServer(srv);
+
+            // 注册工具到 toolRegistry
+            if (data.tools && data.tools.length > 0 && typeof window.registerMcpTools === 'function') {
+                window.registerMcpTools(id, srv.name, data.tools);
+            }
+
+            if (typeof showToast === 'function') showToast('已连接: ' + srv.name + ' (' + srv.tools_count + ' 个工具)', 'success');
+        } else {
+            srv.status = 'error';
+            srv.last_error = data.error || '未知错误';
+            window.saveMcpServer(srv);
+            if (typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
+        }
+    } catch(e) {
+        srv.status = 'error';
+        srv.last_error = e.message || '网络错误';
+        window.saveMcpServer(srv);
+        if (typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
+    }
+
+    window.renderMcpServerPanel();
+    if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+};
+
+// 添加并测试新的 MCP 服务器
+// 当前编辑中的服务器 ID (null = 添加模式)
+window._mcpEditingId = null;
+
+window.addMcpServer = async function() {
+    var name = document.getElementById('mcpNewName').value.trim();
+    var url = document.getElementById('mcpNewUrl').value.trim();
+    var transport = document.getElementById('mcpNewTransport').value;
+    var headersStr = document.getElementById('mcpNewHeaders').value.trim();
+
+    if (!name || !url) {
+        if (typeof showToast === 'function') showToast('请填写名称和 URL', 'warning');
+        return;
+    }
+
+    var headers = {};
+    if (headersStr) {
+        try {
+            headers = JSON.parse(headersStr);
+        } catch(e) {
+            if (typeof showToast === 'function') showToast('Headers JSON 格式错误', 'error');
+            return;
+        }
+    }
+
+    var editingId = window._mcpEditingId;
+    var cfg = {
+        id: editingId || ('mcp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+        name: name,
+        transport: transport,
+        url: url,
+        headers: headers,
+        status: 'connecting',
+        tools_count: 0,
+        last_error: '',
+        last_tools: [],
+    };
+    window.saveMcpServer(cfg);
+
+    // 退出编辑模式
+    window.cancelMcpEdit();
+
+    // 自动测试连接
+    await window.testMcpServer(cfg.id);
+};
+
+// 进入编辑模式
+window.editMcpServer = function(id) {
+    var servers = window.loadMcpServers();
+    var srv = null;
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].id === id) { srv = servers[i]; break; }
+    }
+    if (!srv) return;
+
+    window._mcpEditingId = id;
+    document.getElementById('mcpNewName').value = srv.name;
+    document.getElementById('mcpNewUrl').value = srv.url;
+    document.getElementById('mcpNewTransport').value = srv.transport;
+    document.getElementById('mcpNewHeaders').value = srv.headers ? JSON.stringify(srv.headers, null, 2) : '';
+
+    // 更新 UI 为编辑模式
+    document.getElementById('mcpFormTitle').textContent = '编辑: ' + srv.name;
+    document.getElementById('mcpSaveBtn').innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg> 保存修改';
+    document.getElementById('mcpCancelBtn').classList.remove('hidden');
+    document.getElementById('mcpNewName').focus();
+};
+
+// 取消编辑
+window.cancelMcpEdit = function() {
+    window._mcpEditingId = null;
+    document.getElementById('mcpNewName').value = '';
+    document.getElementById('mcpNewUrl').value = '';
+    document.getElementById('mcpNewHeaders').value = '';
+    document.getElementById('mcpNewTransport').value = 'streamable-http';
+    document.getElementById('mcpFormTitle').textContent = '添加新服务器';
+    document.getElementById('mcpSaveBtn').innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg> 保存并测试';
+    document.getElementById('mcpCancelBtn').classList.add('hidden');
+};
+
+// 渲染 MCP 服务器面板
+window.renderMcpServerPanel = function() {
+    var container = document.getElementById('mcpServerList');
+    if (!container) return;
+    var servers = window.loadMcpServers();
+
+    if (servers.length === 0) {
+        container.innerHTML = '<div style="font-size:11px;color:#9ca3af;padding:8px 4px;text-align:center;">暂无 MCP 服务器<br><span style="font-size:10px;">点击下方按钮添加外部 MCP 服务器</span></div>';
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < servers.length; i++) {
+        var srv = servers[i];
+        var isConnected = srv.status === 'connected';
+        var statusColor = isConnected ? '#22c55e' : (srv.status === 'connecting' ? '#f59e0b' : '#ef4444');
+        var statusText = isConnected ? '已连接' : (srv.status === 'connecting' ? '连接中...' : '未连接');
+        var transportLabel = srv.transport === 'sse' ? 'SSE' : 'HTTP';
+
+        html += '<div class="mcp-server-card" style="padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;">';
+        // 头部行：状态点 + 名称 + 协议标签 + 操作按钮
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">';
+        html += '<svg width="8" height="8" viewBox="0 0 8 8" fill="' + statusColor + '" style="flex-shrink:0;"><circle cx="4" cy="4" r="4"/></svg>';
+        html += '<span style="font-size:12px;font-weight:600;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(srv.name) + '</span>';
+        html += '<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#f3f4f6;color:#6b7280;">' + transportLabel + '</span>';
+        // 操作图标按钮
+        html += '<button onclick="window.editMcpServer(\'' + srv.id + '\')" title="编辑" style="padding:2px 6px;border:none;background:transparent;cursor:pointer;color:#6b7280;font-size:12px;">✎</button>';
+        html += '<button onclick="window.testMcpServer(\'' + srv.id + '\')" title="测试" style="padding:2px 6px;border:none;background:transparent;cursor:pointer;color:#6b7280;font-size:12px;">↻</button>';
+        html += '<button onclick="window.deleteMcpServer(\'' + srv.id + '\')" title="删除" style="padding:2px 6px;border:none;background:transparent;cursor:pointer;color:#ef4444;font-size:12px;">✕</button>';
+        html += '</div>';
+        // URL
+        html += '<div style="font-size:10px;color:#9ca3af;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px;" title="' + escapeHtml(srv.url) + '">' + escapeHtml(srv.url) + '</div>';
+        // 状态行
+        if (isConnected) {
+            html += '<div style="font-size:10px;color:#059669;">✓ ' + srv.tools_count + ' 个工具已导入</div>';
+        } else if (srv.last_error) {
+            html += '<div style="font-size:10px;color:#dc2626;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(srv.last_error) + '">✕ ' + escapeHtml(srv.last_error) + '</div>';
+        } else {
+            html += '<div style="font-size:10px;color:#9ca3af;">未测试</div>';
+        }
+        html += '</div>';
+    }
+    container.innerHTML = html;
+    window.updateMcpServersCount();
+};
+
+window.disconnectMcpServer = function(id) {
+    var servers = window.loadMcpServers();
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].id === id) {
+            servers[i].status = 'disconnected';
+            servers[i].tools_count = 0;
+            window.saveMcpServer(servers[i]);
+            break;
+        }
+    }
+    // 注销工具
+    if (typeof toolRegistry !== 'undefined') {
+        var allNames = toolRegistry.getAllToolNames();
+        allNames.forEach(function(name) {
+            var meta = toolRegistry.get(name);
+            if (meta && meta.mcpServerId === id) {
+                toolRegistry.unregister(name);
+            }
+        });
+    }
+    window.renderMcpServerPanel();
+    if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+    if (typeof showToast === 'function') showToast('已断开连接', 'info');
+};
+
+window.testAllMcpServers = async function() {
+    var servers = window.loadMcpServers();
+    if (servers.length === 0) {
+        if (typeof showToast === 'function') showToast('请先添加 MCP 服务器', 'warning');
+        return;
+    }
+    var ok = 0, fail = 0;
+    for (var i = 0; i < servers.length; i++) {
+        try {
+            await window.testMcpServer(servers[i].id);
+            ok++;
+        } catch(e) {
+            fail++;
+        }
+    }
+    if (typeof showToast === 'function') {
+        showToast('测试完成: ' + ok + ' 成功, ' + fail + ' 失败', fail > 0 ? 'warning' : 'success');
+    }
+};
+
+window.updateMcpServersCount = function() {
+    var countEl = document.getElementById('mcpServersCount');
+    if (!countEl) return;
+    var servers = window.loadMcpServers();
+    var connected = servers.filter(function(s) { return s.status === 'connected'; }).length;
+    countEl.textContent = servers.length > 0 ? '(' + connected + '/' + servers.length + ' 已连接)' : '';
+};
+
+// 初始化 MCP 服务器 (页面加载时自动重连已保存的服务器)
+window.initMcpServers = async function() {
+    window.renderMcpServerPanel();
+    var servers = window.loadMcpServers();
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].status === 'connected' || servers[i].status === 'error') {
+            // 静默重连已连接的服务器
+            try {
+                var resp = await window.proxyFetch('api/mcp_client.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'test',
+                        transport: servers[i].transport,
+                        url: servers[i].url,
+                        headers: servers[i].headers || {},
+                    }),
+                });
+                if (resp.ok) {
+                    var data = await resp.json();
+                    if (data.success) {
+                        servers[i].status = 'connected';
+                        servers[i].tools_count = data.tools_count || 0;
+                        servers[i].last_tools = data.tools || [];
+                        servers[i].last_error = '';
+                        window.saveMcpServer(servers[i]);
+                        if (typeof window.registerMcpTools === 'function') {
+                            window.registerMcpTools(servers[i].id, servers[i].name, data.tools || []);
+                        }
+                    } else {
+                        servers[i].status = 'disconnected';
+                        window.saveMcpServer(servers[i]);
+                    }
+                }
+            } catch(e) {
+                servers[i].status = 'disconnected';
+                window.saveMcpServer(servers[i]);
+            }
+        }
+    }
+    window.renderMcpServerPanel();
+    if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+};
+
+// ==================== END MCP 服务器管理 ====================
+
+// ==================== MCP 工具注入聊天 + 调用路由 ====================
+// 从 toolRegistry 收集所有已连接 MCP 服务器的工具，转为 OpenAI function 格式
+window.getMcpToolsForChat = function() {
+    var result = [];
+    if (typeof toolRegistry === 'undefined') return result;
+    var servers = window.loadMcpServers();
+    var connectedIds = new Set();
+    servers.forEach(function(s) {
+        if (s.status === 'connected') connectedIds.add(s.id);
+    });
+
+    var allNames = toolRegistry.getAllToolNames();
+    allNames.forEach(function(name) {
+        var meta = toolRegistry.get(name);
+        if (!meta || !meta.mcpServerId || !connectedIds.has(meta.mcpServerId)) return;
+        // 检查工具是否启用
+        if (typeof window.isToolEnabled === 'function' && !window.isToolEnabled(name)) return;
+        var def = toolRegistry.getToolDefinition(name);
+        if (def && def.function) {
+            result.push(def);
+        }
+    });
+    return result;
+};
+
+// 调用 MCP 工具 (通过 PHP 代理转发到外部 MCP 服务器)
+window.mcpCallTool = async function(serverId, toolName, args) {
+    var servers = window.loadMcpServers();
+    var srv = null;
+    for (var i = 0; i < servers.length; i++) {
+        if (servers[i].id === serverId) { srv = servers[i]; break; }
+    }
+    if (!srv) return { error: 'MCP 服务器不存在: ' + serverId };
+
+    var resp = await window.proxyFetch('api/mcp_client.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'call',
+            transport: srv.transport,
+            url: srv.url,
+            headers: srv.headers || {},
+            tool: toolName,
+            arguments: args || {},
+        }),
+    });
+
+    if (!resp.ok) return { error: 'HTTP ' + resp.status };
+    var data = await resp.json();
+    if (!data.success) return { error: data.error || '调用失败' };
+    return data.result;
+};
+
+// ==================== END MCP 工具注入 ====================
+
+// ★ 思考强度分级迁移: 旧配置 → 新 unified thinkingIntensity
+// agentThinkingDepth(shallow/standard/deep) → low/medium/high
+// thinkingMode/longcatThinkingMode(disabled) → off, 其他 → medium
+function _migrateThinkingIntensity() {
+    if (localStorage.getItem('thinkingIntensity') !== null) return; // 已迁移
+    var _depth = localStorage.getItem('agentThinkingDepth');
+    if (_depth === 'shallow') localStorage.setItem('thinkingIntensity', 'low');
+    else if (_depth === 'deep') localStorage.setItem('thinkingIntensity', 'high');
+    else if (_depth === 'standard') localStorage.setItem('thinkingIntensity', 'medium');
+    else {
+        // 无 agentThinkingDepth 时，看 MiniMax/LongCat 旧开关
+        var _tm = localStorage.getItem('thinkingMode');
+        var _lc = localStorage.getItem('longcatThinkingMode');
+        var _off = (_tm === 'disabled' || _lc === 'disabled');
+        localStorage.setItem('thinkingIntensity', _off ? 'off' : 'medium');
+    }
+}
+
 async function saveConfig(showFeedback = false) {
     console.log('[saveConfig] apiKey:', (getVal('apiKey')||'') ? '✅' : '❌');
     try {
@@ -795,11 +1276,21 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
     localStorage.setItem('visionApiKeyXAI', await encrypt(getVal('visionApiKeyXAI') || ''));
     localStorage.setItem('visionApiUrlXAI', getVal('visionApiUrlXAI') || 'https://api.x.ai/v1');
-    localStorage.setItem('imageModel', getEl('imageModel')?.value || '');
+    localStorage.setItem('visionApiKeyCustom', await encrypt(getVal('visionApiKeyCustom') || ''));
+    localStorage.setItem('visionApiUrlCustom', getVal('visionApiUrlCustom') || '');
+    // ★ 模型同时写入通用键 + 当前提供商独立键(imageModel_{provider}),确保切换/刷新后各提供商模型不丢失
+    var _curImgProvider = getVal('imageProvider') || localStorage.getItem('imageProvider') || 'minimax';
+    var _curImgModel = getEl('imageModel')?.value || '';
+    localStorage.setItem('imageModel', _curImgModel);
+    localStorage.setItem('imageModel_' + _curImgProvider, _curImgModel);
     localStorage.setItem('imageApiKey', await encrypt(getVal('imageApiKey') || ''));
     localStorage.setItem('imageBaseUrl', getVal('imageBaseUrl') || '');
     localStorage.setItem('imageApiKeyOpenrouter', await encrypt(getVal('imageApiKeyOpenrouter') || ''));
     localStorage.setItem('imageBaseUrlOpenrouter', getVal('imageBaseUrlOpenrouter') || '');
+    localStorage.setItem('imageApiKeyOpenai', await encrypt(getVal('imageApiKeyOpenai') || ''));
+    localStorage.setItem('imageBaseUrlOpenai', getVal('imageBaseUrlOpenai') || '');
+    localStorage.setItem('imageApiKeyCustom', await encrypt(getVal('imageApiKeyCustom') || ''));
+    localStorage.setItem('imageBaseUrlCustom', getVal('imageBaseUrlCustom') || '');
     localStorage.setItem('imageProvider', getVal('imageProvider') || 'minimax');
     localStorage.setItem('temp', getVal('temperature') || '0.7');
     localStorage.setItem('tokens', getVal('maxTokens') || '8192');
@@ -842,8 +1333,13 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('agentAutoDecision', getChecked('agentAutoDecision'));
     localStorage.setItem('agentProactive', getChecked('agentProactive'));
     localStorage.setItem('agentMaxToolRounds', getVal('agentMaxToolRounds') || '1000');
-    localStorage.setItem('agentThinkingDepth', getVal('agentThinkingDepth') || 'standard');
     localStorage.setItem('agentSystemPrompt', getVal('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
+    // ★ 思考强度分级 (全局生效)
+    localStorage.setItem('thinkingIntensity', getVal('thinkingIntensity') || 'medium');
+    // ★ 死循环检测配置
+    localStorage.setItem('loopGuardEnabled', getChecked('loopGuardToggle'));
+    localStorage.setItem('loopGuardMaxRepeat', getVal('loopGuardMaxRepeat') || '3');
+    localStorage.setItem('loopGuardMaxToolOnlyRounds', getVal('loopGuardMaxToolOnlyRounds') || '6');
     // ★ TTS 语音合成配置
     localStorage.setItem('ttsProvider', getVal('ttsProvider') || 'minimax');
     localStorage.setItem('ttsApiKey', await encrypt(getVal('ttsApiKey') || ''));
@@ -855,17 +1351,17 @@ async function saveConfig(showFeedback = false) {
         console.warn('[saveConfig] localStorage写入失败(已忽略):', e.message);
     }
     if (showFeedback) {
-        showToast('配置已保存 ✅', 'success');
+        showToast('配置已保存', 'success');
         // ★ 修复: 保存后自动收起配置栏
         if ($.configPanel) {
-            if ($.configPanel.classList.contains('mobile-open')) {
+            if (typeof window.closeConfigPanel === 'function') window.closeConfigPanel();
+            else {
                 $.configPanel.classList.remove('mobile-open');
-            } else if (!$.configPanel.classList.contains('hidden-panel')) {
                 $.configPanel.classList.add('hidden-panel');
+                if ($.sidebarMask) $.sidebarMask.classList.remove('active');
+                document.querySelector('.main-shell, .flex-1.flex-col')?.classList.remove('config-open');
+                lockBodyScroll(false);
             }
-            // ★ 同步隐藏遮罩
-            if ($.sidebarMask) $.sidebarMask.classList.remove('active');
-            lockBodyScroll(false);
         }
         configSnapshot = null;
         configPanelWasOpen = false;
@@ -906,41 +1402,57 @@ window._updateProxyStatus = async function() {
         var data = await resp.json();
 
         if (data.ok && data.mihomo_running) {
-            statusEl.innerHTML = '✅ Mihomo 运行中 — 当前节点: <b>' + (data.current_node || '?') + '</b> (' + (data.node_delay || '?') + 'ms)';
+            statusEl.innerHTML = '<span style="color:#10b981;display:inline-flex;vertical-align:middle;">' + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' + '</span> Mihomo 运行中 — 当前节点: <b>' + (data.current_node || '?') + '</b> (' + (data.node_delay || '?') + 'ms)';
             statusEl.style.background = '#10b98120';
             statusEl.style.color = '#065f46';
 
             if (data.nodes && data.nodes.length > 0) {
                 listEl.innerHTML = data.nodes.map(function(n) {
                     var color = n.alive ? (n.delay < 1000 ? '#10b981' : '#f59e0b') : '#ef4444';
-                    var icon = n.alive ? '🟢' : '🔴';
-                    return '<div style="padding:2px 0;">' + icon + ' ' + n.name + ' — <span style="color:' + color + '">' + (n.delay > 0 ? n.delay + 'ms' : '超时') + '</span></div>';
+                    return '<div style="padding:2px 0;"><span style="color:' + color + ';display:inline-flex;vertical-align:middle;"><svg width="8" height="8" viewBox="0 0 8 8" fill="' + color + '"><circle cx="4" cy="4" r="4"/></svg></span> ' + n.name + ' — <span style="color:' + color + '">' + (n.delay > 0 ? n.delay + 'ms' : '超时') + '</span></div>';
                 }).join('');
             }
         } else {
-            statusEl.innerHTML = '❌ Mihomo 未运行 — 请检查服务';
+            statusEl.innerHTML = _icon('x','proxy-status-icon') + ' Mihomo 未运行 — 请检查服务';
             statusEl.style.background = '#ef444420';
             statusEl.style.color = '#991b1b';
             listEl.innerHTML = '<div style="color:#9ca3af;">尝试启动: sudo systemctl start mihomo</div>';
         }
     } catch (e) {
-        statusEl.innerHTML = '⚠️ 无法连接状态接口';
+        statusEl.innerHTML = _icon('warning','proxy-status-icon') + ' 无法连接状态接口';
         statusEl.style.background = '#f59e0b20';
         statusEl.style.color = '#92400e';
         listEl.innerHTML = '<div style="color:#9ca3af;">错误: ' + e.message + '</div>';
     }
 };
 
-// ★ thinking 模式 — 仅在 MiniMax 模型时显示
-function _updateThinkingVisibility() {
-    var _tl = getEl('thinkingModeRow');
-    if (!_tl) return;
-    var _m = (getVal('modelSelect') || '').toLowerCase();
-    var _bu = (getVal('baseUrl') || '').toLowerCase();
-    _tl.style.display = (_m.includes('minimax') || _bu.includes('minimax')) ? '' : 'none';
+// ★ 思考强度分级 — 按模型能力动态显示整行 + ultra 选项
+function _updateThinkingIntensityVisibility() {
+    var _row = getEl('thinkingIntensityRow');
+    if (!_row) return;
+    var _m = getVal('modelSelect') || '';
+    var _mc = window.MODEL_CONFIGS;
+    if (!_mc) { _row.style.display = 'none'; return; }
+
+    // 整行显隐
+    _row.style.display = _mc.supportsThinkingIntensity(_m) ? '' : 'none';
+
+    // ultra 选项显隐 (仅 Claude / DeepSeek V4)
+    var _showUltra = _mc.supportsThinkingUltra(_m);
+    var _ultraOpt = _row.querySelector('option[data-ultra]');
+    if (_ultraOpt) _ultraOpt.style.display = _showUltra ? '' : 'none';
+
+    // 若当前选中 ultra 但模型不支持，回退到 high
+    var _select = getEl('thinkingIntensity');
+    if (_select && _select.value === 'ultra' && !_showUltra) {
+        _select.value = 'high';
+    }
 }
-window._saveThinkingMode = function() {
-    localStorage.setItem('thinkingMode', getVal('thinkingMode') || 'adaptive');
+window._updateThinkingIntensityVisibility = _updateThinkingIntensityVisibility;
+
+window._saveThinkingIntensity = function() {
+    var _selected = getVal('thinkingIntensity') || 'medium';
+    localStorage.setItem('thinkingIntensity', _selected);
     saveConfig(false);
 };
 window.isProxyEnabled = function() {
@@ -954,8 +1466,12 @@ window.getProxyUrl = function() {
 // ★ 本地集成模式: proxy.php 自动走 Mihomo (127.0.0.1:1081), 无需前端配置代理
 window.proxyFetch = async function(targetUrl, options = {}) {
     // ★ 解析相对URL为绝对URL（proxy.php只接受http/https开头的URL）
-    if (targetUrl.startsWith('/')) {
-        targetUrl = window.location.origin + targetUrl;
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+        if (targetUrl.startsWith('/')) {
+            targetUrl = window.location.origin + targetUrl;
+        } else {
+            targetUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/') + targetUrl;
+        }
     }
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
     // ★ 同源请求不需要走proxy.php中继
@@ -1073,6 +1589,14 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     return _resp;  // fallthrough
 };
 
+// ★ 隐藏推理过程: body.hide-reasoning 全局隐藏推理块, 流式期间用「思考中」小指示条体现思考状态
+window.toggleHideReasoning = function(checked) {
+    localStorage.setItem('hideReasoning', checked ? '1' : '0');
+    document.body.classList.toggle('hide-reasoning', !!checked);
+    window._scheduleConfigSync();
+};
+window.isHideReasoning = function() { return localStorage.getItem('hideReasoning') === '1'; };
+
 window.updateDisplayParam = (type, val) => {
     if (type === 'lineHeight') {
         var span = getEl('lineHeightValue');
@@ -1119,6 +1643,12 @@ window.updateMarkdownConfig = () => {
 
 // ==================== 模型管理 ====================
 window.fetchModels = async function (silent) {
+    // ★ 有活动流式请求时禁止刷新模型列表 — 防止替换 modelSelect.innerHTML 触发 change 事件中断正在输出的模型
+    // ★ 使用程序化标记 (比 DOM 查询 .bubble.streaming 更可靠, 无时序问题)
+    if (window._activeStreamChatId) {
+        if (!silent) console.log('[fetchModels] 跳过: 聊天 ' + window._activeStreamChatId + ' 正在流式输出');
+        return;
+    }
     var key = getVal('apiKey');
     var url = getVal('baseUrl');
     var selects = ['modelSelect', 'titleModel', 'searchModel', 'aiSearchJudgeModel']
@@ -1213,7 +1743,11 @@ window.fetchModels = async function (silent) {
             mainSelect.innerHTML = modelOptions;
             var _p = getEl('baseUrlProvider')?.value || 'custom';
             var _storedModel = localStorage.getItem('model_' + _p) || localStorage.getItem('model') || '';
-            mainSelect.value = (_storedModel && models.some(function(m) { return m.id === _storedModel; })) ? _storedModel : (models.length ? models[0].id : '');
+            var _selModel = (_storedModel && models.some(function(m) { return m.id === _storedModel; })) ? _storedModel : (models.length ? models[0].id : '');
+            mainSelect.value = _selModel;
+            // ★ 同步实际选中的模型到 localStorage (含 model 通用键 + model_{provider} 独立键),确保刷新/切换后不丢失
+            localStorage.setItem('model', _selModel);
+            localStorage.setItem('model_' + _p, _selModel);
             // ★ 更新后立即失焦,防止 select 展开触发视觉变化
             mainSelect.blur();
             // 避免重复绑定 change 事件
@@ -1282,6 +1816,12 @@ window.fetchModels = async function (silent) {
         if (curModel && modelContextLength[curModel]) {
             var ctxMax = modelContextLength[curModel] - MAX_TOKENS_SAFETY_MARGIN;
             var outMax = modelMaxOutputTokens[curModel] || ctxMax;
+            // ★ 模型元数据报的输出上限可能虚高 (如 LongCat /models 报 389120,
+            //   实际 API 限制 131072)。与模型配置真实上限取最小, 防止输入框超限。
+            if (window.MODEL_CONFIGS && window.MODEL_CONFIGS.getMaxOutputTokens) {
+                var _cfgOut = window.MODEL_CONFIGS.getMaxOutputTokens(curModel);
+                if (_cfgOut > 0 && outMax > _cfgOut) outMax = _cfgOut;
+            }
             var max = Math.min(ctxMax, outMax);
             // ★ 完全按用户配置,不按模型调整
             var cur = parseInt(getVal('maxTokens')) || 8192;
@@ -1367,13 +1907,13 @@ window.loadApiKeys = function() {
             var html = '';
             keys.forEach(function(k) {
                 var lastUsed = k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '从未使用';
-                html += '<div class="api-key-item" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin:4px 0;background:#f9fafb;border-radius:6px;font-size:12px;">' +
+                html += '<div class="api-key-item" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin:4px 0;border-radius:6px;font-size:12px;">' +
                     '<div style="flex:1;min-width:0;">' +
-                        '<div style="font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (k.name || '未命名') + '</div>' +
-                        '<div style="color:#9ca3af;font-family:monospace;font-size:10px;">' + (k.key_prefix || '') + '...' + '</div>' +
+                        '<div class="api-key-item-name" style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (k.name || '未命名') + '</div>' +
+                        '<div style="color:#9ca3af;font-family:var(--font-mono);font-size:10px;">' + (k.key_prefix || '') + '...' + '</div>' +
                         '<div style="color:#9ca3af;font-size:10px;">创建: ' + new Date(k.created_at).toLocaleDateString() + ' | 最后使用: ' + lastUsed + '</div>' +
                     '</div>' +
-                    '<button onclick="window.revokeApiKey(\'' + k.id + '\')" title="撤销此密钥" style="flex-shrink:0;margin-left:8px;padding:3px 8px;font-size:11px;color:#ef4444;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;cursor:pointer;white-space:nowrap;">撤销</button>' +
+                    '<button onclick="window.revokeApiKey(\'' + k.id + '\')" title="撤销此密钥" class="api-key-revoke-btn" style="flex-shrink:0;margin-left:8px;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap;">撤销</button>' +
                 '</div>';
             });
             listEl.innerHTML = html;
@@ -1434,14 +1974,14 @@ window._showApiKeyModal = function(key) {
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">' +
             '<h3 style="font-size:18px;font-weight:700;margin:0;display:flex;align-items:center;gap:8px;color:' + (document.documentElement.classList.contains('dark') ? '#f3f4f6' : '#1f2937') + ';">' +
                 '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>' +
-                '🔑 API 密钥已创建' +
+                'API 密钥已创建' +
             '</h3>' +
             '<button id="apiKeyCloseBtn" style="background:none;border:none;cursor:pointer;padding:4px;border-radius:50%;display:flex;align-items:center;color:#9ca3af;">' +
                 '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>' +
             '</button>' +
         '</div>' +
         '<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px;margin-bottom:16px;">' +
-            '<p style="font-size:13px;color:#92400e;font-weight:600;margin:0 0 4px;">⚠️ 请立即复制并保存此密钥</p>' +
+            '<p style="font-size:13px;color:#92400e;font-weight:600;margin:0 0 4px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 请立即复制并保存此密钥</p>' +
             '<p style="font-size:12px;color:#b45309;margin:0;">关闭此窗口后将无法再次查看完整密钥。</p>' +
         '</div>' +
         '<div style="margin-bottom:12px;">' +
@@ -1451,14 +1991,14 @@ window._showApiKeyModal = function(key) {
         '<div style="margin-bottom:16px;">' +
             '<label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">完整密钥</label>' +
             '<div style="margin-top:4px;display:flex;align-items:center;gap:8px;background:#f9fafb;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;">' +
-                '<code style="flex:1;font-size:12px;font-family:monospace;word-break:break-all;user-select:all;color:' + (document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#1f2937') + ';background:transparent;">' + key.full_key + '</code>' +
+                '<code style="flex:1;font-size:12px;font-family:var(--font-mono);word-break:break-all;user-select:all;color:' + (document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#1f2937') + ';background:transparent;">' + key.full_key + '</code>' +
                 '<button id="apiKeyCopyBtn" style="flex-shrink:0;padding:6px 12px;font-size:12px;font-weight:500;color:#fff;background:#6366f1;border:none;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;">' +
                     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
                     '复制' +
                 '</button>' +
             '</div>' +
         '</div>' +
-        '<div style="font-size:11px;color:#9ca3af;margin-bottom:16px;">密钥前缀: <code style="font-family:monospace;">' + (key.key_prefix || '') + '...</code></div>' +
+        '<div style="font-size:11px;color:#9ca3af;margin-bottom:16px;">密钥前缀: <code style="font-family:var(--font-mono);">' + (key.key_prefix || '') + '...</code></div>' +
         '<button id="apiKeyDoneBtn" style="width:100%;padding:10px 16px;font-size:14px;font-weight:500;color:#374151;background:#f3f4f6;border:1px solid #d1d5db;border-radius:12px;cursor:pointer;">我已保存，关闭</button>';
 
     overlay.appendChild(card);
@@ -1470,20 +2010,20 @@ window._showApiKeyModal = function(key) {
     document.getElementById('apiKeyCopyBtn').onclick = function() {
         if (navigator.clipboard) {
             navigator.clipboard.writeText(key.full_key).then(function() {
-                showToast('✅ 已复制到剪贴板', 'success');
+                showToast('已复制到剪贴板', 'success');
             }).catch(function() {
                 var ta = document.createElement('textarea'); ta.value = key.full_key;
                 ta.style.position = 'fixed'; ta.style.left = '-9999px';
                 document.body.appendChild(ta); ta.select();
                 document.execCommand('copy'); document.body.removeChild(ta);
-                showToast('✅ 已复制到剪贴板', 'success');
+                showToast('已复制到剪贴板', 'success');
             });
         } else {
             var ta = document.createElement('textarea'); ta.value = key.full_key;
             ta.style.position = 'fixed'; ta.style.left = '-9999px';
             document.body.appendChild(ta); ta.select();
             document.execCommand('copy'); document.body.removeChild(ta);
-            showToast('✅ 已复制到剪贴板', 'success');
+            showToast('已复制到剪贴板', 'success');
         }
     };
 };
@@ -1502,14 +2042,14 @@ window.copyApiKeyDialogKey = function() {
     if (!key) return;
     if (navigator.clipboard) {
         navigator.clipboard.writeText(key).then(function() {
-            showToast('✅ 已复制到剪贴板', 'success');
+            showToast('已复制到剪贴板', 'success');
         }).catch(function() { showToast('复制失败', 'error'); });
     } else {
         var ta = document.createElement('textarea'); ta.value = key;
         ta.style.position = 'fixed'; ta.style.left = '-9999px';
         document.body.appendChild(ta); ta.select();
         document.execCommand('copy'); document.body.removeChild(ta);
-        showToast('✅ 已复制到剪贴板', 'success');
+        showToast('已复制到剪贴板', 'success');
     }
 };
 
@@ -1540,7 +2080,7 @@ window.revokeApiKey = function(keyId) {
 window.copyApiKeyToClipboard = function(key) {
     if (navigator.clipboard) {
         navigator.clipboard.writeText(key).then(function() {
-            showToast('✅ 已复制到剪贴板', 'success');
+            showToast('已复制到剪贴板', 'success');
         }).catch(function() {
             fallbackCopy(key);
         });
@@ -1554,7 +2094,7 @@ window.copyApiKeyToClipboard = function(key) {
         ta.style.left = '-9999px';
         document.body.appendChild(ta);
         ta.select();
-        try { document.execCommand('copy'); showToast('✅ 已复制到剪贴板', 'success'); }
+        try { document.execCommand('copy'); showToast('已复制到剪贴板', 'success'); }
         catch(e) { showToast('复制失败，请手动复制', 'error'); }
         document.body.removeChild(ta);
     }
@@ -1586,4 +2126,3 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(cp, { attributes: true, attributeFilter: ['class'] });
     }
 });
-

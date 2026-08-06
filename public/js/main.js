@@ -74,31 +74,130 @@ let configPanelInteracting = false; // 标记是否正在与配置面板交互
 // ★ fetchWithRetry → utils.js
 
 function setupKeyboardDetection() {
-    // 优先使用 visualViewport API
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            var viewport = window.visualViewport;
-            // 如果视口宽度没变但高度减少了,说明键盘弹出了
-            var heightDiff = lastInnerHeight - viewport.height;
-            keyboardActive = heightDiff > 50; // 高度减少超过50px认为是键盘
-            lastInnerHeight = viewport.height;
-        });
-        window.visualViewport.addEventListener('scroll', () => {
-            // 滚动时也可能伴随键盘操作
-        });
-    } else {
-        // 回退方案:监听 window 的 resize 事件
-        window.addEventListener('resize', () => {
-            var heightDiff = lastInnerHeight - window.innerHeight;
-            keyboardActive = heightDiff > 50;
-            lastInnerHeight = window.innerHeight;
-        });
+    if (window.__keyboardDetectionBound) {
+        window.__syncMobileViewport?.();
+        return;
+    }
+    window.__keyboardDetectionBound = true;
+
+    var viewport = window.visualViewport;
+    var root = document.documentElement;
+    var rafId = 0;
+    var settleTimer = 0;
+    var finalTimer = 0;
+    var trackedWidth = viewport ? viewport.width : window.innerWidth;
+    var maxViewportBottom = viewport
+        ? viewport.height + Math.max(0, viewport.offsetTop || 0)
+        : window.innerHeight;
+    var lastScale = 1;   // ★ 上一次采样到的缩放值, 用于识别捏合手势进行中
+    var lastApplied = { vvh: null, kb: null, vh: null };   // ★ 脏检查: 数值未变不写 DOM
+
+    function getFocusedControl() {
+        var active = document.activeElement;
+        return active && active.matches && active.matches('input, textarea, select, [contenteditable="true"]')
+            ? active
+            : null;
+    }
+
+    function applyViewportMetrics(force) {
+        rafId = 0;
+        var focused = getFocusedControl();
+        var width = viewport ? viewport.width : window.innerWidth;
+        var viewportHeight = viewport ? viewport.height : window.innerHeight;
+        var offsetTop = viewport ? Math.max(0, viewport.offsetTop || 0) : 0;
+        var scale = viewport && viewport.scale ? viewport.scale : 1;
+
+        // 捏合/双击缩放进行中(scale 逐帧变化)的实时帧跳过, 避免布局跟随缩放跳动;
+        // 回稳定时器(120/420ms, 事件停止后才触发)以 force 兜底应用 —— viewport.height
+        // 本身就是 CSS 像素, 已自动包含缩放效果, 不会像旧逻辑(scale≠1 直接 return)
+        // 那样永久冻结 --vvh。
+        if (!force && Math.abs(scale - lastScale) > 0.02) {
+            lastScale = scale;
+            return;
+        }
+        lastScale = scale;
+
+        if (Math.abs(width - trackedWidth) > 2) {
+            trackedWidth = width;
+            maxViewportBottom = viewportHeight + offsetTop;
+        }
+
+        var viewportBottom = viewportHeight + offsetTop;
+        if (!focused) maxViewportBottom = Math.max(maxViewportBottom, viewportBottom);
+        var reducedBy = Math.max(0, maxViewportBottom - viewportBottom);
+        var keyboardThreshold = Math.max(120, maxViewportBottom * 0.18);
+        var keyboardOpen = !!focused && reducedBy > keyboardThreshold;
+
+        // 键盘弹起时只使用真实可视高度；无键盘时包含顶部偏移，使应用底边
+        // 始终跟随 Safari 地址栏收起后的最终可视底边。
+        var appHeight = keyboardOpen ? viewportHeight : viewportBottom;
+        appHeight = Math.max(320, Math.round(appHeight));
+        var vhRound = Math.round(viewportHeight);
+        var kbRound = keyboardOpen ? Math.round(reducedBy) : 0;
+        // ★ 脏检查: 数值未变时跳过 DOM 写入, 看门狗轮询零成本
+        if (appHeight === lastApplied.vvh && keyboardOpen === lastApplied.kb && vhRound === lastApplied.vh) return;
+        lastApplied.vvh = appHeight; lastApplied.kb = keyboardOpen; lastApplied.vh = vhRound;
+        root.style.setProperty('--vvh', appHeight + 'px');
+        root.style.setProperty('--visual-viewport-height', vhRound + 'px');
+        root.style.setProperty('--visual-viewport-offset-top', Math.round(offsetTop) + 'px');
+        root.style.setProperty('--keyboard-height', kbRound + 'px');
+        root.classList.toggle('keyboard-open', keyboardOpen);
+        keyboardActive = !!focused;
+        lastInnerHeight = viewportHeight;
+        lastInnerWidth = width;
+    }
+
+    function scheduleViewportSync(settle) {
+        if (!rafId) rafId = requestAnimationFrame(applyViewportMetrics);
+        if (!settle) return;
+        clearTimeout(settleTimer);
+        clearTimeout(finalTimer);
+        // ★ force=true: 回稳定时器在事件停止后才触发, 是缩放/键盘动画的最终收敛路径, 必须应用
+        settleTimer = setTimeout(function() { applyViewportMetrics(true); }, 120);
+        finalTimer = setTimeout(function() { applyViewportMetrics(true); }, 420);
+    }
+
+    window.__syncMobileViewport = function() { scheduleViewportSync(true); };
+    if (viewport) {
+        viewport.addEventListener('resize', function() { scheduleViewportSync(true); }, { passive: true });
+        viewport.addEventListener('scroll', function() { scheduleViewportSync(true); }, { passive: true });
+        if ('onscrollend' in viewport) {
+            viewport.addEventListener('scrollend', function() { scheduleViewportSync(true); }, { passive: true });
+        }
+    }
+    window.addEventListener('resize', function() { scheduleViewportSync(true); }, { passive: true });
+    window.addEventListener('orientationchange', function() {
+        maxViewportBottom = 0;
+        scheduleViewportSync(true);
+    }, { passive: true });
+    window.addEventListener('pageshow', function() { scheduleViewportSync(true); });
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) scheduleViewportSync(true);
+    });
+    scheduleViewportSync(true);
+
+    // ★ 兜底看门狗: iOS Safari 在输入框保持焦点时收起键盘(点键盘「完成」/下滑收键盘/点发送
+    // 后点别处)可能不派发 visualViewport resize/scroll 事件 —— 尤其根元素 overflow:hidden 时。
+    // 此时 --vvh 停留在键盘弹起时的小高度 → 输入框下方空出一大截且永不恢复。
+    // 低频轮询(配合脏检查零开销)保证任何事件丢失都能在 1s 内自愈。
+    var isTouchish = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || window.matchMedia('(max-width: 786px)').matches;
+    if (isTouchish) {
+        setInterval(function() {
+            if (document.hidden) return;
+            scheduleViewportSync(false);
+        }, 1000);
+        // ★ 任意点按后立即重算: 键盘收起后用户的第一次点击即可恢复正确高度
+        document.addEventListener('pointerup', function() { scheduleViewportSync(false); }, { passive: true });
+        if (!window.PointerEvent) {
+            document.addEventListener('touchend', function() { scheduleViewportSync(false); }, { passive: true });
+        }
     }
 
     // 监听输入框聚焦/失焦事件(通用)- 特别针对配置面板
     document.addEventListener('focusin', (e) => {
         if (e.target.matches('input, textarea, select')) {
             keyboardActive = true;
+            scheduleViewportSync(true);
             // 检查是否是配置面板内的元素
             if ($.configPanel?.contains(e.target)) {
                 configPanelInteracting = true;
@@ -117,6 +216,7 @@ function setupKeyboardDetection() {
             if (!focused || !$.configPanel?.contains(focused)) {
                 configPanelInteracting = false;
             }
+            scheduleViewportSync(true);
         }, 150);
     });
 }
@@ -130,8 +230,7 @@ let searchAbortControllerMap = {};
 let userAbortMap = {};
 window.activeBubbleMap = {};
 window.userScrolled = false;
-let isAutoScrolling = false;  // 防止自动滚动时干扰 userScrolled
-let streamingScrollLock = false;
+// ★ 滚动状态统一由 scroll-follow.js 管理 (isAutoScrolling/streamingScrollLock 已废弃移除)
 
   // 流式期间锁定滚动跟随
 let modelContextLength = JSON.parse(localStorage.getItem('modelContextLength') || '{}');
@@ -181,6 +280,110 @@ const Safe = {
     number(val, fallback = 0) { const n = Number(val); return isNaN(n) ? fallback : n; }
 };
 
+// ★ 容错修复工具参数JSON: 未转义引号 → \"、未转义换行 → \\n、截断 → 补齐引号/花括号
+function repairToolArguments(raw) {
+    if (typeof raw !== 'string') return '{}';
+    var out = '';
+    var inStr = false;
+    var hadInner = false;
+    for (var i = 0; i < raw.length; i++) {
+        var ch = raw.charAt(i);
+        if (!inStr) {
+            out += ch;
+            if (ch === '"') { inStr = true; hadInner = false; }
+            continue;
+        }
+        if (ch === '\\') {
+            out += ch;
+            if (i + 1 < raw.length) { out += raw.charAt(i + 1); i++; }
+            continue;
+        }
+        if (ch === '\n') { out += '\\n'; continue; }
+        if (ch === '\r') { out += '\\r'; continue; }
+        if (ch === '\t') { out += '\\t'; continue; }
+        if (ch.charCodeAt(0) < 32) { out += ' '; continue; }
+        if (ch === '"') {
+            var j = i + 1;
+            while (j < raw.length && (raw.charAt(j) === ' ' || raw.charAt(j) === '\t')) j++;
+            var nxt = j < raw.length ? raw.charAt(j) : '';
+            if (nxt === ',') {
+                var k = j + 1;
+                while (k < raw.length && (raw.charAt(k) === ' ' || raw.charAt(k) === '\t')) k++;
+                var afterComma = k < raw.length ? raw.charAt(k) : '';
+                if (afterComma === '"' || afterComma === '}' || afterComma === ']' || afterComma === '') {
+                    if (hadInner) {
+                        // 值内引号对刚闭合, 逗号前补一个真正的JSON收尾引号
+                        out += '\\"'; out += '"'; inStr = false;
+                    } else {
+                        out += '"'; inStr = false;
+                    }
+                } else {
+                    out += '\\"'; hadInner = true;
+                }
+            } else if (nxt === '}' || nxt === ']' || nxt === ':' || nxt === '') {
+                out += '"';
+                inStr = false;
+            } else {
+                out += '\\"'; hadInner = true;
+            }
+            continue;
+        }
+        out += ch;
+    }
+    if (inStr) out += '"';
+    var ob = (out.match(/\{/g) || []).length;
+    var cb = (out.match(/\}/g) || []).length;
+    while (cb < ob) { out += '}'; cb++; }
+    return out;
+}
+
+// ★ 工具参数容错提取: server_exec/server_python 的模型参数非法JSON(未转义引号/截断)时尽量恢复
+function tolerantToolInput(toolName, raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    try { return JSON.parse(raw); } catch (e) {}
+    try { return JSON.parse(repairToolArguments(raw)); } catch (e2) {}
+    var keys = [];
+    if (toolName === 'server_exec') keys = ['cmd', 'command', 'query'];
+    else if (toolName === 'server_python') keys = ['script', 'code', 'cmd'];
+    var targetKey = toolName === 'server_exec' ? 'cmd' : 'script';
+    var i, j;
+    // 1) 标准 JSON 转义的值
+    for (i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        var re = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
+        var m = raw.match(re);
+        if (m) {
+            var obj = {};
+            obj[targetKey] = m[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            return obj;
+        }
+    }
+    // 2) 容错: 值内含未转义的引号 → 取 "key": " 之后全部内容, 从末尾找真正的收尾引号
+    for (j = 0; j < keys.length; j++) {
+        var key2 = keys[j];
+        var re2 = new RegExp('"' + key2 + '"\\s*:\\s*"([\\s\\S]*)$');
+        var m2 = raw.match(re2);
+        if (!m2) continue;
+        var val = m2[1].replace(/\s+$/, '');
+        var cut = -1;
+        for (var k = val.length - 1; k >= 0; k--) {
+            if (val.charAt(k) === '"') {
+                var rest = val.substring(k + 1).replace(/^\s+/, '');
+                if (rest === '' || rest.charAt(0) === '}' || rest.charAt(0) === ',') {
+                    cut = k;
+                    break;
+                }
+            }
+        }
+        if (cut >= 0) val = val.substring(0, cut);
+        val = val.trim();
+        var obj2 = {};
+        obj2[targetKey] = val.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        return obj2;
+    }
+    return null;
+}
+
 // ==================== 统一错误处理 ====================
 class AppError extends Error {
     constructor(message, code = 'UNKNOWN', details = null) {
@@ -207,7 +410,7 @@ const ErrorHandler = {
         console.error('[Error]', appError.code, appError.message);
         showToast(appError.message, 'error', 4000);
         if (bubble) {
-            bubble.classList.remove('typing');
+            bubble.classList.remove('typing', 'gen-active', 'streaming');
             var div = document.createElement('div');
             div.className = 'error-message';
             div.innerHTML = `<span class="error-icon">❌</span> ${escapeHtml(appError.message)}`;
@@ -240,7 +443,11 @@ function abortExistingRequest(chatId) {
         delete searchAbortControllerMap[chatId];
     }
     cleanupStreamState(chatId);  // ★ 清理RAF渲染循环
+    // ★ 中止时当前气泡的光标类一并清除 (cleanupStreamState 可能因 st.bubble 被新流覆盖而漏删)
+    var _abortBubble = activeBubbleMap[chatId];
+    if (_abortBubble) _abortBubble.classList.remove('typing', 'gen-active', 'streaming');
     delete isTypingMap[chatId];
+    if (window._activeStreamChatId === chatId) window._activeStreamChatId = null;  // ★ 中止时清除活动流标记
     if (typeof renderChatHistory === 'function') renderChatHistory();
     delete activeBubbleMap[chatId];
     // ★ 主代理空闲了,处理子代理通知队列
@@ -285,6 +492,11 @@ function stopGenerationForChat(chatId) {
     try { localStorage.removeItem('_rs_cid'); } catch(e) {}
     try { localStorage.removeItem('_rs_ts'); } catch(e) {}
     try { localStorage.removeItem('_rs_msgid'); } catch(e) {}
+    try {
+        if (window.ResumeStream && typeof window.ResumeStream.complete === 'function') {
+            window.ResumeStream.complete(chatId);
+        }
+    } catch(e) {}
     // ★ 标记流已被用户主动停止，loadChat 检测到后跳过续接
     try { localStorage.setItem('_streamStopped_' + chatId, '1'); } catch(e) {}
     window._pendingRecovery = null;
@@ -335,7 +547,7 @@ window._showChainSteps = function(chatId, steps) {
         step.innerHTML = '<span class="step-icon">' + icon + '</span>' + escapeHtml(s.text);
         container.appendChild(step);
     });
-    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
+    if (!userScrolled) { requestAnimationFrame(function() { followToBottom($.chatBox); }); }
 };
 window._addChainStep = function(chatId, text) {
     var bubble = activeBubbleMap[chatId];
@@ -356,7 +568,7 @@ window._addChainStep = function(chatId, text) {
     newStep.className = 'thinking-step active';
     newStep.innerHTML = '<span class="step-icon">\u{1F504}</span>' + escapeHtml(text);
     container.appendChild(newStep);
-    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
+    if (!userScrolled) { requestAnimationFrame(function() { followToBottom($.chatBox); }); }
 };
 window._clearChainSteps = function(chatId) {
     var bubble = activeBubbleMap[chatId];
@@ -453,6 +665,12 @@ function createTemporaryTimestampIfNeeded(text) {
 // ★ 消息队列 → js/queue.js (Phase 8 拆分)
 
 window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesForRegen) {
+    // ★ 子代理会话只读，禁止发送消息
+    if (currentChatId && chats[currentChatId] && chats[currentChatId]._agentSub) {
+        showToast('🤖 子代理会话为只读，请在主聊天中操作', 'info', 3000);
+        return;
+    }
+
     if (!skipUserAdd && !window._isQueueMessage) {
         // ★ ask_agent 临时授权持续整个会话(不再每轮回收,子代理需要跨轮工作)
         // 仅在新用户消息时保持,但等待子代理完成前不回收
@@ -574,7 +792,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ 新消息: 重置滚动状态 + 滚动到底部
     if (!skipUserAdd) {
         userScrolled = false;
-        setTimeout(function() { if ($.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight; }, 30);
+        setTimeout(function() { if ($.chatBox) followToBottom($.chatBox); }, 30);
         // ★ 用户主动发送新消息时,清除推入消息标记,防止旧 finally 块误触发 sendMessage(true) 导致重复发送
         window._hasInjectedMessage = false;
     }
@@ -598,8 +816,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary);
     // ★ 发送消息时重置滚动状态,并锁定流式跟随
     userScrolled = false;
-    streamingScrollLock = false;
     window._streamContentRendered = false;
+    window._streamCompletedOk = false;  // ★ 流是否正常完成(决定 finally 是否免 loadChat 重建)
     var partialIdx = chats[chatId].messages.findIndex(m => m.partial);
     if (partialIdx !== -1) chats[chatId].messages.splice(partialIdx, 1);
 
@@ -614,6 +832,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     searchAbortControllerMap[chatId] = abortSearch;
 
     isTypingMap[chatId] = true;
+    window._activeStreamChatId = chatId;  // ★ 标记活动流, 防止 fetchModels 中断正在输出的模型
     if (typeof renderChatHistory === 'function') renderChatHistory();  // 后台指示器
     // ★ 多端同步: 广播流开始到其他设备(非RS路径,引擎侧也会广播)
     if (typeof window._broadcastEvent === 'function') {
@@ -701,6 +920,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     chats[chatId].messages.push(pendingMsg);
     let currentBubble = null;
     if (currentChatId === chatId) {
+        // ★ 新消息开始: 先清除所有残留的呼吸/生成光晕 (旧流被中止/ID 守卫提前 return 时可能漏清, 导致旧气泡一直发光)
+        document.querySelectorAll('.bubble.assistant.typing, .bubble.assistant.gen-active, .bubble.streaming').forEach(function(_b) {
+            _b.classList.remove('typing', 'gen-active', 'streaming');
+        });
+        // ★ 同时移除上一轮的搜索标题滚动条
+        document.querySelectorAll('.search-ticker').forEach(function(_t) { _t.remove(); });
         currentBubble = appendMessage('assistant', '', null, null, null, 0, false);
         if (currentBubble) currentBubble.classList.add('typing');
         activeBubbleMap[chatId] = currentBubble;
@@ -1041,6 +1266,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     //   api.deepseek.com / api.minimaxi.com → 开开关后启用
     //   其他 (Grok/OpenAI 等) → 不支持，始终 OpenAI 格式
     var _baseUrl = getVal('baseUrl') || '';
+    var _providerName = getEl('baseUrlProvider')?.value || localStorage.getItem('baseUrlProvider') || '';
+    var _isLongCatRequest = typeof window.isLongCat === 'function'
+        ? window.isLongCat(model, _baseUrl, _providerName)
+        : (String(model).toLowerCase().includes('longcat') || _baseUrl.includes('api.longcat.chat'));
+    // 官方当前仅提供 LongCat-2.0，避免历史/搜索模型覆盖后带错模型名。
+    if (_isLongCatRequest) model = 'LongCat-2.0';
     var _isNativeAnthropic = _baseUrl.indexOf('api.anthropic.com') >= 0;
     var _supportsAnthropic = _isNativeAnthropic || _baseUrl.indexOf('api.deepseek.com') >= 0 || _baseUrl.indexOf('api.minimaxi.com') >= 0 || _baseUrl.indexOf('api.minimax.io') >= 0 || _baseUrl.indexOf('api.longcat.chat') >= 0;
     var _useAnthropicFormat = _isNativeAnthropic || (_supportsAnthropic && localStorage.getItem('useAnthropicFormat') === '1');
@@ -1050,7 +1281,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         var _out = [];
         for (var _i = 0; _i < _msgs.length; _i++) {
             var _m = JSON.parse(JSON.stringify(_msgs[_i])); // deep copy
-            if (_m.role === 'user') {
+            // Anthropic 的 system 必须使用顶层 system 字段，不能再留在 messages。
+            if (_m.role === 'system') {
+                continue;
+            } else if (_m.role === 'user') {
                 var _alreadyAnthropic = Array.isArray(_m.content) && _m.content.some(function(c){return c.type==='tool_result'||c.type==='tool_use';});
                 if (_alreadyAnthropic) { _out.push(_m); continue; }
                 if (typeof _m.content === 'string') _m.content = [{type:'text',text:_m.content}];
@@ -1067,7 +1301,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 for (var _ti = 0; _ti < _m.tool_calls.length; _ti++) {
                     var _tc = _m.tool_calls[_ti];
                     var _input = {};
-                    try { _input = JSON.parse(_tc.function.arguments||'{}'); } catch(e) {}
+                    try { _input = JSON.parse(_tc.function.arguments||'{}'); } catch(e) { _input = tolerantToolInput(_tc.function.name, _tc.function.arguments || '') || {}; }
                     _blocks.push({type:'tool_use',id:_tc.id||('toolu_'+Date.now()),name:_tc.function.name,input:_input});
                 }
                 _m.content = _blocks;
@@ -1135,14 +1369,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     }
 
     // 统一获取模型选择并转小写
-    var currentModel = (getVal('modelSelect') || '').replace(/^(models|publishers)\//, '');  // ★ 去除 Google API 等前缀
+    var currentModel = (_isLongCatRequest ? model : (getVal('modelSelect') || '')).replace(/^(models|publishers)\//, '');  // ★ 去除 Google API 等前缀
     var modelLower = currentModel.toLowerCase();
 
     // ★ LongCat 清洗: 在发送前确保 messages 兼容 LongCat 的 apply_chat_template
     try {
-        var _isLC = typeof window.isLongCat === 'function' && window.isLongCat();
-        console.warn('[LongCat] isLongCat=' + _isLC + ' model=' + getVal('modelSelect') + ' baseUrl=' + getVal('baseUrl') + ' provider=' + localStorage.getItem('baseUrlProvider'));
-        if (typeof window.sanitizeForLongCat === 'function') {
+        var _isLC = _isLongCatRequest;
+        // Anthropic 格式的 content block/tool_use 数组必须保留；只清洗 OpenAI 格式。
+        if (_isLC && !_useAnthropicFormat && typeof window.sanitizeForLongCat === 'function') {
             apiMessages = window.sanitizeForLongCat(apiMessages);
             for (var _lc = 0; _lc < apiMessages.length; _lc++) {
                 var _lm = apiMessages[_lc];
@@ -1163,6 +1397,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         max_tokens: requestedTokens
     };
 
+    // ★ 思考强度分级 (全局生效，覆盖 LongCat/MiniMax 原有独立设置)
+    var _thinkingIntensity = localStorage.getItem('thinkingIntensity') || 'medium';
+    if (window.MODEL_CONFIGS && window.MODEL_CONFIGS.supportsThinkingIntensity(modelName)) {
+        var _tp = window.MODEL_CONFIGS.getThinkingIntensityParams(_thinkingIntensity, modelName, _useAnthropicFormat);
+        Object.keys(_tp).forEach(function(_k) {
+            if (_tp[_k] === undefined) delete body[_k]; else body[_k] = _tp[_k];
+        });
+    }
+
     // ★ 按模型配置限制 max_tokens 上限 (如 LongCat 限制 ≤131072)
     var _modelMaxOutput = window.MODEL_CONFIGS && window.MODEL_CONFIGS.getMaxOutputTokens
         ? window.MODEL_CONFIGS.getMaxOutputTokens(model) : 0;
@@ -1172,16 +1415,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         requestedTokens = _modelMaxOutput;
     }
 
-    // ★ MiniMax M3: thinking 和 token 控制（Anthropic 格式跳过，由格式自身处理）
+    // ★ MiniMax M3: token 控制（思考强度已由上方统一逻辑处理）
     if (!_useAnthropicFormat && (modelLower.includes('m3') || modelLower.includes('minimax-m3'))) {
-        var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
-        var _hasTools = body.tools && body.tools.length > 0;
-        if (_hasTools || _tm === 'disabled') {
-            body.thinking = { type: 'disabled' };
-        } else {
-            body.thinking = { type: 'adaptive' };
-            body.reasoning_split = true;
-        }
         body.max_completion_tokens = body.max_tokens;
         delete body.max_tokens;
     }
@@ -1372,6 +1607,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // ★ 股票数据工具(始终注册, 普通模式可用)
         if (typeof window.STOCK_TOOLS !== 'undefined') {
             window.STOCK_TOOLS.forEach(function(t) { tools.push(t); });
+        }
+        // ★ MCP 服务器工具(始终注册, 来自已连接的外部 MCP 服务器)
+        if (typeof window.getMcpToolsForChat === 'function') {
+            var _mcpTools = window.getMcpToolsForChat();
+            _mcpTools.forEach(function(t) { tools.push(t); });
         }
         // ★ 智能工具注入: 根据用户输入动态添加匹配技能的工具
         (function() {
@@ -1672,21 +1912,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ Agent 模式: 如果本轮创建了子代理,禁止模型继续说话
     window._hasCreatedSubAgent = false;  // ★ 全局可写（tools-exec.js 中赋值），此处重置
 
-    // ★ Agent 模式: 思考深度处理 - 使用模型配置判断是否支持 reasoning_effort
-    if (_effectiveAgent) {
-        var _mcSupportsReasonEffort = _getModelCfg().supportsReasonEffort(modelName);
-        var thinkingDepth = localStorage.getItem('agentThinkingDepth') || 'standard';
-        if (thinkingDepth === 'deep' && _mcSupportsReasonEffort) {
-            body.reasoning_effort = 'high';
-        } else if (thinkingDepth === 'shallow' && _mcSupportsReasonEffort) {
-            body.reasoning_effort = 'low';
-        } else if (thinkingDepth === 'standard') {
-            delete body.reasoning_effort;
-        }
-    }
-
-    // ★ 模型配置:集中清理 body 中模型不支持的参数
+    // ★ 思考强度分级已在 body 构建阶段全局应用 (覆盖 Agent/普通聊天)
+    // 模型配置:集中清理 body 中模型不支持的参数
     _getModelCfg().sanitizeBody(modelName, body);
+    // LongCat 模型名收敛 (思考强度已由统一逻辑处理)
+    if (_isLongCatRequest) {
+        body.model = 'LongCat-2.0';
+    }
 
     // ★ 图像模型需要更长超时 (生成图片可达 2-15 分钟)
     var _isImageModel = modelName.toLowerCase().indexOf('image') !== -1
@@ -1734,6 +1966,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ MiniMax M3: 复杂工具调用需要更长时间
     var _timeoutSec = parseInt(getVal('requestTimeout')) || 120;
     if (modelLower.includes('minimax-m3') || modelLower.includes('minimax')) _timeoutSec = Math.max(_timeoutSec, 180);
+    if (_isLongCatRequest) _timeoutSec = Math.max(_timeoutSec, 600);
     var timeout = _isImageModel ? 900000 : _timeoutSec * 1000;
     var timeoutId = setTimeout(() => abortMain.abort(), timeout);
     window._activeRequestTimeoutId = timeoutId;  // ★ 供审批弹窗暂停用
@@ -1741,9 +1974,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // 网络错误重试配置
     var maxRetries = 3;
+    var _longCatPlainRetryUsed = false;
     // Agent 模式使用自定义最大工具调用轮次
     var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 1000;
     let toolCallCount = 0;
+
+    // ★ 死循环检测: 会话级 LoopGuard(跨轮共享, 400/402 重试与工具轮递归共用同一实例)
+    // 小参数模型易陷入工具复读/文本复读死循环烧 token, 详见 loop-guard.js
+    window.__loopGuardMap = window.__loopGuardMap || {};
+    var _guardCfg = {
+        enabled: localStorage.getItem('loopGuardEnabled') !== 'false',
+        maxRepeat: parseInt(localStorage.getItem('loopGuardMaxRepeat')) || 3,
+        maxToolOnlyRounds: parseInt(localStorage.getItem('loopGuardMaxToolOnlyRounds')) || 6
+    };
+    window.__loopGuardMap[chatId] = new window.LoopGuard(_guardCfg);
+    var _guard = window.__loopGuardMap[chatId];
 
     // 离线检测
     if (!navigator.onLine) {
@@ -1763,17 +2008,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (tc.function && typeof tc.function.arguments === 'string') {
                         var raw = tc.function.arguments;
                         try { JSON.parse(raw); } catch(e) {
-                            // 修复非法 JSON
-                            raw = raw.replace(/[\x00-\x1f]/g, ' ');
-                            var qc = (raw.match(/"/g) || []).length;
-                            if (qc % 2 !== 0) raw += '"';
-                            var ob = (raw.match(/\{/g) || []).length;
-                            var cb = (raw.match(/\}/g) || []).length;
-                            while (cb < ob) { raw += '}'; cb++; }
-                            try { JSON.parse(raw); } catch(e2) {
-                                // 彻底放弃,用空对象
-                                raw = '{}';
-                            }
+                            // ★ 修复非法 JSON(未转义引号/换行/截断), 修复失败才降级空对象
+                            try { raw = repairToolArguments(raw); JSON.parse(raw); } catch(e2) { raw = '{}'; }
                             tc.function.arguments = raw;
                         }
                     }
@@ -1794,7 +2030,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _parsed = JSON.parse(_tc.function.arguments);
                         _tc.function.arguments = JSON.stringify(_parsed);
                     } catch(e) {
-                        _tc.function.arguments = '{}';
+                        _tc.function.arguments = JSON.stringify(tolerantToolInput(_tc.function.name, _tc.function.arguments) || {});
                     }
                 }
             }
@@ -1807,6 +2043,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         let _reasoningText = '';
         var _toolCalls = [];
         var _usage = null;
+        var _truncated = false;
+        var _stopReason = '';
         console.log('[A-Stream] status=' + res.status + ' content-type=' + (res.headers.get('content-type') || '?'));
 
         // ★ 流式 SSE 解析 (Anthropic API 默认流式，非流式极少用)
@@ -1818,8 +2056,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var _currentBlockIdx = -1;
             var _currentBlockType = '';
             var _toolUseIdx = -1;
-            var _toolUseMap = {}; // index → {id, name, input_json}
+            var _toolUseMap = {}; // index → {id, name, input_json, incomplete}
             var _done = false;
+            var _hadIncompleteToolUse = false;
+            // SSE 的 event/data 可能落在不同 TCP chunk；事件名必须跨 read() 保留。
+            var _event = '';
 
             while (!_done) {
                 var _rr = await _reader.read();
@@ -1828,21 +2069,22 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 var _lines = _buf.split('\n');
                 _buf = _lines.pop() || '';
 
-                var _event = '';
                 for (var _li = 0; _li < _lines.length; _li++) {
                     var _ln = _lines[_li].trim();
                     if (!_ln) continue;
-                    if (_ln.startsWith('event: ')) { _event = _ln.substring(7); continue; }
-                    if (!_ln.startsWith('data: ')) continue;
-                    var _js = _ln.substring(6);
+                    if (_ln.startsWith('event:')) { _event = _ln.substring(6).trim(); continue; }
+                    if (!_ln.startsWith('data:')) continue;
+                    var _js = _ln.substring(5).trim();
                     try {
                         var _d = JSON.parse(_js);
+                        // 部分兼容端点只在 JSON 中携带 type，不发送 event: 行。
+                        var _eventType = _event || _d.type || '';
 
-                        if (_event === 'message_start' || !_event) {
+                        if (_eventType === 'message_start' || !_eventType) {
                             if (_d.message && _d.message.usage) {
                                 _usage = { prompt_tokens: _d.message.usage.input_tokens || 0, completion_tokens: 0, total_tokens: _d.message.usage.input_tokens || 0 };
                             }
-                        } else if (_event === 'content_block_start') {
+                        } else if (_eventType === 'content_block_start') {
                             var _cb = _d.content_block;
                             if (_cb) {
                                 _currentBlockIdx = _d.index;
@@ -1850,10 +2092,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 if (_cb.type === 'tool_use') {
                                     _toolUseIdx = _d.index;
                                     console.log('[A-Tool] tool_use block_start index=' + _d.index + ' cb.id=' + _cb.id + ' cb.name=' + _cb.name);
-                                    _toolUseMap[_d.index] = { id: _cb.id || ('toolu_' + Date.now() + '_' + _d.index), name: _cb.name, input_json: '' };
+                                    // ★ 部分 Provider 在 block_start 直接带完整 input(无 input_json_delta), 不能丢
+                                    var _seedInput = '';
+                                    if (_cb.input !== undefined && _cb.input !== null) {
+                                        if (typeof _cb.input === 'string') _seedInput = _cb.input;
+                                        else if (typeof _cb.input === 'object' && Object.keys(_cb.input).length > 0) _seedInput = JSON.stringify(_cb.input);
+                                    }
+                                    _toolUseMap[_d.index] = { id: _cb.id || ('toolu_' + Date.now() + '_' + _d.index), name: _cb.name, input_json: _seedInput, incomplete: false };
                                 }
                             }
-                        } else if (_event === 'content_block_delta') {
+                        } else if (_eventType === 'content_block_delta') {
                             var _delta = _d.delta;
                             if (_delta) {
                                 if (_delta.type === 'text_delta') {
@@ -1863,44 +2111,94 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 } else if (_delta.type === 'thinking_delta') {
                                     _reasoningText += _delta.thinking;
                                     pendingMsg.reasoning = _reasoningText;
+                                    // ★ 实时渲染推理面板（与 OpenAI 路径一致）
+                                    if (currentChatId === chatId && currentBubble && typeof window._ensureReasoningPanel === 'function') {
+                                        window._ensureReasoningPanel(currentBubble, _reasoningText);
+                                    }
                                 } else if (_delta.type === 'input_json_delta') {
-                                    if (_toolUseIdx >= 0 && _toolUseMap[_toolUseIdx]) {
-                                        _toolUseMap[_toolUseIdx].input_json += _delta.partial_json || '';
+                                    // ★ 按块 index 归位(兼容多个 tool_use 交错/顺序乱序), 不再依赖单一 _toolUseIdx
+                                    var _deltaIdx = _d.index !== undefined ? _d.index : _toolUseIdx;
+                                    if (_deltaIdx >= 0 && _toolUseMap[_deltaIdx]) {
+                                        _toolUseMap[_deltaIdx].input_json += _delta.partial_json || '';
                                     }
                                 }
                             }
-                        } else if (_event === 'content_block_stop') {
-                            if (_toolUseIdx >= 0 && _toolUseMap[_toolUseIdx]) {
-                                var _tu = _toolUseMap[_toolUseIdx];
-                                var _input = {};
-                                try { _input = JSON.parse(_tu.input_json); } catch(e) {}
-                                _toolCalls.push({ id: _tu.id, type: 'function', function: { name: _tu.name, arguments: JSON.stringify(_input) } });
-                                _toolUseIdx = -1;
+                        } else if (_eventType === 'content_block_stop') {
+                            var _stopIdx = _d.index !== undefined ? _d.index : _toolUseIdx;
+                            if (_stopIdx >= 0 && _toolUseMap[_stopIdx]) {
+                                var _tu = _toolUseMap[_stopIdx];
+                                if (!_tu.incomplete) {
+                                    var _rawInput = (_tu.input_json || '').trim();
+                                    var _input = {};
+                                    var _parseOk = false;
+                                    if (!_rawInput) {
+                                        // 没有任何 input 数据 → 视为截断/异常, 不执行空调用
+                                        _tu.incomplete = true;
+                                    } else {
+                                        try { _input = JSON.parse(_rawInput); _parseOk = true; } catch(e) {}
+                                        if (!_parseOk) {
+                                            var _looksClosed = _rawInput.endsWith('}') || _rawInput.endsWith(']');
+                                            if (_looksClosed) {
+                                                // 完整但格式损坏(未转义引号等) → 容错修复(保持原有行为)
+                                                var _rep = tolerantToolInput(_tu.name, _rawInput) || {};
+                                                if (Object.keys(_rep).length > 0) _input = _rep;
+                                                else _tu.incomplete = true;
+                                            } else {
+                                                // ★ 截断: input 未闭合(如只有 {"cmd": 或 {"cmd": "abc), 绝不能执行
+                                                _tu.incomplete = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (_tu.incomplete) {
+                                    _hadIncompleteToolUse = true;
+                                    console.warn('[A-Stream] tool_use 未完成(可能被截断), 丢弃: ' + _tu.name + ' input=' + JSON.stringify((_tu.input_json || '').substring(0, 120)));
+                                } else {
+                                    _toolCalls.push({ id: _tu.id, type: 'function', function: { name: _tu.name, arguments: JSON.stringify(_input) } });
+                                }
+                                if (_stopIdx === _toolUseIdx) _toolUseIdx = -1;
                             }
-                        } else if (_event === 'message_delta') {
+                        } else if (_eventType === 'message_delta') {
                             if (_d.delta && _d.delta.stop_reason) {
                                 _done = true;
+                                _stopReason = _d.delta.stop_reason;
+                                if (_stopReason === 'max_tokens' || _stopReason === 'length') _truncated = true;
                             }
                             if (_d.usage) {
                                 if (_usage) _usage.completion_tokens = _d.usage.output_tokens || 0;
                                 else _usage = { prompt_tokens: 0, completion_tokens: _d.usage.output_tokens || 0, total_tokens: _d.usage.output_tokens || 0 };
                             }
-                        } else if (_event === 'message_stop') {
+                        } else if (_eventType === 'message_stop') {
                             _done = true;
-                        } else if (_event === 'ping') {
+                        } else if (_eventType === 'ping') {
                             // heartbeat, ignore
                         }
-                        _event = '';
                     } catch(e) {}
+                    // 一个 data: 记录消费完即结束当前 SSE event；若 event/data 被拆包，
+                    // 这里会在 data 真正到达后才重置。
+                    _event = '';
                 }
             }
             try { _reader.releaseLock(); } catch(e) {}
-            return { fullText: _fullText, reasoningText: _reasoningText, usage: _usage, toolCalls: _toolCalls };
+            if (_truncated || _hadIncompleteToolUse) {
+                // ★ 兜底: 模型把工具调用写在正文 XML/文本里(原生 tool_use 为空/截断)时, 从正文恢复
+                var _txtRecover = (typeof _extractTextToolCalls === 'function') ? _extractTextToolCalls(_fullText) : null;
+                if (_txtRecover && _txtRecover.toolCalls && _txtRecover.toolCalls.length > 0) {
+                    _toolCalls = _toolCalls.concat(_txtRecover.toolCalls);
+                    _fullText = _txtRecover.fullText;
+                    if (pendingMsg) pendingMsg.content = _fullText;
+                    console.log('[A-Stream] 从正文XML/文本恢复工具调用 ' + _txtRecover.toolCalls.length + ' 个: ' + _txtRecover.toolCalls.map(function(t){return t.function.name;}).join(','));
+                }
+            }
+            console.log('[A-Stream] done stop_reason=' + (_stopReason || '?') + ' truncated=' + _truncated + ' toolCalls=' + _toolCalls.length + ' hadIncomplete=' + _hadIncompleteToolUse);
+            return { fullText: _fullText, reasoningText: _reasoningText, usage: _usage, toolCalls: _toolCalls, streamAborted: _truncated, truncated: _truncated, stopReason: _stopReason };
         }
 
         // ★ 非流式 JSON 解析
         try {
             var _data = await res.json();
+            _stopReason = _data.stop_reason || '';
+            _truncated = _stopReason === 'max_tokens' || _stopReason === 'length';
             if (_data.usage) {
                 _usage = { prompt_tokens: _data.usage.input_tokens || 0, completion_tokens: _data.usage.output_tokens || 0, total_tokens: (_data.usage.input_tokens || 0) + (_data.usage.output_tokens || 0) };
             }
@@ -1910,22 +2208,68 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (_block.type === 'text') { _fullText += _block.text; }
                     else if (_block.type === 'thinking') { _reasoningText += _block.thinking; }
                     else if (_block.type === 'tool_use') {
-                        _toolCalls.push({ id: _block.id || ('toolu_' + Date.now()), type: 'function', function: { name: _block.name, arguments: JSON.stringify(_block.input || {}) } });
+                        var _blkInput = _block.input;
+                        var _blkParsed = {};
+                        if (typeof _blkInput === 'string') {
+                            try { _blkParsed = JSON.parse(_blkInput || '{}'); } catch(e) { _blkParsed = tolerantToolInput(_block.name, _blkInput) || {}; }
+                        } else if (_blkInput && typeof _blkInput === 'object') {
+                            _blkParsed = _blkInput;
+                        }
+                        // 非流式截断(max_tokens)时同样不执行空/残缺 tool_use
+                        var _blkTruncated = (_data.stop_reason === 'max_tokens' || _data.stop_reason === 'length');
+                        if (_blkTruncated && Object.keys(_blkParsed).length === 0) {
+                            console.warn('[A-Stream] 非流式响应被截断, 丢弃空 tool_use: ' + _block.name);
+                            _truncated = true;
+                            continue;
+                        }
+                        _toolCalls.push({ id: _block.id || ('toolu_' + Date.now()), type: 'function', function: { name: _block.name, arguments: JSON.stringify(_blkParsed) } });
                     }
                 }
             }
             if (_fullText) { pendingMsg.content = _fullText; if (currentChatId === chatId) applyStreamRender(chatId, _fullText); }
             if (_reasoningText) { pendingMsg.reasoning = _reasoningText; }
+            if (_truncated) {
+                var _txtRecover2 = (typeof _extractTextToolCalls === 'function') ? _extractTextToolCalls(_fullText) : null;
+                if (_txtRecover2 && _txtRecover2.toolCalls && _txtRecover2.toolCalls.length > 0) {
+                    _toolCalls = _toolCalls.concat(_txtRecover2.toolCalls);
+                    _fullText = _txtRecover2.fullText;
+                    if (pendingMsg) pendingMsg.content = _fullText;
+                    console.log('[A-Stream] 非流式: 从正文恢复工具调用 ' + _txtRecover2.toolCalls.length + ' 个');
+                }
+            }
         } catch(e) {
             throw new Error('Anthropic 响应解析失败: ' + e.message);
         }
-        return { fullText: _fullText, reasoningText: _reasoningText, usage: _usage, toolCalls: _toolCalls };
+        return { fullText: _fullText, reasoningText: _reasoningText, usage: _usage, toolCalls: _toolCalls, streamAborted: _truncated, truncated: _truncated, stopReason: (_data && _data.stop_reason) || '' };
+    }
+
+    // LongCat 的思考预算耗尽时会合法结束，但只返回 reasoning、正文为空。
+    // ★ 保留推理内容直接展示，不丢弃推理去 retry（用户宁可看到推理也不愿它消失）
+    function _retryLongCatWithoutThinking(attempt, timeoutIdVal) {
+        _longCatPlainRetryUsed = true;
+        body.thinking = { type: 'disabled' };
+        // ★ 不清除推理面板和内容，直接返回空结果让上层保留已有推理展示
+        console.warn('[LongCat] 正文为空，保留推理直接展示（不 retry）');
+        return { fullText: '', reasoningText: pendingMsg.reasoning || '', usage: null, toolCalls: [], streamAborted: false };
     }
 
     async function attemptRequestWithFreshAbort(attempt, abortCtrl, timeoutIdVal) {
+        // ★ 死循环检测参数解析(容错: JSON 非法时用原始串, 规范化内部会再处理)
+        function _parseGuardArgs(argStr) {
+            try { return JSON.parse(argStr); } catch(e) { return argStr; }
+        }
+        // ★ 死循环检测硬中止: 中止在途请求 + 抛出带标记错误, 由外层 catch 分发处理
+        function _throwGuardHard(chk, chatIdForErr) {
+            try { if (abortControllerMap[chatIdForErr]) abortControllerMap[chatIdForErr].abort(); } catch(_abErr) {}
+            console.warn('[LoopGuard] 硬中止:', chk.type, chk.reason);
+            var _lgErr = new Error('检测到模型死循环已自动中止: ' + chk.reason);
+            _lgErr.loopGuard = chk;
+            _lgErr.name = 'LoopGuardError';
+            throw _lgErr;
+        }
         try {
             // ★ LongCat 清洗: 每次发送前都检查并清洗 (包括工具重试路径)
-            if (body.messages && typeof window.sanitizeForLongCat === 'function') {
+            if (_isLongCatRequest && !_useAnthropicFormat && body.messages && typeof window.sanitizeForLongCat === 'function') {
                 body.messages = window.sanitizeForLongCat(body.messages);
             }
             // ★ 清理空 tool_calls:[] — DeepSeek API 拒绝 empty array (每次重试都检查)
@@ -2086,11 +2430,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             var useStream = _isImageModel ? false : getChecked('streamToggle');
             // ★ 可恢复流式：默认启用（引擎后端管理 LLM 流，刷新断点续传）
             // 用户可设置 __enableResumeStream='0' 显式禁用
-            var _rsEnabled = (localStorage.getItem('__enableResumeStream') === '1');
-            // ★ 工具续接也走RS: 每轮独立stream_id不嵌套,前8轮走RS超8轮退直连
-            var _isContinuation = (toolCallCount > 8);
+            var _rsEnabled = (localStorage.getItem('__enableResumeStream') !== '0');
+            // ★ 工具链的每一轮都建立独立可恢复流。旧版第 9 轮后退回直连，
+            // 深工具链恰好在后半段刷新时仍会中断，违背“刷新不断”的语义。
             // ★ Anthropic 格式也支持 RS (引擎新增Anthropic Messages API流式分支)
-            var _useRS = _rsEnabled && !_isContinuation;
+            var _useRS = _rsEnabled;
             if (_useRS) {
                 // ★ 先持久化用户消息到服务器，防止刷新丢失
                 saveChats();
@@ -2101,7 +2445,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                       temp: body.temperature, tokens: body.max_tokens, tools: body.tools,
                       // ★ Anthropic格式: 传递标志+端点,使RS也支持Anthropic Messages API
                       anthropicFormat: _useAnthropicFormat,
-                      anthropicUrl: body._anthropicUrl || '' },
+                      anthropicUrl: body._anthropicUrl || '',
+                      system: body.system || '',
+                      thinking: body.thinking || null },
                     chatId, pendingMsg
                 );
                 console.log('[RS-DEBUG] _rsResult:', _rsResult ? ('fullText=' + (_rsResult.fullText||'').substring(0,60) + ' toolCalls=' + (_rsResult.toolCalls||[]).length + ' completed=' + _rsResult.completed + ' error=' + (_rsResult.error||'none')) : 'NULL');
@@ -2110,6 +2456,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     console.warn('[RS] 用户已停止, 不再回退直连');
                     if (userAbortMap[chatId]) throw new Error('用户停止');
                     throw new Error('RS: 流已中断');
+                }
+                // LongCat 开启思考后可能在 max_tokens 内只产出 reasoning、正文为空。
+                // ★ 保留推理内容直接展示，不丢弃推理去 retry（用户宁可看到推理也不愿它消失）
+                if (_rsResult && _isLongCatRequest && _rsResult.reasoningText
+                    && !_rsResult.fullText && !(_rsResult.toolCalls && _rsResult.toolCalls.length)) {
+                    console.warn('[LongCat] 仅收到思考内容，保留推理直接展示（不 retry）');
+                    body.thinking = { type: 'disabled' };
                 }
                 if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
                     if (!_rsResult.completed) {
@@ -2125,15 +2478,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             }
                         } else {
                             console.warn('[RS] 流未正常完成(中断/刷新), 回退到 HTTP 直连');
+                            _useRS = false;
+                            var _rsDone = false;
                         }
                     } else {
                         // 引擎流成功完成 — 直接使用引擎结果，跳过 HTTP 直连
                         usage = _rsResult.usage;
                         toolCalls = _rsResult.toolCalls || [];
-                        // ★ RS路径: 必须同步到 pendingMsg，否则 buildApiMessages 会孤立所有tool结果→AI看不到→死循环
-                        // ★ 修复: 与其他路径统一用 concat 累积, 避免覆盖丢失之前轮次的 tool_calls 导致结果变孤立
-                        if (!pendingMsg.tool_calls) pendingMsg.tool_calls = [];
-                        pendingMsg.tool_calls = pendingMsg.tool_calls.concat(toolCalls);
+                        // 当前批次先放在恢复字段中；下方完成标准化后再按 id 合并进
+                        // pendingMsg.tool_calls，避免非法 id 清洗前后各留一份重复调用。
+                        pendingMsg._rsToolCalls = toolCalls;
                         if (_rsResult.reasoningText) pendingMsg.reasoning = _rsResult.reasoningText;
                         // ★ 图像模型: 进度条清除
                         try { var _ph = document.getElementById('image-placeholder'); if (_ph) _ph.remove(); } catch(e) {}
@@ -2170,28 +2524,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             } else { var _rsDone = false; }
 
             if (!_useRS && !_rsDone) {
-            // ★ 图像模型: 显示生成进度 (生成图片可能需要 1-15 分钟)
-            var _imgPlaceholder = null;
-            var _imgTimerInterval = null;
-            if (_isImageModel && currentBubble) {
-                _imgPlaceholder = document.createElement('div');
-                _imgPlaceholder.id = 'image-placeholder';
-                _imgPlaceholder.style.cssText = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
-                _imgPlaceholder.innerHTML = '<div style="font-size:32px;margin-bottom:12px;">🎨</div><div style="font-size:18px;font-weight:600;">正在生成图片...</div><div id="img-gen-timer" style="font-size:13px;margin-top:8px;opacity:0.8;">已等待 0s</div><div style="font-size:11px;margin-top:8px;opacity:0.6;">图像生成最多需要 15 分钟</div>';
-                currentBubble.querySelector('.markdown-body')?.appendChild(_imgPlaceholder);
-                var _imgStart = Date.now();
-                _imgTimerInterval = setInterval(function() {
-                    var el = document.getElementById('img-gen-timer');
-                    if (el) el.textContent = '已等待 ' + Math.floor((Date.now() - _imgStart) / 1000) + 's';
-                }, 1000);
-            }
-
             // ★ LongCat 清理: 剥离所有非标准字段,防止 apply_chat_template 'list object' 错误
             //    LongCat 的 apply_chat_template 不支持 reasoning_content/reasoning_details 等非标准字段,
             //    迭代消息时会尝试调用 .items() 导致 'list object' has no attribute 'items' 错误
             //    根因: main.js:2497 工具重试路径 + api-messages.js:318 buildApiMessages 都会设置此字段
             if (body.messages) {
-                var _isLongCatModel = (body.model || '').toLowerCase().includes('longcat');
+                var _isLongCatModel = _isLongCatRequest || (body.model || '').toLowerCase().includes('longcat');
                 for (var _fi3 = 0; _fi3 < body.messages.length; _fi3++) {
                     var _m3 = body.messages[_fi3];
                     if (_isLongCatModel) {
@@ -2214,7 +2552,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                     // ★ 通用防护: 确保 content 始终是字符串 (视觉模型除外 — 保留 image_url 数组)
                     var _isVisionForSafe = _getModelCfg().supportsVision(body.model || '');
-                    if (!_isVisionForSafe && typeof _m3.content !== 'string') {
+                    if (!_useAnthropicFormat && !_isVisionForSafe && typeof _m3.content !== 'string') {
                         if (Array.isArray(_m3.content)) {
                             _m3.content = _m3.content.map(function(c) {
                                 if (typeof c === 'string') return c;
@@ -2235,10 +2573,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             }
             // ★ 统一走 proxyFetch: 代理OFF直连(走系统代理)→失败回退proxy.php中继; 代理ON走proxy.php+外部代理
             var _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getVal('apiKey') };
+            var _wireBody = JSON.parse(JSON.stringify(body));
+            delete _wireBody._anthropicUrl; // 仅为本地路由元数据，不发给上游
             var res = await window.proxyFetch(_reqUrl, {
                 method: 'POST',
                 headers: _headers,
-                body: JSON.stringify(body),
+                body: JSON.stringify(_wireBody),
                 signal: abortCtrl.signal
             });
 
@@ -2253,15 +2593,36 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             if (_useAnthropicFormat) {
                 try {
                     var _aResult = await _parseAnthropicResponse(res, chatId, pendingMsg, currentBubble);
+                    if (_isLongCatRequest && !_longCatPlainRetryUsed && _aResult.reasoningText
+                        && !_aResult.fullText && !(_aResult.toolCalls && _aResult.toolCalls.length)) {
+                        return _retryLongCatWithoutThinking(attempt, timeoutIdVal);
+                    }
                     usage = _aResult.usage;
                     toolCalls = _aResult.toolCalls || [];
-                    if (_aResult.reasoningText) pendingMsg.reasoning = _aResult.reasoningText;
+                    if (_aResult.reasoningText) {
+                        pendingMsg.reasoning = _aResult.reasoningText;
+                        // ★ 补渲染：若实时渲染未触发（如非流式 Anthropic 响应），流结束后补上
+                        if (currentChatId === chatId && currentBubble && typeof window._ensureReasoningPanel === 'function') {
+                            window._ensureReasoningPanel(currentBubble, _aResult.reasoningText);
+                        }
+                    }
+                    // ★ 截断防护: 未完成的 tool_use 已在解析器内丢弃, 这里只提示用户
+                    if (_aResult.truncated) {
+                        console.warn('[A-Stream] 输出被截断(stop_reason=' + (_aResult.stopReason || '?') + '), 未完成工具调用已丢弃, 保留 ' + toolCalls.length + ' 个完整调用');
+                        if (typeof showToast === 'function') {
+                            showToast('⚠️ 输出达到长度/上下文限制被截断，未完成的工具调用已丢弃。可精简对话或重试。', 'warning', 6000);
+                        }
+                    }
                 } catch(_aErr) {
                     throw _aErr;
                 }
             } else if (useStream) {
                 try {
                     let result = await streamResponse(res, chatId, pendingMsg, 3, 2);
+                    if (_isLongCatRequest && !_longCatPlainRetryUsed && result.reasoningText
+                        && !result.fullText && !(result.toolCalls && result.toolCalls.length)) {
+                        return _retryLongCatWithoutThinking(attempt, timeoutIdVal);
+                    }
                     usage = result.usage;
                     toolCalls = result.toolCalls || [];
                     // ★ 死循环防护3: 流被中断(超时/网络/用户停止)时, 丢弃未完整返回的工具调用
@@ -2276,13 +2637,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _ct = usage.completion_tokens || usage.output_tokens || 0;
                         sessionUsage.promptTokens += _pt;
                         sessionUsage.completionTokens += _ct;
-                        sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                        // Feature 7: 增强缓存追踪
-                        var _cHit = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                        var _totalCache = (_pt || _ct);
+                        // ★ 统一提取缓存命中(多模型格式: DeepSeek/OpenAI/Anthropic/Gemini/Grok)
+                        var _cHit = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                        sessionUsage.prefixCacheHits += _cHit;
                         if (_cHit > 0) {
+                            var _ptBase = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt || _ct;
                             sessionUsage.cacheHitTokens += _cHit;
-                            sessionUsage.cacheMissTokens += (_totalCache > _cHit) ? (_totalCache - _cHit) : 0;
+                            sessionUsage.cacheMissTokens += (_ptBase > _cHit) ? (_ptBase - _cHit) : 0;
                         }
                         // 估算费用 (基于 DeepSeek V4 定价: $0.5/M input, $2/M output)
                         var pt = _pt / 1000000;
@@ -2294,6 +2655,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         pendingMsg.reasoning = result.reasoningText;
                     }
                 } catch (streamErr) {
+                    // ★ 死循环检测: LoopGuardError 直接上抛, 不走非流式降级重试(会白烧一次 token)
+                    if (streamErr && streamErr.loopGuard) throw streamErr;
                     // ★ HTTP2/网络错误降级: 非流式重试一次
                     var isStreamNetErr = streamErr.name === 'TypeError' ||
                         (streamErr.message && (streamErr.message.includes('fetch') || streamErr.message.includes('net::') || streamErr.message.includes('ERR_') || streamErr.message.includes('network')));
@@ -2303,6 +2666,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         // 重新构造非流式请求体(清除stream标记)
                         var _nsBody = JSON.parse(JSON.stringify(body));
                         if (_nsBody.stream !== undefined) _nsBody.stream = false;
+                        delete _nsBody._anthropicUrl;
                         var _nsFetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
                         var _nsRes = await _nsFetchFn(_reqUrl, {
                             method: 'POST',
@@ -2319,11 +2683,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             var _ct2 = usage.completion_tokens || usage.output_tokens || 0;
                             sessionUsage.promptTokens += _pt2;
                             sessionUsage.completionTokens += _ct2;
-                            sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                            var _cHit2 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                            var _cHit2 = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                            sessionUsage.prefixCacheHits += _cHit2;
                             if (_cHit2 > 0) {
+                                var _ptBase2 = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt2 || _ct2;
                                 sessionUsage.cacheHitTokens += _cHit2;
-                                sessionUsage.cacheMissTokens += (_pt2 + _ct2 > _cHit2) ? (_pt2 + _ct2 - _cHit2) : 0;
+                                sessionUsage.cacheMissTokens += (_ptBase2 > _cHit2) ? (_ptBase2 - _cHit2) : 0;
                             }
                             var pt2 = _pt2 / 1000000;
                             var ct2 = _ct2 / 1000000;
@@ -2333,29 +2698,44 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         if (_nsResult.generatedImages && _nsResult.generatedImages.length > 0) {
                             if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
                             for (var _gii2 = 0; _gii2 < _nsResult.generatedImages.length; _gii2++) {
-                                if (pendingMsg.generatedImages.indexOf(_nsResult.generatedImages[_gii2]) === -1) {
-                                    pendingMsg.generatedImages.push(_nsResult.generatedImages[_gii2]);
-                                    if (_gii2 === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _nsResult.generatedImages[_gii2];
-                                    // ★ 上传到服务器,确保刷新后图片不消失
-                                    var _imgSf = _nsResult.generatedImages[_gii2];
-                                    if (_imgSf && !_imgSf.startsWith(window.location.origin) && !_imgSf.startsWith('/oneapichat')) {
-                                        (function(_origSf, _sfIdx) {
+                                var _imgSf = _nsResult.generatedImages[_gii2];
+                                var _imgSfUrl = typeof _imgSf === 'string' ? _imgSf : (_imgSf && _imgSf.url ? _imgSf.url : '');
+                                // ★ URL 去重 (对象引用不同但 URL 相同则跳过)
+                                var _alreadyExists = pendingMsg.generatedImages.some(function(existing) {
+                                    var _existingUrl = typeof existing === 'string' ? existing : (existing && existing.url ? existing.url : '');
+                                    return _existingUrl === _imgSfUrl;
+                                });
+                                if (!_alreadyExists) {
+                                    pendingMsg.generatedImages.push(_imgSf);
+                                    if (_gii2 === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _imgSf;
+                                    // ★ 上传到服务器,确保刷新后图片不消失 (兼容新旧格式)
+                                    if (_imgSfUrl && !_imgSfUrl.startsWith(window.location.origin) && !_imgSfUrl.startsWith('/oneapichat')) {
+                                        (function(_origSf, _sfIdx, _metaRef) {
                                             uploadImageToServer(_origSf).then(function(srvUrl) {
                                                 if (srvUrl) {
-                                                    var _pSf = pendingMsg.generatedImages.indexOf(_origSf);
-                                                    if (_pSf !== -1) pendingMsg.generatedImages[_pSf] = srvUrl;
-                                                    if (pendingMsg.generatedImage === _origSf) pendingMsg.generatedImage = srvUrl;
+                                                    // ★ 新格式: 更新对象 url 字段; 旧格式: 替换数组元素
+                                                    if (typeof _metaRef === 'object' && _metaRef.url) {
+                                                        _metaRef.url = srvUrl;
+                                                    } else {
+                                                        var _pSf = pendingMsg.generatedImages.indexOf(_origSf);
+                                                        if (_pSf !== -1) pendingMsg.generatedImages[_pSf] = srvUrl;
+                                                        if (pendingMsg.generatedImage === _origSf) pendingMsg.generatedImage = srvUrl;
+                                                    }
                                                     var _cSf = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                                     if (_cSf !== -1) {
                                                         var _cmSf = chats[chatId].messages[_cSf];
-                                                        if (_cmSf.generatedImages && _cmSf.generatedImages[_sfIdx] === _origSf) _cmSf.generatedImages[_sfIdx] = srvUrl;
-                                                        if (_cmSf.generatedImage === _origSf) _cmSf.generatedImage = srvUrl;
+                                                        if (_cmSf.generatedImages && _cmSf.generatedImages[_sfIdx] === _metaRef) {
+                                                            if (typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                            else _cmSf.generatedImages[_sfIdx] = srvUrl;
+                                                        }
+                                                        if (_cmSf.generatedImage === _metaRef && typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                        else if (_cmSf.generatedImage === _origSf) _cmSf.generatedImage = srvUrl;
                                                     }
                                                 }
                                             }).catch(function(e) {
                                                 console.warn('[ImageModel] 上传流式降级图片失败:', e.message);
                                             });
-                                        })(_imgSf, _gii2);
+                                        })(_imgSfUrl, _gii2, _imgSf);
                                     }
                                 }
                             }
@@ -2376,13 +2756,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 try {
                     result = await handleNonStream(res, chatId, pendingMsg, currentBubble);
                 } catch(_hnsErr) {
+                    // ★ 死循环检测: LoopGuardError 直接上抛到外层 catch 分发
+                    if (_hnsErr && _hnsErr.loopGuard) throw _hnsErr;
                     console.error('[sendMessage] handleNonStream crashed:', _hnsErr.message, _hnsErr.stack);
                     // 兜底: 保证气泡至少可见,如果有提取到的图片也可以渲染
                     result = { fullText: '', reasoningText: '', usage: null, toolCalls: [], generatedImages: pendingMsg.generatedImages || [] };
                     // ★ 确保 pendingMsg 有基本内容,防止刷新后消息消失
                     if (!pendingMsg.content) pendingMsg.content = '(图片生成中发生内部错误,但图片已保存)';
                     if (currentBubble) {
-                        currentBubble.classList.remove('typing', 'gen-active');
+                        currentBubble.classList.remove('typing', 'gen-active', 'streaming');
                         var _phHns = currentBubble.querySelector('#image-placeholder');
                         if (_phHns) _phHns.remove();
                         // 显示兜底文本
@@ -2393,17 +2775,22 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                 }
                 console.log('[ImageModel DEBUG] result.generatedImages:', result.generatedImages ? result.generatedImages.length : 'undefined/null', 'toolCalls len:', (result.toolCalls || []).length);
+                if (_isLongCatRequest && !_longCatPlainRetryUsed && result.reasoningText
+                    && !result.fullText && !(result.toolCalls && result.toolCalls.length)) {
+                    return _retryLongCatWithoutThinking(attempt, timeoutIdVal);
+                }
                 usage = result.usage;
                 if (usage) {
                     var _pt3 = usage.prompt_tokens || usage.input_tokens || 0;
                     var _ct3 = usage.completion_tokens || usage.output_tokens || 0;
                     sessionUsage.promptTokens += _pt3;
                     sessionUsage.completionTokens += _ct3;
-                    sessionUsage.prefixCacheHits += usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
-                    var _cHit3 = usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) || 0;
+                    var _cHit3 = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                    sessionUsage.prefixCacheHits += _cHit3;
                     if (_cHit3 > 0) {
+                        var _ptBase3 = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt3 || _ct3;
                         sessionUsage.cacheHitTokens += _cHit3;
-                        sessionUsage.cacheMissTokens += (_pt3 + _ct3 > _cHit3) ? (_pt3 + _ct3 - _cHit3) : 0;
+                        sessionUsage.cacheMissTokens += (_ptBase3 > _cHit3) ? (_ptBase3 - _cHit3) : 0;
                     }
                     var pt3 = _pt3 / 1000000;
                     var ct3 = _ct3 / 1000000;
@@ -2430,24 +2817,37 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             _targetBubble.appendChild(_imgCont);
                         }
                         result.generatedImages.forEach(function(_imgData, _idx) {
-                            // ★ 去重: handleNonStream 内部可能已渲染,避免重复
-                            if (pendingMsg.generatedImages.indexOf(_imgData) === -1) {
+                            var _imgDataUrl = typeof _imgData === 'string' ? _imgData : (_imgData && _imgData.url ? _imgData.url : '');
+                            // ★ URL 去重 (对象引用不同但 URL 相同则跳过)
+                            var _exists = pendingMsg.generatedImages.some(function(e) {
+                                return (typeof e === 'string' ? e : (e && e.url ? e.url : '')) === _imgDataUrl;
+                            });
+                            if (!_exists) {
                                 pendingMsg.generatedImages.push(_imgData);
                                 if (_idx === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _imgData;
-                                // ★ 上传到服务器,确保刷新后图片不消失 (与 tool call 路径行为一致)
-                                if (_imgData && !_imgData.startsWith(window.location.origin) && !_imgData.startsWith('/oneapichat')) {
-                                    (function(_origUrl, _di) {
+                                // ★ 上传到服务器,确保刷新后图片不消失 (兼容新旧格式)
+                                if (_imgDataUrl && !_imgDataUrl.startsWith(window.location.origin) && !_imgDataUrl.startsWith('/oneapichat')) {
+                                    (function(_origUrl, _di, _metaRef) {
                                         uploadImageToServer(_origUrl).then(function(srvUrl) {
                                             if (srvUrl) {
-                                                var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
-                                                if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
-                                                if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                                // ★ 新格式: 更新对象 url; 旧格式: 替换数组元素
+                                                if (typeof _metaRef === 'object' && _metaRef.url) {
+                                                    _metaRef.url = srvUrl;
+                                                } else {
+                                                    var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
+                                                    if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
+                                                    if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                                }
                                                 // ★ 同步到 chats
                                                 var _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                                 if (_cmi !== -1) {
                                                     var _cmsg = chats[chatId].messages[_cmi];
-                                                    if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _origUrl) _cmsg.generatedImages[_di] = srvUrl;
-                                                    if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
+                                                    if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _metaRef) {
+                                                        if (typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                        else _cmsg.generatedImages[_di] = srvUrl;
+                                                    }
+                                                    if (_cmsg.generatedImage === _metaRef && typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                    else if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
                                                 }
                                             }
                                         }).catch(function(e) {
@@ -2561,14 +2961,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         ? tc.function.arguments
                         : JSON.stringify(tc.function.arguments || {});
                     // ★ 修复: 确保 arguments 是合法 JSON 字符串(和 executeToolCallForRetry 相同的修复)
-                    var qc = (argStr.match(/"/g) || []).length;
-                    if (qc % 2 !== 0) argStr += '"';
-                    var ob = (argStr.match(/\{/g) || []).length;
-                    var cb = (argStr.match(/\}/g) || []).length;
-                    while (cb < ob) { argStr += '}'; cb++; }
-                    while (ob < cb) { argStr = '{' + argStr; ob++; }      // 缺少开头 {
-                    // 清理非法控制字符和未转义换行
-                    argStr = argStr.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
+                    try { JSON.parse(argStr); } catch(_e) { argStr = repairToolArguments(argStr); }
                     // ★ 最终验证: 如果JSON仍无效, 用正则提取参数重新序列化
                     try { JSON.parse(argStr); } catch(_argErr) {
                         console.warn('[normalize] 修复后JSON仍无效, 正则提取:', tc.function.name, _argErr.message);
@@ -2642,6 +3035,40 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (tc.function.thought_signature) _normalized.function.thought_signature = tc.function.thought_signature;
                     return _normalized;
                 });
+                // 在任何工具 await 之前先持久化 assistant.tool_calls 与恢复日志。
+                // RS 路径可能已经写入同一批原始 tool_calls，这里按 id/签名合并，
+                // 避免刷新恢复后出现重复调用或孤立 tool result。
+                var _toolCallKey = function(_tc) {
+                    if (_tc && _tc.id) return 'id:' + _tc.id;
+                    var _fn = _tc && _tc.function || {};
+                    return 'fn:' + (_fn.name || '') + '|' + (typeof _fn.arguments === 'string' ? _fn.arguments : JSON.stringify(_fn.arguments || {}));
+                };
+                var _mergedToolCalls = [];
+                var _seenToolCallKeys = {};
+                (pendingMsg.tool_calls || []).concat(normalizedToolCalls).forEach(function(_tc) {
+                    var _key = _toolCallKey(_tc);
+                    if (_seenToolCallKeys[_key]) return;
+                    _seenToolCallKeys[_key] = true;
+                    _mergedToolCalls.push(_tc);
+                });
+                pendingMsg.tool_calls = _mergedToolCalls;
+                if (window.ResumeStream && typeof window.ResumeStream.prepareTools === 'function') {
+                    window.ResumeStream.prepareTools(chatId, pendingMsg, normalizedToolCalls);
+                }
+                // slimSaveChats 同步写 localStorage；刷新落在首个工具请求期间也能重建状态。
+                slimSaveChats();
+                // ★ 死循环检测: 记录本轮全部工具调用 + 整轮检测
+                // (软触发已在 recordToolCall 内计数; hard 直接中止请求止损)
+                if (_guard) {
+                    normalizedToolCalls.forEach(function(_ntc) {
+                        try { _guard.recordToolCall(_ntc.function.name, JSON.parse(_ntc.function.arguments || '{}')); } catch(_lgE) {}
+                    });
+                    _guard.recordRound(normalizedToolCalls.length);
+                    var _roundChk = _guard.check();
+                    if (_roundChk && _roundChk.level === 'hard') {
+                        _throwGuardHard(_roundChk, chatId);
+                    }
+                }
                 var assistantMsg = {
                     role: 'assistant',
                     content: (typeof pendingMsg.content === 'string' && pendingMsg.content.trim())
@@ -2699,9 +3126,104 @@ window.useAlternativeVisionModel = function() {
 // 快速测试 MCP
 ;
 
+// ★ 统一并行工具执行框架 (v4.0)
+// 核心原理: 模型同一轮发出的所有工具调用本质上是独立的（模型在发出前看不到任何结果），
+// 因此默认全部并行执行。只有明确标记为"需串行"的工具才排除。
+//
+// 需串行的工具（有副作用冲突风险或依赖去重逻辑）:
+//   - video_download/bili_download: 一次性下载，重复调用会开多个 aria2 任务
+//   - video_upload_cloudreve/cr_upload_file/cr_create_share: 一次性上传/分享
+//   - server_file_write/server_file_append: 同路径写入可能冲突
+var _sequentialOnlyTools = Object.create(null);
+_sequentialOnlyTools['video_download'] = true;
+_sequentialOnlyTools['bili_download'] = true;
+_sequentialOnlyTools['video_upload_cloudreve'] = true;
+_sequentialOnlyTools['cr_upload_file'] = true;
+_sequentialOnlyTools['cr_create_share'] = true;
+_sequentialOnlyTools['server_file_write'] = true;
+_sequentialOnlyTools['server_file_append'] = true;
+
+var _parallelToolResults = {};
+var _parallelToolIndices = new Set();
+
+// 预扫描: 收集所有可并行的工具调用索引
+(function() {
+    for (var _pi = 0; _pi < normalizedToolCalls.length; _pi++) {
+        var _tc = normalizedToolCalls[_pi];
+        if (!_tc || !_tc.function || !_tc.function.name) continue;
+        if (_sequentialOnlyTools[_tc.function.name]) continue;
+        _parallelToolIndices.add(_pi);
+    }
+    // <2 则无需并行（避免 Promise.all 开销）
+    if (_parallelToolIndices.size < 2) {
+        _parallelToolIndices.clear();
+    }
+})();
+
+// ★ 并行预执行: 所有可并行的工具调用通过 Promise.all 同时执行
+if (_parallelToolIndices.size >= 2) {
+    var _parallelTcList = [];
+    _parallelToolIndices.forEach(function(_idx) { _parallelTcList.push({ idx: _idx, tc: normalizedToolCalls[_idx] }); });
+    _parallelTcList.sort(function(a, b) { return a.idx - b.idx; });
+
+    // 显示并行状态提示
+    if (currentChatId === chatId) {
+        var _paraBub = activeBubbleMap[chatId];
+        if (_paraBub) {
+            var _paraStatus = _paraBub.querySelector('.search-status');
+            if (!_paraStatus) {
+                _paraStatus = document.createElement('div');
+                _paraStatus.className = 'search-status';
+                _paraBub.querySelector('.markdown-body')?.appendChild(_paraStatus);
+            }
+            _paraStatus.textContent = '⚡ 正在并行执行 ' + _parallelToolIndices.size + ' 个工具...';
+        }
+    }
+
+    // ★ 并行执行: 每个调用独立 AbortController, 各自独立超时
+    var _parallelPromises = _parallelTcList.map(function(_item) {
+        var _pIdx = _item.idx;
+        var _pTc = _item.tc;
+        var _pAbortCtrl = new AbortController();
+        var _pAbortKey = chatId + '_parallel_' + _pIdx;
+        window.__toolAbortControllers = window.__toolAbortControllers || {};
+        window.__toolAbortControllers[_pAbortKey] = _pAbortCtrl;
+        if (userAbortMap[chatId]) _pAbortCtrl.abort();
+
+        return (async function() {
+            try {
+                var _pResult = await executeToolCallForRetry(_pTc, _pAbortCtrl.signal);
+                _parallelToolResults[_pIdx] = _pResult;
+            } catch(_pErr) {
+                _parallelToolResults[_pIdx] = { error: _pErr.message || '并行执行异常' };
+            } finally {
+                delete window.__toolAbortControllers[_pAbortKey];
+            }
+        })();
+    });
+
+    // ★ 设置并行激活标记 — tools-exec.js 检测到该标记时跳过个体占位符
+    window.__parallelToolActive = true;
+    // ★ 等待全部并行调用完成 (阻塞 for 循环开始, 但各调用本身是并行的)
+    await Promise.all(_parallelPromises);
+    window.__parallelToolActive = false;
+    console.log('[ParallelTool] 全部 ' + _parallelToolIndices.size + ' 个工具并行执行完成');
+    if (currentChatId === chatId) {
+        var _doneBub = activeBubbleMap[chatId];
+        if (_doneBub) {
+            var _doneStatus = _doneBub.querySelector('.search-status');
+            if (_doneStatus) _doneStatus.textContent = '✅ ' + _parallelToolIndices.size + ' 个工具全部完成';
+        }
+    }
+}
+
 // 执行每个工具调用并添加结果(只对有有效内容的tool call执行)
                 var _allWebFetchUrls = [];
-                for (const tc of normalizedToolCalls) {
+                // ★ 图片去重: 跨 for 循环迭代持久化 (并行生成时多个工具调用共享 pendingMsg.generatedImages,
+                //   每次迭代都读到全部图片, 仅靠 DOM 去重会因 setTimeout 延迟插入而失效 → 重复渲染)
+                var _scheduledImgSrcs = new Set();
+                for (var _toolExecIndex = 0; _toolExecIndex < normalizedToolCalls.length; _toolExecIndex++) {
+                    const tc = normalizedToolCalls[_toolExecIndex];
                     // ★ 实时显示工具执行状态
                     var _argPreview = '';
                     try {
@@ -2714,19 +3236,26 @@ window.useAlternativeVisionModel = function() {
                     // ★ 用户停止检测: 每次工具调用前检查
                     if (userAbortMap[chatId]) {
                         console.log('[ToolAbort] 用户已停止,跳过工具:', tc.function?.name);
-                        if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId);
                         var _abortMsg = {
                             role: 'tool',
                             tool_call_id: tc.id || '',
                             content: '[用户已中断操作]'
                         };
+                        if (window.ResumeStream && typeof window.ResumeStream.markToolResult === 'function') {
+                            window.ResumeStream.markToolResult(chatId, tc, _toolExecIndex, _abortMsg.content, true);
+                        }
+                        if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', 'aborted', chatId, tc.id || '');
                         body.messages.push(_abortMsg);
                         // ★ 同时持久化到 chat 历史，防止下次发送时出现孤 tool_call 导致 400
                         chats[chatId].messages.push(Object.assign({}, _abortMsg, { _toolResult: true }));
+                        slimSaveChats();
                         continue;
                     }
 
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId);
+                    if (window.ResumeStream && typeof window.ResumeStream.markToolRunning === 'function') {
+                        window.ResumeStream.markToolRunning(chatId, tc, _toolExecIndex);
+                    }
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId, tc.id || '');
 
                     // ★ 记录工具开始时间（用于详情卡片展示耗时）
                     var _toolStartTime = Date.now();
@@ -2773,16 +3302,29 @@ window.useAlternativeVisionModel = function() {
                         } catch(_deErr) {}
                     }
                     var toolResult;
-                    if (_executedBefore) {
+                    if (_parallelToolResults.hasOwnProperty(_toolExecIndex)) {
+                        // ★ 统一并行框架: 使用预计算结果 (已在 for 循环前通过 Promise.all 完成)
+                        toolResult = _parallelToolResults[_toolExecIndex];
+                        console.log('[ParallelTool] 取用并行结果 [' + _toolExecIndex + ']:', tc.function.name, toolResult.error ? '❌' : '✅');
+                    } else if (_executedBefore) {
                         console.warn('[ToolGuard] 跨轮重复调用已自动跳过:', tc.function.name, String(tc.function.arguments || '').substring(0, 120));
                         toolResult = { result: '【系统提示】该调用(名称+参数)在本对话中已成功执行过，为避免重复下载/重复操作已自动跳过。请直接查看历史中的执行结果，不要再发起相同调用。' };
+                    } else if (_guard && (_guard.isDuplicateTool(tc.function.name, _parseGuardArgs(tc.function.arguments)) || _guard.oscillationActive())) {
+                        // ★ 死循环检测软跳过: 跨轮重复(名称+参数)或工具振荡 → 不执行, 注入提示引导模型收敛
+                        // (与防护4 同款注入管线, tool_call_id 配对正常, 模型下一轮能看到提示)
+                        var _guardSkipReason = _guard.isDuplicateTool(tc.function.name, _parseGuardArgs(tc.function.arguments))
+                            ? '重复调用(名称+参数相同)'
+                            : '工具振荡(反复切换)';
+                        console.warn('[LoopGuard] 软跳过:', tc.function.name, _guardSkipReason);
+                        toolResult = { result: '【系统提示】系统检测到' + _guardSkipReason + '。该调用未执行。请立即停止调用工具，直接基于已有结果回答用户问题。' };
                     } else {
                         toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
                     }
-                    
-                    // 清理控制器
-                    delete window.__toolAbortControllers[_toolAbortKey];
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId);
+
+                    // 清理控制器 (并行路径已在 finally 中清理, 这里只清理串行路径)
+                    if (!_parallelToolResults.hasOwnProperty(_toolExecIndex)) {
+                        delete window.__toolAbortControllers[_toolAbortKey];
+                    }
                     // ★ 记录统计
                     if (tc.function && tc.function.name) toolCallStats.record(tc.function.name, !!toolResult.error, toolResult.error || '');
                     // ★ 收集 web_fetch 访问的 URL
@@ -2814,6 +3356,13 @@ window.useAlternativeVisionModel = function() {
                         }
                     }
 
+                    // 先同步落盘工具结果，再写消息历史。刷新恰好发生在两步之间时，
+                    // 恢复器可从日志补回结果，而不会重复执行已经完成的工具。
+                    if (window.ResumeStream && typeof window.ResumeStream.markToolResult === 'function') {
+                        window.ResumeStream.markToolResult(chatId, tc, _toolExecIndex, contentStr, !!toolResult.error);
+                    }
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId, tc.id || '');
+
                     body.messages.push({
                         role: 'tool',
                         tool_call_id: tc.id || '',
@@ -2826,6 +3375,7 @@ window.useAlternativeVisionModel = function() {
                         content: contentStr,
                         _toolResult: true  // 标记为工具结果，UI 渲染时跳过
                     });
+                    slimSaveChats();
 
                     // 更新UI
                     if (currentChatId === chatId) {
@@ -2834,7 +3384,9 @@ window.useAlternativeVisionModel = function() {
                             let status = currentBubble.querySelector('.search-status');
                             if (status) {
                                 if (tc.function.name === 'web_search') {
-                                    status.textContent = `✅ 搜索完成: ${resultContent.substring(0, 100)}...`;
+                                    // ★ 搜索完成状态行整体移除 (进度由顶部状态栏/滚动标题条承担)
+                                    status.remove();
+                                    status = null;
                                 } else if (tc.function.name === 'analyze_image') {
                                     status.textContent = toolResult.error
                                         ? `❌ 图片分析失败: ${toolResult.error}`
@@ -2877,30 +3429,30 @@ window.useAlternativeVisionModel = function() {
                                         _imgBubble.appendChild(_imgCont);
                                     }
                                     var _imgs = pendingMsg.generatedImages || (pendingMsg.generatedImage ? [pendingMsg.generatedImage] : []);
-                                    // 去重 DOM
-                                    var _domSrcs = new Set();
-                                    _imgCont.querySelectorAll('img').forEach(function(el) { _domSrcs.add(el.src); });
-                                    _imgs.forEach(function(_imgSrc, _idx) {
-                                        if (_domSrcs.has(_imgSrc)) return;
-                                        _domSrcs.add(_imgSrc);
+                                    // 去重: 跨迭代持久化集合 + DOM 兜底 (兼容新旧格式: 对象取 url, 字符串直接用)
+                                    _imgCont.querySelectorAll('img').forEach(function(el) { _scheduledImgSrcs.add(el.src); });
+                                    _imgs.forEach(function(_imgData, _idx) {
+                                        var _imgUrl = typeof _imgData === 'string' ? _imgData : (_imgData && _imgData.url ? _imgData.url : '');
+                                        if (!_imgUrl || _scheduledImgSrcs.has(_imgUrl)) return;
+                                        _scheduledImgSrcs.add(_imgUrl);
                                         setTimeout(function() {
                                             var _wrap = document.createElement('div');
-                                            _wrap.style.cssText = 'position:relative;cursor:pointer;';
+                                            _wrap.className = 'gen-image-wrapper';
                                             var _imgEl = document.createElement('img');
-                                            _imgEl.src = _imgSrc;
+                                            _imgEl.src = _imgUrl;
                                             _imgEl.decoding = 'async';
-                                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:8px;display:block;';
+                                            _imgEl.className = 'gen-image';
+                                            _imgEl.style.maxWidth = '320px';
                                             _imgEl.setAttribute('loading', 'lazy');
                                             _imgEl.addEventListener('click', function() {
-                                                var _allImgs = _imgs.map(function(s) { return s; });
-                                                if (typeof showImageLightbox === 'function') showImageLightbox(_allImgs, _idx);
+                                                if (typeof showImageLightbox === 'function') showImageLightbox(_imgs, _idx);
                                             });
                                             _imgEl.onerror = function() { this.style.display = 'none'; };
                                             _wrap.appendChild(_imgEl);
                                             _imgCont.appendChild(_wrap);
                                         }, _idx * 50);
                                     });
-                                    if (!userScrolled) { requestAnimationFrame(function() { $.chatBox.scrollTop = $.chatBox.scrollHeight; }); }
+                                    if (!userScrolled) { requestAnimationFrame(function() { followToBottom($.chatBox); }); }
                                 }
                             }
                             // ★ B站扫码登录: QR已由tools-exec.js渲染为独立消息, 这里不重复处理
@@ -2912,6 +3464,10 @@ window.useAlternativeVisionModel = function() {
                                     chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
                                 }
                             }
+                            // ★ 移除隐藏思考模式下注入的占位元素(工具卡片创建后或卡片禁用时均清理)
+                            var _phEl = currentBubble.querySelector('.tool-executing-placeholder');
+                            if (_phEl) _phEl.remove();
+
                             // ★ 追加可折叠工具调用详情卡片（必须在 for 循环内, currentBubble 块内）
                             if (typeof appendToolCallMessage === 'function' && localStorage.getItem('toolCards') !== '0') {
                                 var _cardDur = Date.now() - (_toolStartTime || Date.now());
@@ -2957,16 +3513,30 @@ window.useAlternativeVisionModel = function() {
                         }
                     }
                 }
+                // ★ 死循环检测软告知: 本轮有软跳过 → 追加系统提示给模型(双写 body + chats 历史, 同 _guardNote 模式)
+                if (_guard && _guard.lastSoftTrigger()) {
+                    var _softTriggerInfo = _guard.lastSoftTrigger();
+                    var _softNote = '【系统提示】系统检测到' + _softTriggerInfo.reason + '，相关调用已被跳过未执行。请立即停止调用工具，直接基于已有结果回答用户问题。';
+                    if (body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'tool') {
+                        var _lastToolMsg2 = body.messages[body.messages.length - 1];
+                        _lastToolMsg2.content += '\n\n' + _softNote;
+                        for (var _gi2 = chats[chatId].messages.length - 1; _gi2 >= 0; _gi2--) {
+                            if (chats[chatId].messages[_gi2].role === 'tool' && chats[chatId].messages[_gi2].tool_call_id === _lastToolMsg2.tool_call_id) {
+                                chats[chatId].messages[_gi2].content += '\n\n' + _softNote;
+                                break;
+                            }
+                        }
+                    }
+                    // 软触发达上限 → 升级硬中止(模型无视停止提示)
+                    if (_guard.softTriggerCount() >= _guard.cfg.maxSoftTriggers) {
+                        _throwGuardHard({ type: 'soft-escalate', reason: '连续 ' + _guard.softTriggerCount() + ' 次软触发未收敛(模型无视停止提示)' }, chatId);
+                    }
+                }
                 // ★ 保存 web_fetch 访问的 URL 列表到 pendingMsg
                 if (_allWebFetchUrls.length > 0) {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
                 }
-                // ★ 持久化 tool_calls 到 chat 历史 — 防止下轮 sendMessage 丢失工具上下文导致幻觉
-                // ★ 累积而非覆盖: 多轮工具调用时保留所有 tool_calls, 避免旧 tool 结果变孤立
-                if (normalizedToolCalls && normalizedToolCalls.length > 0) {
-                    if (!pendingMsg.tool_calls) pendingMsg.tool_calls = [];
-                    pendingMsg.tool_calls = pendingMsg.tool_calls.concat(normalizedToolCalls);
-                }
+                // tool_calls 已在执行任何工具前合并并持久化，避免 await 期间刷新丢失。
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (window._hasCreatedSubAgent) {
@@ -2980,8 +3550,7 @@ window.useAlternativeVisionModel = function() {
                         // ★ 优化: 子代理已创建完毕,注入停止提示防止模型浪费token轮询
                         console.log('[Agent] 本轮只创建了子代理(' + validToolCalls.length + '个),注入停止提示');
                         delete pendingMsg.partial;
-                        streamingScrollLock = false;
-                        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                         if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                         pendingMsg.time = Date.now() - startTime;
                         pendingMsg.usage = usage;
@@ -3020,8 +3589,7 @@ window.useAlternativeVisionModel = function() {
                         console.log('[Agent] 子代理已创建(' + _createdNames.length + '个),允许模型在下一轮自然总结');
                         // 保存当前消息
                         delete pendingMsg.partial;
-                        streamingScrollLock = false;
-                        try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                                    try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                         if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                         pendingMsg.time = Date.now() - startTime;
                         pendingMsg.usage = usage;
@@ -3051,11 +3619,11 @@ window.useAlternativeVisionModel = function() {
                     if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
 
-                    // 2. 最终化当前气泡（不再追加内容）
+                    // 2. 最终化当前气泡（不再追加内容）— 三个光标类全清, 防残留
                     if (currentChatId === chatId) {
                         var _bub = activeBubbleMap[chatId];
                         if (_bub) {
-                            _bub.classList.remove('typing');
+                            _bub.classList.remove('typing', 'gen-active', 'streaming');
                             var _md = _bub.querySelector('.markdown-body');
                             if (_md) _triggerPostRender(_md);
                         }
@@ -3088,13 +3656,16 @@ window.useAlternativeVisionModel = function() {
                 var newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutId);
-                var newTimeoutVal = _isImageModel ? 900000 : parseInt(getVal('requestTimeout')) * 1000;
+                var newTimeoutVal = timeout;
                 var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
                 window._activeRequestTimeoutId = newTimeoutId;
 
                 // ★ 清除 partial 标记(工具调用循环中 assistant 消息已完成)
                 // 链式模式已在上面 block 中处理完毕，跳过避免破坏新 pendingMsg
                 if (!window._chainMode) delete pendingMsg.partial;
+                // ★ 清除 _savedPartial: 链式模式上面已清, 非链式模式也需清, 否则刷新时
+                //   loadChat 会误认为流仍在进行中, 触发虚假日志恢复 → 气泡进入"生成中"状态
+                try { localStorage.removeItem('_savedPartial'); } catch(e) {}
                 // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
                 body.messages = buildApiMessages(chatId);
                 // ★ Anthropic 格式: 重建后需重新转换 tool→user+tool_result
@@ -3113,13 +3684,16 @@ window.useAlternativeVisionModel = function() {
             }
             delete pendingMsg.partial;
             // ★ 流结束释放滚动锁定
-            streamingScrollLock = false;
             // ★ 清除保存的 partial 标记(已完成,刷新不会丢失)
             try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+            if (window.ResumeStream && typeof window.ResumeStream.complete === 'function') {
+                window.ResumeStream.complete(chatId);
+            }
             // ★ 清除流式保存定时器
             if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
+            window._streamCompletedOk = true;  // ★ 流正常完成标记(finally 免全量重建)
             saveChats(true);  // ★ 强制服务器保存+广播到其他设备
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
@@ -3131,7 +3705,14 @@ window.useAlternativeVisionModel = function() {
                     // ★ 流式已完成, 不再重复全局渲染(避免覆盖流式结果)
                     if (_md) {
                         _triggerPostRender(_md);
-                        _bubble.classList.remove('typing');
+                        // ★ 全量清扫: 除当前气泡外, 任何历史气泡的残留光标类(typing/gen-active/streaming)
+                        //   一次清干净 — _streamState[chatId] 被新流覆盖/中止路径漏清时, 旧气泡会永久发光
+                        document.querySelectorAll('.bubble.assistant.typing, .bubble.assistant.gen-active, .bubble.streaming').forEach(function(_sb) {
+                            if (_sb !== _bubble) _sb.classList.remove('typing', 'gen-active', 'streaming');
+                        });
+                        _bubble.classList.remove('typing', 'gen-active', 'streaming');
+                        // ★ 无正文空气泡美化 (非流式)
+                        if (window._ensureEmptyBubbleHint) window._ensureEmptyBubbleHint(_bubble, pendingMsg);
                     }
                     // ★ 追加生成的图片到气泡(如果有)
                     console.log('[ImageModel] render: generatedImages count=', pendingMsg.generatedImages ? pendingMsg.generatedImages.length : 0, 'bubble=', !!_bubble);
@@ -3176,6 +3757,12 @@ window.useAlternativeVisionModel = function() {
                     // ★ 渲染 web_fetch 访问的链接列表
                     if (pendingMsg._webFetchUrls && pendingMsg._webFetchUrls.length > 0) {
                         _renderWebFetchUrls(_bubble, pendingMsg._webFetchUrls);
+                    }
+                    // ★ 就地收尾: 补操作按钮(重新生成/继续/还原) + 页脚(耗时/token/缓存)
+                    //   (原由 finally 的 loadChat 全量重建承担 — 免重建后滚动不再跳变)
+                    if (window.finalizeBubbleUI) {
+                        var _fIdx = chats[chatId].messages.indexOf(pendingMsg);
+                        window.finalizeBubbleUI(_bubble, pendingMsg.content || '', _fIdx, pendingMsg.usage, pendingMsg.time);
                     }
                 }
             }
@@ -3260,17 +3847,16 @@ window.useAlternativeVisionModel = function() {
                         delete _mm.tool_calls;
                     }
                 }
-                // 清理 pendingMsg
+                // 清理 pendingMsg（保留推理内容，重试后正文追加到推理下方）
                 if (pendingMsg) {
                     pendingMsg.content = '';
-                    pendingMsg.reasoning = '';
                 }
                 showToast('⚠️ 模型不支持工具调用,已切换为普通问答模式', 'warning', 4000);
                 try { abortMain.abort(); } catch(e) {}
                 var _downgradeCtrl = new AbortController();
                 abortControllerMap[chatId] = _downgradeCtrl;
                 clearTimeout(timeoutId);
-                var _downgradeTimeout = parseInt(getVal('requestTimeout')) * 1000;
+                var _downgradeTimeout = timeout;
                 var _downgradeTimer = setTimeout(function() { _downgradeCtrl.abort(); }, _downgradeTimeout);
                 return attemptRequestWithFreshAbort(attempt, _downgradeCtrl, _downgradeTimer);
             }
@@ -3297,7 +3883,7 @@ window.useAlternativeVisionModel = function() {
                     var retryCtrl = new AbortController();
                     abortControllerMap[chatId] = retryCtrl;
                     clearTimeout(timeoutId);
-                    var retryTimeoutId = setTimeout(function() { retryCtrl.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                    var retryTimeoutId = setTimeout(function() { retryCtrl.abort(); }, timeout);
                     return attemptRequestWithFreshAbort(attempt, retryCtrl, retryTimeoutId);
                 }
             }
@@ -3346,7 +3932,15 @@ window.useAlternativeVisionModel = function() {
 
                 // 检测可恢复的 400 错误类型
                 // ★ 先检查 max_tokens 超限（必须在 token/context 之前，否则会被错误归类为 trim_context）
-                var _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i) || _errMsg.match(/max_tokens.*?(\d{4,})/i) || _errMsg.match(/does not support max tokens.*?[>≥]\s*(\d+)/i) || _errMsg.match(/support max tokens.*?(\d{4,})/i);
+                // ★ 注意匹配顺序: LongCat 报 "max_tokens: 389120 is not less or equal to 131072",
+                //   通用模式 /max_tokens.*?(\d{4,})/ 会先抓到发送值 389120 而非限制值 131072,
+                //   必须把"限制值"模式排在前面。
+                var _maxTokensLimit = _errMsg.match(/max tokens\s*[>≥]\s*(\d+)/i)
+                    || _errMsg.match(/is not less or equal to\s*(\d+)/i)
+                    || _errMsg.match(/max_tokens.*?(?:≤|<=\s*|<)\s*(\d+)/i)
+                    || _errMsg.match(/does not support max tokens.*?[>≥]\s*(\d+)/i)
+                    || _errMsg.match(/support max tokens.*?(\d{4,})/i)
+                    || _errMsg.match(/max_tokens.*?(\d{4,})/i);
                 if (_maxTokensLimit || _errMsg.includes('max_tokens') || _errMsg.includes('max completion') || _errMsg.includes('does not support max tokens')) {
                     _shouldRetry = true;
                     _retryAction = 'adjust_max_tokens';
@@ -3465,15 +4059,10 @@ window.useAlternativeVisionModel = function() {
                                     var _tcall = _tmsg.tool_calls[_tcj];
                                     if (_tcall.function && typeof _tcall.function.arguments === 'string') {
                                         try { JSON.parse(_tcall.function.arguments); } catch(e) {
-                                            // 尝试修复截断的 JSON
+                                            // ★ 尝试修复截断/未转义引号的 JSON
                                             var _raw2 = _tcall.function.arguments;
-                                            _raw2 = _raw2.replace(/[\x00-\x1f]/g, ' ');
-                                            var _qc = (_raw2.match(/"/g) || []).length;
-                                            if (_qc % 2 !== 0) _raw2 += '"';
-                                            var _ob = (_raw2.match(/\{/g) || []).length;
-                                            var _cb = (_raw2.match(/\}/g) || []).length;
-                                            while (_cb < _ob) { _raw2 += '}'; _cb++; }
                                             try {
+                                                _raw2 = repairToolArguments(_raw2);
                                                 JSON.parse(_raw2);
                                                 _tcall.function.arguments = _raw2;
                                                 _fixed = true;
@@ -3723,7 +4312,7 @@ window.useAlternativeVisionModel = function() {
                     var _retryCtrl400 = new AbortController();
                     abortControllerMap[chatId] = _retryCtrl400;
                     clearTimeout(timeoutIdVal);
-                    var _retryTimeout400 = setTimeout(function() { _retryCtrl400.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                    var _retryTimeout400 = setTimeout(function() { _retryCtrl400.abort(); }, timeout);
                     return attemptRequestWithFreshAbort(attempt + 1, _retryCtrl400, _retryTimeout400);
                 }
             }
@@ -3737,7 +4326,7 @@ window.useAlternativeVisionModel = function() {
                 var newAbortCtrl = new AbortController();
                 abortControllerMap[chatId] = newAbortCtrl;
                 clearTimeout(timeoutIdVal);
-                var newTimeoutVal = parseInt(getVal('requestTimeout')) * 1000;
+                var newTimeoutVal = timeout;
                 var newTimeoutId = setTimeout(() => newAbortCtrl.abort(), newTimeoutVal);
                 return attemptRequestWithFreshAbort(attempt + 1, newAbortCtrl, newTimeoutId);
             }
@@ -3748,6 +4337,32 @@ window.useAlternativeVisionModel = function() {
     try {
         await attemptRequestWithFreshAbort(0, abortMain, timeoutId);
     } catch (e) {
+        // ★ 死循环检测: 硬中止错误 → 展示原因/消耗/建议, 不再重试(重试只会继续烧 token)
+        if (e && e.loopGuard) {
+            var _lgModelName = getVal('modelSelect') || '未知';
+            e.message = '❌ ' + e.message + '。模型: ' + _lgModelName +
+                ' | 本轮已消耗: ' + (sessionUsage.completionTokens || 0) + ' output tokens / ' +
+                (sessionUsage.promptTokens || 0) + ' input tokens';
+            handleError(e, chatId, pendingMsg, currentBubble);
+            // 追加详情区块(触发原因/建议)
+            try {
+                var _lgErrDetail = document.createElement('div');
+                _lgErrDetail.className = 'error-detail';
+                _lgErrDetail.style.cssText = 'margin-top:8px;padding:8px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;font-size:12px;color:#9ca3af;line-height:1.7;word-break:break-all;';
+                _lgErrDetail.innerHTML =
+                    '⚠️ <b>死循环检测触发</b>: ' + escapeHtml(e.loopGuard.reason) + '<br>' +
+                    '模型: ' + escapeHtml(_lgModelName) +
+                    ' | 耗时: ' + Math.round((Date.now() - startTime) / 1000) + 's' +
+                    ' | 本轮 tokens: ' + ((sessionUsage.completionTokens || 0) + (sessionUsage.promptTokens || 0)) + '<br>' +
+                    '建议: ① 切换更强模型重试 ② 清空上下文重新发送 ③ 如为误报可在 设置→Agent 模式 关闭「死循环检测」';
+                var _lgBubble = currentBubble || (activeBubbleMap && activeBubbleMap[chatId]);
+                if (_lgBubble) {
+                    var _lgBody = _lgBubble.querySelector('.markdown-body');
+                    (_lgBody || _lgBubble).appendChild(_lgErrDetail);
+                }
+            } catch(_lgDispErr) {}
+            return;
+        }
         // ★ 智能错误恢复: image_url 格式错误 → 自动切换为分析工具模式重试
         if (e.message && (e.message.includes('unknown variant') || e.message.includes('image_url'))) {
             var retried = await autoDetectAndRetryImageUrlError(e.message, chatId, pendingMsg, currentBubble);
@@ -3776,7 +4391,7 @@ window.useAlternativeVisionModel = function() {
             showToast('⚠️ 模型不支持工具调用,已切换模式,请重新发送', 'warning', 8000);
             // 不清除 pendingMsg,让用户看到气泡
             if (currentBubble) {
-                currentBubble.classList.remove('typing', 'gen-active');
+                currentBubble.classList.remove('typing', 'gen-active', 'streaming');
                 var _ocMb = currentBubble.querySelector('.markdown-body');
                 if (_ocMb) _ocMb.innerHTML = '⚠️ 该模型不支持工具调用,已自动降级为普通模式。请重新发送。';
             }
@@ -3799,7 +4414,7 @@ window.useAlternativeVisionModel = function() {
                 if (pendingMsg) { pendingMsg.content = ''; pendingMsg.reasoning = ''; if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; } }
                 cleanupStreamState(chatId);
                 if (currentBubble) {
-                    currentBubble.classList.remove('typing', 'gen-active');
+                    currentBubble.classList.remove('typing', 'gen-active', 'streaming');
                     var _mb402 = currentBubble.querySelector('.markdown-body');
                     if (_mb402) _mb402.innerHTML = '';
                 }
@@ -3807,7 +4422,7 @@ window.useAlternativeVisionModel = function() {
                 try { abortMain.abort(); } catch(_e402) {}
                 var _retryCtrl402 = new AbortController();
                 abortControllerMap[chatId] = _retryCtrl402;
-                var _retryTimeout402 = setTimeout(function() { _retryCtrl402.abort(); }, parseInt(getVal('requestTimeout')) * 1000);
+                var _retryTimeout402 = setTimeout(function() { _retryCtrl402.abort(); }, timeout);
                 try {
                     await attemptRequestWithFreshAbort(0, _retryCtrl402, _retryTimeout402);
                 } catch(_retryErr402) {
@@ -3815,6 +4430,38 @@ window.useAlternativeVisionModel = function() {
                 }
                 return;
             }
+        }
+        // ★ 503/auth_unavailable 瞬态错误自动重试 (CLIProxyAPI 认证临时不可用,token 刷新/提供商轮换可能恢复)
+        if (e.message && (/503/.test(e.message)) && (/auth_unavailable|service_unavailable|no auth available/.test(e.message))) {
+            var _503Key = '_503retry_' + chatId;
+            var _503Count = (window[_503Key] || 0);
+            if (_503Count < 3) {
+                window[_503Key] = _503Count + 1;
+                console.warn('[503-Retry] 检测到 auth_unavailable，自动重试 (' + (_503Count + 1) + '/3):', e.message);
+                showToast('⚠️ 服务暂时不可用 (auth_unavailable)，正在自动重试 (' + (_503Count + 1) + '/3)...', 'warning', 3000);
+                if (pendingMsg) { pendingMsg.content = ''; pendingMsg.reasoning = ''; if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; } }
+                cleanupStreamState(chatId);
+                if (currentBubble) {
+                    currentBubble.classList.remove('typing', 'gen-active', 'streaming');
+                    var _mb503 = currentBubble.querySelector('.markdown-body');
+                    if (_mb503) _mb503.innerHTML = '';
+                }
+                try { abortMain.abort(); } catch(_e503) {}
+                var _retryCtrl503 = new AbortController();
+                abortControllerMap[chatId] = _retryCtrl503;
+                clearTimeout(timeoutId);
+                var _retryTimeout503 = setTimeout(function() { _retryCtrl503.abort(); }, timeout);
+                var _503Delay = 2000 * Math.pow(1.5, _503Count); // 2s, 3s, 4.5s
+                await new Promise(function(_r503) { setTimeout(_r503, _503Delay); }); // ★ 退避等待上游恢复
+                try {
+                    await attemptRequestWithFreshAbort(0, _retryCtrl503, _retryTimeout503);
+                } catch(_retryErr503) {
+                    handleError(_retryErr503, chatId, pendingMsg, currentBubble);
+                }
+                return;
+            }
+            // 重试次数用尽，清理计数
+            delete window[_503Key];
         }
         handleError(e, chatId, pendingMsg, currentBubble);
     } finally {
@@ -3825,7 +4472,12 @@ window.useAlternativeVisionModel = function() {
         }
         // 清理临时消息(保留子代理通知)
         chats[chatId].messages = chats[chatId].messages.filter(m => !m.temporary || m._agentNotification);
+        // ★ 死循环检测: 释放会话级 guard(已被 _myReqGen 保护, 不会误删新请求实例)
+        if (window.__loopGuardMap && window.__loopGuardMap[chatId]) {
+            delete window.__loopGuardMap[chatId];
+        }
         delete isTypingMap[chatId];
+        if (window._activeStreamChatId === chatId) window._activeStreamChatId = null;  // ★ 清除活动流标记
         if (typeof renderChatHistory === 'function') renderChatHistory();  // 清除后台指示器
         // ★ agent模式:AI生成结束,关闭队列轮询 + 处理下一条
         // AI生成结束:处理队列下一条消息
@@ -3848,9 +4500,31 @@ window.useAlternativeVisionModel = function() {
             setTimeout(function() { window._drainQueue(); }, 300);
         }
         // ★ 子代理完成自动回复: 如果之前因子代理忙而设置了这个标记,现在触发主代理回复
+        //   (严格分隔: 只发送到设置标记时对应的聊天 _pendingAgentReplyChatId,
+        //   防止用户切走后整合消息发进其他聊天)
         if (window._pendingAgentReply && !userAbortMap[chatId]) {
+            var _intendedChat = window._pendingAgentReplyChatId || null;
             window._pendingAgentReply = false;
+            window._pendingAgentReplyChatId = null;
             setTimeout(function() {
+                if (typeof window.sendMessage !== 'function') return;
+                if (_intendedChat && _intendedChat !== currentChatId) {
+                    // ★ 用户已切到其他聊天: 同域则切回目标聊天再发送(与直接路径一致),跨域则跳过
+                    var _sameDomain = (typeof isAgentToolsActive === 'function') && (typeof isAgentChat === 'function') &&
+                        (isAgentToolsActive() === isAgentChat(_intendedChat));
+                    if (_sameDomain && chats[_intendedChat]) {
+                        console.log('[sendMessage] 子代理回复目标聊天非当前,切回: ' + _intendedChat);
+                        loadChat(_intendedChat).then(function() {
+                            if (!isTypingMap[_intendedChat] && typeof window.sendMessage === 'function') {
+                                window.sendMessage(true, '请整合子代理结果并告知用户进展');
+                            }
+                        });
+                    } else {
+                        // 跨域: 用户已离开目标聊天所在模式 → 跳过(整合消息已留在目标聊天历史)
+                        console.log('[sendMessage] 子代理回复跨域,跳过发送: intended=' + _intendedChat + ' current=' + currentChatId);
+                    }
+                    return;
+                }
                 if (!isTypingMap[chatId] && typeof window.sendMessage === 'function') {
                     console.log('[sendMessage] 子代理回复标记触发,发送整合消息');
                     window.sendMessage(true, '请整合子代理结果并告知用户进展');
@@ -3873,7 +4547,10 @@ window.useAlternativeVisionModel = function() {
             if ($.sendBtn) $.sendBtn.classList.remove('hidden');
             if ($.stopBtn) $.stopBtn.classList.remove('visible');
         }
-        if (currentChatId === chatId) loadChat(chatId);
+        // ★ 免全量重建: 流正常完成时已在 completion 块就地收尾(操作按钮/页脚/mermaid),
+        //   此处不再 loadChat 重建整个消息列表(长对话每轮回复省下数百次 DOM 重建 + 动画)
+        //   出错/中止等异常路径保留 loadChat, 保证 DOM 与历史一致
+        if (currentChatId === chatId && !window._streamCompletedOk) loadChat(chatId);
         // ★ 计划面板兜底：回复结束时，将仍为 running 的任务标记为 failed
         // ★ 但若仍有活跃子代理在运行，跳过兜底（子代理完成后会自动更新计划状态）
         if (window._agentPlan && window._agentPlan.tasks && window._agentPlan.status === 'running') {

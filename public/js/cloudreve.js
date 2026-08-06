@@ -35,98 +35,267 @@ async function cloudreveApiHandler(action, args) {
     }
 }
 
+// ==================== 云盘账号同步（切账号时自动调用） ====================
+/**
+ * ★ 同步当前主项目账号到 Cloudreve 云盘
+ * 使用主项目同邮箱同密码登录云盘；云盘账号不存在则自动注册
+ * @param {boolean} silent 是否静默（失败不弹 toast）
+ */
+window.syncCloudreveAccount = async function(silent) {
+    var token = localStorage.getItem('authToken') || '';
+    if (!token) return;
+    try {
+        var r = await fetch('/oneapichat/api/cloudreve_api.php?action=auto_login&oneapichat_token=' + encodeURIComponent(token), { cache: 'no-store' });
+        var d = await r.json();
+        if (d.success) {
+            if (!silent && typeof showToast === 'function') {
+                showToast('☁️ 云盘已同步: ' + (d.data.cloudreve_user.email || d.data.oneapichat_user), 'success', 2500);
+            }
+            return d.data;
+        } else {
+            if (!silent && typeof showToast === 'function') showToast('☁️ 云盘同步失败: ' + (d.error || '未知错误'), 'warning', 3000);
+        }
+    } catch(e) {
+        if (!silent && typeof showToast === 'function') showToast('☁️ 云盘同步异常: ' + e.message, 'warning', 3000);
+    }
+};
+
 // ==================== Cloudreve 简易面板 ====================
+// v2: 修复文件列表解析 bug + 目录导航(点击进入/上级/面包屑) + 云盘主页通道
+var _crPanelState = { path: '', webUrl: '' };  // path: 相对 my/ 的原始路径(未编码), 如 '' | '实习资料' | '实习资料/子目录'
+
 window.toggleCloudrevePanel = async function() {
     var existing = document.getElementById('crPanelOverlay');
     if (existing) { existing.remove(); return; }
+    _crPanelState.path = '';
 
     var overlay = document.createElement('div');
     overlay.id = 'crPanelOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
-    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);position:relative;">' +
-        '<button onclick="document.getElementById(\'crPanelOverlay\').remove()" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>' +
-        '<h3 style="margin:0 0 16px;font-size:18px;">☁️ Cloudreve 云盘</h3>' +
-        '<div id="crPanelBody" style="color:#666;">加载中...</div>' +
-        '</div>';
+    overlay.className = 'cr-overlay';
+    overlay.innerHTML = [
+        '<div class="cr-panel">',
+        '  <div class="cr-panel-head">',
+        '    <span class="cr-panel-title">☁️ Cloudreve 云盘<span class="cr-ok" id="crLoginBadge"></span></span>',
+        '    <button class="cr-close" title="关闭">✕</button>',
+        '  </div>',
+        '  <div class="cr-toolbar" id="crToolbar" style="display:none">',
+        '    <span class="cr-crumb" id="crCrumb"></span>',
+        '    <button class="cr-btn" id="crBtnUp" title="返回上级目录">⬆️ 上级</button>',
+        '    <button class="cr-btn" id="crBtnRefresh" title="刷新当前目录">🔄</button>',
+        '    <button class="cr-btn" id="crBtnHome" title="在浏览器中打开云盘主页">🌐 云盘主页</button>',
+        '  </div>',
+        '  <div class="cr-body" id="crPanelBody">加载中...</div>',
+        '  <div class="cr-foot" id="crPanelFoot"></div>',
+        '</div>'
+    ].join('');
     document.body.appendChild(overlay);
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('.cr-close').onclick = function() { overlay.remove(); };
+    document.getElementById('crBtnHome').onclick = function() { window.open(_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz', '_blank'); };
+    document.getElementById('crBtnUp').onclick = function() {
+        var p = _crPanelState.path;
+        if (!p) return;
+        _crPanelState.path = p.indexOf('/') === -1 ? '' : p.substring(0, p.lastIndexOf('/'));
+        loadPanel();
+    };
+    document.getElementById('crBtnRefresh').onclick = loadPanel;
 
-    var body = document.getElementById('crPanelBody');
+    // ── 面包屑: 各级目录可点击跳转 ──
+    function renderCrumb() {
+        var crumb = document.getElementById('crCrumb');
+        var parts = _crPanelState.path ? _crPanelState.path.split('/') : [];
+        var html = '';
+        if (parts.length === 0) {
+            html = '<span class="cr-crumb-cur">☁️ 我的云盘</span>';
+        } else {
+            html = '<button data-cr-go="">☁️ 我的云盘</button>';
+            var acc = [];
+            for (var i = 0; i < parts.length; i++) {
+                acc.push(parts[i]);
+                html += '<span class="cr-crumb-sep">/</span>';
+                if (i === parts.length - 1) {
+                    html += '<span class="cr-crumb-cur">' + escapeHtml(parts[i]) + '</span>';
+                } else {
+                    html += '<button data-cr-go="' + escapeHtml(acc.join('/')) + '">' + escapeHtml(parts[i]) + '</button>';
+                }
+            }
+        }
+        crumb.innerHTML = html;
+        var btns = crumb.querySelectorAll('button[data-cr-go]');
+        for (var j = 0; j < btns.length; j++) {
+            btns[j].onclick = function() {
+                _crPanelState.path = this.getAttribute('data-cr-go');
+                loadPanel();
+            };
+        }
+    }
 
+    // ── 主加载流程: check_login → 已登录(列文件) / 未登录(登录表单) ──
     async function loadPanel() {
-        body.innerHTML = '加载中...';
+        var body = document.getElementById('crPanelBody');
+        var foot = document.getElementById('crPanelFoot');
+        var badge = document.getElementById('crLoginBadge');
+        body.innerHTML = '<div class="cr-loading">⏳ 加载中...</div>';
+        foot.innerHTML = '';
         try {
             var login = await cloudreveApiHandler('check_login', {});
+            if (login.error) throw new Error(login.error);
             var obj = JSON.parse(login.result);
-            // ★ 修复: check_login 返回 {success, data:{logged_in, nickname, ...}}，需取 obj.data
             var cr = obj.data || obj;
+            if (cr.web_url) _crPanelState.webUrl = cr.web_url;
             if (cr.logged_in) {
-                var files = await cloudreveApiHandler('list_files', { path: '' });
-                var fobj = JSON.parse(files.result);
-                var items = fobj.files || fobj.data || [];
-                var html = '<p style="color:#16a34a;margin-bottom:12px;">✅ 已登录' + (cr.nickname ? ' (' + cr.nickname + ')' : '') + '</p>';
-                html += '<div style="font-size:13px;"><strong>文件列表:</strong><ul style="margin:8px 0;padding-left:20px;">';
-                if (Array.isArray(items) && items.length > 0) {
-                    items.slice(0, 20).forEach(function(f) {
-                        html += '<li>' + (f.name || f) + '</li>';
-                    });
-                    if (items.length > 20) html += '<li>...还有 ' + (items.length - 20) + ' 项</li>';
-                } else {
-                    html += '<li>(空目录)</li>';
-                }
-                html += '</ul></div>';
-                html += '<p style="font-size:12px;color:#999;margin-top:12px;">在聊天中输入云盘相关指令即可操作文件</p>';
-                body.innerHTML = html;
+                badge.textContent = '· 已登录 ' + (cr.nickname || cr.email || '');
+                document.getElementById('crToolbar').style.display = 'flex';
+                await renderFileList();
             } else {
-                // 未登录 - 显示登录表单 + 已有账号快捷选择
-                var accounts = cr.accounts || [];
-                var html = '<p style="color:#dc2626;margin-bottom:12px;">❌ 未登录</p>';
-                if (accounts.length > 0) {
-                    html += '<div style="margin-bottom:12px;font-size:13px;"><strong>已有账号:</strong> ';
-                    accounts.forEach(function(acc) {
-                        html += '<button onclick="document.getElementById(\'crLoginEmail\').value=\'' + acc + '\'" style="margin:2px;padding:4px 8px;background:#f3f4f6;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">' + acc + '</button>';
-                    });
-                    html += '</div>';
-                }
-                html += '<div style="font-size:13px;">';
-                html += '<label style="display:block;margin-bottom:4px;color:#333;">邮箱</label>';
-                html += '<input id="crLoginEmail" type="email" placeholder="your@email.com" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;box-sizing:border-box;">';
-                html += '<label style="display:block;margin-bottom:4px;color:#333;">密码</label>';
-                html += '<input id="crLoginPwd" type="password" placeholder="密码" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;box-sizing:border-box;">';
-                html += '<button id="crLoginBtn" style="width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">登录</button>';
-                html += '<p id="crLoginMsg" style="margin-top:8px;font-size:12px;"></p>';
-                html += '</div>';
-                body.innerHTML = html;
-
-                document.getElementById('crLoginBtn').onclick = async function() {
-                    var email = document.getElementById('crLoginEmail').value.trim();
-                    var pwd = document.getElementById('crLoginPwd').value;
-                    var msg = document.getElementById('crLoginMsg');
-                    if (!email || !pwd) { msg.style.color = '#dc2626'; msg.textContent = '请填写邮箱和密码'; return; }
-                    msg.style.color = '#666'; msg.textContent = '登录中...';
-                    try {
-                        var r = await cloudreveApiHandler('login', { email: email, password: pwd });
-                        var d = JSON.parse(r.result);
-                        if (d.success) {
-                            msg.style.color = '#16a34a'; msg.textContent = '✅ 登录成功!';
-                            setTimeout(loadPanel, 800);
-                        } else {
-                            msg.style.color = '#dc2626'; msg.textContent = '❌ ' + (d.error || '登录失败');
-                        }
-                    } catch(e) {
-                        msg.style.color = '#dc2626'; msg.textContent = '❌ ' + e.message;
-                    }
-                };
-                // 回车提交
-                document.getElementById('crLoginPwd').onkeydown = function(e) { if (e.key === 'Enter') document.getElementById('crLoginBtn').click(); };
+                badge.textContent = '';
+                document.getElementById('crToolbar').style.display = 'none';
+                renderLoginForm(cr);
             }
         } catch(e) {
-            body.innerHTML = '<p style="color:#dc2626;">错误: ' + e.message + '</p>';
+            body.innerHTML = '<div class="cr-error">❌ ' + escapeHtml(e.message) + '</div>';
         }
+    }
+
+    // ── 文件列表渲染 (★ 解析: 真实文件在 d.data.files, 而非 d.files) ──
+    async function renderFileList() {
+        var body = document.getElementById('crPanelBody');
+        var foot = document.getElementById('crPanelFoot');
+        body.innerHTML = '<div class="cr-loading">⏳ 加载目录...</div>';
+        try {
+            var res = await cloudreveApiHandler('list_files', { path: _crPanelState.path });
+            if (res.error) throw new Error(res.error);
+            var d = JSON.parse(res.result);
+            if (!d.success) throw new Error(d.error || '获取文件列表失败');
+            var data = d.data || {};
+            var items = data.files || [];
+            renderCrumb();
+            document.getElementById('crBtnUp').disabled = !_crPanelState.path;
+
+            if (items.length === 0) {
+                body.innerHTML = '<div class="cr-empty"><span class="cr-empty-icon">📂</span>空目录</div>';
+            } else {
+                // 文件夹优先, 再按名称排序
+                items.sort(function(a, b) {
+                    return ((b.is_dir ? 1 : 0) - (a.is_dir ? 1 : 0)) || (a.name || '').localeCompare(b.name || '', 'zh');
+                });
+                var html = '<ul class="cr-file-list">';
+                for (var i = 0; i < items.length; i++) {
+                    var f = items[i];
+                    var meta = '';
+                    if (!f.is_dir) meta = f.size || '';
+                    if (f.updated_at) meta += (meta ? ' · ' : '') + String(f.updated_at).slice(0, 10);
+                    var fpath = (_crPanelState.path ? _crPanelState.path + '/' : '') + (f.name || '');
+                    html += '<li class="cr-file-item' + (f.is_dir ? ' cr-dir' : '') + '" data-goto="' + escapeHtml(fpath) + '" data-dir="' + (f.is_dir ? '1' : '0') + '" title="' + escapeHtml(f.is_dir ? '进入 ' + f.name : f.name) + '">' +
+                        '<span class="cr-ficon">' + (f.is_dir ? '📁' : crFileIcon(f.name)) + '</span>' +
+                        '<span class="cr-fname">' + escapeHtml(f.name) + '</span>' +
+                        (meta ? '<span class="cr-fmeta">' + escapeHtml(meta) + '</span>' : '') +
+                        '</li>';
+                }
+                html += '</ul>';
+                body.innerHTML = html;
+                var lis = body.querySelectorAll('.cr-file-item');
+                for (var k = 0; k < lis.length; k++) {
+                    lis[k].onclick = function() {
+                        if (this.getAttribute('data-dir') === '1') {
+                            _crPanelState.path = this.getAttribute('data-goto');
+                            loadPanel();
+                        }
+                    };
+                }
+            }
+            // 底部信息: 文件数 + 存储策略
+            var info = '共 ' + (data.total || items.length) + ' 项';
+            if (data.storage_policy) info += ' · ' + data.storage_policy;
+            foot.innerHTML = '<span>' + escapeHtml(info) + '</span><span>📤 上传/下载/生成的文件自动同步到 OneAPIChat 文件夹</span>';
+        } catch(e) {
+            body.innerHTML = '<div class="cr-error">❌ ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // ── 未登录: 登录表单 + 主页通道 ──
+    function renderLoginForm(cr) {
+        var body = document.getElementById('crPanelBody');
+        var foot = document.getElementById('crPanelFoot');
+        var accounts = cr.accounts || [];
+        var html = '<div class="cr-login-form">';
+        html += '<p style="color:#dc2626;margin:0 0 12px;">❌ 未登录 Cloudreve 云盘</p>';
+        html += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">' +
+            '<button class="cr-btn cr-primary" id="crOpenHome" style="font-size:13px;padding:7px 14px;">🌐 打开云盘主页</button>' +
+            '<button class="cr-btn" id="crGoRegister" style="font-size:13px;padding:7px 14px;">没有账号? 去注册</button>' +
+            '</div>';
+        if (accounts.length > 0) {
+            html += '<div style="margin-bottom:12px;font-size:12.5px;color:var(--text-secondary,#6b7280);"><strong>已有账号(点击填入):</strong></div>';
+            html += '<div class="cr-acc-chips">';
+            accounts.forEach(function(acc) {
+                html += '<button class="cr-acc-chip" data-acc="' + escapeHtml(acc) + '">' + escapeHtml(acc) + '</button>';
+            });
+            html += '</div>';
+        }
+        html += '<label>邮箱</label>';
+        html += '<input id="crLoginEmail" type="email" placeholder="your@email.com">';
+        html += '<label>密码</label>';
+        html += '<input id="crLoginPwd" type="password" placeholder="密码">';
+        html += '<button class="cr-btn cr-primary" id="crLoginBtn" style="width:100%;padding:10px;font-size:14px;justify-content:center;">🔑 登录</button>';
+        html += '<p class="cr-login-msg" id="crLoginMsg"></p>';
+        html += '</div>';
+        body.innerHTML = html;
+        foot.innerHTML = '<span>登录后可在此浏览文件, 完整管理请打开云盘主页</span>';
+
+        document.getElementById('crOpenHome').onclick = function() { window.open(_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz', '_blank'); };
+        document.getElementById('crGoRegister').onclick = function() { window.open((_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz') + '/signup', '_blank'); };
+        var chips = body.querySelectorAll('.cr-acc-chip');
+        for (var i = 0; i < chips.length; i++) {
+            chips[i].onclick = function() { document.getElementById('crLoginEmail').value = this.getAttribute('data-acc'); };
+        }
+        document.getElementById('crLoginBtn').onclick = async function() {
+            var email = document.getElementById('crLoginEmail').value.trim();
+            var pwd = document.getElementById('crLoginPwd').value;
+            var msg = document.getElementById('crLoginMsg');
+            if (!email || !pwd) { msg.style.color = '#dc2626'; msg.textContent = '请填写邮箱和密码'; return; }
+            msg.style.color = 'var(--text-secondary,#6b7280)'; msg.textContent = '⏳ 登录中...';
+            try {
+                var r = await cloudreveApiHandler('login', { email: email, password: pwd });
+                if (r.error) { msg.style.color = '#dc2626'; msg.textContent = '❌ ' + r.error; return; }
+                msg.style.color = '#16a34a'; msg.textContent = '✅ 登录成功!';
+                setTimeout(loadPanel, 800);
+            } catch(e) {
+                msg.style.color = '#dc2626'; msg.textContent = '❌ ' + e.message;
+            }
+        };
+        // 回车提交
+        document.getElementById('crLoginPwd').onkeydown = function(e) { if (e.key === 'Enter') document.getElementById('crLoginBtn').click(); };
     }
 
     loadPanel();
 };
+
+// 按扩展名选择文件图标
+function crFileIcon(name) {
+    var n = String(name || '').toLowerCase();
+    var m = n.lastIndexOf('.');
+    var ext = m === -1 ? '' : n.substring(m + 1);
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic'].indexOf(ext) >= 0) return '🖼️';
+    if (['mp4', 'mkv', 'avi', 'mov', 'flv', 'webm', 'wmv', 'ts', 'rmvb'].indexOf(ext) >= 0) return '🎬';
+    if (['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'].indexOf(ext) >= 0) return '🎵';
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].indexOf(ext) >= 0) return '🗜️';
+    if (['doc', 'docx', 'md', 'txt', 'rtf'].indexOf(ext) >= 0) return '📝';
+    if (['pdf'].indexOf(ext) >= 0) return '📕';
+    if (['xls', 'xlsx', 'csv'].indexOf(ext) >= 0) return '📊';
+    if (['ppt', 'pptx'].indexOf(ext) >= 0) return '📽️';
+    return '📄';
+}
+
+// ★ 引擎响应防御解析: 非 JSON (nginx 504 HTML 页/PHP 错误页) 时返回 null
+//   由调用方给出可读错误, 避免 "Unexpected token '<'" 这类晦涩报错
+async function _parseEngineJson(r) {
+    try {
+        var _t = await r.text();
+        return JSON.parse(_t);
+    } catch (_e) {
+        return null;
+    }
+}
 
 async function engineApiHandler(action, args) {
     // 所有引擎 API 调用带上 auth_token 实现用户隔离
@@ -285,8 +454,18 @@ async function engineApiHandler(action, args) {
         }
         if (action === 'exec') {
             var _execCmd = args.cmd || args.command || args.query || '';
-            var r = await fetch(_apiBase + '?action=exec&cmd=' + encodeURIComponent(_execCmd) + '&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix);
-            var d = await r.json();
+            // ★ 复杂命令(含引号/特殊字符)改用 POST JSON body, 避免 URL 转义/长度截断
+            var _execUrl = _apiBase + '?action=exec&timeout=' + (args.timeout || 60) + '&cwd=' + encodeURIComponent(args.cwd || '') + authSuffix;
+            var r = await fetch(_execUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+                body: JSON.stringify({ cmd: _execCmd })
+            });
+            // ★ 网关超时/非JSON响应 (如 nginx 504 HTML 页) 给出可读错误, 避免 "Unexpected token '<'"
+            var d = await _parseEngineJson(r);  // ★ 必须 await (漏了会拿到 Promise, ok/error 永远 undefined → 永远报"命令执行失败")
+            if (d === null) {
+                return { error: '引擎网关错误 (HTTP ' + r.status + (r.status === 504 ? ', 网关超时 — 命令可能仍在后台执行, 请稍后查询文件/进程状态' : '') + ')' };
+            }
             if (d.ok) {
                 var out = '💻 命令: ' + _execCmd + '\n退出码: ' + d.exit_code + '\n';
                 if (d.stdout) out += '输出:\n' + d.stdout + '\n';
@@ -302,7 +481,10 @@ async function engineApiHandler(action, args) {
                 headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
                 body: args.script || ''
             });
-            var d = await r.json();
+            var d = await _parseEngineJson(r);  // ★ 必须 await (漏了会拿到 Promise, ok/error 永远 undefined → 永远报"脚本执行失败")
+            if (d === null) {
+                return { error: '引擎网关错误 (HTTP ' + r.status + (r.status === 504 ? ', 网关超时 — 脚本可能仍在执行' : '') + ')' };
+            }
             if (d.ok) {
                 var out = '🐍 Python 脚本执行结果:\n退出码: ' + d.exit_code + '\n';
                 if (d.stdout) out += '输出:\n' + d.stdout + '\n';

@@ -132,6 +132,11 @@ class Tiku:
                 cache_dao.addCache(q_info['title'], answer)
                 logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
                 return answer
+            # ★ 自身查询失败 → 沿 fallback 链继续（如言溪失败自动降级 AI 答题），
+            #   链尾仍失败才返回 None（调用方回退到随机选择）
+            if self._fallback:
+                logger.info(f"{self.name}未命中，回退查询 {self._fallback.name}...")
+                return self._fallback.query(q_info)
             logger.error(f"从{self.name}获取答案失败：{q_info['title']}")
         return None
     def _query(self,q_info:dict):
@@ -231,13 +236,15 @@ class TikuYanxi(Tiku):
             res_json = res.json()
             if not res_json['code']:
                 # 如果是因为TOKEN次数到期，则更换token
-                if self._times == 0 or '次数不足' in res_json['data']['answer']:
+                _data = res_json.get('data') or {}
+                _answer_msg = str(_data.get('answer', ''))
+                if self._times == 0 or '次数不足' in _answer_msg:
                     logger.info(f'TOKEN查询次数不足，将会更换并重新搜题')
                     self._token_index += 1
                     self.load_token()
                     # 重新查询
                     return self._query(q_info)
-                logger.error(f'{self.name}查询失败:\n剩余查询数{res_json["data"].get("times",f"{self._times}(仅参考)")}:\n消息:{res_json["message"]}')
+                logger.error(f'{self.name}查询失败:\n剩余查询数{_data.get("times",f"{self._times}(仅参考)")}:\n消息:{res_json.get("message","")}')
                 return None
             self._times = res_json["data"].get("times",self._times)
             return res_json['data']['answer'].strip()
@@ -268,13 +275,38 @@ class AI(Tiku):
         base_url = self._conf.get('ai_base_url', 'https://api.deepseek.com')
         model = self._conf.get('ai_model', 'deepseek-chat')
         api_key = self._conf.get('ai_key', '')
-        if not api_key:
+        # ★ 空 key 或配置占位符（「你的…」）视为未配置：不发起无效请求，明确提示
+        if not api_key or '你的' in api_key:
+            logger.error('AI答题未配置有效 api_key（请在刷课设置填写 AI Key，如 DeepSeek），本次跳过 AI 答题')
             return None
         title = q_info.get('title', '')
         options = q_info.get('options', '')
         q_type = q_info.get('type', 'single')
         type_map = {'single': '单选题', 'multiple': '多选题', 'judgement': '判断题', 'completion': '填空题'}
+        # ★ 联网搜索增强：ai_search=1 且 ai_search_key 有效时，先 Tavily 搜题再交给 AI
+        search_hint = ''
+        search_enabled = str(self._conf.get('ai_search', '0')) in ('1', 'true', 'True')
+        search_key = self._conf.get('ai_search_key', '')
+        if search_enabled and search_key and '你的' not in search_key:
+            try:
+                sr = _req.post('https://api.tavily.com/search',
+                    json={'api_key': search_key, 'query': title, 'max_results': 4, 'search_depth': 'basic'},
+                    timeout=15, verify=True)
+                if sr.status_code == 200:
+                    results = (sr.json() or {}).get('results', [])
+                    if results:
+                        search_hint = '以下为联网搜索到的相关资料，请结合它们作答：\n' + '\n'.join(
+                            f"- {r.get('title','')}: {r.get('content','')[:300]}" for r in results[:4])
+                        logger.info(f'AI答题联网搜索到 {len(results)} 条资料')
+                    else:
+                        logger.info('AI联网搜索无结果，跳过')
+                else:
+                    logger.error(f'AI联网搜索失败 HTTP {sr.status_code}: {sr.text[:120]}')
+            except Exception as e:
+                logger.error(f'AI联网搜索异常: {e}')
         prompt = '你是一个专业的在线教育答题助手。请回答以下' + type_map.get(q_type, '未知题型') + '。\n题目：' + title
+        if search_hint:
+            prompt += '\n' + search_hint
         if options:
             prompt += '\n选项：\n' + options
         if q_type == 'single':
@@ -290,6 +322,7 @@ class AI(Tiku):
                 timeout=30, verify=True)
             if resp.status_code == 200:
                 return resp.json()['choices'][0]['message']['content'].strip()
-        except Exception:
-            pass
+            logger.error(f'AI答题请求失败 HTTP {resp.status_code}: {resp.text[:120]}')
+        except Exception as e:
+            logger.error(f'AI答题请求异常: {e}')
         return None

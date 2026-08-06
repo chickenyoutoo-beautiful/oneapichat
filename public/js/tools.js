@@ -57,7 +57,7 @@ const SERVER_EXEC_TOOL = {
     type: "function",
     function: {
         name: "server_exec",
-        description: "在服务器上执行终端命令。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制(5000字符),超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。",
+        description: "在服务器上执行终端命令。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制(5000字符),超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。参数名必须是 cmd(不要用 command)。命令内含双引号时请用 shell 单引号或反斜杠转义。",
         parameters: {
             type: "object",
             properties: {
@@ -768,7 +768,7 @@ const IMAGE_TOOL_DEFINITION = {
                 },
                 model: {
                     type: "string",
-                    description: "图像模型(可选,不传则使用用户配置的默认模型): image-01(MiniMax)/openai/gpt-5.4-image-2(OpenRouter GPT Image 2)"
+                    description: "图像模型(可选,不传则使用用户在图像生成设置中配置的默认模型)。注意:不同提供商支持不同模型,不要跨提供商使用模型名。"
                 },
                 aspect_ratio: {
                     type: "string",
@@ -780,7 +780,7 @@ const IMAGE_TOOL_DEFINITION = {
                 },
                 n: {
                     type: "integer",
-                    description: "生成图片数量,1-9张。★ 用户要求多张图片时务必使用此参数一次生成,不要多次调用生成。默认1张。"
+                    description: "生成图片数量,1-9张。★ 用户要求多张图片时务必使用此参数一次生成,不要多次调用生成。默认1张。★ 并行提示:如果需要多张不同提示词的图片,可以在一次响应中发起多个 generate_image 调用,它们会被并行执行以节省时间。"
                 },
                 seed: {
                     type: "integer",
@@ -818,7 +818,7 @@ const IMAGE_I2I_TOOL_DEFINITION = {
                 },
                 n: {
                     type: "integer",
-                    description: "生成图片数量,1-9张。★ 需要多张变体时使用此参数一次生成。"
+                    description: "生成图片数量,1-9张。★ 需要多张变体时使用此参数一次生成。★ 并行提示:如果需要多张不同提示词的图片,可以在一次响应中发起多个 generate_image_i2i 调用,它们会被并行执行以节省时间。"
                 },
                 seed: {
                     type: "integer",
@@ -1114,10 +1114,16 @@ const toolRegistry = (function() {
     return Object.assign({}, _toolDefMap);
   }
 
+  function unregister(name) {
+    delete _registry[name];
+    delete _toolDefMap[name];
+  }
+
   return {
     register: register,
     get: get,
     has: has,
+    unregister: unregister,
     getApprovalLevel: getApprovalLevel,
     isReadOnly: isReadOnly,
     isAgentOnly: isAgentOnly,
@@ -1975,3 +1981,69 @@ window.STOCK_TOOLS.forEach(function(t) {
 });
 
 // ★ 所有工具注册完毕后刷新分类和标签
+
+// ==================== MCP 工具注册 ====================
+// 批量注册来自 MCP 服务器的工具，标记来源服务器
+window.registerMcpTools = function(serverId, serverName, tools) {
+    if (!Array.isArray(tools) || tools.length === 0) return;
+    tools.forEach(function(t) {
+        var name = t.name || '';
+        if (!name || toolRegistry.has(name)) return;  // 跳过已存在的 (本机工具优先)
+        var meta = {
+            name: name,
+            description: t.description || '',
+            capabilities: ['mcp'],
+            approval: ApprovalLevel.SUGGEST,  // MCP 工具默认建议审批 (外部来源)
+            isReadOnly: false,
+            isAgentOnly: false,
+            searchHint: serverName + ': ' + name,
+            mcpServer: serverName,      // ★ 标记来源服务器名
+            mcpServerId: serverId,      // ★ 标记来源服务器 ID
+        };
+        toolRegistry.register(name, meta);
+        // 注册工具定义 (OpenAI function 格式)
+        toolRegistry.registerToolDefinition(name, {
+            type: 'function',
+            function: {
+                name: name,
+                description: t.description || '',
+                parameters: t.inputSchema || { type: 'object', properties: {} },
+            }
+        });
+    });
+};
+
+// ==================== 动态 MCP 分类 ====================
+// resolveToolCategories() 末尾追加: 收集未归类的 MCP 工具，按服务器名分组
+var _originalResolveToolCategories = window.resolveToolCategories;
+window.resolveToolCategories = function() {
+    var cats = _originalResolveToolCategories();
+    var used = new Set();
+    cats.forEach(function(c) { c.keys.forEach(function(k) { used.add(k); }); });
+
+    // 收集所有带 mcpServer 标记但未归类的工具
+    var mcpGroups = {};
+    var allNames = (typeof toolRegistry !== 'undefined' ? toolRegistry.getAllToolNames() : []);
+    allNames.forEach(function(n) {
+        if (used.has(n)) return;
+        var meta = toolRegistry.get(n);
+        if (meta && meta.mcpServer && meta.mcpServerId) {
+            var srv = meta.mcpServer;
+            if (!mcpGroups[srv]) mcpGroups[srv] = { keys: [], serverId: meta.mcpServerId };
+            mcpGroups[srv].keys.push(n);
+        }
+    });
+
+    // 按服务器名排序，追加到分类列表末尾
+    Object.keys(mcpGroups).sort().forEach(function(srv) {
+        cats.push({
+            label: '🔌 MCP: ' + srv,
+            keys: mcpGroups[srv].keys,
+            agentOnly: false,
+            isMcp: true,            // ★ 标记为 MCP 分类
+            mcpServerId: mcpGroups[srv].serverId,
+        });
+    });
+
+    return cats;
+};

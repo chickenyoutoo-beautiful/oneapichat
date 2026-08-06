@@ -331,6 +331,18 @@ switch ($method) {
             ];
             writeJson($sessionsFile, $sessions);
 
+            // ★ 云盘同步: 缓存明文邮箱+密码（按 userId 隔离），供 cr_ensureAccount 自动登录/注册云盘
+            $crSyncFile = '/tmp/cloudreve_login_' . md5($userId) . '.json';
+            @file_put_contents($crSyncFile, json_encode([
+                'email' => $email ?: ($users[$userId]['email'] ?? ''),
+                'password' => $password,
+                'user_id' => '',
+                'nickname' => $username,
+                'created_at' => time(),
+                'oneapichat_user' => $userId,
+                'source' => 'main_auth',
+            ]), LOCK_EX);
+
             jsonSuccess([
                 'token' => $token,
                 'username' => $username,
@@ -382,6 +394,18 @@ switch ($method) {
                 'created_at' => time()
             ];
             writeJson($sessionsFile, $sessions);
+
+            // ★ 云盘同步: 缓存明文邮箱+密码（按 userId 隔离），供 cr_ensureAccount 自动登录云盘
+            $crSyncFile = '/tmp/cloudreve_login_' . md5($userId) . '.json';
+            @file_put_contents($crSyncFile, json_encode([
+                'email' => $users[$userId]['email'] ?? '',
+                'password' => $password,
+                'user_id' => '',
+                'nickname' => $users[$userId]['username'] ?? $username,
+                'created_at' => time(),
+                'oneapichat_user' => $userId,
+                'source' => 'main_auth',
+            ]), LOCK_EX);
 
             // 从数据库读取真实 role
             $role = $users[$userId]['role'] ?? 'user';

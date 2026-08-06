@@ -26,40 +26,26 @@ function cacheDOMElements() {
 function injectStyles() {
     var style = document.createElement('style');
     style.textContent = `
-        .bubble.assistant.typing .markdown-body { min-height:1.5em; position:relative; }
-        .bubble.assistant.typing .markdown-body::after { content:'...'; display:inline-block; animation:typing-dots 1.2s steps(4,end) infinite; width:1.5em; text-align:left; font-size:1.2em; line-height:1; opacity:0.7; }
+        /* ★ 等待中三点脉动 — :not(.streaming) 防止与流式光标同时命中:
+           两个规则同时命中时 typing 的 width:1.5em 会泄漏给 streaming 光标 → 粗彩色光标块 */
+        .bubble.assistant.typing:not(.streaming) .markdown-body::after { content:'...'; display:inline-block; animation:typing-dots 1.2s steps(4,end) infinite; width:1.5em; text-align:left; font-size:1.2em; line-height:1; opacity:0.7; background:none; }
         @keyframes typing-dots { 0%,20% { content:''; } 40% { content:'.'; } 60% { content:'..'; } 80%,100% { content:'...'; } }
         .bubble.assistant { padding:12px 16px; }
-        .toast-container { position:fixed; top:20px; right:20px; z-index:9999; }
-        .toast { display:flex; align-items:center; padding:12px 16px; margin-bottom:10px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); animation:slideIn 0.3s ease-out; max-width:350px; min-width:200px; }
-        .toast-success { background:#d1fae5; color:#065f46; border-left:4px solid #10b981; }
-        .toast-error { background:#fee2e2; color:#991b1b; border-left:4px solid #ef4444; }
-        .toast-warning { background:#fef3c7; color:#92400e; border-left:4px solid #f59e0b; }
-        .toast-info { background:#dbeafe; color:#1e40af; border-left:4px solid #3b82f6; }
-        .toast-icon { margin-right:10px; font-weight:bold; }
-        .toast-message { flex:1; font-size:14px; }
-        .toast-close { background:none; border:none; font-size:18px; cursor:pointer; color:inherit; opacity:0.7; margin-left:10px; }
-        .toast-close:hover { opacity:1; }
-        @keyframes slideIn { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
-
         .markdown-body img { max-width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; margin: 8px 0; }
         .markdown-body a { color: #0366d6; text-decoration: underline; text-underline-offset: 2px; }
         .markdown-body a:hover { color: #0056b3; text-decoration: none; background-color: #f0f6ff; }
         .search-placeholder { color: #666; font-style: italic; }
-        /* ★ 流式输出光标 — 细线呼吸动画 */
+        /* ★ 流式输出光标 — 细线呼吸动画 (显式重置宽高, 防 typing 规则泄漏) */
         .bubble.streaming { transition: box-shadow 0.3s ease; }
         .bubble.streaming .markdown-body::after {
-            content: ''; display: inline-block;
-            width: 2px; height: 1em; margin-left: 2px;
+            content: '' !important; display: inline-block;
+            width: 2px !important; height: 1em !important; margin-left: 2px;
             vertical-align: text-bottom;
-            background: linear-gradient(180deg, #6366f1, #8b5cf6);
+            background: linear-gradient(180deg, #6366f1, #8b5cf6) !important;
             border-radius: 1px;
             animation: stream-cursor 1s ease-in-out infinite;
         }
         @keyframes stream-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
-        .bubble.streaming .markdown-body { scroll-behavior: smooth; }
-        /* 流式过程平滑滚动 — 避免跳变 */
-        #chat-messages { scroll-behavior: smooth; }
         .search-status { background: rgba(0,0,0,0.03); border-radius: 4px; padding: 4px 8px; margin-bottom: 8px; font-size: 0.9em; color: #666; max-height: 100px; overflow-y: auto; }
         .dark .search-status { background: rgba(255,255,255,0.1); color: #aaa; }
         .code-actions { position: absolute; top: 4px; right: 4px; z-index: 5; display: flex; gap: 4px; pointer-events: none; opacity: 0; transition: opacity 0.2s; min-width: 0; width: auto; }
@@ -317,19 +303,34 @@ async function initializeConfig() {
     var storedXAIKey = await decrypt(localStorage.getItem('visionApiKeyXAI') || '');
     setVal('visionApiKeyXAI', (storedXAIKey && storedXAIKey !== 'not-needed') ? storedXAIKey : '');
     setVal('visionApiUrlXAI', localStorage.getItem('visionApiUrlXAI') || 'https://api.x.ai/v1');
+    // ★ 加载自定义 Vision 的配置(刷新后恢复)
+    var storedCustomVisionKey = await decrypt(localStorage.getItem('visionApiKeyCustom') || '');
+    setVal('visionApiKeyCustom', (storedCustomVisionKey && storedCustomVisionKey !== 'not-needed') ? storedCustomVisionKey : '');
+    setVal('visionApiUrlCustom', localStorage.getItem('visionApiUrlCustom') || '');
     var storedImageKey = await decrypt(localStorage.getItem('imageApiKey') || '');
     var cleanImageKey = (storedImageKey && storedImageKey !== 'not-needed') ? storedImageKey : '';
     setVal('imageApiKey', cleanImageKey || '');
-    setVal('imageModel', localStorage.getItem('imageModel') || DEFAULT_CONFIG.imageModel || '');
+    // ★ 图像模型恢复: 优先用提供商独立键,回退到通用 imageModel 键
+    var _imgProvInit4Model = localStorage.getItem('imageProvider') || DEFAULT_CONFIG.imageProvider || 'minimax';
+    setVal('imageModel', localStorage.getItem('imageModel_' + _imgProvInit4Model) || localStorage.getItem('imageModel') || DEFAULT_CONFIG.imageModel || '');
     setVal('imageBaseUrl', localStorage.getItem('imageBaseUrl') || DEFAULT_CONFIG.imageBaseUrl || '');
     var storedOrKey_Final = await decrypt(localStorage.getItem('imageApiKeyOpenrouter') || '');
     var cleanOrKey_Final = (storedOrKey_Final && storedOrKey_Final !== 'not-needed') ? storedOrKey_Final : '';
     setVal('imageApiKeyOpenrouter', cleanOrKey_Final || '');
     setVal('imageBaseUrlOpenrouter', localStorage.getItem('imageBaseUrlOpenrouter') || 'https://openrouter.ai/api');
+    // ★ OpenAI / 自定义 图像字段恢复
+    var storedOaiKey_Final = await decrypt(localStorage.getItem('imageApiKeyOpenai') || '');
+    var cleanOaiKey_Final = (storedOaiKey_Final && storedOaiKey_Final !== 'not-needed') ? storedOaiKey_Final : '';
+    setVal('imageApiKeyOpenai', cleanOaiKey_Final || '');
+    setVal('imageBaseUrlOpenai', localStorage.getItem('imageBaseUrlOpenai') || 'https://api.openai.com/v1');
+    var storedCustomKey_Final = await decrypt(localStorage.getItem('imageApiKeyCustom') || '');
+    var cleanCustomKey_Final = (storedCustomKey_Final && storedCustomKey_Final !== 'not-needed') ? storedCustomKey_Final : '';
+    setVal('imageApiKeyCustom', cleanCustomKey_Final || '');
+    setVal('imageBaseUrlCustom', localStorage.getItem('imageBaseUrlCustom') || '');
     setVal('imageProvider', localStorage.getItem('imageProvider') || DEFAULT_CONFIG.imageProvider || 'minimax');
     // ★ 根据当前视觉提供商切换字段可见性(刷新后恢复正确的字段显示)
     var _visProvInit = localStorage.getItem('visionProvider') || 'minimax';
-    var _visFields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'] };
+    var _visFields = { minimax: ['visionKeyField', 'visionUrlField'], openai: ['visionOAKeyField', 'visionOAUrlField'], xai: ['visionXAIKeyField', 'visionXAIUrlField'], custom: ['visionCustomKeyField', 'visionCustomUrlField'] };
     Object.keys(_visFields).forEach(function(_vk) {
         _visFields[_vk].forEach(function(_fid) {
             var _el = getEl(_fid);
@@ -396,16 +397,18 @@ async function initializeConfig() {
     setChecked('markdownBreaks', localStorage.getItem('markdownBreaks') !== 'false');
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
+    // ★ 隐藏推理过程: 恢复持久化状态
+    if (typeof window.isHideReasoning === 'function' && window.isHideReasoning()) {
+        document.body.classList.add('hide-reasoning');
+        setChecked('hideReasoningToggle', true);
+    }
     if (window.marked) {
         marked.setOptions({ gfm: getChecked('markdownGFM'), breaks: getChecked('markdownBreaks'), pedantic: false, sanitize: false });
         // 不再使用自定义 paragraph renderer(marked v15 默认已正确处理,自定义 renderer 会导致 [object Object])
     }
 
-    if (localStorage.getItem('dark') === 'true') toggleDarkMode(true);
-    else {
-        var theme = getEl('hljsTheme');
-        if (theme) theme.href = 'lib/atom-one-light.min.css';
-    }
+    // 只同步持久化主题；初始化/取消配置都不应反转当前主题。
+    toggleDarkMode(true);
 
     createTitleModelSelector();
     initFontSize();
@@ -413,22 +416,27 @@ async function initializeConfig() {
     // Agent 模式初始化
     await initAgentConfig();
     updateAgentUI();
-    // ★ thinking mode 初始化
-    var _tm = localStorage.getItem('thinkingMode') || 'adaptive';
-    var _tmEl = getEl('thinkingMode');
-    if (_tmEl) _tmEl.value = _tm;
-    _updateThinkingVisibility();
-    // modelSelect 变化时更新 thinking 栏可见性
+    // ★ 思考强度分级初始化 (迁移旧配置 + 回填 + 显隐)
+    if (typeof _migrateThinkingIntensity === 'function') _migrateThinkingIntensity();
+    var _tiVal = localStorage.getItem('thinkingIntensity') || 'medium';
+    var _tiEl = getEl('thinkingIntensity');
+    if (_tiEl) _tiEl.value = _tiVal;
+    if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
+    // modelSelect 变化时更新思考强度栏可见性
     var _ms = getEl('modelSelect');
     if (_ms && !_ms._thinkingBound) {
         _ms._thinkingBound = true;
-        _ms.addEventListener('change', _updateThinkingVisibility);
+        _ms.addEventListener('change', function () {
+            if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
+        });
     }
     // baseUrlProvider 变化时也检查
     var _bp = getEl('baseUrlProvider');
     if (_bp && !_bp._thinkingBound) {
         _bp._thinkingBound = true;
-        _bp.addEventListener('change', _updateThinkingVisibility);
+        _bp.addEventListener('change', function () {
+            if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
+        });
     }
     // 配置面板打开时自动刷新引擎状态
     var configToggleBtn = document.querySelector('button[onclick*="toggleConfigPanel"]');
@@ -470,6 +478,9 @@ async function initializeConfig() {
             }
         }
     }
+    if (typeof window._syncChatTitlePlacement === 'function') {
+        window._syncChatTitlePlacement(isMobile());
+    }
 
     // 移动端配置输入框聚焦时自动展开面板
     if (isMobile()) {
@@ -503,8 +514,11 @@ async function initAgentConfig() {
     setChecked('agentAutoDecision', localStorage.getItem('agentAutoDecision') !== 'false');
     setChecked('agentProactive', localStorage.getItem('agentProactive') === 'true');
     setVal('agentMaxToolRounds', localStorage.getItem('agentMaxToolRounds') || '30');
-    setVal('agentThinkingDepth', localStorage.getItem('agentThinkingDepth') || 'standard');
     setVal('agentSystemPrompt', localStorage.getItem('agentSystemPrompt') || DEFAULT_CONFIG.agentSystemPrompt);
+    // ★ 死循环检测配置回填
+    setChecked('loopGuardToggle', localStorage.getItem('loopGuardEnabled') !== 'false');
+    setVal('loopGuardMaxRepeat', localStorage.getItem('loopGuardMaxRepeat') || '3');
+    setVal('loopGuardMaxToolOnlyRounds', localStorage.getItem('loopGuardMaxToolOnlyRounds') || '6');
     setVal('ttsProvider', localStorage.getItem('ttsProvider') || 'minimax');
     var _ttsKey = ''; try { _ttsKey = await decrypt(localStorage.getItem('ttsApiKey')||''); } catch(e) {} setVal('ttsApiKey', _ttsKey || '');
     // TTS 音色: 如果存储的值不在下拉选项中, 追加 custom option
@@ -542,27 +556,29 @@ async function initAgentConfig() {
 
 function setupEventListeners() {
     window.addEventListener('resize', handleResize);
+    if (!window.__shellEscapeBound) {
+        window.__shellEscapeBound = true;
+        document.addEventListener('keydown', function(e) {
+            if (e.key !== 'Escape') return;
+            var auth = getEl('authOverlay');
+            if (auth && !auth.classList.contains('hidden')) return;
+            if ($.sidebar?.classList.contains('mobile-open') || $.configPanel?.classList.contains('mobile-open')) {
+                e.preventDefault();
+                window.closeAllSidebars();
+            }
+        });
+    }
     // ★ 队列浮窗:点击外部区域折叠
     document.addEventListener('click', window._handleQueueDocClick);
 
     if ($.chatBox) {
+        // ★ 滚动跟随判定统一走 scroll-follow.js 的 handleChatScroll
+        // (程序滚动三重防误判 + 滚回底部自动重新吸附)
         $.chatBox.addEventListener('scroll', throttle(() => {
-            var { scrollTop, scrollHeight, clientHeight } = $.chatBox;
-            // ★ 位置匹配: 若scrollTop=上次程序化滚动目标,则是自动滚动→忽略
-            if (window.__lastAutoScrollTarget !== undefined && Math.abs(scrollTop + clientHeight - (window.__lastAutoScrollTarget || 0)) < 10) {
-                return;  // 程序化滚动,不触发userScrolled
-            }
-            var atBottom = scrollHeight - scrollTop - clientHeight < 80;
-            if ($.scrollToBottomBtn) {
-                if (!atBottom) {
-                    $.scrollToBottomBtn.classList.add('visible');
-                    userScrolled = true;
-                } else {
-                    $.scrollToBottomBtn.classList.remove('visible');
-                    userScrolled = false;
-                }
-            }
+            window.handleChatScroll($.chatBox);
         }, 50));
+        // ★ 初始化滚动跟随: 触摸暂停 + ResizeObserver 兜底
+        if (typeof window.initScrollFollow === 'function') window.initScrollFollow();
     }
 
     var wrapper = document.querySelector('.input-wrapper');
@@ -600,16 +616,48 @@ function setupEventListeners() {
         });
     }
 
+    // ★ 文件夹上传输入
+    var folderInput = document.getElementById('folderInput');
+    if (folderInput) {
+        folderInput.addEventListener('change', async e => {
+            if (e.target.files.length) {
+                showToast('📁 已选择 ' + e.target.files.length + ' 个文件 (文件夹上传)', 'info', 3000);
+                await processSelectedFiles(e.target.files);
+            }
+            e.target.value = '';
+        });
+    }
+
     // 图片输入已移除,只保留文件输入
 
     if ($.userInput) {
+        var _syncComposerState = function() {
+            var compact = window.innerWidth <= MOBILE_BREAKPOINT;
+            $.userInput.placeholder = compact ? '输入消息…' : '输入消息，键入 / 使用命令，@ 提及代理';
+            document.querySelector('.input-wrapper')?.classList.toggle('composer-has-value', !!$.userInput.value.trim());
+        };
+        _syncComposerState();
         $.userInput.addEventListener('keydown', e => {
             var _p = getEl('slashPopup');
             var _vis = _p && window._slashVisible;
+            var _mp = getEl('mentionPopup');
+            var _mvis = _mp && window._mentionVisible;
+            // ★ @ 提及导航
+            if (e.key === 'ArrowDown' && _mvis) { e.preventDefault(); navigateMentionPopup(1); return; }
+            if (e.key === 'ArrowUp' && _mvis) { e.preventDefault(); navigateMentionPopup(-1); return; }
+            if (e.key === 'Escape' && _mvis) { e.preventDefault(); hideMentionPopup(); return; }
+            if (e.key === 'Enter' && !e.shiftKey && _mvis) {
+                e.preventDefault();
+                var _msel = _mp.querySelector('.slash-item-highlight');
+                if (_msel) { selectMentionCommand(_msel.dataset.type, _msel.dataset.cmd, parseInt(_msel.dataset.index || '-1', 10)); }
+                return;
+            }
             if (e.key === 'ArrowDown' && _vis) { e.preventDefault(); navigateSlashPopup(1); return; }
             if (e.key === 'ArrowUp' && _vis) { e.preventDefault(); navigateSlashPopup(-1); return; }
             if (e.key === 'Escape' && _vis) { e.preventDefault(); hideSlashPopup(); return; }
             if (e.key === 'Enter' && !e.shiftKey) {
+                // ★ 中文输入法(IME)组合期间 Enter 用于确认候选词, 禁止触发发送
+                if (e.isComposing || e.keyCode === 229) return;
                 if (_vis) {
                     e.preventDefault();
                     var _sel = _p.querySelector('.slash-item-highlight');
@@ -626,8 +674,8 @@ function setupEventListeners() {
             }
         });
         window.autoResize($.userInput);
-        $.userInput.addEventListener('input', function () { window.autoResize(this); try { handleSlashInput(this); } catch(e) { console.error('[Slash] error:', e); } });
-        window.addEventListener('resize', debounce(() => window.autoResize($.userInput), 100));
+        $.userInput.addEventListener('input', function () { _syncComposerState(); window.autoResize(this); try { handleSlashInput(this); } catch(e) { console.error('[Slash] error:', e); } try { handleMentionInput(this); } catch(e) { console.error('[Mention] error:', e); } });
+        window.addEventListener('resize', debounce(() => { _syncComposerState(); window.autoResize($.userInput); }, 100));
     }
 
     // ★ 配置自动保存:配置面板内任意输入框/选择框/开关变更时自动保存到 localStorage + 服务器
@@ -694,41 +742,83 @@ function loadInitialData() {
         }, 2000);
     }
 
+    // ★ 恢复子代理会话到 chats 对象（供侧边栏显示）
+    (function _restoreSubAgentChats() {
+        var _restored = 0;
+        for (var i = 0; i < localStorage.length; i++) {
+            var _k = localStorage.key(i);
+            if (_k && _k.indexOf('agent_chat_') === 0) {
+                var _name = _k.substring('agent_chat_'.length);
+                var _subId = '_agent_sub_' + _name;
+                if (!chats[_subId]) {
+                    try {
+                        var _msgs = JSON.parse(localStorage.getItem(_k) || '[]');
+                        chats[_subId] = {
+                            title: '🤖 ' + _name,
+                            userId: localStorage.getItem('authUserId') || '',
+                            updated_at: _msgs.length > 0 ? (_msgs[_msgs.length - 1].time || Date.now()) : Date.now(),
+                            messages: _msgs.map(function(m) {
+                                return { role: m.role, content: m.content, time: m.time };
+                            }),
+                            _agentSub: true
+                        };
+                        _restored++;
+                    } catch(e) {}
+                }
+            }
+        }
+        if (_restored > 0) {
+            console.log('[init] 恢复了', _restored, '个子代理会话到侧边栏');
+            try { slimSaveChats(); } catch(e) {}
+        }
+    })();
+
     // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
     if (isAgentToolsActive()) {
-        // 已在 setAgentMode 中创建了带上下文的 agent 聊天,直接加载
-        if (currentChatId && currentChatId === '_agent_main') {
+        // 已在 setAgentMode/restoreUserData 中创建了 agent 聊天,直接加载
+        if (currentChatId && isAgentChat(currentChatId)) {
             loadChat(currentChatId);
             $.sidebar?.classList.add('collapsed');
-            if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
+            renderChatHistory();
+        } else if (chats['_agent_main']) {
+            // ★ 主会话存在但当前聊天不在 Agent 域 → 回到主会话
+            //   (切勿调 createAgentChat: 它会无条件覆盖 _agent_main,毁掉当前会话)
+            loadChat('_agent_main');
+            $.sidebar?.classList.add('collapsed');
+            if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
             renderChatHistory();
         } else {
-            // 兜底:页面加载时 agent 模式激活,但没有 agent 聊天(刷新场景)
+            // 兜底: Agent 模式激活但没有 agent 主会话(刷新场景) → 创建
             createAgentChat([]).then(function(agentId) {
                 loadChat(agentId);
                 $.sidebar?.classList.add('collapsed');
-                if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+                if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
                 renderChatHistory();
             });
         }
     } else {
-        var last = localStorage.getItem('lastChatId');
-        if (last && chats[last]) {
-            loadChat(last);
-        } else {
-            // ★ 优先复用已有的空新对话,避免登录后反复创建
-            var emptyChatId = null;
-            for (var _cid in chats) {
-                var _chat = chats[_cid];
-                if (_chat.title === '新对话' && (!_chat.messages || _chat.messages.length <= 1)) {
-                    emptyChatId = _cid;
-                    break;
-                }
-            }
-            if (emptyChatId) {
-                loadChat(emptyChatId);
+        // ★ 普通模式: 当前聊天已由 restoreUserData 按域恢复,仅当缺失或不在普通域时兜底
+        if (!currentChatId || !chats[currentChatId] || isAgentChat(currentChatId)) {
+            var last = localStorage.getItem('lastChatId');
+            if (last && chats[last] && !isAgentChat(last)) {
+                loadChat(last);
             } else {
-                createNewChat();
+                // ★ 优先复用已有的空新对话,避免登录后反复创建
+                var emptyChatId = null;
+                for (var _cid in chats) {
+                    if (isAgentChat(_cid)) continue;
+                    var _chat = chats[_cid];
+                    if (_chat.title === '新对话' && (!_chat.messages || _chat.messages.length <= 1)) {
+                        emptyChatId = _cid;
+                        break;
+                    }
+                }
+                if (emptyChatId) {
+                    loadChat(emptyChatId);
+                } else {
+                    createNewChat();
+                }
             }
         }
         renderChatHistory();
@@ -738,9 +828,11 @@ function loadInitialData() {
     // 初始化配置面板状态
     if (isMobile()) {
         $.sidebar?.classList.remove('mobile-open');
-        $.configPanel?.classList.remove('mobile-open', 'hidden-panel');
+        $.configPanel?.classList.remove('mobile-open');
+        $.configPanel?.classList.add('hidden-panel');
         $.sidebarMask?.classList.remove('active');
-        if ($.sidebarToggle) $.sidebarToggle.style.display = 'block';
+        $.sidebar && ($.sidebar.inert = true);
+        if ($.sidebarToggle) $.sidebarToggle.style.display = 'inline-flex';
         configPanelWasOpen = false; // 移动端默认不打开
     } else {
         $.sidebar?.classList.remove('mobile-open');
@@ -753,6 +845,7 @@ function loadInitialData() {
         }
         configPanelWasOpen = false;
     }
+    if (typeof window._syncConfigShellState === 'function') window._syncConfigShellState(false);
     // ★ 硬刷新确保侧边栏状态正确
     updateAgentUI();
 }
@@ -1182,6 +1275,16 @@ function initializeApp() {
             }
         } catch(e) {}
 
+        // ★ 切账号后自动同步云盘登录（主项目同邮箱同密码 → 云盘，不存在则注册）
+        try {
+            if (localStorage.getItem('_syncCloudreveAfterLoad')) {
+                localStorage.removeItem('_syncCloudreveAfterLoad');
+                setTimeout(function() {
+                    if (typeof window.syncCloudreveAccount === 'function') window.syncCloudreveAccount(false);
+                }, 1500);
+            }
+        } catch(e) {}
+
         window.addEventListener('beforeunload', function() {
             // ★ 保存输入框文本,刷新后恢复
             try {
@@ -1214,6 +1317,9 @@ function initializeApp() {
                                 chatId: __cid,
                                 content: __msgs[__i].content || '',
                                 reasoning: __msgs[__i].reasoning || '',
+                                toolCalls: __msgs[__i].tool_calls || __msgs[__i]._rsToolCalls || [],
+                                streamId: __msgs[__i]._rsStreamId || '',
+                                msgId: __msgs[__i]._rsMsgId || '',
                                 userText: __userMsg ? __userMsg.text : '',
                                 userFiles: __userMsg ? __userMsg.files : []
                             }));
@@ -1239,7 +1345,8 @@ function initializeApp() {
                     var _skipKeys = ['chats','lastChatId','deviceId','ongoingChats','authToken','authUsername','authUserId','dark','modelContextLength','modelMaxOutputTokens','autoDetectedTextModels','_test','_savedInputText','_savedPartial']
                     for (var _ui = 0; _ui < localStorage.length; _ui++) {
                         var _uk = localStorage.key(_ui);
-                        if (!_uk || _skipKeys.indexOf(_uk) !== -1) continue;
+                        if (!_uk || _skipKeys.indexOf(_uk) !== -1 ||
+                            (window._isTransientRuntimeStorageKey && window._isTransientRuntimeStorageKey(_uk))) continue;
                         _unloadCfg[_uk] = localStorage.getItem(_uk);
                     }
                     var _beaconUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
@@ -1265,6 +1372,74 @@ function initializeApp() {
                 e.preventDefault();
             }
         }, true);
+
+        // ★ 聊天内图片/图表点击放大 (委托监听): markdown 渲染的图片(含 stock_chart K线图)
+        //   与 mermaid SVG 图表统一走灯箱 (之前只有 generatedImages 绑定过灯箱)
+        document.addEventListener('click', function(e) {
+            var t = e.target;
+            if (!t || !t.closest) return;
+            try {
+                // ── mermaid SVG 图表: 序列化为 data URL 进灯箱 ──
+                if (t.closest('.mermaid') && (t.tagName === 'SVG' || t.closest('svg'))) {
+                    var _mermaidDiv = t.closest('.mermaid');
+                    var _svgEl = _mermaidDiv.querySelector('svg');
+                    if (_svgEl && typeof showImageLightbox === 'function') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var _svgClone = _svgEl.cloneNode(true);
+                        _svgClone.setAttribute('width', Math.max(_svgEl.viewBox.baseVal.width || 800, 800));
+                        _svgClone.setAttribute('height', Math.max(_svgEl.viewBox.baseVal.height || 600, 600));
+                        _svgClone.style.width = _svgClone.style.height = '';
+                        var _svgData = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(_svgClone.outerHTML);
+                        showImageLightbox([_svgData], 0);
+                    }
+                    return;
+                }
+                // ── markdown 正文图片 (K线图/网络图片等): 整组灯箱翻页 ──
+                var _mdImg = t.closest ? t.closest('.markdown-body img') : null;
+                if (_mdImg) {
+                    // 生成图容器自带灯箱绑定, 跳过避免双重打开
+                    if (_mdImg.closest('.generated-images-container')) return;
+                    // 图片外层是链接(带 <a>)时保持链接行为
+                    if (_mdImg.closest('a')) return;
+                    var _mdBox = _mdImg.closest('.markdown-body');
+                    if (!_mdBox || typeof showImageLightbox !== 'function') return;
+                    var _mdImgs = Array.prototype.slice.call(_mdBox.querySelectorAll('img')).filter(function(im) {
+                        return im.src && !im.closest('.generated-images-container');
+                    });
+                    var _idx = _mdImgs.indexOf(_mdImg);
+                    if (_idx >= 0 && _mdImgs.length > 0) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showImageLightbox(_mdImgs.map(function(im) { return im.src; }), _idx);
+                    }
+                }
+            } catch(_err) { console.warn('[LightboxDelegate]', _err.message); }
+        });
+
+        // ★ PWA 独立窗口 (standalone) 链接处理: 聊天里的外链不弹到浏览器/app,
+        //   改为当前窗口内打开, 用户可用返回键回到聊天 (iOS/Android 安装后体验一致)
+        (function _initStandaloneLinks() {
+            var _isStandalone = function() {
+                return window.navigator.standalone === true ||
+                    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+            };
+            document.addEventListener('click', function(e) {
+                if (!_isStandalone()) return;
+                var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+                if (!a || !a.href) return;
+                var href = a.getAttribute('href') || '';
+                if (!/^https?:\/\//i.test(href)) return;          // 只拦 http(s) 外链
+                if (/^#/.test(href)) return;
+                if (a.hasAttribute('download') || a.target === '_self') return;
+                var isSameOrigin = false;
+                try { isSameOrigin = (new URL(a.href)).origin === location.origin; } catch(err) {}
+                if (isSameOrigin) return;                          // 站内链接保持原行为
+                e.preventDefault();
+                e.stopPropagation();
+                location.href = a.href;                            // 当前窗口内打开, 不弹到浏览器/app
+            }, true);
+        })();
         } catch(e) {
             console.error('[Init] 初始化崩溃:', e.message, e.stack);
             document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;"><div style="text-align:center;padding:40px;"><h2>⚠️ 加载失败</h2><p style="color:#666;">请尝试清除该账号的聊天记录</p><button onclick="localStorage.clear();location.reload();" style="margin:10px;padding:8px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;">清除本地数据</button></div></div>';

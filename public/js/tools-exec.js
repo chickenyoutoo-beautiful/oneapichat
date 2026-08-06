@@ -1,6 +1,100 @@
 // tools-exec.js — 工具执行分发表 v1.0 (Phase 8 拆分自 main.js)
 // executeToolCallForRetry — 100+ 工具分支的统一执行入口
 
+// ★ 容错修复工具参数JSON: 未转义引号 → \"、未转义换行 → \\n、截断 → 补齐引号/花括号
+function repairToolArguments(raw) {
+    if (typeof raw !== 'string') return '{}';
+    var out = '';
+    var inStr = false;
+    var hadInner = false;
+    for (var i = 0; i < raw.length; i++) {
+        var ch = raw.charAt(i);
+        if (!inStr) {
+            out += ch;
+            if (ch === '"') { inStr = true; hadInner = false; }
+            continue;
+        }
+        if (ch === '\\') {
+            out += ch;
+            if (i + 1 < raw.length) { out += raw.charAt(i + 1); i++; }
+            continue;
+        }
+        if (ch === '\n') { out += '\\n'; continue; }
+        if (ch === '\r') { out += '\\r'; continue; }
+        if (ch === '\t') { out += '\\t'; continue; }
+        if (ch.charCodeAt(0) < 32) { out += ' '; continue; }
+        if (ch === '"') {
+            var j = i + 1;
+            while (j < raw.length && (raw.charAt(j) === ' ' || raw.charAt(j) === '\t')) j++;
+            var nxt = j < raw.length ? raw.charAt(j) : '';
+            if (nxt === ',') {
+                var k = j + 1;
+                while (k < raw.length && (raw.charAt(k) === ' ' || raw.charAt(k) === '\t')) k++;
+                var afterComma = k < raw.length ? raw.charAt(k) : '';
+                if (afterComma === '"' || afterComma === '}' || afterComma === ']' || afterComma === '') {
+                    if (hadInner) {
+                        // 值内引号对刚闭合, 逗号前补一个真正的JSON收尾引号
+                        out += '\\"'; out += '"'; inStr = false;
+                    } else {
+                        out += '"'; inStr = false;
+                    }
+                } else {
+                    out += '\\"'; hadInner = true;
+                }
+            } else if (nxt === '}' || nxt === ']' || nxt === ':' || nxt === '') {
+                out += '"';
+                inStr = false;
+            } else {
+                out += '\\"'; hadInner = true;
+            }
+            continue;
+        }
+        out += ch;
+    }
+    if (inStr) out += '"';
+    var ob = (out.match(/\{/g) || []).length;
+    var cb = (out.match(/\}/g) || []).length;
+    while (cb < ob) { out += '}'; cb++; }
+    return out;
+}
+
+// ★ 容错提取字符串参数: 兼容模型输出未转义引号/非法JSON的情况
+function tolerantExtractArg(raw, keys) {
+    if (!raw || typeof raw !== 'string') return '';
+    var i, j, k;
+    // 1) 标准 JSON 转义的值
+    for (i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        var re = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
+        var m = raw.match(re);
+        if (m) {
+            return m[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        }
+    }
+    // 2) 容错: 值内含未转义的引号 → 取 "key": " 之后全部内容, 从末尾找真正的收尾引号
+    for (j = 0; j < keys.length; j++) {
+        var key2 = keys[j];
+        var re2 = new RegExp('"' + key2 + '"\\s*:\\s*"([\\s\\S]*)$');
+        var m2 = raw.match(re2);
+        if (!m2) continue;
+        var val = m2[1].replace(/\s+$/, '');
+        var cut = -1;
+        for (k = val.length - 1; k >= 0; k--) {
+            if (val.charAt(k) === '"') {
+                var rest = val.substring(k + 1).replace(/^\s+/, '');
+                if (rest === '' || rest.charAt(0) === '}' || rest.charAt(0) === ',') {
+                    cut = k;
+                    break;
+                }
+            }
+        }
+        if (cut >= 0) val = val.substring(0, cut);
+        val = val.trim();
+        return val.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+    return '';
+}
+
                 window.executeToolCallForRetry = async function(tc, abortSignal, ctx) {
     var body = ctx.body, pendingMsg = ctx.pendingMsg, chatId = ctx.chatId,
         currentChatId = ctx.currentChatId, activeBubbleMap = ctx.activeBubbleMap,
@@ -31,16 +125,13 @@
                     let args;
                     try {
                         if (typeof func.arguments === 'string') {
-                            // 尝试修复截断的JSON
                             var raw = func.arguments;
-                            var qc = (raw.match(/"/g) || []).length;
-                            if (qc % 2 !== 0) raw += '"';
-                            var ob = (raw.match(/\{/g) || []).length;
-                            var cb = (raw.match(/\}/g) || []).length;
-                            while (cb < ob) { raw += '}'; cb++; }
-                            // ★ 修复: 清理 JSON 字符串中的非法控制字符和未转义换行
-                            raw = raw.replace(/[\x00-\x1f]/g, ' ').replace(/\n(?![^"\\]*(?:\\.[^"\\]*)*")/g, '\\n');
-                            args = JSON.parse(raw || '{}');
+                            try {
+                                args = JSON.parse(raw || '{}');
+                            } catch (e1) {
+                                // ★ 修复: 未转义引号/换行/截断 → 容错修复后再解析
+                                args = JSON.parse(repairToolArguments(raw) || '{}');
+                            }
                         } else {
                             args = func.arguments || {};
                         }
@@ -67,6 +158,14 @@
                                 prompt: promptMatch ? promptMatch[1].replace(/\\n/g, '\n') : '搜索并整理相关信息',
                                 model: modelMatch ? modelMatch[1] : ''
                             };
+                        } else if (func.name === 'server_exec') {
+                            // ★ 容错提取 cmd(兼容 command/query 别名与值内含未转义引号)
+                            var _cmdT = tolerantExtractArg(argStr2, ['cmd', 'command', 'query']);
+                            args = _cmdT ? { cmd: _cmdT } : {};
+                        } else if (func.name === 'server_python') {
+                            // ★ 容错提取 script(兼容 code/cmd 别名)
+                            var _scriptT = tolerantExtractArg(argStr2, ['script', 'code', 'cmd']);
+                            args = _scriptT ? { script: _scriptT } : {};
                         } else if (func.name === 'plan_update') {
                             // ★ plan_update 参数修复: 从破损 JSON 中提取关键字段
                             var _aMatch = argStr2.match(/"action"\s*:\s*"([^"]+)"/);
@@ -120,25 +219,39 @@
                     }
                     let toolResult = { error: `Unknown tool: ${func.name}` };
 
+                    // ★ 外部 MCP 服务器工具路由 — 通过 PHP 代理转发
+                    if (typeof toolRegistry !== 'undefined' && toolRegistry.get && toolRegistry.get(func.name)) {
+                        var _mcpMeta = toolRegistry.get(func.name);
+                        if (_mcpMeta && _mcpMeta.mcpServerId && typeof window.mcpCallTool === 'function') {
+                            toolResult = await window.mcpCallTool(_mcpMeta.mcpServerId, func.name, args);
+                            // 标准化返回格式
+                            if (toolResult && toolResult.error) {
+                                toolResult = { error: toolResult.error };
+                            } else if (toolResult && toolResult.content) {
+                                // MCP 标准 content 格式 → 提取文本
+                                var _texts = [];
+                                if (Array.isArray(toolResult.content)) {
+                                    toolResult.content.forEach(function(c) {
+                                        if (c.type === 'text' && c.text) _texts.push(c.text);
+                                    });
+                                }
+                                toolResult = { result: _texts.join('\n') };
+                            } else if (toolResult && typeof toolResult === 'object') {
+                                toolResult = { result: JSON.stringify(toolResult, null, 2) };
+                            }
+                        }
+                    }
+
                     if (func.name === 'web_search') {
                         let query = args.query;
                         if (query) {
-                            if (currentChatId === chatId) {
-                                var currentBubble = activeBubbleMap[chatId];
-                                if (currentBubble) {
-                                    let status = currentBubble.querySelector('.search-status');
-                                    if (!status) {
-                                        status = document.createElement('div');
-                                        status.className = 'search-status';
-                                        currentBubble.querySelector('.markdown-body')?.appendChild(status);
-                                    }
-                                    status.textContent = `🔧 工具调用: web_search("${query}")`;
-                                }
-                            }
+                            // ★ 「🔧 工具调用」状态行已移除 (实时状态由 tool-call-lines + 顶部状态栏承担)
                             try {
                                 // 不传递外部signal,让performWebSearch使用自己的超时控制器
                                 var searchResult = await performWebSearch(query, null, 'web');
                                 var optimized = formatRawResults(searchResult);
+                                // ★ 气泡外滚动展示搜索标题 (完整结果仍传给模型)
+                                if (window.showSearchTicker) window.showSearchTicker(searchResult);
                                 toolResult = { result: optimized || '搜索完成' };
                             } catch (e) {
                                 toolResult = { error: e.message };
@@ -160,18 +273,7 @@
                             urls = [args.url];
                         }
                         if (urls.length > 0) {
-                            if (currentChatId === chatId) {
-                                var currentBubble = activeBubbleMap[chatId];
-                                if (currentBubble) {
-                                    let status = currentBubble.querySelector('.search-status');
-                                    if (!status) {
-                                        status = document.createElement('div');
-                                        status.className = 'search-status';
-                                        currentBubble.querySelector('.markdown-body')?.appendChild(status);
-                                    }
-                                    status.textContent = `🌐 正在抓取网页 (${urls.length}个)...`;
-                                }
-                            }
+                            // ★ 抓取状态行已移除 (实时状态由 tool-call-lines + 顶部状态栏承担)
                             try {
                                 var fetched = await performWebFetch(urls);
                                 if (fetched.error) {
@@ -544,6 +646,8 @@
                                 _updateTempGrantBanner(true);
                                 // ★ Agent 模式同款进入动效
                                 if (typeof playAgentEnterEffect === 'function') playAgentEnterEffect('agent');
+                                // ★ 临时授权无聊天切换: 动画播完即淡出(遮罩无固定自动淡出计时器)
+                                if (typeof _dismissOverlayAfter === 'function') _dismissOverlayAfter('agent', null, 700, 1800);
                                 toolResult = { result: '✅ 已获得单次授权。\n\n⚠️ 重要规则：\n1. 搜索类任务必须用 delegate_task 创建子代理来执行，禁止直接用 web_search 然后谎称是子代理做的\n2. 子代理创建后请等待系统自动通知结果,禁止调用 engine_agent_status 轮询(会浪费token)\n3. 只有超过2次搜索或需要分析/总结的复杂任务才需要子代理\n4. 简单搜索（≤2次）可以直接用 web_search\n\n可用工具：delegate_task（子代理）、engine_agent_create、web_search、web_fetch、server_exec 等。完成后权限自动回收。' };
                                 console.log('[AskAgent] 单次授权已授予, chatId=' + chatId);
                             }
@@ -1165,16 +1269,21 @@
                     status.className = 'search-status';
                     currentBubble.querySelector('.markdown-body')?.appendChild(status);
                 }
-                status.textContent = '🎨 正在生成图片...';
+                // ★ 并行模式: 跳过个体占位符 (由 main.js 统一显示并行状态)
+                if (window.__parallelToolActive) {
+                    status.textContent = '🎨 并行生成中...';
+                } else {
+                    status.textContent = '🎨 正在生成图片...';
 
-                // ★ 添加图片占位符: 先清除旧占位符,避免重复
-                var _oldPh = currentBubble.querySelector('#image-placeholder');
-                if (_oldPh) _oldPh.remove();
-                var placeholder = document.createElement('div');
-                placeholder.id = 'image-placeholder';
-                placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
-                placeholder.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">🎨</div><div style="font-size:14px;">图片生成中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(prompt.substring(0, 30)) + '...</div>';
-                currentBubble.querySelector('.markdown-body')?.appendChild(placeholder);
+                    // ★ 添加图片占位符: 先清除旧占位符,避免重复
+                    var _oldPh = currentBubble.querySelector('#image-placeholder');
+                    if (_oldPh) _oldPh.remove();
+                    var placeholder = document.createElement('div');
+                    placeholder.id = 'image-placeholder';
+                    placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
+                    placeholder.innerHTML = '<img src="./src/remi/creating.gif" style="width:64px;height:64px;border-radius:12px;margin:0 auto 12px;display:block;object-fit:cover;" alt="蕾米创作中"><div style="font-size:14px;">图片生成中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(prompt.substring(0, 30)) + '...</div>';
+                    currentBubble.querySelector('.markdown-body')?.appendChild(placeholder);
+                }
             }
         }
 
@@ -1197,29 +1306,34 @@
             });
 
             if (imageResult) {
-                // ★ 累积所有图片(支持多次调用)
+                // ★ 累积所有图片(支持多次调用) — 新格式: 带元数据的对象
                 if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
                 var _imgUrlsFinal = typeof imageResult === 'string' ? [imageResult] : imageResult;
+                var _imgOpts = {
+                    model: args.model || localStorage.getItem('imageModel_' + (localStorage.getItem('imageProvider') || 'minimax')) || '',
+                    aspect_ratio: args.aspect_ratio || '1:1'
+                };
                 for (var _giF = 0; _giF < _imgUrlsFinal.length; _giF++) {
                     var _imgF = _imgUrlsFinal[_giF];
-                    pendingMsg.generatedImages.push(_imgF);
-                    if (_giF === 0) pendingMsg.generatedImage = _imgF;
+                    // ★ 新格式: 存储带元数据的对象 {url, prompt, model, aspect_ratio, timestamp}
+                    var _metaObj = window.buildImageMeta(_imgF, prompt, _imgOpts);
+                    pendingMsg.generatedImages.push(_metaObj);
+                    if (_giF === 0) pendingMsg.generatedImage = _metaObj;
                     // 异步上传到服务器,上传成功后替换为服务器URL(避免localStorage溢出)
                     if (_imgF && !_imgF.startsWith(window.location.origin) && !_imgF.startsWith('/oneapichat')) {
-                        (function(_origUrl, _idx) {
+                        (function(_origUrl, _idx, _meta) {
                             uploadImageToServer(_origUrl).then(function(srvUrl) {
                                 if (srvUrl) {
                                     console.log('[Image] 已上传生成图片:', srvUrl);
-                                    // ★ 替换 pendingMsg 中的 base64 为服务器 URL
-                                    var _pos = pendingMsg.generatedImages.indexOf(_origUrl);
-                                    if (_pos !== -1) pendingMsg.generatedImages[_pos] = srvUrl;
-                                    if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                    // ★ 替换对象中的 url 字段
+                                    _meta.url = srvUrl;
+                                    if (pendingMsg.generatedImage === _meta) pendingMsg.generatedImage = _meta;
                                     // ★ 同步到 chats 消息对象
                                     var _msgIdx = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                     if (_msgIdx !== -1) {
                                         var _cm = chats[chatId].messages[_msgIdx];
-                                        if (_cm.generatedImages && _cm.generatedImages[_idx] === _origUrl) _cm.generatedImages[_idx] = srvUrl;
-                                        if (_cm.generatedImage === _origUrl) _cm.generatedImage = srvUrl;
+                                        if (_cm.generatedImages && _cm.generatedImages[_idx] === _meta) _cm.generatedImages[_idx] = _meta;
+                                        if (_cm.generatedImage === _meta) _cm.generatedImage = _meta;
                                     }
                                     // ★ 图片URL替换后立即保存,防止刷新丢失
                                     slimSaveChats();
@@ -1227,7 +1341,7 @@
                             }).catch(function(e) {
                                 console.warn('[Image] 上传生成图片失败:', e.message);
                             });
-                        })(_imgF, _giF);
+                        })(_imgF, _giF, _metaObj);
                     }
                 }
                 slimSaveChats();
@@ -1367,12 +1481,17 @@
                                     var currentBubble = activeBubbleMap[chatId];
                                     if (currentBubble) {
                                         let status = currentBubble.querySelector('.search-status');
-                                        if (status) status.textContent = '🎨 正在图生图(' + _allImages.length + '张参考图)...';
-                                        var placeholder = document.createElement('div');
-                                        placeholder.id = 'image-placeholder';
-                                        placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
-                                        placeholder.innerHTML = '<div style="font-size:24px;margin-bottom:8px;">🎨</div><div style="font-size:14px;">图生图中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(userPrompt.substring(0, 30)) + '...</div>';
-                                        currentBubble.querySelector('.markdown-body')?.appendChild(placeholder);
+                                        // ★ 并行模式: 跳过个体占位符
+                                        if (window.__parallelToolActive) {
+                                            if (status) status.textContent = '🎨 并行图生图中...';
+                                        } else {
+                                            if (status) status.textContent = '🎨 正在图生图(' + _allImages.length + '张参考图)...';
+                                            var placeholder = document.createElement('div');
+                                            placeholder.id = 'image-placeholder';
+                                            placeholder.style = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px;padding:40px 20px;text-align:center;margin:12px 0;color:white;animation:pulse 2s infinite;';
+                                            placeholder.innerHTML = '<img src="./src/remi/creating.gif" style="width:64px;height:64px;border-radius:12px;margin:0 auto 12px;display:block;object-fit:cover;" alt="蕾米创作中"><div style="font-size:14px;">图生图中' + ((args.n || 1) > 1 ? ' (' + (args.n || 1) + '张)' : '') + ',请稍候...</div><div style="font-size:12px;margin-top:8px;opacity:0.8;">' + escapeHtml(userPrompt.substring(0, 30)) + '...</div>';
+                                            currentBubble.querySelector('.markdown-body')?.appendChild(placeholder);
+                                        }
                                     }
                                 }
 
@@ -1392,26 +1511,31 @@
                                 if (i2iResult) {
                                     if (!pendingMsg.generatedImages) pendingMsg.generatedImages = [];
                                     var _imgUrlsI2i = typeof i2iResult === 'string' ? [i2iResult] : i2iResult;
+                                    var _i2iOpts = {
+                                        model: args.model || localStorage.getItem('imageModel_' + (localStorage.getItem('imageProvider') || 'minimax')) || '',
+                                        aspect_ratio: args.aspect_ratio || '1:1'
+                                    };
                                     for (var _giI2i = 0; _giI2i < _imgUrlsI2i.length; _giI2i++) {
                                         var _imgI2i = _imgUrlsI2i[_giI2i];
-                                        pendingMsg.generatedImages.push(_imgI2i);
-                                        if (_giI2i === 0) pendingMsg.generatedImage = _imgI2i;
+                                        // ★ 新格式: 带元数据的对象
+                                        var _metaI2i = window.buildImageMeta(_imgI2i, userPrompt || prompt, _i2iOpts);
+                                        pendingMsg.generatedImages.push(_metaI2i);
+                                        if (_giI2i === 0) pendingMsg.generatedImage = _metaI2i;
                                         // 异步上传到服务器,上传成功后替换为服务器URL(避免localStorage溢出)
                                         if (_imgI2i && !_imgI2i.startsWith(window.location.origin) && !_imgI2i.startsWith('/oneapichat')) {
-                                            (function(_origUrl, _idx) {
+                                            (function(_origUrl, _idx, _meta) {
                                                 uploadImageToServer(_origUrl).then(function(srvUrl) {
                                                     if (srvUrl) {
                                                         console.log('[Image] i2i已上传:', srvUrl);
-                                                        // ★ 替换 pendingMsg 中的 base64 为服务器 URL
-                                                        var _pos = pendingMsg.generatedImages.indexOf(_origUrl);
-                                                        if (_pos !== -1) pendingMsg.generatedImages[_pos] = srvUrl;
-                                                        if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                                        // ★ 替换对象中的 url 字段
+                                                        _meta.url = srvUrl;
+                                                        if (pendingMsg.generatedImage === _meta) pendingMsg.generatedImage = _meta;
                                                         // ★ 同步到 chats 消息对象
                                                         var _msgIdx = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
                                                         if (_msgIdx !== -1) {
                                                             var _cm = chats[chatId].messages[_msgIdx];
-                                                            if (_cm.generatedImages && _cm.generatedImages[_idx] === _origUrl) _cm.generatedImages[_idx] = srvUrl;
-                                                            if (_cm.generatedImage === _origUrl) _cm.generatedImage = srvUrl;
+                                                            if (_cm.generatedImages && _cm.generatedImages[_idx] === _meta) _cm.generatedImages[_idx] = _meta;
+                                                            if (_cm.generatedImage === _meta) _cm.generatedImage = _meta;
                                                         }
                                                         // ★ 图片URL替换后立即保存,防止刷新丢失
                                                         slimSaveChats();
@@ -1419,7 +1543,7 @@
                                                 }).catch(function(e) {
                                                     console.warn('[Image] i2i上传失败:', e.message);
                                                 });
-                                            })(_imgI2i, _giI2i);
+                                            })(_imgI2i, _giI2i, _metaI2i);
                                         }
                                     }
                                     toolResult = { result: '\u2705 \u56fe\u7247\u5df2\u751f\u6210' };
@@ -1607,13 +1731,35 @@
                                         } catch(_cfgErr2) { console.warn('[analyze_image] 服务器获取配置失败:', _cfgErr2.message); }
                                     }
                                     if (!_visApiKey) console.warn('[analyze_image] ⚠️ OpenAI 提供商已选择但未配置 API Key, 请在设置中填写 visionApiKeyOpenAI');
+                                } else if (_visProvider === 'custom') {
+                                    // ★ 自定义提供商: 读取独立存储的 Key/URL/Model,走直连 API
+                                    _visApiKey = await decrypt(localStorage.getItem('visionApiKeyCustom') || '');
+                                    _visApiUrl = localStorage.getItem('visionApiUrlCustom') || '';
+                                    _visModel = localStorage.getItem('visionModel') || '';
+                                    console.log('[analyze_image] 自定义 Key:', _visApiKey ? 'YES(' + _visApiKey.substring(0, 8) + '...)' : 'NO', 'URL:', _visApiUrl, 'Model:', _visModel);
+                                    // ★ 自定义 Key 为空时, 直接从服务器获取配置
+                                    if (!_visApiKey && !_visApiUrl) {
+                                        try {
+                                            var _cfgResp3 = await fetch('/oneapichat/api/chat.php?action=get_config&auth_token=' + encodeURIComponent(window.getAuthToken() || ''), { cache: 'no-store' });
+                                            if (_cfgResp3.ok) {
+                                                var _cfgData3 = await _cfgResp3.json();
+                                                if (_cfgData3.visionApiKeyCustom) {
+                                                    localStorage.setItem('visionApiKeyCustom', _cfgData3.visionApiKeyCustom);
+                                                    _visApiKey = await decrypt(_cfgData3.visionApiKeyCustom);
+                                                }
+                                                if (_cfgData3.visionApiUrlCustom) { localStorage.setItem('visionApiUrlCustom', _cfgData3.visionApiUrlCustom); _visApiUrl = _cfgData3.visionApiUrlCustom; }
+                                            }
+                                        } catch(_cfgErr3) { console.warn('[analyze_image] 服务器获取配置失败:', _cfgErr3.message); }
+                                    }
+                                    if (!_visApiKey) console.warn('[analyze_image] ⚠️ 自定义提供商已选择但未配置 API Key, 请在设置中填写 visionApiKeyCustom');
+                                    if (!_visApiUrl) console.warn('[analyze_image] ⚠️ 自定义提供商已选择但未配置 API 地址, 请在设置中填写 visionApiUrlCustom');
                                 } else {
-                                    console.log('[analyze_image] ⚠️ 未配置视觉提供商或自定义, 走 MiniMax MCP');
+                                    console.log('[analyze_image] ⚠️ 未配置视觉提供商, 走 MiniMax MCP');
                                 }
                                 var analyzeInput;
                                 var _xaiHandled = false;
-                                // ★ xAI/OpenAI 视觉提供商: 强制 base64, 走 proxyFetch
-                                if ((_visProvider === 'xai' || _visProvider === 'openai') && _visApiKey) {
+                                // ★ xAI/OpenAI/自定义 视觉提供商: 强制 base64, 走 proxyFetch
+                                if ((_visProvider === 'xai' || _visProvider === 'openai' || _visProvider === 'custom') && _visApiKey && _visApiUrl) {
                                     analyzeInput = imageFile.content || '';
                                     if (!analyzeInput.startsWith('data:')) {
                                         // ★ 优先用服务端代理获取 base64 (可靠, 不依赖浏览器下载)
@@ -1860,7 +2006,7 @@
                                                     '<img src="' + _qrB64 + '" style="max-width:220px;border-radius:10px;display:block;margin:0 auto;" />' +
                                                 '</div>';
                                             _qrCont.appendChild(_qrRow);
-                                            if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                            if (typeof $ !== 'undefined' && $.chatBox && !userScrolled) followToBottom($.chatBox);
                                             // ★ 持久化引用(供reload恢复, 注意不含base64避免token浪费)
                                             pendingMsg._hasQrRow = true;
                                             if (chats[chatId]) {
@@ -1920,7 +2066,7 @@
                                             '<div style="font-size:11px;color:var(--text-secondary,#999);">' + _hint + '</div>' +
                                             '</div>';
                                         _qrCont.appendChild(_qrRow);
-                                        if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                        if (typeof $ !== 'undefined' && $.chatBox && !userScrolled) followToBottom($.chatBox);
                                         pendingMsg._hasQrRow = true;
                                         if (chats[chatId]) {
                                             var _bmi = chats[chatId].messages.findIndex(m => m === pendingMsg);
@@ -2008,7 +2154,7 @@
                                             '<img src="' + _qrB64 + '" style="max-width:220px;border-radius:10px;display:block;margin:0 auto;" />' +
                                             '</div>';
                                         _qrCont.appendChild(_qrRow);
-                                        if (typeof $ !== 'undefined' && $.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                        if (typeof $ !== 'undefined' && $.chatBox && !userScrolled) followToBottom($.chatBox);
                                         pendingMsg._hasQrRow = true;
                                         if (chats[chatId]) {
                                             var _bmi3 = chats[chatId].messages.findIndex(m => m === pendingMsg);
@@ -2041,7 +2187,7 @@
                                         _wrapper.innerHTML = msgContent;
                                         _md.appendChild(_wrapper);
                                         // 滚动到底部
-                                        if ($.chatBox) $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                                        if ($.chatBox && !userScrolled) followToBottom($.chatBox);
                                     }
                                 }
                                 // ★ 追加到 pendingMsg.content 以便持久化到聊天记录
@@ -2275,4 +2421,3 @@ window._createPlanApprovalBanner = function(taskCount) {
     // 插入到 flowPanel 最前面
     panel.insertBefore(banner, panel.firstChild);
 };
-

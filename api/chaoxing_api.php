@@ -189,9 +189,15 @@ switch ($action) {
                 echo json_encode(['error' => '获取课程列表失败', 'detail' => $exit_code == 0 ? '无JSON输出' : '退出码='.$exit_code]);
                 exit;
             }
-            // ★ 只缓存成功的响应，不缓存错误
-            if (strpos($json, '"courses"') !== false) {
+            // ★ 只缓存成功且非空的响应（空列表可能是 Cookie 失效/风控的假象，缓存后会持续误导面板 5 分钟）
+            if (strpos($json, '"courses"') !== false && strpos($json, '"courses":[]') === false) {
                 file_put_contents($cache_file, $json);
+            } elseif (file_exists($cache_file)) {
+                // 空结果或错误：顺手清掉已存在的空/旧缓存，避免下次命中
+                $cached = @file_get_contents($cache_file);
+                if ($cached !== false && strpos($cached, '"courses":[]') !== false) {
+                    @unlink($cache_file);
+                }
             }
         }
         // 从 DB 合并课程状态（通过 Python 查询，避免 PHP SQLite3 扩展依赖）
@@ -784,7 +790,9 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
             'false_list' => $tiku['false_list'] ?? '错误,错,×,否,不对,不正确',
             'ai_base_url' => $tiku['ai_base_url'] ?? '',
             'ai_model' => $tiku['ai_model'] ?? '',
-            'ai_key' => $tiku['ai_key'] ?? ''
+            'ai_key' => $tiku['ai_key'] ?? '',
+            'ai_search' => $tiku['ai_search'] ?? '0',
+            'ai_search_key' => $tiku['ai_search_key'] ?? ''
         ]);
         break;
 
@@ -797,16 +805,61 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         $ai_base_url = $_GET['ai_base_url'] ?? '';
         $ai_model = $_GET['ai_model'] ?? '';
         $ai_key = $_GET['ai_key'] ?? '';
+        $ai_search = ($_GET['ai_search'] ?? '0') === '1' || ($_GET['ai_search'] ?? '') === 'true' ? '1' : '0';
+        $ai_search_key = $_GET['ai_search_key'] ?? '';
 
         $config_path = ensureUserConfig($userId);
         $ini = file_get_contents($config_path);
         $tiku_section = "[tiku]\nprovider=$provider\nsubmit=$submit\ntokens=$tokens\ntrue_list=$true_list\nfalse_list=$false_list";
         if (strpos($provider, 'TikuAI') !== false) {
-            $tiku_section .= "\nai_base_url=$ai_base_url\nai_model=$ai_model\nai_key=$ai_key";
+            $tiku_section .= "\nai_base_url=$ai_base_url\nai_model=$ai_model\nai_key=$ai_key\nai_search=$ai_search\nai_search_key=$ai_search_key";
         }
         $ini = preg_replace('/\[tiku\].*/s', $tiku_section, $ini);
         file_put_contents($config_path, $ini);
         echo json_encode(['success' => true]);
+        break;
+
+    case 'ai_sync':
+        // ★ 从主客户端真实配置同步 AI 答题配置：真实 baseUrl / apiKey（解密）/ 当前模型 / 联网搜索 key
+        //   数据源: SQLite user_config 表（主客户端 chat.php save_config 的实际存储，跨设备一致）
+        //   兜底: users/{uid}_config.json（旧文件存储）
+        $out = ['base_url' => '', 'api_key' => '', 'model' => '', 'search_key' => '', 'search_enabled' => '0'];
+        $mc = null;
+        $dbPath = dirname(__DIR__) . '/users/oneapichat.db';
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("SELECT config_json FROM user_config WHERE user_id = ?");
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) $mc = json_decode($row['config_json'], true);
+        } catch (Exception $e) {}
+        if (!is_array($mc)) {
+            $main_config_file = dirname(__DIR__) . '/users/' . preg_replace('/[^a-zA-Z0-9_-]/', '', $userId) . '_config.json';
+            if (file_exists($main_config_file)) $mc = json_decode(file_get_contents($main_config_file), true);
+        }
+        if (is_array($mc)) {
+            $out['base_url'] = $mc['baseUrl'] ?? '';
+            $out['model'] = $mc['model'] ?? '';
+            // ★ apiKey：按 baseUrlProvider 取对应提供商专属键（v2 加密）解密，通用 apiKey 兜底
+            $rawKey = $mc['apiKey'] ?? '';
+            $provider = $mc['baseUrlProvider'] ?? 'custom';
+            $provKeyMap = ['deepseek' => 'apiKeyDeepseek', 'openai' => 'apiKeyOpenai', 'xai' => 'apiKeyXAI',
+                'gemini' => 'apiKeyGemini', 'custom' => 'apiKeyCustom', 'minimax' => 'apiKeyMinimax',
+                'anthropic' => 'apiKeyAntthropic', 'openrouter' => 'apiKeyOpenRouter', 'longcat' => 'apiKeyLongCat'];
+            $provKey = $provKeyMap[$provider] ?? '';
+            if ($provKey && !empty($mc[$provKey])) $rawKey = $mc[$provKey];
+            if (!empty($rawKey)) $out['api_key'] = decrypt_config_key((string)$rawKey);
+            // ★ 联网搜索：按 searchProvider 选 key（tavily 优先专用键，其次通用 searchApiKey）
+            $sp = $mc['searchProvider'] ?? '';
+            $searchKey = '';
+            if ($sp === 'tavily' && !empty($mc['searchApiKeyTavily'])) $searchKey = $mc['searchApiKeyTavily'];
+            elseif ($sp === 'brave' && !empty($mc['searchApiKeyBrave'])) $searchKey = $mc['searchApiKeyBrave'];
+            elseif (!empty($mc['searchApiKey'])) $searchKey = $mc['searchApiKey'];
+            if (!empty($searchKey)) $out['search_key'] = decrypt_config_key((string)$searchKey);
+            $out['search_enabled'] = ($mc['enableSearch'] ?? '0') === '1' || ($mc['enableSearch'] ?? '') === 'true' ? '1' : '0';
+        }
+        echo json_encode(['success' => true, 'ai' => $out]);
         break;
 
     case 'stats':
@@ -886,6 +939,38 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         }
         file_put_contents($config_path, $ini_str);
         echo json_encode(['success' => true]);
+        break;
+
+    case 'models_proxy':
+        // ★ 服务端代理 /models 请求 — 绕过浏览器 CORS 限制（chaoxing.html 是单文件，无法加载 proxyFetch）
+        //   前端直接 fetch 外部 API 的 /models 会被浏览器拦截，改由 PHP curl 中继（同源请求）
+        $mUrl = $_GET['url'] ?? '';
+        $mKey = $_GET['key'] ?? '';
+        if (!$mUrl || !preg_match('#^https?://#', $mUrl)) {
+            echo json_encode(['error' => 'invalid url']);
+            break;
+        }
+        $mUrl = rtrim($mUrl, '/') . '/models';
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $mUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => $mKey ? ['Authorization: Bearer ' . $mKey, 'Content-Type: application/json'] : ['Content-Type: application/json'],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,  // ★ 东财风控教训：强制 IPv4 防 DNS 污染
+        ]);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $cerr = curl_error($ch);
+        curl_close($ch);
+        if ($httpCode >= 200 && $httpCode < 300 && $resp) {
+            // 直接透传 API 原始响应（保持 data: [{id}] 格式）
+            header('Content-Type: application/json');
+            echo $resp;
+        } else {
+            echo json_encode(['error' => 'proxy fetch failed', 'http' => $httpCode, 'curl_err' => $cerr]);
+        }
         break;
 
     default:

@@ -62,6 +62,9 @@ try:
     if not result["status"]:
         _fail(result.get("msg", "登录失败"))
     courses = chaoxing.get_course_list()
+    if not courses:
+        # 登录成功但依然取不到课程：多为风控/验证码/接口异常，明确报错而非静默空列表
+        _fail("登录成功但课程列表为空，可能触发验证码或风控，请先用浏览器登录一次超星学习通（https://i.chaoxing.com）再刷新")
     print(json.dumps({"courses": courses}), flush=True)
 
 except SystemExit:

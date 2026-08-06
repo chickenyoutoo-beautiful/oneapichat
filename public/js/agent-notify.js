@@ -109,10 +109,19 @@ function _applyRunningAgentAnimation() {
 })();
 
 function ensureChatExists() {
-    if (!currentChatId || !chats[currentChatId]) {
-        var keys = Object.keys(chats);
+    // ★ 严格分隔: 当前聊天缺失或不在当前模式域内时,只加载同域最新聊天
+    var _agentView = (typeof isAgentToolsActive === 'function') ? isAgentToolsActive() : false;
+    var _currentOk = currentChatId && chats[currentChatId] && (isAgentChat(currentChatId) === _agentView);
+    if (!_currentOk) {
+        var _uid = localStorage.getItem('authUserId') || '';
+        var keys = Object.keys(chats).filter(function(id) {
+            if (isAgentChat(id) !== _agentView) return false;
+            return !_uid || !chats[id].userId || chats[id].userId === _uid;
+        }).sort(function(a, b) {
+            return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+        });
         if (keys.length > 0) {
-            loadChat(keys[keys.length - 1]);
+            loadChat(keys[0]);
         } else {
             createNewChat();
         }
@@ -261,6 +270,37 @@ window.connectSSEChannel = function() {
         } catch(_sce) {}
     });
 
+    // ★ 多端删除同步 (2026-08-02): 其他端删除会话时, 立即移除本地副本 + 删除标记,
+    //   防止本地旧 chats 被 saveChatsToServer 写回服务器(配合服务器 deleted 墓碑双保险)
+    _sseChannel.addEventListener('chat:deleted', function(e) {
+        try {
+            var ev = JSON.parse(e.data);
+            if (ev.source === window._sseSourceId) return;
+            var cid = ev.chat_id;
+            if (!cid || !window.chats || !window.chats[cid]) return;
+            console.log('[SSE] Chat deleted from another device:', cid);
+            window._deletedChatIds = window._deletedChatIds || {};
+            window._deletedChatIds[cid] = true;
+            try { localStorage.setItem('_deletedChatIds', JSON.stringify(window._deletedChatIds)); } catch(err) {}
+            delete window.chats[cid];
+            if (typeof slimSaveChats === 'function') slimSaveChats();
+            if (typeof renderChatHistory === 'function') renderChatHistory();
+            // 当前打开的会话被其他端删除 → 切换到同域其他会话(严格分隔:不跨域加载)
+            if (currentChatId === cid) {
+                var _delAgentView = (typeof isAgentToolsActive === 'function') ? isAgentToolsActive() : false;
+                var _delUid = localStorage.getItem('authUserId') || '';
+                var _keys = Object.keys(window.chats || {}).filter(function(id) {
+                    if (isAgentChat(id) !== _delAgentView) return false;
+                    return !_delUid || !window.chats[id].userId || window.chats[id].userId === _delUid;
+                }).sort(function(a, b) {
+                    return ((window.chats[b] || {}).updated_at || 0) - ((window.chats[a] || {}).updated_at || 0);
+                });
+                if (_keys.length && typeof window.loadChat === 'function') window.loadChat(_keys[0]);
+                else if (typeof window.createNewChat === 'function') window.createNewChat();
+            }
+        } catch(err) { /* 静默 */ }
+    });
+
     _sseChannel.addEventListener('chat:updated', function(e) {
         try {
             var ev = JSON.parse(e.data);
@@ -380,6 +420,27 @@ window.connectSSEChannel = function() {
                 localStorage.setItem(agentKey, JSON.stringify(agentMsgs));
             }
 
+            // ★ 同步到 chats 对象供侧边栏显示
+            try {
+                var _subChatId = '_agent_sub_' + agentName;
+                if (!chats[_subChatId]) {
+                    chats[_subChatId] = {
+                        title: '🤖 ' + agentName,
+                        userId: localStorage.getItem('authUserId') || '',
+                        updated_at: Date.now(),
+                        messages: [],
+                        _agentSub: true
+                    };
+                }
+                var _loaded = JSON.parse(localStorage.getItem('agent_chat_' + agentName) || '[]');
+                chats[_subChatId].messages = _loaded.map(function(m) {
+                    return { role: m.role, content: m.content, time: m.time };
+                });
+                chats[_subChatId].updated_at = Date.now();
+                if (typeof saveChats === 'function') saveChats();
+                if (typeof renderChatHistory === 'function') renderChatHistory();
+            } catch(_syncErr) { console.warn('[AgentNotify] 同步侧边栏失败:', _syncErr); }
+
             // ★ 失败时显示Toast通知
             if (status === 'failed' || status === 'error') {
                 var errMsg = error || result || '未知错误';
@@ -407,6 +468,8 @@ window.connectSSEChannel = function() {
                     }
                 }
             }
+            // ★ 更新子代理运行状态条 (实时显示当前工具和步骤)
+            if (typeof window._updateSubAgentStatusBar === 'function') window._updateSubAgentStatusBar();
         } catch(_s) {}
     });
 
@@ -453,7 +516,7 @@ window._broadcastChatUpdate = function(chatId) {
 
 // ═══════════════════════════════════════════════════════════════
 // WebSocket 流式网关 — 无感续接 + 多端同步
-// 开关: __enableResumeStream === '1'
+// 开关: 默认启用，只有 __enableResumeStream === '0' 时关闭
 // ═══════════════════════════════════════════════════════════════
 
 window._wsClient = null;
@@ -530,10 +593,16 @@ window._wsConnect = function() {
                 saveChats();
                 window._wsStreamId = null;
                 window._wsChunkCount = 0;
+                // ★ 流结束必须同时清除 localStorage 残留 — 否则 loadChat 的 WS 续接块
+                //   会读到陈旧 stream_id 触发最长 3s 等待 + 早退不渲染(模式切换遮罩变慢/内容不切换)
+                try { localStorage.removeItem('_wsStreamId'); } catch(e) {}
+                try { localStorage.removeItem('_wsChunkCount'); } catch(e) {}
             } else if (ev === 'error') {
                 console.warn('[WS] ❌ Stream error:', d.error);
                 window._wsStreamId = null;
                 window._wsChunkCount = 0;
+                try { localStorage.removeItem('_wsStreamId'); } catch(e) {}
+                try { localStorage.removeItem('_wsChunkCount'); } catch(e) {}
             }
         } catch(ex) {}
     };
@@ -546,7 +615,7 @@ window._wsConnect = function() {
             window._wsReconnecting = true;
             setTimeout(function() {
                 window._wsReconnecting = false;
-                if (localStorage.getItem('__enableResumeStream') === '1') {
+                if (localStorage.getItem('__enableResumeStream') !== '0') {
                     window._wsConnect();
                 }
             }, 5000);
@@ -860,4 +929,3 @@ window.__forceSave = function() {
     console.log('强制保存后状态:');
     window.__dumpImages();
 };
-

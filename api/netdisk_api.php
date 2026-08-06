@@ -18,16 +18,35 @@ require_once __DIR__ . '/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
 // ── 认证 ──
+// ★ 2026-08-03 修复: sessions.json 实际结构是 {token: {user_id, created_at}},
+//   旧逻辑遍历找 $sess['token'] 永远匹配不到 → $userId 恒为 null（下载无法按用户隔离）
 $userId = null;
 $authToken = $_GET['auth_token'] ?? $_POST['auth_token'] ?? '';
 if ($authToken) {
-    $sessionFile = __DIR__ . '/../users/sessions.json';
-    if (file_exists($sessionFile)) {
-        $sessions = json_decode(file_get_contents($sessionFile), true) ?: [];
-        foreach ($sessions as $uid => $sess) {
-            if (!empty($sess['token']) && $sess['token'] === $authToken) {
-                $userId = $uid;
-                break;
+    // DB 优先（与 verifyAuthToken 同源）
+    $dbPath = __DIR__ . '/../users/oneapichat.db';
+    if (file_exists($dbPath)) {
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("SELECT user_id, created_at FROM sessions WHERE token = ?");
+            $stmt->execute([$authToken]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && time() - ($row['created_at'] ?? 0) < 30 * 24 * 3600) {
+                $userId = $row['user_id'];
+            }
+        } catch (Exception $e) {}
+    }
+    // 回退: JSON 文件
+    if (!$userId) {
+        $sessionFile = __DIR__ . '/../users/sessions.json';
+        if (file_exists($sessionFile)) {
+            $sessions = json_decode(file_get_contents($sessionFile), true) ?: [];
+            if (isset($sessions[$authToken]['user_id'])) {
+                $sess = $sessions[$authToken];
+                if (time() - ($sess['created_at'] ?? 0) < 30 * 24 * 3600) {
+                    $userId = $sess['user_id'];
+                }
             }
         }
     }
@@ -55,8 +74,9 @@ function identify_netdisk_type($url) {
         'mobile'  => '/(yun\.139\.com|caiyun\.139\.com)/',
         'uc'      => '/(drive\.uc\.cn|fast\.uc\.cn)/',
         '123'     => '/123pan\.com/',
-        'lanzou'  => '/(lanzou[a-z]*\.com|lanzous\.com)/',
-        'ilanzou' => '/ilanzou\.com/',
+        // ★ ilanzou 必须先于 lanzou, 且 lanzou 模式用 (?:^|[^a-z0-9]) 避免误命中 "ilanzou.com"
+        'ilanzou' => '/(?:^|[^a-z0-9])ilanzou\.com/',
+        'lanzou'  => '/(?:^|[^a-z0-9])lanzou[a-z]*\.com|lanzous\.com/',
         'feijipan' => '/feijipan\.com/',
         'guangyapan' => '/guangyapan\.com/',
     ];
@@ -82,6 +102,8 @@ function get_jxpan_api() {
 function jxpan_parse($url, $password) {
     $api = get_jxpan_api();
     if ($api === '') return null;
+    // JxPan Worker 对百度链接会抛 Cloudflare 1101 异常, 直接跳过(百度走 Playwright 兜底)
+    if (preg_match('/pan\.baidu\.com/', $url)) return null;
     $apiUrl = rtrim($api, '/') . '/?url=' . urlencode($url) . '&type=json';
     if ($password !== '') $apiUrl .= '&pwd=' . urlencode($password);
     $ch = curl_init();
@@ -107,8 +129,14 @@ function jxpan_parse($url, $password) {
     $d = $data['data'];
     $size = 0;
     if (isset($d['file_size']) && is_string($d['file_size'])) {
-        if (preg_match('/^([\d.]+)\s*(B|KB|MB|GB|TB)$/i', trim($d['file_size']), $m)) {
-            $units = ['B' => 1, 'KB' => 1024, 'MB' => 1048576, 'GB' => 1073741824, 'TB' => 1099511627776];
+        // 兼容 "58.3 M" / "1.2G" / "300MB" 等常见格式
+        if (preg_match('/^([\d.]+)\s*([KMGT]?B?)$/i', trim($d['file_size']), $m)) {
+            $units = [
+                'B' => 1, 'KB' => 1024, 'K' => 1024,
+                'MB' => 1048576, 'M' => 1048576,
+                'GB' => 1073741824, 'G' => 1073741824,
+                'TB' => 1099511627776, 'T' => 1099511627776,
+            ];
             $size = (int)round((float)$m[1] * $units[strtoupper($m[2])]);
         } elseif (is_numeric($d['file_size'])) {
             $size = (int)$d['file_size'];
@@ -179,7 +207,7 @@ function parse_baidu_link($url, $password) {
         'method' => 'POST',
         'header' => "Content-Type: application/json\r\n",
         'content' => $mcpBody,
-        'timeout' => 80,
+        'timeout' => 130,
         'ignore_errors' => true,
     ]]);
     $mcpResp = @file_get_contents('http://127.0.0.1:18788/mcp/api/tools/call', false, $mcpCtx);
@@ -189,6 +217,8 @@ function parse_baidu_link($url, $password) {
         $mcpResult = $mcpData['result'] ?? $mcpData ?? null;
         if (is_string($mcpResult)) { $mcpResult = json_decode($mcpResult, true) ?: $mcpResult; }
         if (is_array($mcpResult) && !empty($mcpResult['success'])) return $mcpResult;
+        // ★ 验证码人机协助: 把验证码图片/vcode 原样返回, 由用户提供验证码后重试
+        if (is_array($mcpResult) && !empty($mcpResult['captcha_required'])) return $mcpResult;
         if (is_array($mcpResult) && !empty($mcpResult['error'])) $mcpFailError = $mcpResult['error'];
     }
 
@@ -259,23 +289,25 @@ function parse_aliyun_link($url, $password) {
         return ['success' => false, 'error' => '无法提取阿里云盘分享ID'];
     }
 
-    // 阿里云盘解析需要 token，使用本地脚本
-    $scriptPath = __DIR__ . '/../python/netdisk/aliyun_parser.py';
+    // ★ 使用统一 Python 解析器 (netdisk_parser.py 内含 parse_aliyun: refresh_token → 直链)
+    $scriptPath = __DIR__ . '/../python/netdisk/netdisk_parser.py';
     if (file_exists($scriptPath)) {
         $cmd = sprintf(
-            '%s %s %s 2>&1',
+            '%s %s %s %s 2>&1',
             pythonBin(),
             escapeshellarg($scriptPath),
-            escapeshellarg($url)
+            escapeshellarg($url),
+            escapeshellarg($password)
         );
         $output = shell_exec($cmd);
         if ($output) {
             $result = json_decode($output, true);
             if ($result) return $result;
+            return ['success' => false, 'error' => '阿里云盘解析引擎返回异常: ' . substr($output, 0, 200)];
         }
     }
 
-    return ['success' => false, 'error' => '阿里云盘解析暂不支持，需要配置 refresh_token'];
+    return ['success' => false, 'error' => '阿里云盘解析引擎未安装'];
 }
 
 /**
@@ -297,8 +329,32 @@ function parse_generic($url, $password) {
     $output = shell_exec($cmd);
     if ($output) {
         $result = json_decode($output, true);
-        if ($result) return $result;
-        return ['success' => false, 'error' => '解析引擎返回异常: ' . substr($output, 0, 200)];
+        if ($result && !empty($result['success'])) return $result;
+        $failedResult = $result ?: ['success' => false, 'error' => '解析引擎无输出'];
+
+        // ★ 蓝奏云浏览器兜底: 页面被阿里云WAF JS挑战拦截, 纯Python拿不到真实页面。
+        //   Playwright(以 naujtrats 身份, 由MCP服务运行) 自动执行JS挑战后提取sign请求ajaxm.php。
+        if (preg_match('/(?:^|[^a-z0-9])(?:wws?\.)?lanzou[a-z]*\.com|lanzous\.com/i', $url)) {
+            $mcpBody = json_encode(['name' => 'netdisk_login', 'arguments' => [
+                'action' => 'parse', 'service' => 'lanzou', 'url' => $url, 'password' => $password,
+            ]], JSON_UNESCAPED_UNICODE);
+            $mcpCtx = stream_context_create(['http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => $mcpBody,
+                'timeout' => 90,
+                'ignore_errors' => true,
+            ]]);
+            $mcpResp = @file_get_contents('http://127.0.0.1:18788/mcp/api/tools/call', false, $mcpCtx);
+            if ($mcpResp) {
+                $mcpData = json_decode($mcpResp, true);
+                $mcpResult = $mcpData['result'] ?? $mcpData ?? null;
+                if (is_string($mcpResult)) { $mcpResult = json_decode($mcpResult, true) ?: $mcpResult; }
+                if (is_array($mcpResult) && !empty($mcpResult['success'])) return $mcpResult;
+            }
+        }
+
+        return $failedResult;
     }
     return ['success' => false, 'error' => '解析引擎无输出'];
 }
@@ -306,7 +362,8 @@ function parse_generic($url, $password) {
 /**
  * 使用 aria2 下载文件
  */
-function download_file($url, $filename, $outputDir, $threads) {
+function download_file($url, $filename, $outputDir, $threads, $headers = null) {
+    global $userId; // ★ 2026-08-03: 下载完成按用户同步云盘
     if (!filter_var($url, FILTER_VALIDATE_URL)) {
         return ['success' => false, 'error' => '无效的下载链接'];
     }
@@ -328,6 +385,14 @@ function download_file($url, $filename, $outputDir, $threads) {
         $threads, $threads,
         escapeshellarg($outputDir)
     );
+    // ★ 带请求头下载(夸克直链需要最新 __pus/__puus Cookie + Referer/UA, 否则CDN回调403)
+    if (is_array($headers)) {
+        foreach (['Cookie', 'Referer', 'User-Agent'] as $hk) {
+            if (!empty($headers[$hk])) {
+                $cmd .= ' --header=' . escapeshellarg($hk . ': ' . $headers[$hk]);
+            }
+        }
+    }
     if ($filename) {
         $cmd .= ' -o ' . escapeshellarg(basename($filename));
     }
@@ -336,11 +401,36 @@ function download_file($url, $filename, $outputDir, $threads) {
     exec($cmd, $output, $returnCode);
 
     if ($returnCode === 0) {
+        // ★ 2026-08-03 云盘全面结合: 下载完成自动同步到用户 Cloudreve 账号 OneAPIChat/downloads
+        $cloudreve = null;
+        if ($userId) {
+            $downloadedFile = $filename ? $outputDir . '/' . basename($filename) : '';
+            if (!$downloadedFile || !is_file($downloadedFile)) {
+                // 无显式文件名: 取目录内最新文件
+                $dirFiles = glob($outputDir . '/*');
+                usort($dirFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
+                $downloadedFile = $dirFiles[0] ?? '';
+            }
+            if ($downloadedFile && is_file($downloadedFile)) {
+                require_once __DIR__ . '/cloudreve_lib.php';
+                $crResult = cr_importFile($userId, $downloadedFile, 'downloads');
+                if (empty($crResult['success'])) {
+                    error_log('[cloudreve] netdisk 下载导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$downloadedFile");
+                }
+                $cloudreve = [
+                    'synced' => !empty($crResult['success']),
+                    'path' => $crResult['cloudreve_path'] ?? '',
+                    'source' => $crResult['source'] ?? '',
+                    'error' => $crResult['error'] ?? null,
+                ];
+            }
+        }
         return [
             'success' => true,
             'message' => '下载完成',
             'output_dir' => $outputDir,
             'threads' => $threads,
+            'cloudreve' => $cloudreve,
         ];
     }
     return [
@@ -364,6 +454,11 @@ switch ($action) {
         if ($result['success']) {
             $result['netdisk_type'] = $netdiskType;
             netdisk_success($result);
+        } elseif (!empty($result['captcha_required'])) {
+            // 百度验证码: 返回图片+提示, 客户端可展示给用户人工识别
+            $result['netdisk_type'] = $netdiskType;
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+            exit;
         } else {
             netdisk_error($result['error'] ?? '解析失败');
         }
@@ -405,7 +500,8 @@ switch ($action) {
         // Step 2: Download
         $directUrl = $parseResult['direct_url'];
         $autoFilename = $filename ?: ($parseResult['filename'] ?? '');
-        $downloadResult = download_file($directUrl, $autoFilename, $outputDir, $threads);
+        $downloadHeaders = $parseResult['headers'] ?? null;
+        $downloadResult = download_file($directUrl, $autoFilename, $outputDir, $threads, $downloadHeaders);
 
         netdisk_success([
             'parse' => $parseResult,

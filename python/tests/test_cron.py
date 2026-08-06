@@ -51,9 +51,10 @@ class TestCronJobs(unittest.TestCase):
 
         # Stop
         _stop_cron_job("test_cron", "test_user", self._mock_get_ns)
-        # After stop, thread may still exist briefly but job is disabled
+        # stop 会等待线程与子进程完成清理，避免 teardown 后继续访问临时目录。
         updated = store.get()
         self.assertFalse(updated["test_cron"]["enabled"])
+        self.assertNotIn(key, _cron_threads)
 
     def test_start_nonexistent(self):
         """启动不存在的任务不抛异常"""

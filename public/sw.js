@@ -1,5 +1,5 @@
 // Service Worker v66 — 仅缓存静态资源, 其他全部放行
-const CACHE_NAME = 'naujtrats-v104';
+const CACHE_NAME = 'naujtrats-v106';
 const STATIC_EXTS = /\.(css|woff2?|ttf|eot|png|jpg|jpeg|svg|ico|webp|json)$/i;
 
 // ========== Install ==========

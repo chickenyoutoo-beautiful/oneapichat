@@ -80,6 +80,137 @@ def _get_proxies():
     if _PROXY_URL:
         return {'http': _PROXY_URL, 'https': _PROXY_URL}
     return None
+
+def _repair_tool_json(raw):
+    """容错修复工具参数JSON: 未转义引号 → \\\"、未转义换行 → \\\\n、截断 → 补齐引号/花括号"""
+    if not isinstance(raw, str):
+        return '{}'
+    out = []
+    in_str = False
+    had_inner = False
+    i = 0
+    n = len(raw)
+    while i < n:
+        ch = raw[i]
+        if not in_str:
+            out.append(ch)
+            if ch == '"':
+                in_str = True
+                had_inner = False
+            i += 1
+            continue
+        if ch == '\\':
+            out.append(ch)
+            if i + 1 < n:
+                out.append(raw[i + 1])
+                i += 2
+            else:
+                i += 1
+            continue
+        if ch == '\n':
+            out.append('\\n')
+            i += 1
+            continue
+        if ch == '\r':
+            out.append('\\r')
+            i += 1
+            continue
+        if ch == '\t':
+            out.append('\\t')
+            i += 1
+            continue
+        if ord(ch) < 32:
+            out.append(' ')
+            i += 1
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < n and raw[j] in ' \t':
+                j += 1
+            nxt = raw[j] if j < n else ''
+            if nxt == ',':
+                k = j + 1
+                while k < n and raw[k] in ' \t':
+                    k += 1
+                after_comma = raw[k] if k < n else ''
+                if after_comma in ('"', '}', ']', ''):
+                    if had_inner:
+                        # 值内引号对刚闭合, 逗号前补一个真正的JSON收尾引号
+                        out.append('\\"')
+                        out.append('"')
+                        in_str = False
+                    else:
+                        out.append('"')
+                        in_str = False
+                else:
+                    out.append('\\"')
+                    had_inner = True
+            elif nxt in ('}', ']', ':', ''):
+                out.append('"')
+                in_str = False
+            else:
+                out.append('\\"')
+                had_inner = True
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    if in_str:
+        out.append('"')
+    fixed = ''.join(out)
+    ob = fixed.count('{')
+    cb = fixed.count('}')
+    if cb < ob:
+        fixed += '}' * (ob - cb)
+    return fixed
+
+def _tolerant_tool_args(tool_name, raw):
+    """模型输出的工具参数JSON不合法时,尽量恢复 server_exec/server_python 的命令/脚本(兼容未转义引号)"""
+    if not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(_repair_tool_json(raw))
+        if isinstance(data, dict):
+            if tool_name == "server_exec":
+                val = data.get("cmd") or data.get("command") or data.get("query")
+            elif tool_name == "server_python":
+                val = data.get("script") or data.get("code") or data.get("cmd")
+            if val:
+                return {("cmd" if tool_name == "server_exec" else "script"): str(val)}
+            return data
+    except Exception:
+        pass
+    if tool_name == "server_exec":
+        keys = ["cmd", "command", "query"]
+    elif tool_name == "server_python":
+        keys = ["script", "code", "cmd"]
+    else:
+        return None
+    target = "cmd" if tool_name == "server_exec" else "script"
+    # 1) 标准 JSON 转义的值
+    for key in keys:
+        m = re.search(r'"' + key + r'"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+        if m:
+            val = m.group(1)
+            return {target: val.replace('\\n', '\n').replace('\\r', '\r').replace('\\"', '"').replace('\\\\', '\\')}
+    # 2) 容错: 值内含未转义的引号 → 取 "key": " 之后全部内容, 从末尾找真正的收尾引号
+    for key in keys:
+        m2 = re.search(r'"' + key + r'"\s*:\s*"([\s\S]*)$', raw)
+        if not m2:
+            continue
+        val = m2.group(1).rstrip()
+        cut = -1
+        for i in range(len(val) - 1, -1, -1):
+            if val[i] == '"':
+                rest = val[i+1:].lstrip()
+                if rest == '' or rest.startswith('}') or rest.startswith(','):
+                    cut = i
+                    break
+        if cut >= 0:
+            val = val[:cut]
+        val = val.strip()
+        return {target: val.replace('\\n', '\n').replace('\\r', '\r').replace('\\"', '"').replace('\\\\', '\\')}
+    return None
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 sys.path.insert(0, os.path.join(tempfile.gettempdir(), 'pylib'))
@@ -755,12 +886,13 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not path or not content:
                 return "错误:缺少 path 或 content 参数"
             try:
-                allowed_prefix = str(TEMP_DIR) + "/"
-                if not path.startswith(allowed_prefix):
-                    return f"错误:只允许写入 {allowed_prefix} 目录"
+                # ★ 相对路径基于项目根解析(曾只允许 /tmp, 项目内写入全被拒)
+                if not os.path.isabs(path):
+                    path = os.path.join(PROJECT_ROOT, path)
                 safe_path = os.path.normpath(path)
-                if not safe_path.startswith(allowed_prefix):
-                    return "错误:路径不合法"
+                allowed_prefixes = (str(TEMP_DIR) + "/", PROJECT_ROOT + "/")
+                if not safe_path.startswith(allowed_prefixes):
+                    return f"错误:只允许写入 /tmp/ 或项目目录"
                 os.makedirs(os.path.dirname(safe_path), exist_ok=True)
                 mode = "a"  # 追加模式
                 with open(safe_path, mode, encoding="utf-8") as f:
@@ -778,12 +910,13 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not path or not content:
                 return "错误:缺少 path 或 content 参数"
             try:
-                allowed_prefix = str(TEMP_DIR) + "/"
-                if not path.startswith(allowed_prefix):
-                    return f"错误:只允许写入 {allowed_prefix} 目录"
+                # ★ 相对路径基于项目根解析(曾只允许 /tmp, 项目内写入全被拒)
+                if not os.path.isabs(path):
+                    path = os.path.join(PROJECT_ROOT, path)
                 safe_path = os.path.normpath(path)
-                if not safe_path.startswith(allowed_prefix):
-                    return "错误:路径不合法"
+                allowed_prefixes = (str(TEMP_DIR) + "/", PROJECT_ROOT + "/")
+                if not safe_path.startswith(allowed_prefixes):
+                    return f"错误:只允许写入 /tmp/ 或项目目录"
                 os.makedirs(os.path.dirname(safe_path), exist_ok=True)
                 with open(safe_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -797,6 +930,8 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             if not path:
                 return "错误:缺少 path 参数"
             try:
+                if not os.path.isabs(path):  # ★ 相对路径基于项目根解析
+                    path = os.path.join(PROJECT_ROOT, path)
                 if not os.path.isfile(path):
                     return f"文件不存在: {path}"
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -1018,6 +1153,12 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 shutil.copy2(output, web_path)
                 file_size_kb = os.path.getsize(web_path) // 1024
                 web_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/ppt_{safe_name}.pptx"
+                # ★ 云盘全面结合: 同步到用户 OneAPIChat/generated
+                try:
+                    if user_id:
+                        _import_to_cloudreve(user_id, web_path, "generated")
+                except Exception:
+                    pass
                 return (
                     f"✅ PPT已生成\n"
                     f"📥 下载链接: {web_url}\n"
@@ -1035,15 +1176,33 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 _engine_url = "http://127.0.0.1:8766/engine/" + {
                     "server_exec": "exec", "server_python": "python", "server_file_read": "file/read",
                     "server_file_write": "file/write", "server_file_write_chunked": "file/write_chunked",
-                "server_file_search": "file_search",
+                    "server_file_search": "file_search", "server_file_grep": "file_grep",
+                    "server_file_edit": "file_edit",
                     "server_sys_info": "sys/info", "server_ps": "ps", "server_disk": "disk",
                     "server_network": "network", "server_docker": "docker", "server_db_query": "db_query",
-                    "server_file_op": "file_op", "server_file_append": "file_append",
+                    "server_file_op": "file_op", "server_file_append": "file/write",
                     "engine_push": "agent/heartbeat"
                 }.get(tool_name, tool_name)
                 _params = {};
-                for _k, _v in args.items(): _params[_k] = str(_v);
-                _r = _http_session.get(_engine_url, params=_params, timeout=30);
+                for _k, _v in args.items():
+                    if _v is None: continue
+                    _params[_k] = str(_v);
+                # ★ 复杂命令(含引号/特殊字符)走 POST body,避免 GET URL 转义/长度限制; 兼容 command/code 别名
+                if tool_name == "server_exec":
+                    _cmd = _params.get("cmd") or _params.get("command") or _params.get("query") or ""
+                    _ep = {k: v for k, v in _params.items() if k in ("timeout", "cwd", "max_output", "user_id")}
+                    _r = _http_session.post(_engine_url, params=_ep, data=_cmd.encode('utf-8') if isinstance(_cmd, str) else str(_cmd), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 60) or 60) + 10, 5))
+                elif tool_name == "server_python":
+                    _script = _params.get("script") or _params.get("code") or _params.get("cmd") or ""
+                    _ep = {k: v for k, v in _params.items() if k in ("timeout", "user_id")}
+                    _r = _http_session.post(_engine_url, params=_ep, data=_script.encode('utf-8') if isinstance(_script, str) else str(_script), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 30) or 30) + 10, 5))
+                elif tool_name == "server_file_edit":
+                    # ★ file_edit 端点要求 POST + JSON body (old_string/new_string), path 走 query
+                    _ep = {k: v for k, v in _params.items() if k in ("path", "replace_all")}
+                    _body = json.dumps({k: args[k] for k in ("old_string", "new_string") if args.get(k) is not None}, ensure_ascii=False)
+                    _r = _http_session.post(_engine_url, params=_ep, data=_body, headers={"Content-Type": "application/json"}, timeout=30)
+                else:
+                    _r = _http_session.get(_engine_url, params=_params, timeout=30);
                 _d = _r.json();
                 return json.dumps(_d, ensure_ascii=False)
             except Exception as _e:
@@ -1175,6 +1334,10 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             max_rounds = max_agent_rounds
             result_parts = []
             start_time = time.time()
+            # ★ 死循环检测: 小参数模型易陷入工具复读/振荡死循环烧 token (python/engine/loop_guard.py)
+            from engine.loop_guard import LoopGuard
+            _lg = LoopGuard()
+            _force_summary = False
 
             for round_num in range(max_rounds):
                 # 检查总执行时间
@@ -1248,14 +1411,30 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     try:
                         tool_args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError as _je:
-                        # ★ 工具参数解析失败时降级为"跳过并通知"
-                        result_parts.append(f"[工具: {tool_name}] 参数解析失败: 跳过")
-                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"[错误] {tool_name} 参数解析失败: {str(_je)}, 请检查参数格式后重试"})
-                        continue
-                    try:
-                        result = _execute_tool(tool_name, tool_args)
-                    except Exception as _te:
-                        result = f"[工具执行异常] {tool_name}: {str(_te)[:200]}"
+                        # ★ 容错: server_exec/server_python 参数含引号导致JSON非法时尝试恢复
+                        tool_args = _tolerant_tool_args(tool_name, tc.function.arguments)
+                        if tool_args is None:
+                            result_parts.append(f"[工具: {tool_name}] 参数解析失败: 跳过")
+                            messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"[错误] {tool_name} 参数解析失败: {str(_je)}, 请检查参数格式后重试"})
+                            continue
+                        result_parts.append(f"[工具: {tool_name}] 参数JSON非法,已容错恢复: {str(tool_args)[:80]}")
+                    if not isinstance(tool_args, dict):
+                        tool_args = {}
+                    # ★ 参数别名兼容: command→cmd, code→script
+                    if tool_name == "server_exec" and not tool_args.get("cmd"):
+                        tool_args["cmd"] = tool_args.get("command") or tool_args.get("query") or ""
+                    elif tool_name == "server_python" and not tool_args.get("script"):
+                        tool_args["script"] = tool_args.get("code") or tool_args.get("cmd") or ""
+                    # ★ 死循环检测: 重复/振荡 → 跳过执行, 注入提示并强制总结轮
+                    if _lg.record_tool_call(tool_name, tool_args) == "skip":
+                        _guard_msg = f"【系统提示】系统检测到{_lg.last_reason},该调用未执行。请立即停止调用工具,直接根据已有信息输出最终总结。"
+                        result = _guard_msg
+                        _force_summary = True
+                    else:
+                        try:
+                            result = _execute_tool(tool_name, tool_args)
+                        except Exception as _te:
+                            result = f"[工具执行异常] {tool_name}: {str(_te)[:200]}"
                     # ★ 日志追踪: 工具名称 + 结果概要
                     result_preview = str(result)[:80].replace('\n', ' ')
                     print(f"[子代理:{name}] 工具调用: {tool_name} -> {result_preview}", flush=True)
@@ -1291,6 +1470,26 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         store.set(current)
                     finally:
                         _lock.release()
+
+                # ★ 死循环检测(轮末): 连续纯工具轮 → 终止; 复读/无进展 → 强制总结轮
+                _round_action = _lg.record_round(had_content=bool(msg.content), tool_count=len(msg.tool_calls))
+                if _round_action == "abort":
+                    result_parts.append(f"[系统检测到死循环: {_lg.last_reason},已终止本轮工作]")
+                    try:
+                        _broadcast_to_user(user_id, 'agent:warning', {'agent': name, 'msg': f'检测到死循环({_lg.last_reason}),已终止'})
+                    except Exception:
+                        pass
+                    break
+                _rep = _lg.feed_text("\n".join(result_parts))
+                if _rep:
+                    result_parts.append(f"[系统检测到死循环: {_rep}]")
+                    max_rounds = min(max_rounds, round_num + 1)  # 复用早停: 下一轮为无工具总结轮
+                    try:
+                        _broadcast_to_user(user_id, 'agent:warning', {'agent': name, 'msg': f'检测到死循环({_rep}),已注入强制总结'})
+                    except Exception:
+                        pass
+                if _force_summary:
+                    max_rounds = min(max_rounds, round_num + 1)  # 强制进入最终总结轮(无工具)
 
             # ★ P0: 尝试从累积结果生成结构化输出
             _structured_output = None
@@ -2043,6 +2242,7 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
     tool_calls = []
     usage = None
     error = ''
+    stop_reason = ''
     seq = 0
 
     def sse_event(data_str: str, event_type: str = 'chunk'):
@@ -2056,11 +2256,15 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             import httpx; _httpc = httpx.Client(proxy=_rp)
         elif _PROXY_URL:
             import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
+        is_longcat = _is_longcat_request(request_data)
         client = OpenAI(api_key=request_data.get('api_key', ''),
                         base_url=request_data.get('base_url', '').strip().rstrip('/') or None,
-                        http_client=_httpc)
-        model = request_data.get('model', 'deepseek-chat')
+                        http_client=_httpc,
+                        timeout=600.0 if is_longcat else 300.0)
+        model = 'LongCat-2.0' if is_longcat else request_data.get('model', 'deepseek-chat')
         messages = request_data.get('messages', [])
+        if is_longcat:
+            _sanitize_longcat_openai_messages(messages)
         # ★ 去重 tool_call_id: MiniMax/DeepSeek 拒绝同一请求中重复的 tool_call id
         seen_tc_ids_s2 = set()
         for m in messages:
@@ -2098,6 +2302,8 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             stream_params['tools'] = tools
         if request_data.get('reasoning'):
             stream_params['reasoning'] = request_data.get('reasoning')
+        if is_longcat:
+            stream_params['extra_body'] = {'thinking': _longcat_thinking(request_data)}
         # 发送初始事件
         yield sse_event(json.dumps({'type': 'start', 'msg_id': msg_id}))
 
@@ -2115,7 +2321,10 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
                     try: usage = chunk.usage.model_dump()
                     except Exception: pass
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                stop_reason = choice.finish_reason
+            delta = choice.delta
             seq += 1
 
             content_delta = delta.content or ''
@@ -2212,7 +2421,9 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             full_text = _re_tmp2.sub(r'', full_text)
         store.finish_stream(msg_id, full_text.strip(), reasoning_text.strip(), tool_calls, usage)
         yield sse_event(json.dumps({'type': 'done', 'full_text': full_text.strip(), 'reasoning_text': reasoning_text.strip(),
-                                     'tool_calls': tool_calls, 'usage': usage}))
+                                     'tool_calls': tool_calls, 'usage': usage,
+                                     'stop_reason': stop_reason,
+                                     'truncated': stop_reason in ('max_tokens', 'length')}))
 
     except Exception as e:
         error = str(e)
@@ -2295,50 +2506,265 @@ def _is_cancelled(stream_id: str) -> bool:
         return bool(entry and entry.get('cancel'))
 
 
+def _is_longcat_request(request_data: dict) -> bool:
+    """LongCat 识别同时覆盖官方 base URL 和模型名。"""
+    model = str(request_data.get('model', '') or '').lower()
+    base_url = str(request_data.get('base_url', '') or '').lower()
+    anthropic_url = str(request_data.get('anthropic_url', '') or '').lower()
+    return 'longcat' in model or 'api.longcat.chat' in base_url or 'api.longcat.chat' in anthropic_url
+
+
+def _longcat_thinking(request_data: dict) -> dict:
+    """官方只接受 enabled/disabled；未配置时默认关闭以保证普通问答有正文。"""
+    thinking = request_data.get('thinking')
+    mode = thinking.get('type') if isinstance(thinking, dict) else ''
+    return {'type': 'enabled' if mode == 'enabled' else 'disabled'}
+
+
+def _longcat_text_content(content):
+    """把 OpenAI 多模态块降级为 LongCat 当前支持的纯文本输入。"""
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            block_type = block.get('type', '')
+            if block_type == 'text':
+                parts.append(str(block.get('text', '') or ''))
+            elif block_type in ('image', 'image_url'):
+                parts.append('[图片]')
+            elif block_type in ('video', 'video_url'):
+                parts.append('[视频]')
+            elif block_type == 'tool_result':
+                value = block.get('content', '')
+                parts.append(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+    return '\n'.join(part for part in parts if part)
+
+
+def _sanitize_longcat_openai_messages(messages: list) -> list:
+    """移除 LongCat OpenAI 端点不支持的历史推理元数据。"""
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if isinstance(message.get('content'), list):
+            message['content'] = _longcat_text_content(message['content'])
+        for key in ('reasoning_content', 'reasoning', 'reasoning_details'):
+            message.pop(key, None)
+    return messages
+
+
 # ═══════════════════════════════════════════════════════════════
 # StreamBuffer — 磁盘持久化流缓冲（引擎重启不丢 chunks）
 # ═══════════════════════════════════════════════════════════════
 
 class StreamBuffer:
-    """msg_id 粒度的流缓冲，chunks 持久化到 JSON 文件"""
-    __slots__ = ('msg_id', 'path', 'chunks', 'content', '_last_save')
+    """msg_id 粒度的流缓冲，并持久化可立即恢复的聚合快照。"""
+    __slots__ = (
+        'msg_id', 'path', 'chunks', 'content', 'reasoning', 'tool_calls',
+        'usage', 'finished', 'error', 'stop_reason', 'truncated',
+        'stream_id', 'chat_id', 'user_id',
+        '_last_save', '_lock'
+    )
 
     def __init__(self, msg_id: str):
         self.msg_id = msg_id
         self.path = STREAM_DIR / f"{msg_id}.json"
         self.chunks: list = []
         self.content: str = ''
+        self.reasoning: str = ''
+        self.tool_calls: list = []
+        self.usage = None
+        self.finished: bool = False
+        self.error: str = ''
+        self.stop_reason: str = ''
+        self.truncated: bool = False
+        self.stream_id: str = ''
+        self.chat_id: str = ''
+        self.user_id: str = ''
+        self._last_save = 0.0
+        self._lock = threading.RLock()
         self._load()
 
     def _load(self):
         if self.path.exists():
             try:
-                data = json.loads(self.path.read_text())
+                data = json.loads(self.path.read_text(encoding='utf-8'))
                 self.chunks = data.get("chunks", [])
                 self.content = data.get("content", "")
+                self.reasoning = data.get("reasoning", data.get("reasoning_text", ""))
+                self.tool_calls = data.get("tool_calls", []) or []
+                self.usage = data.get("usage")
+                self.finished = bool(data.get("finished", False))
+                self.error = data.get("error", "") or ""
+                self.stop_reason = data.get("stop_reason", "") or ""
+                self.truncated = bool(data.get("truncated", False))
+                self.stream_id = data.get("stream_id", "") or ""
+                self.chat_id = data.get("chat_id", "") or ""
+                self.user_id = data.get("user_id", "") or ""
+                self._last_save = float(data.get("ts", 0) or 0)
+                # 升级前的缓冲文件只保存 chunks/finished。首次读取时从 SSE 历史
+                # 重建聚合快照，避免部署升级后的第一次刷新显示为空白。
+                if (not data.get("snapshot_version") and self.chunks and
+                        not any(key in data for key in (
+                            "content", "reasoning", "tool_calls", "usage", "error", "stop_reason"
+                        ))):
+                    self._rebuild_snapshot_from_chunks()
             except Exception:
                 pass
 
+    def _rebuild_snapshot_from_chunks(self):
+        for payload in self.chunks:
+            if not isinstance(payload, str):
+                continue
+            event_type = ''
+            event_data = None
+            for raw_line in payload.splitlines():
+                line = raw_line.strip()
+                if line.startswith('event:'):
+                    event_type = line[6:].strip()
+                elif line.startswith('data:'):
+                    try:
+                        event_data = json.loads(line[5:].strip())
+                    except Exception:
+                        event_data = None
+            if not isinstance(event_data, dict):
+                continue
+            event_type = event_type or str(event_data.get('type', '') or '')
+            if event_type == 'content':
+                self.content += str(event_data.get('delta', '') or '')
+            elif event_type == 'reasoning':
+                self.reasoning += str(event_data.get('delta', '') or '')
+            elif event_type == 'tool_call':
+                tools = event_data.get('tools')
+                if isinstance(tools, list):
+                    self.tool_calls = tools
+                elif event_data.get('function'):
+                    self.tool_calls.append(event_data)
+            elif event_type == 'done' or 'full_text' in event_data:
+                self.content = event_data.get('full_text', self.content) or self.content
+                self.reasoning = event_data.get('reasoning_text', self.reasoning) or self.reasoning
+                if isinstance(event_data.get('tool_calls'), list):
+                    self.tool_calls = event_data['tool_calls']
+                self.usage = event_data.get('usage', self.usage)
+                self.stop_reason = event_data.get('stop_reason', self.stop_reason) or self.stop_reason
+                self.truncated = bool(event_data.get('truncated', self.truncated))
+                self.finished = True
+                self.error = ''
+            elif event_type == 'error' or event_data.get('error'):
+                self.error = str(event_data.get('error', 'stream error') or 'stream error')
+                self.finished = True
+
     def _save(self):
-        try:
-            self.path.write_text(json.dumps({
-                "chunks": self.chunks, "content": self.content,
-                "ts": time.time()
-            }, ensure_ascii=False))
-        except Exception as e:
-            print(f"[StreamBuffer] save error: {e}")
+        with self._lock:
+            try:
+                now = time.time()
+                payload = {
+                    "snapshot_version": 1,
+                    "chunks": self.chunks,
+                    "content": self.content,
+                    "reasoning": self.reasoning,
+                    "tool_calls": self.tool_calls,
+                    "usage": self.usage,
+                    "finished": self.finished,
+                    "error": self.error,
+                    "stop_reason": self.stop_reason,
+                    "truncated": self.truncated,
+                    "stream_id": self.stream_id,
+                    "chat_id": self.chat_id,
+                    "user_id": self.user_id,
+                    "ts": now,
+                }
+                # 原子替换，避免进程退出或并发读取时留下半截 JSON。
+                tmp_path = self.path.with_suffix(self.path.suffix + '.tmp')
+                tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+                os.replace(tmp_path, self.path)
+                self._last_save = now
+            except Exception as e:
+                print(f"[StreamBuffer] save error: {e}")
+
+    def set_meta(self, stream_id: str = '', chat_id: str = '', user_id: str = ''):
+        with self._lock:
+            if stream_id:
+                self.stream_id = stream_id
+            if chat_id:
+                self.chat_id = chat_id
+            if user_id:
+                self.user_id = user_id
+
+    def record(self, event_type: str, data: dict, sse_payload: str):
+        """追加原始事件并同步聚合快照；工具和终态事件立即落盘。"""
+        with self._lock:
+            self.chunks.append(sse_payload)
+            if event_type == 'content':
+                self.content += str(data.get('delta', '') or '')
+            elif event_type == 'reasoning':
+                self.reasoning += str(data.get('delta', '') or '')
+            elif event_type == 'tool_call':
+                tools = data.get('tools')
+                if isinstance(tools, list):
+                    self.tool_calls = tools
+                elif data.get('function'):
+                    self.tool_calls.append(data)
+            elif event_type == 'done':
+                self.content = data.get('full_text', self.content) or self.content
+                self.reasoning = data.get('reasoning_text', self.reasoning) or self.reasoning
+                if isinstance(data.get('tool_calls'), list):
+                    self.tool_calls = data['tool_calls']
+                self.usage = data.get('usage', self.usage)
+                self.stop_reason = data.get('stop_reason', self.stop_reason) or self.stop_reason
+                self.truncated = bool(data.get('truncated', self.truncated))
+                self.finished = True
+                self.error = ''
+            elif event_type == 'error':
+                self.error = str(data.get('error', 'stream error') or 'stream error')
+                self.finished = True
+
+            should_save = (
+                event_type in ('tool_call', 'done', 'error') or
+                len(self.chunks) % 5 == 0 or
+                time.time() - self._last_save >= 1.0
+            )
+        if should_save:
+            self._save()
 
     def append(self, sse_payload: str):
-        self.chunks.append(sse_payload)
-        if len(self.chunks) % 5 == 0:
+        # 兼容旧调用；新流应使用 record()，以同时维护聚合快照。
+        with self._lock:
+            self.chunks.append(sse_payload)
+            should_save = len(self.chunks) % 5 == 0
+        if should_save:
             self._save()
 
     def since(self, offset: int):
-        if offset >= len(self.chunks):
-            return []
-        return self.chunks[offset:]
+        with self._lock:
+            if offset >= len(self.chunks):
+                return []
+            return list(self.chunks[offset:])
+
+    def snapshot(self):
+        """返回一致的首屏状态，客户端无需等待下一个 token 才能重绘。"""
+        with self._lock:
+            return {
+                'msg_id': self.msg_id,
+                'stream_id': self.stream_id,
+                'chat_id': self.chat_id,
+                'full_text': self.content,
+                'reasoning_text': self.reasoning,
+                'tool_calls': json.loads(json.dumps(self.tool_calls, ensure_ascii=False)),
+                'usage': self.usage,
+                'finished': self.finished,
+                'error': self.error,
+                'stop_reason': self.stop_reason,
+                'truncated': self.truncated,
+                'offset': len(self.chunks),
+                'updated_at': self._last_save,
+            }
 
     def done(self):
+        with self._lock:
+            self.finished = True
         self._save()
 
 
@@ -2361,10 +2787,14 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     reasoning = ''
     tool_calls = []
     usage = None
+    stop_reason = ''
 
     anthropic_url = request.get('anthropic_url', '')
     api_key = request.get('api_key', '')
     model = request.get('model', '')
+    is_longcat = _is_longcat_request(request)
+    if is_longcat:
+        model = 'LongCat-2.0'
     # ★ 代理配置: 请求级优先 → 全局回退
     _req_proxy = request.get('proxy_url', '')
     _proxies = None
@@ -2374,7 +2804,16 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
         _proxies = {'http': _PROXY_URL, 'https': _PROXY_URL}
 
     # ★ 提取 system 消息 (Anthropic 用顶级 system 字段)
-    system_content = ''
+    raw_system = request.get('system', '')
+    if isinstance(raw_system, str):
+        system_content = raw_system
+    elif isinstance(raw_system, list):
+        system_content = '\n\n'.join(
+            str(block.get('text', '') or '') for block in raw_system
+            if isinstance(block, dict) and block.get('type') == 'text'
+        )
+    else:
+        system_content = ''
     anthropic_messages = []
     for m in request.get('messages', []):
         if isinstance(m, dict) and m.get('role') == 'system':
@@ -2394,6 +2833,10 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
         payload['tools'] = request['tools']
     if request.get('temperature') is not None:
         payload['temperature'] = request['temperature']
+    if is_longcat:
+        payload['thinking'] = _longcat_thinking(request)
+    elif isinstance(request.get('thinking'), dict):
+        payload['thinking'] = request['thinking']
 
     # ★ 认证头: 原生Anthropic用 x-api-key, 其他(LongCat/DeepSeek)用 Bearer
     if 'api.anthropic.com' in anthropic_url:
@@ -2415,10 +2858,11 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     try:
         print(f"[_generate_resumable_anthropic] Starting stream {stream_id} model={model} url={anthropic_url[:60]}", flush=True)
         with _requests.post(anthropic_url, json=payload, headers=headers, proxies=_proxies,
-                            stream=True, timeout=300) as resp:
+                            stream=True, timeout=(30, 600)) as resp:
             if resp.status_code != 200:
                 _emit('error', {'error': f'Anthropic HTTP {resp.status_code}: {resp.text[:300]}'})
                 _resumable[stream_id]['finished'] = True
+                _complete_task_from_stream(stream_id, 'failed')
                 try: q.put(None)
                 except Exception: pass
                 return
@@ -2433,10 +2877,10 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
                     line_str = line.decode('utf-8') if isinstance(line, bytes) else line
                 except Exception:
                     continue
-                if not line_str.startswith('data: '):
+                if not line_str.startswith('data:'):
                     continue
                 try:
-                    d = json.loads(line_str[6:])
+                    d = json.loads(line_str[5:].strip())
                 except Exception:
                     continue
                 etype = d.get('type', '')
@@ -2483,11 +2927,15 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
                         try:
                             inp = json.loads(tu['input_json']) if tu['input_json'] else {}
                         except Exception:
-                            pass
+                            # ★ 容错: 参数JSON非法时恢复 server_exec/server_python 的命令
+                            inp = _tolerant_tool_args(tu['name'], tu['input_json']) or {}
                         tool_calls.append({'id': tu['id'], 'type': 'function',
                                            'function': {'name': tu['name'], 'arguments': json.dumps(inp)}})
                         _current_tool_idx = -1
                 elif etype == 'message_delta':
+                    delta_info = d.get('delta', {}) or {}
+                    if delta_info.get('stop_reason'):
+                        stop_reason = delta_info['stop_reason']
                     mu = d.get('usage')
                     if mu:
                         if usage:
@@ -2500,26 +2948,35 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     except Exception as e:
         _emit('error', {'error': f'Anthropic stream error: {str(e)}'})
         _resumable[stream_id]['finished'] = True
+        _complete_task_from_stream(stream_id, 'failed')
         try: q.put(None)
         except Exception: pass
         return
 
     if _is_cancelled(stream_id):
         # 用户停止: 标记完成并清理, 不输出done(前端已中断)
+        cancelled_msg_id = ''
         with _resumable_lock:
             entry = _resumable.get(stream_id)
             if entry:
                 entry['finished'] = True
+                cancelled_msg_id = entry.get('msg_id', '')
+        if cancelled_msg_id:
+            _get_stream_buffer(cancelled_msg_id).done()
+        _complete_task_from_stream(stream_id, 'failed')
         try: q.put(None)
         except Exception: pass
         with _resumable_lock:
             _resumable.pop(stream_id, None)
         return
 
+    truncated = stop_reason in ('max_tokens', 'length')
     done_data = {'full_text': full.strip(), 'reasoning_text': reasoning.strip(),
-                 'tool_calls': tool_calls, 'usage': usage}
+                 'tool_calls': tool_calls, 'usage': usage,
+                 'stop_reason': stop_reason, 'truncated': truncated}
     _emit('done', done_data)
     _resumable[stream_id]['finished'] = True
+    _complete_task_from_stream(stream_id, 'completed')
     try: q.put(None)
     except Exception: pass
 
@@ -2532,6 +2989,7 @@ def _generate_resumable(request: dict, stream_id: str):
     reasoning = ''
     tool_calls = []
     usage = None
+    stop_reason = ''
 
     # 关联磁盘缓冲（从 stream_id 提取 msg_id，或使用 stream_id 本身）
     msg_id = _resumable[stream_id].get('msg_id', stream_id)
@@ -2540,7 +2998,7 @@ def _generate_resumable(request: dict, stream_id: str):
     def _emit(ev_type, data):
         sse = f"event: {ev_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         _resumable[stream_id]['chunks'].append(sse)
-        buf.append(sse)
+        buf.record(ev_type, data, sse)
         q.put(sse)  # queue.Queue is thread-safe
 
     # ★ Anthropic Messages API 流式分支 (前端已转换消息/工具为Anthropic格式)
@@ -2558,12 +3016,17 @@ def _generate_resumable(request: dict, stream_id: str):
         elif _PROXY_URL:
             import httpx
             _http_client = httpx.Client(proxy=_PROXY_URL)
+        is_longcat = _is_longcat_request(request)
+        model = 'LongCat-2.0' if is_longcat else request.get('model', 'deepseek-chat')
         client = OpenAI(
             api_key=request.get('api_key', ''),
             base_url=request.get('base_url', '').strip().rstrip('/') or None,
-            http_client=_http_client
+            http_client=_http_client,
+            timeout=600.0 if is_longcat else 300.0,
         )
         messages = request.get('messages', [])
+        if is_longcat:
+            _sanitize_longcat_openai_messages(messages)
         # ★ 去重 tool_call_id: MiniMax/DeepSeek 拒绝同一请求中重复的 tool_call id
         #  检查范围: 1) assistant 消息的 tool_calls[].id  2) tool 消息的 tool_call_id
         seen_tc_ids = set()
@@ -2598,7 +3061,7 @@ def _generate_resumable(request: dict, stream_id: str):
             print(f"[_generate_resumable] 移除 {_dup_tool_msgs} 条重复 tool 消息", flush=True)
         # ★ 清理空 tool_calls:[] 数组 — DeepSeek API 拒绝 empty array
         # ★ 确保 reasoning_content 传递给后续请求(DeepSeek thinking模式要求)
-        _has_any_reasoning = any(
+        _has_any_reasoning = not is_longcat and any(
             isinstance(m, dict) and m.get('role') == 'assistant' and (m.get('reasoning_content') or m.get('reasoning'))
             for m in messages
         )
@@ -2611,7 +3074,7 @@ def _generate_resumable(request: dict, stream_id: str):
                 if 'reasoning_content' not in m:
                     m['reasoning_content'] = m.get('reasoning', '')
         params = {
-            'model': request.get('model', 'deepseek-chat'),
+            'model': model,
             'messages': messages,
             'stream': True,
             'temperature': request.get('temperature', 0.7),
@@ -2619,6 +3082,8 @@ def _generate_resumable(request: dict, stream_id: str):
         }
         if request.get('tools'):
             params['tools'] = request['tools']
+        if is_longcat:
+            params['extra_body'] = {'thinking': _longcat_thinking(request)}
 
         print(f"[_generate_resumable] Calling API...", flush=True)
         # ★ 诊断: 打印消息摘要检测重复 tool_call_id
@@ -2659,7 +3124,10 @@ def _generate_resumable(request: dict, stream_id: str):
                     try: usage = chunk.usage.model_dump()
                     except Exception: pass
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                stop_reason = choice.finish_reason
+            delta = choice.delta
             c = (delta.content or '')
             r = getattr(delta, 'reasoning_content', '') or ''
             if c:
@@ -2800,8 +3268,10 @@ def _generate_resumable(request: dict, stream_id: str):
         if _open_m and len(_open_m.group(1)) < 3000:
             reasoning += _open_m.group(1)
             full = _re_tmp.sub(r'', full)
+        truncated = stop_reason in ('max_tokens', 'length')
         done_data = {'full_text': full.strip(), 'reasoning_text': reasoning.strip(),
-                     'tool_calls': tool_calls, 'usage': usage}
+                     'tool_calls': tool_calls, 'usage': usage,
+                     'stop_reason': stop_reason, 'truncated': truncated}
         _emit('done', done_data)
         _resumable[stream_id]['finished'] = True
         buf.done()
@@ -2828,39 +3298,51 @@ async def chat_create(request: Request, user_id: str = Query("")):
 
     sid = f"stream_{uuid.uuid4().hex[:12]}"
     q = queue.Queue()
-
-    with _resumable_lock:
-        _resumable[sid] = {'queue': q, 'chunks': [], 'finished': False, 'created': time.time()}
-        # 清理过期
-        now = time.time()
-        for k in list(_resumable.keys()):
-            v = _resumable[k]
-            if not v.get('finished') and now - v.get('created', 0) > _RESUMABLE_TTL:
-                try: v['queue'].put_nowait(None)
-                except Exception: pass
-                del _resumable[k]
-
-    threading.Thread(target=_generate_resumable, args=(body, sid), daemon=True).start()
-
-    # Register task for cross-browser recovery
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     chat_id = body.get("chat_id", "")
     msg_id = body.get("msg_id", f"msg_{int(time.time()*1000)}")
     model = body.get("model", "")
+
+    with _resumable_lock:
+        # 在启动后台线程前写全关联信息。旧逻辑先 start()，快速响应可能在
+        # msg_id/task_id 注册前完成，导致磁盘缓冲写到 stream_id 且任务永不收尾。
+        _resumable[sid] = {
+            'queue': q,
+            'chunks': [],
+            'finished': False,
+            'created': time.time(),
+            'task_id': task_id,
+            'user_id': user_id,
+            'msg_id': msg_id,
+            'chat_id': chat_id,
+        }
+        # 清理过期
+        now = time.time()
+        for k in list(_resumable.keys()):
+            v = _resumable[k]
+            if now - v.get('created', 0) > _RESUMABLE_TTL:
+                if not v.get('finished'):
+                    v['cancel'] = True
+                    try: v['queue'].put_nowait(None)
+                    except Exception: pass
+                    # 生成线程仍可能从上游醒来并访问该条目，先保留到它自行收尾。
+                    continue
+                # 聚合快照已落盘，完成流无需常驻内存；统一端点仍可按 msg_id 恢复。
+                del _resumable[k]
+
+    stream_buf = _get_stream_buffer(msg_id)
+    stream_buf.set_meta(sid, chat_id, user_id)
+    stream_buf._save()
+
+    # 先注册恢复任务，再允许生成线程完成并调用 _complete_task_from_stream。
     if user_id and chat_id:
         try:
             store = get_chat_store(user_id)
             store.register_task(task_id, sid, chat_id, msg_id, user_id, model, body)
-            # Store task_id in the resumable entry for completion tracking
-            with _resumable_lock:
-                if sid in _resumable:
-                    _resumable[sid]['task_id'] = task_id
-                    _resumable[sid]['user_id'] = user_id
-                    _resumable[sid]['msg_id'] = msg_id
-                    _resumable[sid]['chat_id'] = chat_id
-                    _resumable[sid]['chat_id'] = chat_id
         except Exception as e:
             print(f"[chat_create] task register error: {e}")
+
+    threading.Thread(target=_generate_resumable, args=(body, sid), daemon=True).start()
 
     # ★ 多端同步: 广播流开始事件到其他浏览器/设备
     if user_id and chat_id:
@@ -2878,56 +3360,77 @@ async def chat_stream_offset(
     since: int = Query(0),
     stream_id: str = Query(""),
     user_id: str = Query(""),
+    snapshot: int = Query(0),
 ):
     """
     统一 SSE 流端点（支持 offset 断点续传）：
     - msg_id + since: 从磁盘补发 since 之后的 chunks，再连接实时流
     - stream_id: 兼容旧 ResumeStream（直接消费 live stream）
     """
-    # 兼容旧路径
-    if stream_id and not msg_id:
-        s = _resumable.get(stream_id)
-        if not s:
-            return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
-        buf = _get_stream_buffer(s.get('msg_id', stream_id))
-    elif msg_id:
-        buf = _get_stream_buffer(msg_id)
-    else:
+    if not msg_id and not stream_id:
         return JSONResponse({"error": "msg_id or stream_id required"}, status_code=400)
 
+    # 同时给出 stream_id + msg_id 时优先使用精确流，并允许在引擎重启后
+    # 仅凭 msg_id 从磁盘快照恢复最终显示。
+    s = None
+    if stream_id:
+        with _resumable_lock:
+            s = _resumable.get(stream_id)
+    if not s and msg_id:
+        with _resumable_lock:
+            for _sid, _entry in _resumable.items():
+                if _entry.get('msg_id') == msg_id:
+                    s = _entry
+                    stream_id = _sid
+                    break
+
+    resolved_msg_id = msg_id or (s.get('msg_id', stream_id) if s else stream_id)
+    with _stream_buffers_lock:
+        known_in_memory = resolved_msg_id in _stream_buffers
+    persisted_path = STREAM_DIR / f"{resolved_msg_id}.json"
+    if not s and not known_in_memory and not persisted_path.exists():
+        return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
+    buf = _get_stream_buffer(resolved_msg_id)
+
     async def gen():
-        # 阶段1: 补发 since 之后的缓存 chunks
-        if since > 0:
-            missed = buf.since(since)
-            for i, c in enumerate(missed):
+        # snapshot=1：先发聚合首屏，正文/思考/工具状态无需等待新 token。
+        # 快照的 offset 同时是后续实时流起点，因此不会重复拼接历史 chunks。
+        if snapshot:
+            snap = buf.snapshot()
+            if s:
+                snap['finished'] = bool(snap.get('finished') or s.get('finished'))
+            elif not snap.get('finished'):
+                # 引擎重启后无法继续已丢失的上游连接，但仍把最后快照完整交给前端。
+                snap['finished'] = True
+                snap['error'] = snap.get('error') or 'stream interrupted before completion'
+            yield f"event: snapshot\ndata: {json.dumps(snap, ensure_ascii=False)}\n\n"
+            replay_offset = int(snap.get('offset', 0) or 0)
+        else:
+            replay_offset = max(0, since)
+            missed = buf.since(replay_offset)
+            for c in missed:
                 yield c
-                await asyncio.sleep(0.001)
-        elif since == 0 and buf.chunks:
-            for c in buf.chunks:
-                yield c
+                replay_offset += 1
                 await asyncio.sleep(0.001)
 
-        # 阶段2: 连接实时流（如果还在生成中）
-        if stream_id:
-            s = _resumable.get(stream_id)
-        else:
-            s = None
-            with _resumable_lock:
-                for _sid, _v in _resumable.items():
-                    if _v.get('msg_id') == msg_id and not _v.get('finished'):
-                        s = _v
-                        break
+        # 阶段2: 连接实时流（如果还在生成中）。定期 ping，避免模型长时间
+        # 思考/等待上游时代理把一个健康的 SSE 连接判定为空闲并断开。
         if s and not s.get('finished'):
             # ★ 多消费者广播：用索引轮询 s['chunks']（避免 q.get() 瓜分 chunk）
-            _live_idx = len(s['chunks'])  # 从缓存之后开始
+            _live_idx = replay_offset
+            _last_emit = time.monotonic()
             while not s.get('finished'):
                 _cur_len = len(s['chunks'])
                 while _live_idx < _cur_len:
                     yield s['chunks'][_live_idx]
                     _live_idx += 1
+                    _last_emit = time.monotonic()
                     await asyncio.sleep(0.001)
                 if s.get('finished'):
                     break
+                if time.monotonic() - _last_emit >= 10:
+                    yield f"event: ping\ndata: {json.dumps({'offset': _live_idx, 'ts': time.time()})}\n\n"
+                    _last_emit = time.monotonic()
                 await asyncio.sleep(0.05)
             # ★ 发送finished=true后可能残留的chunks(含done事件)
             _cur_len = len(s['chunks'])
@@ -2993,11 +3496,16 @@ async def chat_stream_get(stream_id: str):
 
 
 @app.delete("/engine/chat/stream/{stream_id}")
-async def chat_stream_delete(stream_id: str):
+async def chat_stream_delete(stream_id: str, msg_id: str = Query("")):
     """取消/清理指定流 — 标记 cancel, 通知后台生成线程停止
     (用户点停止键后调用, 避免"停止了还在等模型思考完"、继续消耗token)"""
     with _resumable_lock:
         entry = _resumable.get(stream_id)
+        if not entry and msg_id:
+            for candidate in _resumable.values():
+                if candidate.get('msg_id') == msg_id:
+                    entry = candidate
+                    break
         if entry:
             entry['cancel'] = True
     return {"cleaned": True}
@@ -3339,6 +3847,9 @@ def ppt_generate(user_id: str = Query(""), title: str = Query(""), pages: str = 
         _ppt_shutil.copy2(_ppt_output, _ppt_web_path)
         _ppt_size_kb = _ppt_os.path.getsize(_ppt_web_path) // 1024
         _ppt_web_url = f"https://naujtrats.xyz/oneapichat/uploads/shared/ppt_{_ppt_safe}.pptx"
+        # ★ 云盘全面结合: 同步到用户 OneAPIChat/generated
+        if user_id:
+            _import_to_cloudreve(user_id, _ppt_web_path, "generated")
         return {
             "ok": True,
             "download_url": _ppt_web_url,
@@ -3354,7 +3865,28 @@ def ppt_generate(user_id: str = Query(""), title: str = Query(""), pages: str = 
 
 # ── 文档生成工具 (Word/Excel/PDF) ──
 
-def _doc_output(safe_name, ext):
+# ★ 2026-08-03 云盘全面结合: 生成文件同步到用户 Cloudreve 账号 OneAPIChat/{category}
+def _import_to_cloudreve(user_id, file_path, category="generated"):
+    """调用 PHP 桥接把生成文件导入用户 Cloudreve 云盘（内部 cr_shared 通道, 同机 loopback）"""
+    if not user_id or not file_path or not os.path.isfile(file_path):
+        return
+    try:
+        import urllib.parse as _up
+        _url = ("https://127.0.0.1:443/oneapichat/api/cloudreve_api.php"
+                "?action=import_file&auth_token=cr_shared"
+                "&user_id=" + _up.quote(str(user_id))
+                + "&category=" + _up.quote(category)
+                + "&file_path=" + _up.quote(str(file_path)))
+        # ★ 必须禁用代理: 引擎全局 session 走 socks5h://127.0.0.1:1081 (Mihomo), 127.0.0.1 经代理会 SSL EOF
+        _r = _http_session.get(_url, headers={"Host": "naujtrats.xyz"}, timeout=120, verify=False,
+                               proxies={"http": None, "https": None})
+        if _r.status_code != 200:
+            print(f"[cloudreve] 导入失败 HTTP {_r.status_code}: {file_path}", flush=True)
+    except Exception as _e:
+        print(f"[cloudreve] 生成文件导入失败: {_e} {file_path}", flush=True)
+
+
+def _doc_output(safe_name, ext, user_id=""):
     """Copy generated file to web-accessible dir and return download URL."""
     import shutil, os
     web_dir = os.path.join(PROJECT_ROOT, 'uploads', 'shared')
@@ -3365,6 +3897,9 @@ def _doc_output(safe_name, ext):
     os.chmod(web_path, 0o644)
     size_kb = os.path.getsize(web_path) // 1024
     url = f"https://naujtrats.xyz/oneapichat/uploads/shared/{safe_name}.{ext}"
+    # ★ 云盘全面结合: 同步到用户 OneAPIChat/generated
+    if user_id:
+        _import_to_cloudreve(user_id, web_path, "generated")
     return url, size_kb
 
 
@@ -3399,7 +3934,7 @@ def docx_generate(user_id: str = Query(""), title: str = Query(""), content: str
         safe = (filename or title or 'document').replace('/', '_').replace('\\', '_')[:60]
         tmp = f"/tmp/{safe}.docx"
         doc.save(tmp)
-        url, size = _doc_output(safe, 'docx')
+        url, size = _doc_output(safe, 'docx', user_id)
         return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ Word文档已生成\\n📥 {url}\\n📦 {size} KB"}
     except ImportError as e:
         return JSONResponse({"ok": False, "error": f"Word生成缺少依赖: {e}"}, status_code=500)
@@ -3446,7 +3981,7 @@ def xlsx_generate(user_id: str = Query(""), title: str = Query("Sheet1"), rows: 
         safe = (filename or title or 'spreadsheet').replace('/', '_').replace('\\', '_')[:60]
         tmp = f"/tmp/{safe}.xlsx"
         wb.save(tmp)
-        url, size = _doc_output(safe, 'xlsx')
+        url, size = _doc_output(safe, 'xlsx', user_id)
         return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ Excel表格已生成\\n📥 {url}\\n📦 {size} KB | 行数: {len(_rows)}"}
     except ImportError as e:
         return JSONResponse({"ok": False, "error": f"Excel生成缺少依赖: {e}"}, status_code=500)
@@ -3502,7 +4037,7 @@ def pdf_generate(user_id: str = Query(""), title: str = Query(""), content: str 
         safe = (filename or title or 'document').replace('/', '_').replace('\\', '_')[:60]
         tmp = f"/tmp/{safe}.pdf"
         pdf.output(tmp)
-        url, size = _doc_output(safe, 'pdf')
+        url, size = _doc_output(safe, 'pdf', user_id)
         return {"ok": True, "download_url": url, "file_size_kb": size, "result": f"✅ PDF文档已生成\\n📥 {url}\\n📦 {size} KB"}
     except ImportError as e:
         return JSONResponse({"ok": False, "error": f"PDF生成缺少依赖: {e}"}, status_code=500)

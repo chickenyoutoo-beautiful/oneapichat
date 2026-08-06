@@ -7,35 +7,81 @@ import json
 import os
 import shutil
 import tempfile
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 
-PROJECT_ROOT = str(Path(__file__).parent.parent.resolve())
+# ★ 本文件位于 python/engine/ 下, 项目根需上溯 3 层 (曾误为 2 层 → 解析到 python/,
+#   导致 file_write/file_append/file_op 允许根目录错误, 相对路径写入全被拒)
+PROJECT_ROOT = str(Path(__file__).parent.parent.parent.resolve())
 TEMP_DIR = Path(tempfile.gettempdir())
+
+def _resolve_path(path: str) -> Path:
+    """统一路径解析: 相对路径基于项目根拼接, 避免受引擎进程 cwd (/home/naujtrats) 影响"""
+    if not path:
+        return Path(path)
+    if not os.path.isabs(path):
+        path = os.path.join(PROJECT_ROOT, path)
+    return Path(path).resolve()
 
 def register_server_tools(app):
     """注册所有服务器操控工具路由"""
-    @app.get("/engine/exec")
-    def engine_exec(
-        cmd: str = Query(...),
-        timeout: int = Query(60),
-        max_output: int = Query(8000),
-        cwd: str = Query(""),
-        user_id: str = Query("")
-    ):
+    @app.api_route("/engine/exec", methods=["GET", "POST"])
+    async def engine_exec(request: Request):
         """执行 shell 命令,返回 stdout/stderr/exit_code
 
         关键改进:
         - 超时时返回已捕获的部分输出(partial_stdout),防止全丢
         - max_output 控制输出截断上限(默认8000,最大50000)
         - 始终返回 JSON,不会有 HTML 错误页
+        - GET/POST 均支持;POST 时 cmd 可放 raw body 或 JSON,避免 URL 转义/长度问题
         """
+        params = request.query_params
+        cmd = params.get("cmd") or params.get("command") or ""
         try:
-            result = subprocess.run(
+            timeout = int(params.get("timeout", 60) or 60)
+        except Exception:
+            timeout = 60
+        try:
+            max_output = int(params.get("max_output", 8000) or 8000)
+        except Exception:
+            max_output = 8000
+        cwd = params.get("cwd", "")
+        user_id = params.get("user_id", "")
+        if not cmd and request.method == "POST":
+            body = await request.body()
+            if body:
+                raw = body.decode('utf-8', errors='replace').strip()
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, dict):
+                        cmd = data.get("cmd") or data.get("command") or ""
+                        if data.get("timeout") is not None:
+                            try:
+                                timeout = int(data.get("timeout"))
+                            except Exception:
+                                pass
+                        if data.get("max_output") is not None:
+                            try:
+                                max_output = int(data.get("max_output"))
+                            except Exception:
+                                pass
+                        if data.get("cwd"):
+                            cwd = data.get("cwd")
+                except json.JSONDecodeError:
+                    cmd = raw
+        if not cmd:
+            return JSONResponse({"ok": False, "error": "缺少cmd参数(支持cmd/command别名,POST支持raw body)"}, status_code=400)
+        try:
+            # ★ 在线程池执行,避免阻塞 FastAPI 事件循环(长命令会卡住整个引擎)
+            result = await asyncio.to_thread(
+                subprocess.run,
                 cmd, shell=True, capture_output=True, text=True,
-                timeout=min(timeout, 300),
+                # ★ 上限 300→900: 工具 timeout 参数声明无上限, 旧值 300 与
+                #   nginx fastcgi_read_timeout 300s 双双卡边界 (sleep 300 命令必超时)
+                timeout=min(timeout, 900),
                 cwd=cwd or None,
                 encoding='utf-8', errors='replace'
             )
@@ -76,8 +122,12 @@ def register_server_tools(app):
         try:
             tf.write(script)
             tf.close()
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ['python3', tf.name], capture_output=True, text=True,
+                # ★ cwd=项目根: 脚本内相对路径(tempfile/x.md 等)落到项目目录,
+                #   与 server_file_* 工具一致 (曾受引擎进程 cwd=/home/naujtrats 影响)
+                cwd=PROJECT_ROOT,
                 timeout=min(timeout, 120)
             )
             return {
@@ -106,7 +156,7 @@ def register_server_tools(app):
     ):
         """读取服务器上的文件内容（支持行范围 / 字符偏移分页）"""
         try:
-            p = Path(path).resolve()
+            p = _resolve_path(path)
             if not p.exists():
                 return {"ok": False, "error": f"文件不存在: {path}"}
             if p.is_dir():
@@ -196,12 +246,17 @@ def register_server_tools(app):
             if "application/json" in content_type:
                 body_json = await request.json()
                 content = body_json.get("content", "")
+                # ★ append/atomic 兼容 JSON body (api-tools.js 的 server_file_append 路由)
+                if body_json.get("append") is not None:
+                    append = append or body_json.get("append") in (True, "true", "1")
+                if body_json.get("atomic") is not None:
+                    atomic = atomic or body_json.get("atomic") in (True, "true", "1")
             else:
                 content = (await request.body()).decode('utf-8', errors='replace')
             if not path or not content:
                 return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
             # 安全检查:只允许写入 /tmp 和 /var/www/html/oneapichat
-            resolved = Path(path).resolve()
+            resolved = _resolve_path(path)
             allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
             if not any(str(resolved).startswith(str(d)) for d in allowed):
                 return {"ok": False, "error": f"写入权限受限,只允许 {[str(d) for d in allowed]}"}
@@ -275,7 +330,7 @@ def register_server_tools(app):
             if not path or not content:
                 return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
 
-            resolved = Path(path).resolve()
+            resolved = _resolve_path(path)
             allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
             if not any(str(resolved).startswith(str(d)) for d in allowed):
                 return {"ok": False, "error": f"写入权限受限"}
@@ -403,7 +458,8 @@ def register_server_tools(app):
         """执行数据库查询"""
         import sqlite3
         try:
-            db_path = str(Path(PROJECT_ROOT) / "chaoxing" / "learning_records.db")
+            # ★ DB 实际位于 python/chaoxing/ 下 (PROJECT_ROOT 修复后需显式带 python/)
+            db_path = str(Path(PROJECT_ROOT) / "python" / "chaoxing" / "learning_records.db")
             conn = sqlite3.connect(db_path)
             c = conn.cursor()
             c.execute(sql)
@@ -439,6 +495,7 @@ def register_server_tools(app):
     def engine_file_search(pattern: str = Query(...), path: str = Query(PROJECT_ROOT), max_results: int = Query(30)):
         """搜索文件"""
         try:
+            path = str(_resolve_path(path))  # ★ 相对路径统一解析到项目根
             cmd = ["find", path, "-name", pattern, "-type", "f", "!", "-path", "*/node_modules/*", "!", "-path", "*/.git/*", "!", "-path", "*/__pycache__/*"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             files = [f for f in result.stdout.strip().split("\n") if f][:max_results]
@@ -458,6 +515,7 @@ def register_server_tools(app):
         import os as _os, re, fnmatch
         from collections import deque
         try:
+            path = str(_resolve_path(path))  # ★ 相对路径统一解析到项目根
             # ★ 保底机制: 单行内容与总返回体积都设上限(可配置, 默认值防止再次出现900万字符事件)。
             MAX_LINE_CHARS = max(200, int(max_line_chars))
             MAX_TOTAL_CHARS = max(10000, int(max_total_chars))
@@ -588,6 +646,8 @@ def register_server_tools(app):
                 return {"error": "old_string is required"}
     
             # 安全检查
+            if not _os.path.isabs(path):
+                path = _os.path.join(PROJECT_ROOT, path)
             path = _os.path.realpath(path)
             allowed_roots = [PROJECT_ROOT, str(TEMP_DIR), "/var/www/html/oneapichat"]
             allowed = any(path.startswith(_os.path.realpath(r)) for r in allowed_roots)
@@ -635,11 +695,18 @@ def register_server_tools(app):
         import os as _os, shutil
         try:
             allowed = [str(TEMP_DIR), PROJECT_ROOT, PROJECT_ROOT + '/uploads', PROJECT_ROOT + '/oneapichat']
-            # 路径转换: /oneapichat/uploads/... → /var/www/html/oneapichat/uploads/...
-            for path in ('src', 'dst'):
-                p = locals().get(path, '')
-                if p and p.startswith('/oneapichat/'):
-                    locals()[path] = PROJECT_ROOT + '/' + p.replace('/oneapichat/', '', 1)
+            # 路径转换: 相对路径 → 项目根; /oneapichat/uploads/... → /var/www/html/oneapichat/uploads/...
+            # ★ 勿用 locals()[path]=p (函数内赋值不生效, 相对路径校验仍拿原值 → 全被拒)
+            def _abs(p):
+                if not p:
+                    return p
+                if not _os.path.isabs(p):
+                    p = _os.path.join(PROJECT_ROOT, p)
+                if p.startswith('/oneapichat/'):
+                    p = PROJECT_ROOT + '/' + p.replace('/oneapichat/', '', 1)
+                return p
+            src = _abs(src)
+            dst = _abs(dst)
             def safe(p):
                 return any(p.startswith(pre) for pre in allowed)
             if not safe(src) or (dst and not safe(dst)):
@@ -668,7 +735,7 @@ def register_server_tools(app):
         try:
             if not path:
                 return {"ok": False, "error": "缺少 path 参数"}
-            p = Path(path).resolve()
+            p = _resolve_path(path)
             if not p.exists():
                 return {"ok": False, "error": f"文件不存在: {path}"}
             if p.is_dir():
