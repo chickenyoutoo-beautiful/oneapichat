@@ -30,9 +30,11 @@ npx cap sync android
 
 # ── 构建 ──
 cd android
-echo → 构建 APK...
+echo → 构建 APK (${BUILD_TYPE:-debug})...
 if [ "${BUILD_TYPE:-debug}" = "release" ]; then
-  ./gradlew assembleRelease --no-daemon
+  ./gradlew assembleRelease --no-daemon \
+    -PKEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-oneapichat2024}" \
+    -PKEY_PASSWORD="${KEY_PASSWORD:-oneapichat2024}"
   APK_PATH="app/build/outputs/apk/release/app-release.apk"
 else
   ./gradlew assembleDebug --no-daemon

@@ -109,3 +109,8 @@ quark_qr.png
 # Android APK 构建产物
 *.apk
 deploy/android/app/build/outputs/
+
+# Android 签名密钥（敏感）
+*.keystore
+*.jks
+deploy/local.properties
