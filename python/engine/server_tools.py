@@ -5,9 +5,12 @@
 import subprocess
 import json
 import os
+import re
 import shutil
 import tempfile
 import asyncio
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from fastapi import Query, Request
@@ -17,14 +20,141 @@ from fastapi.responses import JSONResponse
 #   导致 file_write/file_append/file_op 允许根目录错误, 相对路径写入全被拒)
 PROJECT_ROOT = str(Path(__file__).parent.parent.parent.resolve())
 TEMP_DIR = Path(tempfile.gettempdir())
+OBSERVATION_TTL_SECONDS = 3600
+_observed_files: dict[tuple[str, str], float] = {}
+_observation_lock = threading.Lock()
 
-def _resolve_path(path: str) -> Path:
-    """统一路径解析: 相对路径基于项目根拼接, 避免受引擎进程 cwd (/home/naujtrats) 影响"""
+def _observation_key(user_id: str, path: Path) -> tuple[str, str]:
+    return (str(user_id or 'anonymous'), str(path.resolve()))
+
+def _mark_observed(user_id: str, path: Path) -> None:
+    with _observation_lock:
+        _observed_files[_observation_key(user_id, path)] = time.time()
+
+def _was_observed(user_id: str, path: Path) -> bool:
+    key = _observation_key(user_id, path)
+    with _observation_lock:
+        seen = _observed_files.get(key, 0)
+        if not seen or time.time() - seen > OBSERVATION_TTL_SECONDS:
+            _observed_files.pop(key, None)
+            return False
+        return True
+
+def _validate_modified_file(path: Path) -> dict:
+    """Run a bounded syntax/build check for files modified by coding tools."""
+    suffix = path.suffix.lower()
+    commands = {
+        '.py': ['python3', '-m', 'py_compile', str(path)],
+        '.js': ['node', '--check', str(path)],
+        '.mjs': ['node', '--check', str(path)],
+        '.cjs': ['node', '--check', str(path)],
+        '.php': ['php', '-l', str(path)],
+    }
+    command = commands.get(suffix)
+    if not command:
+        return {"ok": True, "skipped": True, "reason": "no validator"}
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20, cwd=PROJECT_ROOT)
+        return {"ok": result.returncode == 0, "command": command, "exit_code": result.returncode, "stdout": (result.stdout or '')[:4000], "stderr": (result.stderr or '')[:4000]}
+    except Exception as exc:
+        return {"ok": False, "command": command, "error": str(exc)}
+
+def _resolve_path(path: str, cwd: str = "") -> Path:
+    """统一路径解析: 相对路径基于当前工作区 cwd 或项目根拼接, 避免受引擎进程 cwd 影响"""
     if not path:
         return Path(path)
     if not os.path.isabs(path):
-        path = os.path.join(PROJECT_ROOT, path)
+        base_dir = cwd if (cwd and os.path.isdir(cwd)) else PROJECT_ROOT
+        path = os.path.join(base_dir, path)
     return Path(path).resolve()
+
+def _within(candidate: Path, root: Path) -> bool:
+    """Component-aware containment; string prefix checks allow /project-evil escapes."""
+    try:
+        return os.path.commonpath((str(candidate), str(root))) == str(root)
+    except (OSError, ValueError):
+        return False
+
+def _allowed_path(path: Path, allow_temp: bool = True, full_access: bool = False, cwd: str = "") -> bool:
+    """Default sandbox is the project, active workspace cwd, and temporary space; external roots require a server-verified grant."""
+    if full_access:
+        return True
+    roots = [Path(PROJECT_ROOT).resolve()]
+    if cwd and os.path.isdir(cwd):
+        try:
+            roots.append(Path(cwd).resolve())
+        except Exception:
+            pass
+    if allow_temp:
+        roots.extend([TEMP_DIR.resolve(), Path("/tmp").resolve(), Path("/var/tmp").resolve()])
+    return any(_within(path, root) for root in roots)
+
+def _trusted_full_access(request: Request, requested: bool) -> bool:
+    """Only the authenticated loopback PHP bridge may activate full filesystem access."""
+    if not requested:
+        return False
+    return bool(request.scope.get("state", {}).get("trusted_internal"))
+
+_DOCKER_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$")
+_DOCKER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_DOCKER_ACTIONS = {"doctor", "ps", "images", "stats", "logs", "pull", "run", "yatori_deploy", "stop", "remove"}
+
+
+def _docker_error(stderr: str, action: str = "") -> dict:
+    message = (stderr or "Docker command failed").strip()[-4000:]
+    lower = message.lower()
+    if "permission denied" in lower or "cannot connect to the docker daemon" in lower and "permission" in lower:
+        code, hint = "DOCKER_PERMISSION", "当前引擎用户无权访问 Docker socket。将用户加入 docker 组，或挂载 /var/run/docker.sock 并提供 docker CLI。"
+    elif "cannot connect to the docker daemon" in lower or "is the docker daemon running" in lower:
+        code, hint = "DOCKER_DAEMON_UNAVAILABLE", "Docker daemon 未连接。请确认 Docker 服务正常运行后重试 doctor。"
+    elif action in {"pull", "yatori_deploy"} and any(x in lower for x in ("timeout", "timed out", "network", "tls", "lookup", "temporary failure", "connection")):
+        code, hint = "DOCKER_NETWORK", "镜像仓库网络不可达或被隔离。先在宿主机完成 docker pull，或配置 Docker daemon registry mirror。"
+    else:
+        code, hint = "DOCKER_COMMAND_FAILED", "请查看 stderr，并先运行 server_docker(action=doctor) 获取环境诊断。"
+    return {"ok": False, "error": message, "code": code, "retryable": code in {"DOCKER_NETWORK", "DOCKER_DAEMON_UNAVAILABLE"}, "hint": hint}
+
+
+def _docker_run(cmd: list[str], timeout: int = 30, action: str = "") -> dict:
+    docker = shutil.which("docker")
+    if not docker:
+        return {"ok": False, "error": "未找到 docker CLI", "code": "DOCKER_CLI_MISSING", "retryable": False, "hint": "当前 Agent 运行环境没有 Docker CLI；容器化部署需要安装 CLI 并挂载 Docker socket。"}
+    try:
+        result = subprocess.run([docker, *cmd], capture_output=True, text=True, timeout=max(5, min(int(timeout), 900)), encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"Docker 操作超时({timeout}秒)", "code": "DOCKER_TIMEOUT", "retryable": True, "hint": "拉取镜像可能受网络限制，请在宿主机手动 docker pull 后重试。"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "code": "DOCKER_EXEC_FAILED", "retryable": False}
+    stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
+    if result.returncode != 0:
+        return {**_docker_error(stderr or stdout, action), "exit_code": result.returncode}
+    return {"ok": True, "stdout": stdout[:50000], "stderr": stderr[:4000], "exit_code": result.returncode, "truncated": len(stdout) > 50000}
+
+
+def _docker_valid_image(image: str) -> bool:
+    return isinstance(image, str) and bool(_DOCKER_IMAGE_RE.fullmatch(image.strip()))
+
+
+def _docker_valid_name(name: str) -> bool:
+    return isinstance(name, str) and bool(_DOCKER_NAME_RE.fullmatch(name.strip()))
+
+
+def _docker_host_path(raw: str) -> Path | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    candidate = Path(os.path.expanduser(raw)).resolve()
+    roots = [Path.home().resolve(), TEMP_DIR.resolve(), Path("/tmp").resolve(), Path("/var/tmp").resolve(), Path(PROJECT_ROOT).resolve()]
+    return candidate if any(_within(candidate, root) for root in roots) else None
+
+
+def _yatori_default_config() -> dict:
+    return {"users": [{"accountType": "XXT", "username": "", "password": "", "courses": []}], "setting": {"speed": 1.0, "interactive": False, "examAuto": True}}
+
+
+def _docker_command_result(result: dict) -> dict:
+    if result.get("ok"):
+        return {"result": result.get("stdout", ""), "stderr": result.get("stderr", ""), "exit_code": result.get("exit_code", 0)}
+    return result
+
 
 def register_server_tools(app):
     """注册所有服务器操控工具路由"""
@@ -146,19 +276,34 @@ def register_server_tools(app):
     
     @app.get("/engine/file/read")
     def engine_file_read(
+        request: Request,
         path: str = Query(...),
         max_lines: int = Query(200),
         start_line: int = Query(0),
         end_line: int = Query(0),
         offset: int = Query(-1),
         max_chars: int = Query(0),
-        user_id: str = Query("")
+        full_access: bool = Query(False),
+        user_id: str = Query(""),
+        cwd: str = Query("")
     ):
-        """读取服务器上的文件内容（支持行范围 / 字符偏移分页）"""
+        """读取服务器上的文件内容（支持行范围 / 字符偏移分页 / full_access 全盘访问授权 / DSH Workspace cwd）"""
         try:
-            p = _resolve_path(path)
+            full_access = _trusted_full_access(request, full_access)
+            p = _resolve_path(path, cwd)
+            if not _allowed_path(p, full_access=full_access, cwd=cwd):
+                return {
+                    "ok": False,
+                    "error": "路径不在允许的工作区或临时目录。如需访问全盘，请在授权确认中批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.read",
+                    "path": str(p),
+                    "retryable": True,
+                }
             if not p.exists():
                 return {"ok": False, "error": f"文件不存在: {path}"}
+            if p.is_file():
+                _mark_observed(user_id, p)
             if p.is_dir():
                 items = []
                 for item in sorted(p.iterdir()):
@@ -241,11 +386,15 @@ def register_server_tools(app):
             append = request.query_params.get("append", "") in ("true", "1", True)
             atomic = request.query_params.get("atomic", "") in ("true", "1", True)
             expected_size = int(request.query_params.get("expected_size", "0") or "0")
+            user_id = request.query_params.get("user_id", "")
+            cwd = request.query_params.get("cwd", "")
             # content 从 raw body 读(支持大文件)
             content_type = request.headers.get("content-type", "")
             if "application/json" in content_type:
                 body_json = await request.json()
                 content = body_json.get("content", "")
+                if not cwd and body_json.get("cwd"):
+                    cwd = body_json.get("cwd")
                 # ★ append/atomic 兼容 JSON body (api-tools.js 的 server_file_append 路由)
                 if body_json.get("append") is not None:
                     append = append or body_json.get("append") in (True, "true", "1")
@@ -255,14 +404,34 @@ def register_server_tools(app):
                 content = (await request.body()).decode('utf-8', errors='replace')
             if not path or not content:
                 return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
-            # 安全检查:只允许写入 /tmp 和 /var/www/html/oneapichat
-            resolved = _resolve_path(path)
-            allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
-            if not any(str(resolved).startswith(str(d)) for d in allowed):
-                return {"ok": False, "error": f"写入权限受限,只允许 {[str(d) for d in allowed]}"}
+            # 安全检查:组件级 containment，避免 /project-evil 等字符串前缀绕过
+            full_access_requested = request.query_params.get("full_access", "") in ("true", "1", True) or (isinstance(locals().get("body_json"), dict) and body_json.get("full_access") in (True, "true", "1"))
+            full_access = _trusted_full_access(request, full_access_requested)
+            resolved = _resolve_path(path, cwd)
+            if not _allowed_path(resolved, full_access=full_access, cwd=cwd):
+                return {
+                    "ok": False,
+                    "error": "写入权限受限,路径必须位于项目根或临时目录。如需写入外部目录，请在授权弹窗中批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.write",
+                    "path": str(resolved),
+                    "retryable": True,
+                }
 
             content_bytes = content.encode('utf-8')
             actual_size = len(content_bytes)
+            if not append and resolved.exists() and resolved.is_file() and not _was_observed(user_id, resolved):
+                return {"ok": False, "error": "cannot overwrite without reading it first: target file must be read with read/server_file_read before writing", "code": "OBSERVATION_REQUIRED", "path": str(resolved), "retryable": True}
+
+            # ★ 覆写前自动安全备份(防盲写破坏原文件)
+            backup_path = None
+            if not append and resolved.exists() and resolved.is_file():
+                try:
+                    backup_path = str(resolved) + ".bak"
+                    import shutil as _shutil
+                    _shutil.copy2(str(resolved), backup_path)
+                except Exception:
+                    pass
 
             if atomic and not append:
                 # ★ 原子写入: 先写 .tmp, 校验后 rename
@@ -293,12 +462,24 @@ def register_server_tools(app):
 
             # 最终验证
             final_size = os.path.getsize(resolved) if resolved.exists() else 0
+            validation = _validate_modified_file(resolved)
+            if not validation.get("ok"):
+                if backup_path and Path(backup_path).exists(): shutil.copy2(backup_path, resolved)
+                return {"ok": False, "error": "post-edit validation failed; original file restored", "code": "VALIDATION_FAILED", "path": str(resolved), "validation": validation, "backup": backup_path}
+            build_result = None
+            if _within(resolved, Path(PROJECT_ROOT).resolve()) and ("/public/js/" in str(resolved) or "/public/css/" in str(resolved)):
+                try:
+                    br = subprocess.run(['python3','tools/build-index.py'],cwd=PROJECT_ROOT,capture_output=True,text=True,timeout=30)
+                    build_result = {"ok": br.returncode == 0, "stdout": br.stdout[-2000:], "stderr": br.stderr[-2000:]}
+                except Exception as exc: build_result = {"ok": False, "error": str(exc)}
             return {
                 "ok": True,
                 "path": str(resolved),
                 "written": actual_size,
                 "file_size": final_size,
                 "mode": "append" if append else ("atomic" if atomic else "overwrite"),
+                "validation": validation,
+                "build": build_result,
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -330,10 +511,17 @@ def register_server_tools(app):
             if not path or not content:
                 return JSONResponse({"ok": False, "error": "缺少path或content"}, status_code=400)
 
+            full_access = _trusted_full_access(request, body.get("full_access") in (True, "true", "1"))
             resolved = _resolve_path(path)
-            allowed = [TEMP_DIR.resolve(), Path(PROJECT_ROOT).resolve()]
-            if not any(str(resolved).startswith(str(d)) for d in allowed):
-                return {"ok": False, "error": f"写入权限受限"}
+            if not _allowed_path(resolved, full_access=full_access):
+                return {
+                    "ok": False,
+                    "error": "写入权限受限。如需写入外部目录，请先批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.write",
+                    "path": str(resolved),
+                    "retryable": True,
+                }
 
             # ★ 写入临时块文件
             os.makedirs(str(resolved.parent), exist_ok=True)
@@ -386,6 +574,105 @@ def register_server_tools(app):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    async def _run_code_call(name: str, args: dict, user_id: str, full_access: bool):
+        import requests as _requests
+        from engine.runtime_auth import get_internal_bridge_secret
+        base = "http://127.0.0.1:8766"
+        headers = {"X-OneAPIChat-Internal": get_internal_bridge_secret(PROJECT_ROOT)}
+        args = args if isinstance(args, dict) else {}
+        raw_timeout = args.get("timeoutMs") if "timeoutMs" in args else (args.get("timeout") or 60)
+        try:
+            val = int(raw_timeout)
+            if "timeoutMs" in args or val > 1000:
+                timeout = min(max(val // 1000, 1), 300)
+            else:
+                timeout = min(max(val, 1), 300)
+        except Exception:
+            timeout = 60
+        query_common = {"user_id": user_id, "full_access": "true" if full_access else "false"}
+        def request_call():
+            if name == "read":
+                params = {**query_common, "path": args.get("file_path") or args.get("path") or "", "start_line": args.get("offset", args.get("start_line", 0)), "max_lines": args.get("limit", args.get("max_lines", 2000))}
+                return _requests.get(base + "/engine/file/read", params=params, headers=headers, timeout=timeout).json()
+            if name == "glob":
+                params = {**query_common, "pattern": args.get("pattern", ""), "path": args.get("path", PROJECT_ROOT), "max_results": args.get("max_results", 100)}
+                return _requests.get(base + "/engine/file_search", params=params, headers=headers, timeout=timeout).json()
+            if name == "grep":
+                params = {**query_common, "pattern": args.get("pattern", ""), "path": args.get("path", PROJECT_ROOT), "file_pattern": args.get("include", args.get("file_pattern", "")), "context_lines": args.get("context_lines", 2), "max_results": args.get("max_results", 50)}
+                return _requests.get(base + "/engine/file_grep", params=params, headers=headers, timeout=timeout).json()
+            if name == "write":
+                params = {**query_common, "path": args.get("file_path") or args.get("path") or "", "append": "true" if args.get("append") else "false"}
+                return _requests.post(base + "/engine/file/write", params=params, data=str(args.get("content", "")).encode(), headers={**headers,"Content-Type":"text/plain"}, timeout=timeout).json()
+            if name == "edit":
+                params = {**query_common, "path": args.get("file_path") or args.get("path") or "", "replace_all": "true" if args.get("replace_all") else "false"}
+                body = {"old_string": args.get("old_string", ""), "new_string": args.get("new_string", ""), "full_access": full_access}
+                return _requests.post(base + "/engine/file_edit", params=params, json=body, headers=headers, timeout=timeout).json()
+            if name == "bash":
+                params = {"user_id": user_id, "timeout": timeout, "cwd": args.get("workdir", args.get("cwd", ""))}
+                return _requests.post(base + "/engine/exec", params=params, data=str(args.get("command", args.get("cmd", ""))).encode(), headers={**headers,"Content-Type":"text/plain"}, timeout=timeout + 5).json()
+            if name == "todo_write":
+                return {"ok": True, "todos": args.get("todos", []), "surface": "todo_write"}
+            return {"ok": False, "error": f"unsupported run_code tool: {name}", "code": "UNSUPPORTED_TOOL"}
+        return await asyncio.to_thread(request_call)
+
+    @app.post("/engine/run_code")
+    async def engine_run_code(request: Request):
+        """Execute a constrained JavaScript orchestration program with an RPC-only tools object."""
+        if not request.scope.get("state", {}).get("trusted_internal"):
+            return JSONResponse({"ok": False, "error": "trusted bridge required", "code": "FORBIDDEN"}, status_code=403)
+        body = await request.json()
+        code = str(body.get("code", ""))
+        description = str(body.get("description", ""))[:200]
+        user_id = str(body.get("user_id", ""))
+        full_access = bool(body.get("full_access", False))
+        timeout_ms = min(max(int(body.get("timeout_ms", 60000)), 1000), 120000)
+        if not code or len(code) > 60000:
+            return JSONResponse({"ok": False, "error": "invalid code", "code": "INVALID_ARGUMENT"}, status_code=400)
+        runner = Path(__file__).with_name("run_code_runner.mjs")
+        proc = await asyncio.create_subprocess_exec(
+            "node", "--permission", f"--allow-fs-read={runner}", str(runner),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            cwd=PROJECT_ROOT,
+        )
+        logs, tool_calls, todos = [], [], []
+        permission_error = None
+        try:
+            proc.stdin.write((json.dumps({"type":"init","code":code}) + "\n").encode())
+            await proc.stdin.drain()
+            deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0: raise asyncio.TimeoutError()
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+                if not line: break
+                msg = json.loads(line.decode("utf-8", "replace"))
+                if msg.get("type") == "call":
+                    result = await _run_code_call(str(msg.get("name", "")), msg.get("args") or {}, user_id, full_access)
+                    tool_calls.append({"name": msg.get("name"), "ok": bool(result.get("ok")), "summary": str(result.get("error") or result.get("path") or result.get("status") or "ok")[:300]})
+                    if result.get("surface") == "todo_write": todos = result.get("todos") or []
+                    if result.get("code") == "PERMISSION_REQUIRED": permission_error = result
+                    response = {"type":"response","id":msg.get("id"),"ok":bool(result.get("ok")),"value":result,"error":{"message":str(result.get("error", "tool call failed")),"code":result.get("code", ""),"details":result}}
+                    proc.stdin.write((json.dumps(response, ensure_ascii=False) + "\n").encode()); await proc.stdin.drain()
+                    if permission_error: break
+                elif msg.get("type") == "log": logs.append(msg)
+                elif msg.get("type") == "result":
+                    await proc.wait()
+                    return {"ok": True, "result": msg.get("value"), "description": description, "tool_calls": tool_calls, "logs": logs[-50:], "todos": todos}
+                elif msg.get("type") == "error":
+                    await proc.wait()
+                    return {"ok": False, "error": msg.get("error", {}).get("message", "run_code failed"), "code": msg.get("error", {}).get("code", "RUN_CODE_ERROR"), "tool_calls": tool_calls, "logs": logs[-50:]}
+            if permission_error:
+                return {"ok": False, **permission_error, "tool_calls": tool_calls}
+            stderr = (await proc.stderr.read()).decode("utf-8", "replace")[:4000]
+            return {"ok": False, "error": stderr or "run_code ended without result", "code": "RUN_CODE_ERROR", "tool_calls": tool_calls}
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "run_code timed out", "code": "TIMEOUT", "tool_calls": tool_calls}
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                try: await proc.wait()
+                except Exception: pass
+
     @app.get("/engine/sys/info")
     def engine_sys_info(user_id: str = Query("")):
         """获取系统信息"""
@@ -433,24 +720,85 @@ def register_server_tools(app):
             return {"error": str(e)}
     
     
-    @app.get("/engine/docker")
-    def engine_docker(action: str = Query("ps"), user_id: str = Query("")):
-        """Docker 操作"""
-        try:
-            if action == "ps":
-                cmd = ["docker", "ps", "-a", "--format", "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"]
-            elif action == "images":
-                cmd = ["docker", "images"]
-            elif action == "stats":
-                cmd = ["docker", "stats", "--no-stream"]
-            else:
-                return {"error": f"Unknown action: {action}"}
-            result = subprocess.run(["sudo"] + cmd, capture_output=True, text=True, timeout=15)
-            return {"ok": True, "stdout": result.stdout, "stderr": result.stderr}
-        except FileNotFoundError:
-            return {"error": "Docker not available"}
-        except Exception as e:
-            return {"error": str(e)}
+    @app.api_route("/engine/docker", methods=["GET", "POST"])
+    async def engine_docker(request: Request, action: str = Query("ps"), user_id: str = Query("")):
+        """Docker health/inspection and bounded deployment actions.
+
+        The old implementation prepended sudo, which cannot work reliably in a
+        long-running non-interactive agent. All commands now use the Docker CLI
+        directly and return actionable daemon/network/permission diagnostics.
+        """
+        payload = {}
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                if isinstance(body, dict): payload = body
+            except Exception:
+                return JSONResponse({"ok": False, "error": "Docker 请求体必须是 JSON 对象", "code": "DOCKER_BAD_REQUEST"}, status_code=400)
+        action = str(payload.get("action") or action or "ps").strip().lower()
+        if action not in _DOCKER_ACTIONS:
+            return JSONResponse({"ok": False, "error": f"不支持的 Docker 操作: {action}", "code": "DOCKER_ACTION_UNSUPPORTED", "supported_actions": sorted(_DOCKER_ACTIONS)}, status_code=400)
+
+        if action == "doctor":
+            cli = shutil.which("docker")
+            if not cli: return {"ok": False, "error": "未找到 docker CLI", "code": "DOCKER_CLI_MISSING", "retryable": False}
+            version = _docker_run(["version", "--format", "{{.Server.Version}}"], 10, action)
+            if not version.get("ok"): return {**version, "cli": cli, "daemon": False}
+            info = _docker_run(["info", "--format", "{{.DockerRootDir}}"], 10, action)
+            if not info.get("ok"): return {**info, "cli": cli, "daemon": False}
+            return {"ok": True, "cli": cli, "daemon": True, "server_version": version.get("stdout", ""), "docker_root": info.get("stdout", ""), "supported_actions": sorted(_DOCKER_ACTIONS)}
+        if action == "ps":
+            return _docker_command_result(_docker_run(["ps", "-a", "--format", "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"], 15, action))
+        if action == "images":
+            return _docker_command_result(_docker_run(["images", "--format", "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"], 15, action))
+        if action == "stats":
+            return _docker_command_result(_docker_run(["stats", "--no-stream"], 20, action))
+
+        name = str(payload.get("name") or payload.get("container") or "").strip()
+        if action in {"logs", "stop", "remove"} and not _docker_valid_name(name):
+            return {"ok": False, "error": "请提供合法容器名(name/container)", "code": "DOCKER_INVALID_NAME"}
+        if action == "logs":
+            try: tail = max(1, min(int(payload.get("tail", 200)), 5000))
+            except Exception: tail = 200
+            return _docker_command_result(_docker_run(["logs", "--tail", str(tail), name], 30, action))
+        if action == "stop": return _docker_command_result(_docker_run(["stop", "--time", "15", name], 30, action))
+        if action == "remove":
+            return _docker_command_result(_docker_run((["rm", "-f"] if payload.get("force") else ["rm"]) + [name], 30, action))
+
+        image = str(payload.get("image") or "").strip()
+        if action == "pull":
+            if not _docker_valid_image(image): return {"ok": False, "error": "请提供合法镜像名(image)", "code": "DOCKER_INVALID_IMAGE"}
+            return _docker_command_result(_docker_run(["pull", image], 900, action))
+        if action == "yatori_deploy":
+            image = image or "yatoridev/yatori-go-console:latest"
+            name = name or "yatori-console"
+            deploy_dir = _docker_host_path(str(payload.get("deploy_dir") or (Path.home() / "yatori")))
+            if not deploy_dir or not _docker_valid_image(image) or not _docker_valid_name(name):
+                return {"ok": False, "error": "部署目录必须位于 Home/tmp/项目目录，且 image/name 合法", "code": "DOCKER_DEPLOY_INPUT_INVALID"}
+            config_dir, logs_dir = deploy_dir / "config", deploy_dir / "logs"
+            try:
+                config_dir.mkdir(parents=True, exist_ok=True); logs_dir.mkdir(parents=True, exist_ok=True)
+                config_path = config_dir / "config.json"; created_config = False
+                if not config_path.exists():
+                    config_path.write_text(json.dumps(_yatori_default_config(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); created_config = True
+            except Exception as exc:
+                return {"ok": False, "error": f"创建 Yatori 配置目录失败: {exc}", "code": "DOCKER_DEPLOY_FILESYSTEM"}
+            existing = _docker_run(["ps", "-a", "--filter", f"name=^{name}$", "--format", "{{{{.Names}}}}\t{{{{.Status}}}}"], 15, action)
+            if existing.get("ok") and existing.get("stdout") and not payload.get("replace"):
+                return {"ok": False, "code": "DOCKER_CONTAINER_EXISTS", "error": f"容器 {name} 已存在；如需重建请传 replace=true", "container": name, "deploy_dir": str(deploy_dir), "config_created": created_config, "existing": existing.get("stdout")}
+            if existing.get("ok") and existing.get("stdout") and payload.get("replace"):
+                removed = _docker_run(["rm", "-f", name], 30, action)
+                if not removed.get("ok"): return _docker_command_result(removed)
+            pulled = _docker_run(["pull", image], 900, action)
+            if not pulled.get("ok"): return {**pulled, "container": name, "image": image, "deploy_dir": str(deploy_dir), "config_created": created_config}
+            started = _docker_run(["run", "-d", "-i", "--name", name, "--restart", "unless-stopped", "-v", f"{config_dir}:/app/config", "-v", f"{logs_dir}:/app/logs", image], 90, action)
+            if not started.get("ok"): return {**started, "container": name, "image": image, "deploy_dir": str(deploy_dir), "config_created": created_config}
+            inspect = _docker_run(["inspect", "--format", "{{.Name}}\t{{.Config.Image}}\t{{.State.Status}}", name], 15, action)
+            logs = _docker_run(["logs", "--tail", "40", name], 20, action)
+            return {"ok": True, "result": f"Yatori 容器 {name} 已启动", "container": name, "image": image, "deploy_dir": str(deploy_dir), "config_path": str(config_path), "logs_path": str(logs_dir), "config_created": created_config, "inspect": inspect.get("stdout", ""), "logs": (logs.get("stdout", "") or logs.get("stderr", ""))[-12000:]}
+        if action == "run":
+            return {"ok": False, "error": "通用 run 已禁用；请使用 yatori_deploy，避免 Agent 拼接任意 Docker 参数。", "code": "DOCKER_DECLARATIVE_ONLY"}
+        return {"ok": False, "error": "未处理的 Docker 操作", "code": "DOCKER_ACTION_UNSUPPORTED"}
     
     
     @app.get("/engine/db_query")
@@ -492,10 +840,20 @@ def register_server_tools(app):
     
     
     @app.get("/engine/file_search")
-    def engine_file_search(pattern: str = Query(...), path: str = Query(PROJECT_ROOT), max_results: int = Query(30)):
-        """搜索文件"""
+    def engine_file_search(request: Request, pattern: str = Query(...), path: str = Query(PROJECT_ROOT), max_results: int = Query(30), full_access: bool = Query(False), cwd: str = Query("")):
+        """搜索文件 (支持 full_access 全盘访问授权 / DSH Workspace cwd)"""
         try:
-            path = str(_resolve_path(path))  # ★ 相对路径统一解析到项目根
+            full_access = _trusted_full_access(request, full_access)
+            path = str(_resolve_path(path, cwd))
+            if not _allowed_path(Path(path), full_access=full_access, cwd=cwd):
+                return {
+                    "ok": False,
+                    "error": "搜索路径不在允许的工作区或临时目录。如需访问全盘，请在授权确认中批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.search",
+                    "retryable": True,
+                    "path": path,
+                }
             cmd = ["find", path, "-name", pattern, "-type", "f", "!", "-path", "*/node_modules/*", "!", "-path", "*/.git/*", "!", "-path", "*/__pycache__/*"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             files = [f for f in result.stdout.strip().split("\n") if f][:max_results]
@@ -505,17 +863,28 @@ def register_server_tools(app):
     
     
     @app.get("/engine/file_grep")
-    def engine_file_grep(pattern: str = Query(...), path: str = Query(PROJECT_ROOT),
+    def engine_file_grep(request: Request, pattern: str = Query(...), path: str = Query(PROJECT_ROOT),
                          context_lines: int = Query(2), max_results: int = Query(20),
                          ignore_case: bool = Query(True), file_pattern: str = Query(""),
                          max_line_chars: int = Query(2000), max_total_chars: int = Query(200000),
-                         max_file_size: int = Query(64 * 1024 * 1024)):
-        """在文件中搜索匹配内容，返回匹配行及上下文（类似 grep -C）。
+                         max_file_size: int = Query(64 * 1024 * 1024), full_access: bool = Query(False),
+                         cwd: str = Query("")):
+        """在文件中搜索匹配内容，返回匹配行及上下文（类似 grep -C，支持 full_access 全盘授权 / DSH Workspace cwd）。
         自动跳过二进制/超大文件；单行与总返回体积均设上限，防止把超大内容塞进上下文。"""
         import os as _os, re, fnmatch
         from collections import deque
         try:
-            path = str(_resolve_path(path))  # ★ 相对路径统一解析到项目根
+            full_access = _trusted_full_access(request, full_access)
+            path = str(_resolve_path(path, cwd))
+            if not _allowed_path(Path(path), full_access=full_access, cwd=cwd):
+                return {
+                    "ok": False,
+                    "error": "grep 路径不在允许的工作区或临时目录。如需访问全盘，请在授权确认中批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.search",
+                    "retryable": True,
+                    "path": path,
+                }
             # ★ 保底机制: 单行内容与总返回体积都设上限(可配置, 默认值防止再次出现900万字符事件)。
             MAX_LINE_CHARS = max(200, int(max_line_chars))
             MAX_TOTAL_CHARS = max(10000, int(max_total_chars))
@@ -639,20 +1008,30 @@ def register_server_tools(app):
         import os as _os
         try:
             body = await request.json()
+            user_id = request.query_params.get("user_id", "")
+            cwd = request.query_params.get("cwd", "") or (body.get("cwd", "") if isinstance(body, dict) else "")
             old_string = body.get("old_string", "")
             new_string = body.get("new_string", "")
     
             if not old_string and old_string != "":
                 return {"error": "old_string is required"}
     
-            # 安全检查
-            if not _os.path.isabs(path):
-                path = _os.path.join(PROJECT_ROOT, path)
-            path = _os.path.realpath(path)
-            allowed_roots = [PROJECT_ROOT, str(TEMP_DIR), "/var/www/html/oneapichat"]
-            allowed = any(path.startswith(_os.path.realpath(r)) for r in allowed_roots)
-            if not allowed:
-                return {"error": "路径不在允许范围内"}
+            # 安全检查：使用统一的组件级 containment
+            full_access_requested = request.query_params.get("full_access", "") in ("true", "1", True) or (isinstance(body, dict) and body.get("full_access") in (True, "true", "1"))
+            full_access = _trusted_full_access(request, full_access_requested)
+            resolved_path = _resolve_path(path, cwd)
+            if not _allowed_path(resolved_path, full_access=full_access, cwd=cwd):
+                return {
+                    "ok": False,
+                    "error": "路径不在允许范围内。如需编辑外部目录文件，请在授权弹窗中批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.write",
+                    "path": str(resolved_path),
+                    "retryable": True,
+                }
+            path = str(resolved_path)
+            if resolved_path.exists() and resolved_path.is_file() and not _was_observed(user_id, resolved_path):
+                return {"ok": False, "error": "cannot overwrite without reading it first: target file must be read with read/server_file_read before editing", "code": "OBSERVATION_REQUIRED", "path": path, "retryable": True}
     
             if not _os.path.exists(path):
                 return {"error": "文件不存在"}
@@ -683,17 +1062,28 @@ def register_server_tools(app):
     
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
+            validation = _validate_modified_file(resolved_path)
+            if not validation.get("ok"):
+                with open(path, 'w', encoding='utf-8') as f: f.write(content)
+                return {"ok": False, "error": "post-edit validation failed; original file restored", "code": "VALIDATION_FAILED", "path": path, "validation": validation, "backup": backup_path}
+            build_result = None
+            if _within(resolved_path, Path(PROJECT_ROOT).resolve()) and ("/public/js/" in path or "/public/css/" in path):
+                try:
+                    br = subprocess.run(['python3','tools/build-index.py'],cwd=PROJECT_ROOT,capture_output=True,text=True,timeout=30)
+                    build_result = {"ok": br.returncode == 0, "stdout": br.stdout[-2000:], "stderr": br.stderr[-2000:]}
+                except Exception as exc: build_result = {"ok": False, "error": str(exc)}
     
-            return {"ok": True, "replaced": count, "path": path, "backup": backup_path if _os.path.exists(backup_path) else None}
+            return {"ok": True, "replaced": count, "path": path, "backup": backup_path if _os.path.exists(backup_path) else None, "validation": validation, "build": build_result}
         except Exception as e:
             return {"error": str(e)}
     
     
     @app.get("/engine/file_op")
-    def engine_file_op(action: str = Query(...), src: str = Query(...), dst: str = Query("")):
-        """文件操作"""
+    def engine_file_op(request: Request, action: str = Query(...), src: str = Query(...), dst: str = Query(""), full_access: bool = Query(False)):
+        """文件操作（支持 full_access 全盘授权）"""
         import os as _os, shutil
         try:
+            full_access = _trusted_full_access(request, full_access)
             allowed = [str(TEMP_DIR), PROJECT_ROOT, PROJECT_ROOT + '/uploads', PROJECT_ROOT + '/oneapichat']
             # 路径转换: 相对路径 → 项目根; /oneapichat/uploads/... → /var/www/html/oneapichat/uploads/...
             # ★ 勿用 locals()[path]=p (函数内赋值不生效, 相对路径校验仍拿原值 → 全被拒)
@@ -705,12 +1095,18 @@ def register_server_tools(app):
                 if p.startswith('/oneapichat/'):
                     p = PROJECT_ROOT + '/' + p.replace('/oneapichat/', '', 1)
                 return p
-            src = _abs(src)
-            dst = _abs(dst)
-            def safe(p):
-                return any(p.startswith(pre) for pre in allowed)
-            if not safe(src) or (dst and not safe(dst)):
-                return {"error": f"只允许操作 {TEMP_DIR}, {PROJECT_ROOT}, {PROJECT_ROOT}/uploads 目录"}
+            src = str(_resolve_path(_abs(src))) if src else src
+            dst = str(_resolve_path(_abs(dst))) if dst else dst
+            target_op_path = str(src or dst or "")
+            if (src and not _allowed_path(Path(src), full_access=full_access)) or (dst and not _allowed_path(Path(dst), full_access=full_access)):
+                return {
+                    "ok": False,
+                    "error": "文件操作路径不在允许范围内。如需操作外部目录，请先批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.move" if action in ("mv", "move") else "filesystem.write",
+                    "path": target_op_path,
+                    "retryable": True,
+                }
             if action in ("cp", "copy"):
                 shutil.copy2(src, dst)
             elif action in ("mv", "move"):
@@ -729,13 +1125,23 @@ def register_server_tools(app):
             return {"error": str(e)}
 
     @app.get("/engine/parse_document")
-    def engine_parse_document(path: str = Query(""), max_chars: int = Query(50000)):
-        """解析办公文档(DOCX/PPTX/XLSX/PDF/DOC/TXT)返回提取的文本内容"""
+    def engine_parse_document(request: Request, path: str = Query(""), max_chars: int = Query(50000), full_access: bool = Query(False)):
+        """解析办公文档(DOCX/PPTX/XLSX/PDF/DOC/TXT)，支持 full_access 全盘授权"""
         import os as _os
         try:
             if not path:
                 return {"ok": False, "error": "缺少 path 参数"}
+            full_access = _trusted_full_access(request, full_access)
             p = _resolve_path(path)
+            if not _allowed_path(p, full_access=full_access):
+                return {
+                    "ok": False,
+                    "error": "路径不在允许的工作区或临时目录。如需访问外部路径，请先批准全盘访问权限。",
+                    "code": "PERMISSION_REQUIRED",
+                    "capability": "filesystem.read",
+                    "path": str(p),
+                    "retryable": True,
+                }
             if not p.exists():
                 return {"ok": False, "error": f"文件不存在: {path}"}
             if p.is_dir():

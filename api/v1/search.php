@@ -44,10 +44,17 @@ if (file_exists($dbPath)) {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             $config = json_decode($row['config_json'], true);
-            $provider = $config['searchProvider'] ?? 'tavily';
-            // 优先用专用 key，否则用通用 searchApiKey
-            $apiKey = $config['searchApiKeyTavily'] ?? '';
-            if (!$apiKey) $apiKey = $config['searchApiKey'] ?? '';
+            $provider = strtolower((string)($config['searchProvider'] ?? 'tavily'));
+            // 按当前引擎读取专属 Key，避免 Brave 错拿 Tavily Key。
+            $providerKeyMap = [
+                'brave' => 'searchApiKeyBrave',
+                'google' => 'searchApiKeyGoogle',
+                'tavily' => 'searchApiKeyTavily',
+                'deepseek' => 'searchApiKeyDeepSeek',
+            ];
+            $providerKeyName = $providerKeyMap[$provider] ?? '';
+            $apiKey = $providerKeyName ? (string)($config[$providerKeyName] ?? '') : '';
+            if (!$apiKey) $apiKey = (string)($config['searchApiKey'] ?? '');
             // 解密 v2: 格式
             if (str_starts_with($apiKey, 'v2:')) {
                 $apiKey = _decrypt_search_key($apiKey);
@@ -88,17 +95,50 @@ echo json_encode(['results' => $results, 'status' => $status, 'provider' => $pro
 exit;
 
 // ============================================================
-// 搜索引擎实现
+// 搜索引擎实现 (支持项目代理)
 // ============================================================
+
+function _search_proxy_curl(string $url, string $method = 'GET', array $headers = [], ?string $body = null): ?string
+{
+    $proxies = ['http://127.0.0.1:1080', 'http://192.168.195.226:8890', ''];
+    foreach ($proxies as $proxy) {
+        $ch = curl_init($url);
+        $opts = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 4,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_CONNECTTIMEOUT => 6,
+            CURLOPT_ENCODING => '', // 支持 gzip
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER => $headers,
+        ];
+        if (strtoupper($method) === 'POST') {
+            $opts[CURLOPT_POST] = true;
+            if ($body !== null) $opts[CURLOPT_POSTFIELDS] = $body;
+        }
+        if ($proxy) {
+            $opts[CURLOPT_PROXY] = $proxy;
+        }
+        curl_setopt_array($ch, $opts);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($resp !== false && $code >= 200 && $code < 500) {
+            return $resp;
+        }
+    }
+    return null;
+}
 
 function searchTavily(string $query, int $limit, string $apiKey): array
 {
     $body = json_encode(['api_key' => $apiKey, 'query' => $query, 'search_depth' => 'basic', 'max_results' => $limit]);
-    $ctx = stream_context_create(['http' => [
-        'method' => 'POST', 'header' => "Content-Type: application/json\r\n",
-        'content' => $body, 'timeout' => 15, 'ignore_errors' => true,
-    ]]);
-    $resp = @file_get_contents('https://api.tavily.com/search', false, $ctx);
+    $resp = _search_proxy_curl('https://api.tavily.com/search', 'POST', [
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ], $body);
     if (!$resp) return [];
     $data = json_decode($resp, true);
     if (empty($data['results'])) return [];
@@ -111,20 +151,26 @@ function searchTavily(string $query, int $limit, string $apiKey): array
 
 function searchBrave(string $query, int $limit, string $apiKey): array
 {
-    $url = 'https://api.search.brave.com/res/v1/web/search?q=' . urlencode($query) . '&count=' . $limit;
-    $ctx = stream_context_create(['http' => [
-        'header' => "Accept: application/json\r\nX-Subscription-Token: $apiKey\r\n",
-        'timeout' => 15, 'ignore_errors' => true,
-    ]]);
-    $resp = @file_get_contents($url, false, $ctx);
+    $url = 'https://api.search.brave.com/res/v1/web/search?q=' . urlencode($query) . '&count=' . min(max($limit, 1), 20) . '&safesearch=off&text_decorations=0';
+    $resp = _search_proxy_curl($url, 'GET', [
+        'Accept: application/json',
+        'Accept-Encoding: gzip',
+        'X-Subscription-Token: ' . $apiKey,
+    ]);
     if (!$resp) return [];
     $data = json_decode($resp, true);
     $webResults = $data['web']['results'] ?? [];
-    return array_map(fn($r) => [
-        'title' => $r['title'] ?? '',
-        'url' => $r['url'] ?? '',
-        'content' => $r['description'] ?? '',
-    ], array_slice($webResults, 0, $limit));
+    return array_map(function($r) {
+        $content = $r['description'] ?? '';
+        if (!empty($r['extra_snippets']) && is_array($r['extra_snippets'])) {
+            $content .= "\n" . implode("\n", $r['extra_snippets']);
+        }
+        return [
+            'title' => $r['title'] ?? '',
+            'url' => $r['url'] ?? '',
+            'content' => $content,
+        ];
+    }, array_slice($webResults, 0, $limit));
 }
 
 function searchGoogle(string $query, int $limit, string $apiKey): array
@@ -133,8 +179,7 @@ function searchGoogle(string $query, int $limit, string $apiKey): array
     $cx = ''; // 需要搜索引擎 ID
     $url = 'https://www.googleapis.com/customsearch/v1?key=' . urlencode($apiKey) . '&q=' . urlencode($query) . '&num=' . $limit;
     if ($cx) $url .= '&cx=' . urlencode($cx);
-    $ctx = stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true]]);
-    $resp = @file_get_contents($url, false, $ctx);
+    $resp = _search_proxy_curl($url, 'GET', ['Accept: application/json']);
     if (!$resp) return [];
     $data = json_decode($resp, true);
     $items = $data['items'] ?? [];

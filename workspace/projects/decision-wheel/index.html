@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>决策轮盘 · Decision Wheel</title>
+<style>
+:root{--bg-1:#0f0c29;--bg-2:#302b63;--bg-3:#24243e;--glass-bg:rgba(255,255,0.06);--glass-br:rgba(255,255,0.12);--glass-sw:rgba(0,0,0,0.3);--tp:rgba(255,0.95);--ts:rgba(255,255,0.55);--tm:rgba(255,0.3);--ac:#7c6cf0;--ag:rgba(124,108,240,0.4);--dn:#f87171;--rd:20px}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:linear-gradient(135deg,var(--bg-1),var(--bg-2),var(--bg-3));color:var(--tp);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;-webkit-font-smoothing:antialiased}
+.ob{position:fixed;border-radius:50%;filter:blur(80px);opacity:.35;pointer-events:none;z-index:0;animation:of 12s ease-in-out infinite alternate}
+.ob1{width:320px;height:320px;background:radial-gradient(circle,#7c6cf0,transparent 70%);top:-80px;left:-80px;animation-duration:14s}
+.ob2{width:260px;height:260px;background:radial-gradient(circle,#f472b6,transparent 70%);bottom:-60px;right:-60px;animation-duration:18s;animation-delay:-4s}
+.ob3{width:200px;height:200px;background:radial-gradient(circle,#38bdf8,transparent 70%);top:50%;left:60%;animation-duration:16s;animation-delay:-8s}
+@keyframes of{0%{transform:translate(0,0) scale(1)}33%{transform:translate(30px,-20px) scale(1.08)}66%{transform:translate(-20px,25px) scale(.95)}100%{transform:translate(15px,-10px) scale(1.03)}}
+.ac{position:relative;z-index:1;width:100%;max-width:480px;height:100%;max-height:900px;display:flex;flex-direction:column;padding:24px 20px;gap:16px}
+.hd{text-align:center;flex-shrink:0}
+.hd h1{font-size:22px;font-weight:600;letter-spacing:2px}
+.hd .st{font-size:12px;color:var(--ts);letter-spacing:4px;text-transform:uppercase;margin-top:4px}
+.gc{background:var(--glass-bg);backdrop-filter:blur(24px) saturate(1.5);-webkit-backdrop-filter:blur(24px) saturate(1.5);border:1px solid var(--glass-br);border-radius:var(--rd);box-shadow:0 8px 32px var(--glass-sw),inset 0 1px 0 rgba(255,0.08)}
+.wa{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0}
+.ww{position:relative;width:min(340px,78vw);height:min(340px,78vw)}
+.wp{position:absolute;top:-18px;left:50%;transform:translateX(-50%);z-index:10;filter:drop-shadow(0 4px 12px rgba(0,0,0,.5))}
+.wp svg{width:32px;height:36px}
+#wc{width:100%;height:100%;border-radius:50%;box-shadow:0 0 60px rgba(124,108,240,.15)}
+.wh{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:64px;height:64px;border-radius:50%;background:var(--glass-bg);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--glass-br);display:flex;align-items:center;justify-content:center;z-index:5;box-shadow:0 4px 20px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,0.1)}
+.wh span{font-size:22px}
+.sb{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:64px;height:64px;border-radius:50%;border:none;background:transparent;cursor:pointer;z-index:6;transition:transform .2s cubic-bezier(.22,1,.36,1)}
+.sb:hover{transform:translate(-50%,-50%) scale(1.1)}
+.sb:active{transform:translate(-50%,-50%) scale(.95)}
+.rb{flex-shrink:0;padding:16px 24px;text-align:center;border-radius:var(--rd);transition:all .4s cubic-bezier(.22,1,.36,1);opacity:0;transform:translateY(8px)}
+.rb.v{opacity:1;transform:translateY(0)}
+.rb .rl{font-size:11px;color:var(--ts);letter-spacing:3px;text-transform:uppercase;margin-bottom:6px}
+.rb .rt{font-size:20px;font-weight:600}
+.op{flex-shrink:0;padding:16px;max-height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,.15) transparent}
+.op::-webkit-scrollbar{width:4px}
+.op::-webkit-scrollbar-track{background:transparent}
+.op::-webkit-scrollbar-thumb{background:rgba(255,255,.15);border-radius:4px}
+.oh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.oh h3{font-size:13px;font-weight:500;color:var(--ts);letter-spacing:2px;text-transform:uppercase}
+.oc{font-size:11px;color:var(--tm);background:rgba(255,255,.06);padding:2px 8px;border-radius:10px}
+.ol{display:flex;flex-direction:column;gap:6px}
+.oi{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;background:rgba(255,255,.03);border:1px solid rgba(255,255,.06);transition:all .2s}
+.oi:hover{background:rgba(255,255,.06)}
+.oc2{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ot{flex:1;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.od{width:24px;height:24px;border-radius:50%;border:none;background:rgba(255,255,.05);color:var(--tm);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .2s;flex-shrink:0}
+.od:hover{background:rgba(248,113,113,.2);color:var(--dn)}
+.aor{display:flex;gap:8px;margin-top:10px}
+.ai{flex:1;padding:8px 14px;border-radius:12px;border:1px solid rgba(255,255,.1);background:rgba(255,255,.04);color:var(--tp);font-size:14px;outline:none;transition:border-color .2s;font-family:inherit}
+.ai::placeholder{color:var(--tm)}
+.ai:focus{border-color:var(--ac)}
+.ab{width:36px;height:36px;border-radius:12px;border:none;background:var(--ac);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.ab:hover{transform:scale(1.08);box-shadow:0 4px 16px var(--ag)}
+.ab:active{transform:scale(.95)}
+.pr{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.pc{padding:5px 12px;border-radius:20px;border:1px solid rgba(255,255,.1);background:rgba(255,255,.04);color:var(--ts);font-size:12px;cursor:pointer;transition:all .2s;font-family:inherit}
+.pc:hover{background:rgba(124,108,240,.15);border-color:var(--ac);color:var(--tp)}
+.cc{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:100;overflow:hidden}
+.cp{position:absolute;width:8px;height:8px;border-radius:2px;opacity:1}
+.es{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:20px;color:var(--tm);font-size:13px}
+.es .ei{font-size:28px;opacity:.5}
+@media(max-height:700px){.ac{padding:16px;gap:10px}.ww{width:min(280px,65vw);height:min(280px,65vw)}.op{max-height:140px}}
+@media(max-height:600px){.hd{display:none}.ww{width:min(240px,55vw);height:min(240px,55vw)}}
+@keyframes fiu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fi{animation:fiu .5s cubic-bezier(.22,1,.36,1) both}
+</style>
+</head>
+<body>
+<div class="ob ob1"></div>
+<div class="ob ob2"></div>
+<div class="ob ob3"></div>
+<div class="ac">
+  <div class="hd fi"><h1>决策轮盘</h1><div class="st">Spin to Decide</div></div>
+  <div class="wa fi" style="animation-delay:.1s">
+    <div class="ww">
+      <div class="wp"><svg viewBox="0 0 32 36"><defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fff" stop-opacity=".95"/><stop offset="100%" stop-color="#e0e0e0" stop-opacity=".8"/></linearGradient></defs><polygon points="16,36 0,0 32,0" fill="url(#pg)" stroke="rgba(255,255,.3)" stroke-width=".5"/></svg></div>
+      <canvas id="wc"></canvas>
+      <div class="wh"><span>🎯</span></div>
+      <button class="sb" id="sb" title="点击转动"></button>
+    </div>
+  </div>
+  <div class="rb gc fi" id="rb" style="animation-delay:.2s"><div class="rl">✨ 命运选择了</div><div class="rt" id="rt">点击中心按钮开始</div></div>
+  <div class="op gc fi" id="op" style="animation-delay:.3s">
+    <div class="oh"><h3>选项列表</h3><span class="oc" id="oc">0 项</span></div>
+    <div class="ol" id="ol"></div>
+    <div class="aor"><input type="text" class="ai" id="ai" placeholder="添加新选项..." maxlength="30"><button class="ab" id="ab">+</button></div>
+    <div class="pr"><button class="pc" data-p="meal">🍜 吃什么</button><button class="pc" data-p="activity">🎮 活动</button><button class="pc" data-p="yesno">🤔 Yes/No</button><button class="pc" data-p="clear">🗑️ 清空</button></div>
+  </div>
+</div>
+<div class="cc" id="cf"></div>
+<script src="app.js"></script>
+</body>
+</html>

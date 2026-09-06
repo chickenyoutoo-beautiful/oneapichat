@@ -244,7 +244,6 @@ curl https://naujtrats.xyz/oneapichat/api/v1/tools \
 | 📚 超星学习通 | 13 | `chaoxing_login`, `chaoxing_list_courses`, `chaoxing_auto`, `chaoxing_status`, `chaoxing_stop`, `chaoxing_stats`, `chaoxing_overview`, `chaoxing_auth`, `chaoxing_qr_login`, `chaoxing_exam_list`, `chaoxing_exam_start`, `chaoxing_exam_status`, `chaoxing_exam_stop` |
 | 🎬 视频/下载 | 12 | `video_edit`, `video_understanding`, `video_search`, `video_download`, `video_download_status`, `video_parse`, `video_list_downloads`, `video_upload_cloudreve`, `video_cloudreve_list`, `video_cloudreve_mkdir`, `video_cloudreve_search`, `video_cloudreve_url` |
 | 🪟 Windows 远程 | 7 | `win_info`, `win_processes`, `win_kill`, `win_start`, `win_restart`, `win_file`, `win_screenshot` |
-| 🎵 MiniMax 多模态 | 8 | `mmx_chat`, `mmx_image`, `mmx_speech`, `mmx_music`, `mmx_voices`, `mmx_vision`, `mmx_quota`, `mmx_video` |
 | 🌐 浏览器自动化 | 6 | `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_get_content`, `browser_get_snapshot` |
 | 📂 网盘解析 | 5 | `netdisk_parse`, `netdisk_download`, `netdisk_parse_and_download`, `netdisk_status`, `netdisk_login` |
 | 🤖 Agent/编排 | 5+12 | `delegate_task`, `delegate_workflow`, `plan_update`, `ask_agent`, `autonomous_mode` + `run_skill` (含 12 个技能: deep-search, multi-agent-orchestration, chaoxing-automation, content-creation, server-management, cloud-file-manager, video-hunter, game-redemption-codes, windows-automation, browser-automation, netdisk-parser, amap-maps) |
@@ -1060,7 +1059,6 @@ Nginx (naujtrats.xyz)
     │                                                              │
     │                                                              ├── Node.js handlers
     │                                                              ├── Python bridge (bilibili/chaoxing)
-    │                                                              ├── MiniMax CLI
     │                                                              └── Engine proxy → Python FastAPI (:8766)
     │
     ├── /oneapichat/api/v1/mcp ──→ PHP (mcp.php)

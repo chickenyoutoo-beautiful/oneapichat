@@ -31,12 +31,15 @@ if (!$userId) {
 }
 
 $usersFile = ONECHAT_ROOT . '/users/users.json';
-$users = json_decode(file_get_contents($usersFile), true) ?: [];
+$users = (file_exists($usersFile) ? json_decode(file_get_contents($usersFile), true) : []) ?: [];
 
 if (!isset($users[$userId])) {
-    http_response_code(404);
-    echo json_encode(['error' => '用户不存在']);
-    exit;
+    $users[$userId] = [
+        'id' => $userId,
+        'username' => $userId,
+        'created_at' => date('c'),
+        'api_keys' => [],
+    ];
 }
 
 $action = $_GET['action'] ?? '';

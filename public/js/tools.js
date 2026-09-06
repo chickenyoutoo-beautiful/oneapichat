@@ -52,12 +52,164 @@ const BROWSER_GET_SNAPSHOT_TOOL = {
     }
 };
 
+// ═══════════════════════════════════════════════════════════════
+//  DSH (DeepSeek Harness) 标准底层 Coding 工具定义
+// ═══════════════════════════════════════════════════════════════
+const BASH_TOOL = {
+    type: "function",
+    function: {
+        name: "bash",
+        description: "在终端执行 bash/shell 命令并返回 stdout 与 stderr。支持沙箱与超时控制。参数 command 为要执行的完整命令（兼容 cmd），workdir 为工作目录（兼容 cwd）。避免破坏性命令。",
+        parameters: {
+            type: "object",
+            properties: {
+                command: { type: "string", description: "要执行的 bash shell 命令" },
+                cmd: { type: "string", description: "command 别名" },
+                workdir: { type: "string", description: "工作目录路径（可选，默认为当前工作空间）" },
+                cwd: { type: "string", description: "workdir 别名" },
+                timeoutMs: { type: "number", description: "超时毫秒数（默认60000）" },
+                timeout: { type: "number", description: "超时秒数（可选）" }
+            },
+            required: ["command"]
+        }
+    }
+};
+
+const READ_TOOL = {
+    type: "function",
+    function: {
+        name: "read",
+        description: "读取 UTF-8 文本文件内容，返回带行号的文本内容与总行数。修改文件前必须先使用本工具阅读文件。支持 offset/limit 或 start_line/end_line 行范围截取。",
+        parameters: {
+            type: "object",
+            properties: {
+                file_path: { type: "string", description: "要读取的文件绝对路径" },
+                path: { type: "string", description: "file_path 别名" },
+                offset: { type: "number", description: "从第几行开始读取（1-based，默认1）" },
+                limit: { type: "number", description: "读取的最大行数（默认2000）" },
+                start_line: { type: "number", description: "起始行号（offset别名）" },
+                end_line: { type: "number", description: "结束行号" }
+            },
+            required: ["file_path"]
+        }
+    }
+};
+
+const WRITE_TOOL = {
+    type: "function",
+    function: {
+        name: "write",
+        description: "创建全新文件或完全替换现有文件内容。系统会自动为被覆盖的文件创建 .bak 备份。⚠️修改已有文件时优先使用 edit 进行局部字面量精准替换，禁止直接盲写全量覆盖。",
+        parameters: {
+            type: "object",
+            properties: {
+                file_path: { type: "string", description: "目标文件绝对路径" },
+                path: { type: "string", description: "file_path 别名" },
+                content: { type: "string", description: "要写入的完整文本内容" }
+            },
+            required: ["file_path", "content"]
+        }
+    }
+};
+
+const EDIT_TOOL = {
+    type: "function",
+    function: {
+        name: "edit",
+        description: "精准编辑已有文件：在指定文件中将 old_string 字面量精确替换为 new_string。修改前必须先调用 read 确认精确内容和缩进。old_string 必须在文件中唯一（如有多处请提供更多上下文或指定 replace_all=true）。替换成功后将生成可视化 Diff。",
+        parameters: {
+            type: "object",
+            properties: {
+                file_path: { type: "string", description: "要编辑的文件绝对路径" },
+                path: { type: "string", description: "file_path 别名" },
+                old_string: { type: "string", description: "要替换的精确原文（必须完全匹配空格/缩进/换行）" },
+                new_string: { type: "string", description: "替换后的新文本（空字符串表示删除）" },
+                replace_all: { type: "boolean", description: "是否替换所有匹配项（默认 false）" }
+            },
+            required: ["file_path", "old_string", "new_string"]
+        }
+    }
+};
+
+const GREP_TOOL = {
+    type: "function",
+    function: {
+        name: "grep",
+        description: "在工作区或指定目录/文件中使用正则表达式或关键词搜索文本内容，返回匹配行号和上下文。支持 file_pattern/include 过滤文件类型。",
+        parameters: {
+            type: "object",
+            properties: {
+                pattern: { type: "string", description: "搜索的正则表达式或关键字" },
+                path: { type: "string", description: "搜索起始路径（默认项目根目录）" },
+                include: { type: "string", description: "文件名过滤通配符（如 *.js 或 *.py）" },
+                file_pattern: { type: "string", description: "include 别名" }
+            },
+            required: ["pattern"]
+        }
+    }
+};
+
+const GLOB_TOOL = {
+    type: "function",
+    function: {
+        name: "glob",
+        description: "使用 glob 模式查找并返回匹配的文件路径列表（如 **/*.ts, src/**/*.js, *.json）。按修改时间排序。",
+        parameters: {
+            type: "object",
+            properties: {
+                pattern: { type: "string", description: "Glob 匹配模式（如 **/*.js）" },
+                path: { type: "string", description: "搜索起始目录（默认项目工作区）" }
+            },
+            required: ["pattern"]
+        }
+    }
+};
+
+const TODO_WRITE_TOOL = {
+    type: "function",
+    function: {
+        name: "todo_write",
+        description: "记录并原子更新当前任务的多步待办清单。每次传入完整的 todos 数组替换旧状态。用于向用户清晰展示当前执行步骤、进度与状态转化（pending | in_progress | completed）。",
+        parameters: {
+            type: "object",
+            properties: {
+                todos: {
+                    type: "array",
+                    description: "完整的待办事项列表",
+                    items: {
+                        type: "object",
+                        properties: {
+                            content: { type: "string", description: "步骤描述（简明祈使句）" },
+                            status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "pending (待处理) | in_progress (进行中) | completed (已完成)" }
+                        },
+                        required: ["content", "status"]
+                    }
+                }
+            },
+            required: ["todos"]
+        }
+    }
+};
+
+const RUN_CODE_TOOL = {
+    type: "function",
+    function: {
+        name: "run_code",
+        description: "在受限 JavaScript 编排沙箱中执行异步代码。仅暴露 tools.read/write/edit/grep/glob/bash/todo_write，用于一次完成条件、并发只读查询与错误处理；禁止 require/process/fs/fetch。",
+        parameters: { type: "object", properties: {
+            code: { type: "string", description: "async 函数体代码，可 await tools.read(...) 并 return JSON 可序列化结果" },
+            description: { type: "string", description: "5-10字执行摘要" },
+            timeout_ms: { type: "number", description: "总超时毫秒，默认60000，最大120000" }
+        }, required: ["code", "description"] }
+    }
+};
+
 // ==================== 服务器操控工具定义 ====================
 const SERVER_EXEC_TOOL = {
     type: "function",
     function: {
         name: "server_exec",
-        description: "在服务器上执行终端命令。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制(5000字符),超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。参数名必须是 cmd(不要用 command)。命令内含双引号时请用 shell 单引号或反斜杠转义。",
+        description: "在服务器上执行终端命令。工具名是 server_exec（不存在 run_command），参数名必须是 cmd（不要用 command）。用于系统管理、文件操作、进程管理、服务控制等。输出有长度限制(5000字符),超长时间命令会超时。⚠️ 谨慎使用:避免执行破坏性命令(rm -rf, shutdown等)。命令内含双引号时请用 shell 单引号或反斜杠转义。",
         parameters: {
             type: "object",
             properties: {
@@ -86,11 +238,20 @@ const SERVER_PYTHON_TOOL = {
     }
 };
 
+const PROJECT_SELF_DESCRIBE_TOOL = {
+    type: "function",
+    function: {
+        name: "project_self_describe",
+        description: "查询项目自身的身份、架构、当前能力、恢复机制和安全规则。按需返回有界上下文，不读取密钥。用户询问‘你是谁/项目怎么工作/为什么刷新会恢复’时优先调用。",
+        parameters: { type: "object", properties: { query: { type: "string", description: "想了解的项目主题或问题" }, budget: { type: "integer", description: "上下文字符预算，默认14000，最大50000" } }, required: ["query"] }
+    }
+};
+
 const SERVER_FILE_READ_TOOL = {
     type: "function",
     function: {
         name: "server_file_read",
-        description: "读取服务器文件内容。普通多行文件用 start_line/end_line/max_lines 按行分页读取；压缩 JSON 等单行巨长文件按行读不到内容，改用 offset/max_chars 按字符偏移分页（offset=0 从开头读 max_chars 字符，读完后用返回提示里的下一个 offset 继续翻页）。也支持目录列表。",
+        description: "读取服务器上的一个具体文件内容（不能把目录当文件读）。先用 server_file_search 查找下载文件，或用 server_exec 的 ls/find 列目录，再把返回的完整文件路径传给本工具。普通多行文件用 start_line/end_line/max_lines 按行分页；单行巨长文件用 offset/max_chars 分页。B站/磁力下载先轮询对应status工具，从completed_files.path读取，不能猜测/tmp路径。",
         parameters: {
             type: "object",
             properties: {
@@ -127,7 +288,7 @@ const SERVER_FILE_WRITE_TOOL = {
     type: "function",
     function: {
         name: "server_file_write",
-        description: "写入文件到服务器(仅允许 /tmp 和项目目录)。用于保存脚本输出、生成报告、创建配置等。",
+        description: "写入文件到服务器(仅允许 /tmp 和项目目录)。用于创建全新文件、生成报告或保存脚本。⚠️注意：修改已有文件时禁止直接盲写全量覆盖！已有文件必须先调用 server_file_read 确认内容，且优先使用 server_file_edit 进行局部精确修改；仅当确实需要全量重写时才使用本工具(系统会自动创建.bak备份)。",
         parameters: {
             type: "object",
             properties: {
@@ -140,12 +301,12 @@ const SERVER_FILE_WRITE_TOOL = {
     }
 };
 
-// ★ 智能文件编辑 — 精确字符串替换（参考 Claude Code Edit 工具）
+// ★ 智能文件编辑 — 精确字符串替换（参考 Claude Code / DSH Edit 工具）
 const SERVER_FILE_EDIT_TOOL = {
     type: "function",
     function: {
         name: "server_file_edit",
-        description: "精确编辑文件：在文件中查找指定字符串并替换。比 server_file_write 更高效——只需传递要改的片段而非整个文件。\n使用规则：\n- old_string 必须与文件中的内容完全匹配（包括缩进和空格）\n- old_string 在文件中只能出现一次，否则编辑会失败\n- new_string 替换 old_string，用空字符串表示删除\n- 建议先 server_file_read 确认要修改的内容",
+        description: "精确编辑已有文件：在文件中查找指定字符串并替换。比 server_file_write 更安全且高效——只需传递要修改的代码片段而非全量重写。\n强制规则：\n- 修改已有文件首选此工具，严禁随意全量覆盖破坏已有代码\n- 修改前必须先通过 server_file_read 确认当前精确内容和缩进\n- old_string 必须与文件中的内容完全一致\n- old_string 在文件中应保持唯一（如有多处请提供更多上下文或设 replace_all=true）\n- new_string 替换 old_string（空字符串表示删除）",
         parameters: {
             type: "object",
             properties: {
@@ -228,11 +389,17 @@ const SERVER_DOCKER_TOOL = {
     type: "function",
     function: {
         name: "server_docker",
-        description: "Docker 容器管理工具。查看容器列表(ps)、镜像列表(images)、容器状态(stats)。",
+        description: "Docker 运维与一键部署工具。先用 doctor 检查 CLI/daemon/socket，再用 yatori_deploy 自动创建 ~/yatori/config、~/yatori/logs、config.json、拉取 yatoridev/yatori-go-console:latest 并启动容器。支持 ps/images/stats/logs/pull/stop/remove；禁止任意 Docker 参数拼接。",
         parameters: {
             type: "object",
             properties: {
-                action: { type: "string", enum: ["ps", "images", "stats"], description: "操作类型: ps(默认,列出容器), images(列出镜像), stats(实时状态)" }
+                action: { type: "string", enum: ["doctor", "ps", "images", "stats", "logs", "pull", "yatori_deploy", "stop", "remove"], description: "doctor=环境预检；yatori_deploy=一键部署 Yatori；logs=查看日志；pull=拉取镜像；ps/images/stats=只读诊断；stop/remove=容器管理" },
+                image: { type: "string", description: "镜像名，默认 yatoridev/yatori-go-console:latest，仅 pull/yatori_deploy 使用" },
+                name: { type: "string", description: "容器名，默认 yatori-console" },
+                deploy_dir: { type: "string", description: "数据目录，默认 ~/yatori；仅允许 Home/tmp/项目目录" },
+                replace: { type: "boolean", description: "yatori_deploy 时是否删除同名旧容器后重建，默认 false" },
+                tail: { type: "integer", description: "logs 返回行数，默认 200，最大 5000" },
+                force: { type: "boolean", description: "remove 是否强制删除运行中容器" }
             },
             required: []
         }
@@ -586,12 +753,13 @@ const ENGINE_PUSH_TOOL = {
     type: "function",
     function: {
         name: "engine_push",
-        description: "向用户推送通知消息,可附带服务器文件作为下载链接。当视频剪辑/文件处理完成后,调用此工具把结果文件发送给用户。传file参数指定服务器上文件路径(如/tmp/video.mp4),用户会收到紫色下载按钮。",
+        description: "向用户交付通知或服务器文件下载链接。只在产物已生成并经你核验后调用；msg仅写简短、可验证的交付说明，不要自行估算字数、页数、测试结果或格式状态。每个文件默认只推送一次；详细分析统一放在最终回答中。传file参数指定服务器路径(如/tmp/video.mp4)，用户会收到下载按钮。",
         parameters: {
             type: "object",
             properties: {
                 msg: { type: "string", description: "推送消息内容" },
-                file: { type: "string", description: "可选,服务器上文件路径(如/tmp/video_output.mp4),会生成下载链接" }
+                file: { type: "string", description: "可选,服务器上文件路径(如/tmp/video_output.mp4),会生成下载链接" },
+                filename: { type: "string", description: "可选,用户下载时显示的文件名；未填时使用源文件 basename。应按用户要求填写完整文件名和扩展名。" }
             },
             required: ["msg"]
         }
@@ -653,7 +821,7 @@ const WEB_FETCH_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "web_fetch",
-        description: "抓取并解析网页内容。当需要查看搜索结果的详细信息、阅读文章、核实事实、获取最新数据时调用此工具。支持单个URL和批量URL(最多5个并行)。返回网页的文本内容(已去除HTML标签、脚本等噪音)。",
+        description: "抓取并解析网页内容。当需要查看搜索结果的详细信息、阅读文章、核实事实、获取最新数据时调用此工具。支持单个URL和批量URL(最多5个并行)。返回网页的文本内容(已去除HTML标签、脚本等噪音)。工具内部会自动尝试当前代理、服务器中继和直连；全部失败后再调用 toggle_proxy 请求用户确认，不要自行臆造 ghproxy/gitclone 镜像地址。图片纪律：抓取页面只返回文本不代表其中提到的图片文件可按猜测路径访问；不得依据页面摘要中的 *.png/*.jpg 文件名自行拼接图片 URL。找不到服务端返回的真实图片 URL 时，只输出该页面作为来源链接。",
         parameters: {
             type: "object",
             properties: {
@@ -727,7 +895,7 @@ const SEARCH_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "web_search",
-        description: "执行网页搜索并返回结果。当用户问题涉及最新新闻、实时信息、当前事件、专业知识库之外的内容时,应主动调用此工具。搜索结果会包含网页标题、链接和摘要。",
+        description: "执行网页搜索并返回结果。当用户问题涉及最新新闻、实时信息、当前事件、专业知识库之外的内容时,应主动调用此工具。搜索结果会包含网页标题、链接和摘要。图片纪律：用户要求找/看已有图片时，优先使用图片搜索返回的真实 thumbnail/image_url；如果搜索结果只有网页链接和文件名，必须提供可访问的来源页面链接，绝对禁止根据文件名、目录或哈希猜测/拼接图片直链（如 patchwiki、Wikimedia thumb 路径），也禁止声称未经实际验证的直链可访问。",
         parameters: {
             type: "object",
             properties: {
@@ -749,7 +917,7 @@ const GET_CURRENT_TIME_TOOL = {
     type: "function",
     function: {
         name: "get_current_time",
-        description: "获取当前精确时间和日期。返回日期时间、星期、时区、时段(凌晨/上午/中午/下午/晚上)和Unix时间戳。用于判断今天某个事件是否已发生、计算时差、确认时区等。",
+        description: "获取当前精确时间和全球金融交易时区(北京时间/美东时间EDT/EST/伦敦时间/东京时间)及各证券市场实时交易状态(美股盘中/盘前/盘后/已收盘、A股/港股状态)。查询实时事件、美股开闭盘、计算时差时必须以此为准。",
         parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "unused"}}, required: [] }
     }
 };
@@ -758,7 +926,7 @@ const IMAGE_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "generate_image",
-        description: "【纯文生图】用于从零开始生成图片。★ 这是唯一的生图方式,不要在文本回复中伪造图片链接。适用场景:画一幅画、生成一张图片、创作插画。没有参考图片时必须用这个。",
+        description: "【纯文生图；禁止用于搜图】仅在用户明确要求画、生成、创作、设计一张不存在的新图片时使用。用户说搜索、查找、收集、推荐或‘给我找几张图片/照片/梗图/壁纸’时，属于现有图片搜索，严禁调用本工具，即使句子含‘有趣插图’等描述也不是生图。只有同一句明确要求搜索后再创作新图，搜索完成后才可调用；若要参考搜索结果生成，应改用 generate_image_i2i(reference_source=search_results)。不要在文本回复中伪造生成结果。",
         parameters: {
             type: "object",
             properties: {
@@ -804,7 +972,7 @@ const IMAGE_I2I_TOOL_DEFINITION = {
     type: "function",
     function: {
         name: "generate_image_i2i",
-        description: "【图生图】用户上传了多张参考图并要求据此生成/创作图片时用这个。适用场景:换颜色、换风格、换脸/换发型、以图为基础创作新图、参考多张图合成等。这个工具会先分析所有参考图获取详细描述,再调用图生图API生成新图。系统会自动使用用户上传的第一张图作为主参考图。禁止:用户只是问'图片里有什么'时不要用这个,用analyze_image。",
+        description: "【图生图】当用户明确要求参考已有图片生成/创作新图时使用。参考图既可以来自用户上传、聊天中最近生成图，也可以来自最近一次 /image 搜索结果；使用搜图结果时传 reference_source=search_results。适用:换颜色/风格/人物、参考多图合成、先搜素材再创作。禁止:用户只要求搜索或查看已有图片时不要调用。",
         parameters: {
             type: "object",
             properties: {
@@ -827,6 +995,16 @@ const IMAGE_I2I_TOOL_DEFINITION = {
                 mask_image: {
                     type: "string",
                     description: "【可选,GPT Image原生支持】遮罩图URL或base64,用于精确指定要修改的区域。仅用于图生图模式。"
+                },
+                reference_source: {
+                    type: "string",
+                    enum: ["auto", "uploads", "search_results"],
+                    description: "参考图来源。auto=优先本轮上传图、否则最近生成图；uploads=仅用户上传图；search_results=使用当前聊天最近一次 /image 搜索结果。复合‘先搜图再参考生成’必须传 search_results。"
+                },
+                reference_indexes: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "当 reference_source=search_results 时选择搜索结果序号，0=第一张。默认使用前3张，最多4张。"
                 }
             },
             required: ["prompt"]
@@ -880,7 +1058,7 @@ const ANALYZE_IMAGE_TOOL = {
     type: "function",
     function: {
         name: "analyze_image",
-        description: "分析用户上传的图片内容,返回详细的图片描述。当用户发送图片并询问图片内容、要求描述图片、分析图片细节时调用此工具。支持多张图片(包括用户分多次上传的所有图片),用 image_index 指定分析哪一张(0=第一张,1=第二张,2=第三张...)。系统会自动收集聊天中所有用户上传的图片,按上传顺序排列。不传则分析第一张。支持 JPEG、PNG、GIF、WebP 格式。",
+        description: "分析用户上传的图片内容,返回详细的图片描述。当用户发送图片并询问图片内容、要求描述图片、分析图片细节时调用此工具。支持多张图片(包括用户分多次上传的所有图片和AI生成的图片),系统会自动收集聊天中所有图片,按上传顺序排列。用 image_index 指定分析哪一张(0=第一张/最旧, 最后一张索引=最新上传),或用 image_indexes 同时分析多张 [0,1,2]。★ 不传则默认分析最新上传的图片(最后一张)。支持 JPEG、PNG、GIF、WebP、HEIC 格式。",
         parameters: {
             type: "object",
             properties: {
@@ -890,7 +1068,12 @@ const ANALYZE_IMAGE_TOOL = {
                 },
                 image_index: {
                     type: "integer",
-                    description: "要分析的图片索引(0=第一张,1=第二张...)。当用户上传了多张图片时使用此参数指定具体分析哪一张,避免每次都分析第一张。默认0。"
+                    description: "要分析的图片索引(0=第一张/最旧, 1=第二张, ..., 最后一张=最新上传)。当用户上传了多张图片时使用此参数指定具体分析哪一张。默认不传=分析最新上传的图片(最后一张)。"
+                },
+                image_indexes: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "★ 并行分析多张图片: 传入索引数组 [0,1,2] 可同时分析多张图片,结果合并返回。适用于用户上传多张图片需要全部分析的场景。"
                 }
             }
         }
@@ -901,7 +1084,7 @@ const VIDEO_UNDERSTANDING_TOOL = {
     type: "function",
     function: {
         name: "video_understanding",
-        description: "分析上传的视频内容。提取关键帧并进行全面理解。",
+        description: "分析用户上传的本地 MP4/视频。系统通过 ffmpeg 提取关键帧，再复用配置栏当前选择的视觉提供商与视觉模型进行理解；询问结尾、最后动作或定格时会密集提取最后两秒与最终帧。不要声称无法读取视频或要求用户另行截图，应优先调用本工具。",
         parameters: {
             type: "object",
             properties: {
@@ -1010,16 +1193,18 @@ function buildToolMeta(name, opts) {
     searchHint: opts.searchHint || '',
     isReadOnly: opts.isReadOnly !== undefined ? opts.isReadOnly : true,
     isAgentOnly: opts.isAgentOnly || false,
-    // 渲染工具调用消息 (可覆写)
+    // 渲染工具调用消息 (纯 SVG 图标，禁用 Emoji)
     renderUseMessage: opts.renderUseMessage || function(input) {
       var summary = typeof input === 'object' ? JSON.stringify(input).substring(0, 80) : String(input).substring(0, 80);
-      return '<div class="tool-card"><div class="tool-card-header"><span class="tool-card-icon">🔧</span><span class="tool-card-name">' + escapeHtml(name) + '</span></div><div class="tool-card-body">' + escapeHtml(summary) + '</div></div>';
+      var svgIcon = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('bolt', { size: 14, className: 'text-blue-500' }) : '<span class="vibe-tool-bullet"></span>';
+      return '<div class="tool-card"><div class="tool-card-header"><span class="tool-card-icon">' + svgIcon + '</span><span class="tool-card-name">' + escapeHtml(name) + '</span></div><div class="tool-card-body">' + escapeHtml(summary) + '</div></div>';
     },
-    // 渲染工具结果 (可覆写)
+    // 渲染工具结果 (纯 SVG 图标，禁用 Emoji)
     renderResultMessage: opts.renderResultMessage || function(output) {
       var text = typeof output === 'string' ? output : (output && output.result ? output.result : JSON.stringify(output));
       var truncated = text.length > 500 ? text.substring(0, 500) + '...' : text;
-      return '<div class="tool-result"><div class="tool-result-header">✅ 结果</div><pre class="tool-result-body">' + escapeHtml(truncated) + '</pre></div>';
+      var checkSvg = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('checkCircle', { size: 14, className: 'text-emerald-500 inline-block mr-1' }) : '';
+      return '<div class="tool-result"><div class="tool-result-header flex items-center">' + checkSvg + '<span>执行完成</span></div><pre class="tool-result-body">' + escapeHtml(truncated) + '</pre></div>';
     },
     // 获取简要摘要
     getSummary: opts.getSummary || function(input) {
@@ -1150,6 +1335,78 @@ var _vhLabels = {
 
 // ==================== 注册所有工具到注册表 ====================
 (function _registerAllTools() {
+  // ★ DSH 标准底层 Coding 工具注册
+  toolRegistry.register('run_code', buildToolMeta('run_code', {
+    capabilities: [ToolCapability.EXEC, ToolCapability.READS_FILES, ToolCapability.WRITES_FILES],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '聚合编排多个底层工具',
+  }));
+  toolRegistry.registerToolDefinition('run_code', RUN_CODE_TOOL);
+  toolRegistry.register('read', buildToolMeta('read', {
+    capabilities: [ToolCapability.READS_FILES],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '读取文件内容(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('read', READ_TOOL);
+
+  toolRegistry.register('edit', buildToolMeta('edit', {
+    capabilities: [ToolCapability.WRITES_FILES],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '局部精确编辑文件(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('edit', EDIT_TOOL);
+
+  toolRegistry.register('write', buildToolMeta('write', {
+    capabilities: [ToolCapability.WRITES_FILES],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '写入文件(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('write', WRITE_TOOL);
+
+  toolRegistry.register('bash', buildToolMeta('bash', {
+    capabilities: [ToolCapability.EXEC],
+    approval: ApprovalLevel.REQUIRED,
+    isReadOnly: false,
+    isAgentOnly: true,
+    searchHint: '执行Shell命令(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('bash', BASH_TOOL);
+
+  toolRegistry.register('grep', buildToolMeta('grep', {
+    capabilities: [ToolCapability.FILE_SEARCH],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '正则搜索文件内容(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('grep', GREP_TOOL);
+
+  toolRegistry.register('glob', buildToolMeta('glob', {
+    capabilities: [ToolCapability.FILE_SEARCH],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: true,
+    isAgentOnly: true,
+    searchHint: '模式匹配查找文件(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('glob', GLOB_TOOL);
+
+  toolRegistry.register('todo_write', buildToolMeta('todo_write', {
+    capabilities: [ToolCapability.NONE],
+    approval: ApprovalLevel.AUTO,
+    isReadOnly: false,
+    isAgentOnly: false,
+    searchHint: '更新任务清单(DSH)',
+  }));
+  toolRegistry.registerToolDefinition('todo_write', TODO_WRITE_TOOL);
+
   // 读操作 - 只读,自动审批
   toolRegistry.register('server_file_read', buildToolMeta('server_file_read', {
     capabilities: [ToolCapability.READS_FILES],
@@ -1729,7 +1986,6 @@ const _TOOL_CATEGORIES = [
     { label: '🔑 网盘登录',    match: n => n === 'netdisk_login' },
     { label: '📈 股票行情',    match: n => n.startsWith('stock_') },
     { label: '🌐 浏览器',     match: n => n.startsWith('browser_'), agentOnly: true },
-    { label: '🎵 MiniMax 工具', match: n => n.startsWith('mmx_') },
     { label: '📦 更多工具',    match: () => true },  // catch-all: 确保所有工具都有归属
 ];
 
@@ -1768,7 +2024,6 @@ const _TOOL_LABELS = {
     // src_* 星穹铁道工具已移除
     'win_info':'系统信息','win_processes':'进程列表','win_kill':'结束进程','win_start':'启动程序','win_restart':'重启程序','win_file':'文件操作','win_screenshot':'屏幕截图',
     'cr_check_login':'登录检查','cr_login':'云盘登录','cr_register':'注册账号','cr_user_info':'用户信息','cr_list_files':'文件列表','cr_search_files':'搜索文件','cr_create_folder':'创建文件夹','cr_rename':'重命名','cr_move':'移动','cr_copy':'复制','cr_delete':'删除','cr_list_shares':'分享列表','cr_create_share':'创建分享','cr_delete_share':'删除分享','cr_storage_info':'存储空间','cr_overview':'云盘总览','cr_upload_file':'上传文件','cr_upload':'文本上传',
-    'mmx_chat':'MiniMax对话','mmx_speech':'语音合成','mmx_music':'音乐生成','mmx_voices':'音色列表','mmx_quota':'配额查询','mmx_image':'MiniMax生图','mmx_video':'视频生成','mmx_vision':'图片分析',
     'browser_navigate':'打开网页','browser_screenshot':'页面截图','browser_click':'点击元素','browser_type':'输入文字','browser_get_content':'提取文本','browser_get_snapshot':'DOM快照',
     'bilibili_search':'B站搜索','bilibili_video_info':'B站视频','bilibili_article_read':'B站专栏','bilibili_user_profile':'B站用户','bilibili_comment_list':'B站评论','bilibili_dynamic_list':'B站动态','bilibili_qr_login':'B站扫码登录',
     // 视频猎手 Video Hunter
@@ -1786,18 +2041,6 @@ const _TOOL_LABELS = {
 };
 
 
-// ==================== MiniMax CLI 工具 ====================
-const MMX_TOOLS = [
-    { type: "function", function: { name: "mmx_chat", description: "通过 MiniMax 语言模型对话。用 MiniMax 模型回答用户问题，支持流式输出。适用于与主线模型不同的场景或需要多模型对比。", parameters: { type: "object", properties: { message: { type: "string", description: "用户消息" }, system: { type: "string", description: "系统提示词(可选)" }, max_tokens: { type: "integer", description: "最大生成token数,默认4096" } }, required: ["message"] } } },
-    { type: "function", function: { name: "mmx_image", description: "使用 MiniMax image-01 生成图片。支持自定义宽高比和批量生成。", parameters: { type: "object", properties: { prompt: { type: "string", description: "图片描述" }, aspect_ratio: { type: "string", description: "宽高比，如 16:9, 1:1, 9:16，默认1:1" }, n: { type: "integer", description: "生成数量，默认1，最大4" } }, required: ["prompt"] } } },
-    { type: "function", function: { name: "mmx_video", description: "使用 MiniMax Hailuo 生成视频。异步任务，返回任务ID。", parameters: { type: "object", properties: { prompt: { type: "string", description: "视频描述，如'夕阳下，一只猫坐在窗边望向远方'" } }, required: ["prompt"] } } },
-    { type: "function", function: { name: "mmx_speech", description: "使用 MiniMax 语音合成，将文字转为语音。", parameters: { type: "object", properties: { text: { type: "string", description: "要朗读的文字" }, voice: { type: "string", description: "音色ID，可选: female-yujie(默认)/female-shaonv/male-qn-qingse/male-qn-jingying/female-chengshu/female-tianmei/male-qn-badao/male-qn-daxuesheng" } }, required: ["text"] } } },
-    { type: "function", function: { name: "mmx_voices", description: "列出 MiniMax 语音合成可用的所有音色列表。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "unused"}}, required: [] } } },
-    { type: "function", function: { name: "mmx_music", description: "用户说'生成/创作/创作一首歌/音乐/歌曲'时,必须调用此工具！★ 使用 MiniMax 生成音乐，会自动根据 prompt 创作歌词并生成完整歌曲。★ 纯旋律: instrumental=true。★ 提供歌词: lyrics=歌词。★ 默认(推荐): 只传 prompt,自动创作歌词+音乐。", parameters: { type: "object", properties: { prompt: { type: "string", description: "音乐风格描述，如 '轻快爵士风格，主题是夏天的海边'。必须描述风格/主题/情绪" }, lyrics: { type: "string", description: "歌词(可选)。支持 [Verse][Chorus][Bridge] 等结构标签。不传则自动生成歌词。" }, instrumental: { type: "boolean", description: "纯音乐无歌词，默认false" } }, required: ["prompt"] } } },
-    { type: "function", function: { name: "mmx_vision", description: "使用 MiniMax VLM 分析图片内容。", parameters: { type: "object", properties: { image: { type: "string", description: "图片URL或base64" }, prompt: { type: "string", description: "关于图片的问题，默认'描述这张图片'" } }, required: ["image"] } } },
-    { type: "function", function: { name: "mmx_quota", description: "查看 MiniMax Token Plan 的剩余用量和配额信息。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "unused"}}, required: [] } } },
-];
-
 // ==================== Windows 本机操控工具 ====================
 const WIN_POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
 const WIN_TOOLS = [
@@ -1813,16 +2056,6 @@ const WIN_TOOLS = [
 // 注册
 (function() {
     WIN_TOOLS.forEach(function(t) {
-        toolRegistry.register(t.function.name, {
-            name: t.function.name,
-            description: t.function.description,
-        });
-    });
-})();
-
-// ==================== MiniMax CLI 工具注册 ====================
-(function() {
-    MMX_TOOLS.forEach(function(t) {
         toolRegistry.register(t.function.name, {
             name: t.function.name,
             description: t.function.description,
@@ -1924,9 +2157,9 @@ AMAP_MAPS_TOOLS.forEach(function(t) {
 // ★ 网盘解析工具组 (Netdisk Parser — 解析+下载主流网盘分享链接)
 window.NETDISK_TOOLS = [
     { type: "function", function: { name: "netdisk_parse", description: "解析网盘分享链接,获取直链下载地址。支持百度网盘(pan.baidu.com)、夸克网盘(pan.quark.cn)、阿里云盘(alipan.com/aliyundrive.com)、天翼云盘(cloud.189.cn)、迅雷网盘、移动网盘(yun.139.com)、UC网盘(drive.uc.cn)、123网盘、蓝奏云(lanzou/ilanzou)、小飞机网盘(feijipan.com)、光鸭云盘(guangyapan.com)等。参数: url(必填,分享链接), password(可选,提取码)。", parameters: { type: "object", properties: { url: { type: "string", description: "网盘分享链接" }, password: { type: "string", description: "提取码/密码" } }, required: ["url"] } } },
-    { type: "function", function: { name: "netdisk_download", description: "使用aria2多线程下载文件到服务器。下载完成后文件位于 uploads/downloads/ 目录。参数: url(必填,直链), filename(可选,保存名), output_dir(可选,下载目录), threads(可选,线程数,默认16)。", parameters: { type: "object", properties: { url: { type: "string", description: "文件直链URL" }, filename: { type: "string", description: "保存文件名" }, output_dir: { type: "string", description: "下载目录" }, threads: { type: "number", description: "下载线程数, 默认16" } }, required: ["url"] } } },
-    { type: "function", function: { name: "netdisk_parse_and_download", description: "一键解析网盘链接并下载到服务器(解析+下载组合)。参数: url(必填,分享链接), password(可选,提取码), filename(可选,保存名), output_dir(可选,下载目录), threads(可选,线程数)。", parameters: { type: "object", properties: { url: { type: "string", description: "网盘分享链接" }, password: { type: "string", description: "提取码/密码" }, filename: { type: "string", description: "保存文件名" }, output_dir: { type: "string", description: "下载目录" }, threads: { type: "number", description: "下载线程数, 默认16" } }, required: ["url"] } } },
-    { type: "function", function: { name: "netdisk_status", description: "查询网盘解析服务状态(aria2是否可用、支持的网盘类型等)。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "unused"}}, required: [] } } },
+    { type: "function", function: { name: "netdisk_download", description: "下载网盘文件到服务器。url可传分享链接(夸克/百度/阿里等，服务端自动解析并保留动态会话)或文件直链；大于512MB的文件会进入后台队列，返回job_id后调用netdisk_status(job_id)查询。下载完成后文件位于uploads/downloads/。参数: url(必填), password(可选,分享提取码), filename(可选), output_dir(可选), threads(可选,默认16)。", parameters: { type: "object", properties: { url: { type: "string", description: "分享链接或文件直链URL" }, password: { type: "string", description: "分享提取码" }, filename: { type: "string", description: "保存文件名" }, output_dir: { type: "string", description: "下载目录" }, threads: { type: "number", description: "下载线程数, 默认16" } }, required: ["url"] } } },
+    { type: "function", function: { name: "netdisk_parse_and_download", description: "一键解析网盘链接并下载到服务器。夸克直链自动携带动态Cookie/Referer/UA；大于512MB的文件进入后台队列并返回job_id，必须继续调用netdisk_status(job_id)直到completed。参数: url(必填,分享链接), password(可选,提取码), filename(可选), output_dir(可选), threads(可选,默认16)。", parameters: { type: "object", properties: { url: { type: "string", description: "网盘分享链接" }, password: { type: "string", description: "提取码/密码" }, filename: { type: "string", description: "保存文件名" }, output_dir: { type: "string", description: "下载目录" }, threads: { type: "number", description: "下载线程数, 默认16" } }, required: ["url"] } } },
+    { type: "function", function: { name: "netdisk_status", description: "查询网盘解析/下载服务状态；传job_id时查询后台大文件下载进度，status=completed后文件已保存到uploads/downloads/。", parameters: { type: "object", properties: { job_id: { type: "string", description: "netdisk_download或netdisk_parse_and_download返回的后台任务ID" } }, required: [] } } },
 ];
 NETDISK_TOOLS.forEach(function(t) {
     toolRegistry.register(t.function.name, {
@@ -1956,17 +2189,17 @@ window.NETDISK_LOGIN_TOOLS.forEach(function(t) {
     toolRegistry.registerToolDefinition(t.function.name, t);
 });
 
-// ★ 股票数据工具组 (A股 — 东方财富数据源, 10秒缓存)
+// ★ 全球金融数据工具组 (A股/美股/港股/全球指数 — 东方财富+腾讯+新浪冗余数据源)
 window.STOCK_TOOLS = [
-    { type: "function", function: { name: "stock_realtime", description: "获取A股个股实时行情(价格/涨跌幅/成交额/换手率/PE/市值等)。参数symbol为股票代码(如000001, 600519)。数据来源:东方财富, 10秒缓存。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码, 如 000001(平安银行), 600519(贵州茅台), 300750(宁德时代)" } }, required: ["symbol"] } } },
-    { type: "function", function: { name: "stock_kline", description: "获取A股历史K线数据(OHLCV+涨跌幅+换手率)。period=daily/weekly/monthly/5/15/30/60(分钟), adjust=qfq(前复权)/hfq(后复权)/空(不复权), count=条数(默认120)。也可指定start/end(YYYYMMDD格式日期范围)。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" }, period: { type: "string", description: "周期: daily(日K,默认)/weekly/monthly/5/15/30/60(分钟K)", enum: ["daily", "weekly", "monthly", "5", "15", "30", "60"] }, start: { type: "string", description: "起始日期 YYYYMMDD, 如 20260101" }, end: { type: "string", description: "结束日期 YYYYMMDD, 如 20260730" }, adjust: { type: "string", description: "复权: qfq(前复权,默认)/hfq(后复权)/空(不复权)", enum: ["qfq", "hfq", ""] }, count: { type: "integer", description: "获取条数, 默认120" } }, required: ["symbol"] } } },
+    { type: "function", function: { name: "stock_realtime", description: "获取股票与指数实时行情。★ 全面支持 A股(如 000001, 600519), 美股股票(如 NVDA, AAPL, TSLA, AMD, TSM, MU, BABA), 美股主要指数(如 SOX 费城半导体, IXIC 纳斯达克, NDX 纳指100, SPX 标普500, DJI 道琼斯, RUT 罗素2000), 港股(如 00700, 09988), 全球股指(如 N225, HSI)。返回价格、涨跌幅、涨跌额、振幅、美东/北京时间戳、市场开闭盘状态。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票或指数代码, 如 SOX(费半), IXIC(纳指), SPX(标普), NVDA, AAPL, 000001, 600519, 00700" } }, required: ["symbol"] } } },
+    { type: "function", function: { name: "stock_kline", description: "获取历史K线数据(OHLCV+涨跌幅)。支持 A股、美股、港股及全球主流指数。period=daily/weekly/monthly/5/15/30/60(分钟), adjust=qfq(前复权)/hfq(后复权)/none(不复权), count=条数(默认120)。也可指定start/end(YYYYMMDD格式日期范围)。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票或指数代码" }, period: { type: "string", description: "周期: daily(日K,默认)/weekly/monthly/5/15/30/60(分钟K)", enum: ["daily", "weekly", "monthly", "5", "15", "30", "60"] }, start: { type: "string", description: "起始日期 YYYYMMDD, 如 20260101" }, end: { type: "string", description: "结束日期 YYYYMMDD, 如 20260730" }, adjust: { type: "string", description: "复权: qfq(前复权)/hfq(后复权)/none(不复权), 不传默认qfq", enum: ["qfq", "hfq", "none"] }, count: { type: "integer", description: "获取条数, 默认120" } }, required: ["symbol"] } } },
     { type: "function", function: { name: "stock_sector_flow", description: "获取行业/概念板块资金流向(主力净流入/超大单/大单/中单/小单)。sector_type=2(行业板块,默认)或3(概念板块)。返回TOP30板块。", parameters: { type: "object", properties: { sector_type: { type: "string", description: "2=行业板块(默认), 3=概念板块", enum: ["2", "3"] } }, required: [] } } },
     { type: "function", function: { name: "stock_dragon_tiger", description: "获取龙虎榜数据(机构/游资买入卖出明细)。date=YYYYMMDD, 默认今天。返回上榜个股的净买入额/买入额/卖出额/上榜理由。", parameters: { type: "object", properties: { date: { type: "string", description: "日期 YYYYMMDD, 如 20260730, 默认今天" } }, required: [] } } },
     { type: "function", function: { name: "stock_north_flow", description: "获取北向资金(沪深股通)实时净流入数据。返回沪股通/深股通各自的净流入额和总额。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "无参数,保留字段"}}, required: [] } } },
-    { type: "function", function: { name: "stock_diagnosis", description: "获取个股综合诊断(价格/涨跌幅/PE/PB/换手率/市值等关键指标一览)。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" } }, required: ["symbol"] } } },
-    { type: "function", function: { name: "stock_indicators", description: "计算A股技术指标(MA5/10/20/60, MACD, KDJ, RSI6/12/24, 布林带)。返回最近5个周期的指标值, 可用于判断买卖信号。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" }, count: { type: "integer", description: "计算所用K线条数, 默认120" } }, required: ["symbol"] } } },
-    { type: "function", function: { name: "stock_chart", description: "生成A股K线分析图(PNG), 含K线+均线+成交量+MACD。返回图片URL可直接在对话中展示。period=daily/weekly/monthly, count=条数(默认60), indicators=ma,macd,volume(可组合)。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" }, period: { type: "string", description: "周期: daily(默认)/weekly/monthly", enum: ["daily", "weekly", "monthly"] }, count: { type: "integer", description: "K线条数, 默认60" }, adjust: { type: "string", description: "复权: qfq(默认)/hfq/空", enum: ["qfq", "hfq", ""] }, indicators: { type: "string", description: "显示指标: ma,macd,volume 组合(默认全部)", enum: ["ma,macd,volume", "ma,volume", "ma,macd", "ma"] } }, required: ["symbol"] } } },
-    { type: "function", function: { name: "stock_market_overview", description: "获取A股市场主要指数实时行情(上证指数/深证成指/创业板指/科创50/上证50/沪深300/中证500等)。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "无参数,保留字段"}}, required: [] } } },
+    { type: "function", function: { name: "stock_diagnosis", description: "获取个股综合诊断(价格/涨跌幅/PE/PB/换手率/市值等关键指标一览)。支持A股/美股/港股。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" } }, required: ["symbol"] } } },
+    { type: "function", function: { name: "stock_indicators", description: "计算技术指标(MA5/10/20/60, MACD, KDJ, RSI6/12/24, 布林带)。支持A股/美股/港股/全球指数。返回最近5个周期的指标值, 可用于判断买卖信号。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票代码" }, count: { type: "integer", description: "计算所用K线条数, 默认120" } }, required: ["symbol"] } } },
+    { type: "function", function: { name: "stock_chart", description: "生成K线技术分析图(PNG), 含K线+均线+成交量+MACD。支持 A股、美股股票、港股与全球指数。返回图片URL可直接在对话中展示。period=daily/weekly/monthly, count=条数(默认60), indicators=ma,macd,volume(可组合)。", parameters: { type: "object", properties: { symbol: { type: "string", description: "股票或指数代码, 如 SOX, NVDA, 000001, 600519" }, period: { type: "string", description: "周期: daily(默认)/weekly/monthly", enum: ["daily", "weekly", "monthly"] }, count: { type: "integer", description: "K线条数, 默认60" }, adjust: { type: "string", description: "复权: qfq(前复权,默认)/hfq(后复权)/none(不复权)", enum: ["qfq", "hfq", "none"] }, indicators: { type: "string", description: "显示指标: ma,macd,volume 组合(默认全部)", enum: ["ma,macd,volume", "ma,volume", "ma,macd", "ma"] } }, required: ["symbol"] } } },
+    { type: "function", function: { name: "stock_market_overview", description: "获取全球主要指数实时全景行情看板。★ 一键返回美股核心指数(道琼斯/标普500/纳斯达克/纳指100/费城半导体SOX)、A股各大指数(上证/深证/创业板/科创50)、港股指数(恒生/恒科)及全球外盘实时涨跌幅与点位。回答宏观大盘或全球科技股动向时必须优先调用。", parameters: { type: "object", properties: {"_dummy": {"type": "string", "description": "无参数,保留字段"}}, required: [] } } },
 ];
 window.STOCK_TOOLS.forEach(function(t) {
     toolRegistry.register(t.function.name, {
@@ -1988,7 +2221,14 @@ window.registerMcpTools = function(serverId, serverName, tools) {
     if (!Array.isArray(tools) || tools.length === 0) return;
     tools.forEach(function(t) {
         var name = t.name || '';
-        if (!name || toolRegistry.has(name)) return;  // 跳过已存在的 (本机工具优先)
+        if (!name) return;
+        // 如果已存在同名工具且不是来自该 MCP 服务器，则跳过 (本机原生工具优先)
+        if (typeof toolRegistry !== 'undefined' && toolRegistry.has(name)) {
+            var existingMeta = toolRegistry.get(name);
+            if (!existingMeta || existingMeta.mcpServerId !== serverId) {
+                return;
+            }
+        }
         var meta = {
             name: name,
             description: t.description || '',

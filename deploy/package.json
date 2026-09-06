@@ -1,6 +1,6 @@
 {
   "name": "oneapichat-client",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "OneAPIChat 桌面客户端 — 瘦客户端模式，连接远程服务器",
   "main": "electron_main.js",
   "homepage": "https://github.com/chickenyoutoo-beautiful/oneapichat",
@@ -90,5 +90,8 @@
     "@capacitor/core": "^8.5.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
   }
 }

@@ -188,7 +188,12 @@ switch ($action) {
 
     case 'match':
         // ★ 根据用户查询匹配相关技能
-        $query = mb_strtolower($_GET['query'] ?? '', 'UTF-8');
+        // match 支持 POST，避免长用户消息拼进 URL 触发 414 URI Too Long。
+        $jsonBody = json_decode(file_get_contents('php://input'), true);
+        $rawQuery = is_array($jsonBody) && array_key_exists('query', $jsonBody)
+            ? $jsonBody['query']
+            : ($_POST['query'] ?? ($_GET['query'] ?? ''));
+        $query = mb_strtolower((string)$rawQuery, 'UTF-8');
         if (!$query) { echo json_encode(['matched' => []]); exit; }
 
         $matched = [];

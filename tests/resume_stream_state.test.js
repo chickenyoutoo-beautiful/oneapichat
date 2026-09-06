@@ -210,9 +210,109 @@ async function testPendingCreateHandshake() {
     assert.strictEqual(app.context.window.ResumeStream.peek('chat1'), null);
 }
 
+async function testCreateForwardsSafeProviderOptionsAndRuntimeIds() {
+    const values = { authUserId: 'user-1', authToken: 'token-1' };
+    const assistant = { role: 'assistant', content: '', reasoning: '', partial: true };
+    let createBody = null;
+    let requests = 0;
+    const app = boot(values, {
+        currentChatId: 'chat1',
+        chats: { chat1: { messages: [assistant] } },
+        fetch: async function(url, options) {
+            requests++;
+            if (String(url).indexOf('chat_create') !== -1) {
+                createBody = JSON.parse(options.body);
+                return new Response(JSON.stringify({
+                    stream_id: 'stream_full', msg_id: 'msg_full', task_id: 'task_full',
+                    runtime_session_id: 'session_full', runtime_job_id: 'job_full'
+                }), { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            const snapshot = {
+                stream_id: 'stream_full', msg_id: 'msg_full', full_text: 'done',
+                reasoning_text: '', tool_calls: [], usage: null, finished: true, error: '', offset: 1
+            };
+            return new Response('event: snapshot\ndata: ' + JSON.stringify(snapshot) + '\n\n', {
+                status: 200, headers: { 'content-type': 'text/event-stream' }
+            });
+        }
+    });
+    const result = await app.context.window.ResumeStream.create([{ role: 'user', content: 'hi' }], {
+        model: 'gpt-5', apiKey: 'provider-key', baseUrl: 'https://api.example/v1', tokens: 1234,
+        requestBody: {
+            model: 'gpt-5', messages: [], max_completion_tokens: 777, tool_choice: 'required',
+            modalities: ['text', 'audio'], audio: { voice: 'alloy' },
+            image_config: { size: '1024x1024' }, custom_sampling: 0.2, access_token: 'do-not-forward'
+        }
+    }, 'chat1', assistant);
+    assert.strictEqual(result.completed, true);
+    assert.strictEqual(requests, 2);
+    assert.strictEqual(createBody.max_completion_tokens, 777);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(createBody, 'max_tokens'), false);
+    assert.strictEqual(createBody.tool_choice, 'required');
+    assert.deepStrictEqual(Array.from(createBody.modalities), ['text', 'audio']);
+    assert.strictEqual(createBody.image_config.size, '1024x1024');
+    assert.strictEqual(createBody.custom_sampling, 0.2);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(createBody, 'access_token'), false);
+    assert.strictEqual(createBody.api_key, 'provider-key');
+    assert.strictEqual(assistant.task_id, 'task_full');
+    assert.strictEqual(assistant.runtime_session_id, 'session_full');
+    assert.strictEqual(assistant.runtime_job_id, 'job_full');
+}
+
+function testDirectRequestTimeoutDoesNotCancelDurableCreate() {
+    assert.ok(source.indexOf('var _CREATE_ACK_TIMEOUT_MS = 30000;') !== -1, 'durable create must have its own acknowledgement timeout');
+    assert.strictEqual(/setTimeout\([^;]*config\.requestTimeout/.test(source), false, 'direct request timeout must not abort a durable engine job');
+}
+
+function testStateRemainsResumableForEngineWindow() {
+    const now = Date.now();
+    const values = {
+        authUserId: 'user-1',
+        _rs_state_v3: JSON.stringify({
+            version: 3,
+            chats: {
+                chat1: {
+                    version: 3, chatId: 'chat1', sid: 'stream_long', msgId: 'msg_long',
+                    userId: 'user-1', phase: 'streaming', content: 'partial', reasoning: '',
+                    toolCalls: [], tools: [], createdAt: now - 20 * 60 * 1000,
+                    updatedAt: now - 20 * 60 * 1000
+                }
+            }
+        })
+    };
+    const app = boot(values);
+    const state = app.context.window.ResumeStream.peek('chat1');
+    assert.ok(state, 'a stream inside the engine 30-minute retention window must remain resumable');
+    assert.strictEqual(state.sid, 'stream_long');
+}
+
+async function testCreateTreatsAuthFailuresAsTerminal() {
+    const assistant = { role: 'assistant', content: '', reasoning: '', partial: true };
+    let requests = 0;
+    const app = boot({ authUserId: 'user-1', authToken: 'expired' }, {
+        currentChatId: 'chat1', chats: { chat1: { messages: [assistant] } },
+        fetch: async function() {
+            requests++;
+            return new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'session expired' } }), {
+                status: 401, headers: { 'content-type': 'application/json' }
+            });
+        }
+    });
+    const result = await app.context.window.ResumeStream.create([], { model: 'gpt-5' }, 'chat1', assistant);
+    assert.strictEqual(requests, 1);
+    assert.strictEqual(result.authFailure, true);
+    assert.strictEqual(result.terminal, true);
+    assert.strictEqual(result.status, 401);
+    assert.strictEqual(result.errorCode, 'UNAUTHORIZED');
+}
+
 Promise.resolve()
     .then(testRecoveredToolHandoff)
     .then(testPendingCreateHandshake)
+    .then(testCreateForwardsSafeProviderOptionsAndRuntimeIds)
+    .then(testDirectRequestTimeoutDoesNotCancelDurableCreate)
+    .then(testStateRemainsResumableForEngineWindow)
+    .then(testCreateTreatsAuthFailuresAsTerminal)
     .then(function() {
         console.log('resume stream state journal/tool handoff/create handshake: ok');
     }).catch(function(error) {

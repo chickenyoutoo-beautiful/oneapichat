@@ -91,6 +91,20 @@ docker compose up -d
 
 同时支持 `linux/amd64` 和 `linux/arm64`，树莓派、群晖 NAS、威联通等设备均可运行。
 
+#### Agent 一键部署 Docker 应用（含 Yatori）
+
+如果 Agent 之前只会调用 `sudo docker ...`，在长期非交互进程中很容易因为 sudo 无 TTY/无凭据而失败。现在 `server_docker` 使用 Docker CLI 直连 daemon，并提供结构化预检、网络/权限诊断和受限的一键部署动作：
+
+```text
+server_docker(action="doctor")
+server_docker(action="yatori_deploy", deploy_dir="~/yatori")
+server_docker(action="logs", name="yatori-console", tail=200)
+```
+
+`yatori_deploy` 会在目标目录创建 `config/`、`logs/` 和默认 `config.json`，拉取 `yatoridev/yatori-go-console:latest`，再以 `--restart unless-stopped` 启动 `yatori-console`。默认不会覆盖已有同名容器；确认要重建时显式传 `replace=true`。
+
+若 `doctor` 报 `DOCKER_PERMISSION`，请让运行 Agent 的用户加入 Docker 组并重新登录；若报 `DOCKER_NETWORK`，请在宿主机先执行 `docker pull yatoridev/yatori-go-console:latest` 或配置 Docker registry mirror。工具不会执行任意 Docker 参数拼接，部署目录也限制在用户 Home、临时目录或项目目录内。
+
 ### 手动部署
 
 ```bash

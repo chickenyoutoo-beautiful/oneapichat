@@ -662,3 +662,32 @@ details[open] .src-chevron { transform: rotate(180deg); }
 /* ═══ 内联图标（状态消息） ═══ */
 
 .dark .src-upgrade-log { background: #0f172a; border: 1px solid var(--src-border); }
+
+/* Chat theme adapter: this stylesheet loads after theme-studio.css, so keep
+   classic light Markdown code blocks on the pale editor surface. */
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] .markdown-body pre,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] .code-block-wrapper {
+    color: #243247 !important;
+    background: linear-gradient(145deg,#f7fbff 0%,#eef4fb 100%) !important;
+    border: 1px solid rgba(84,112,151,.20) !important;
+    border-radius: 14px !important;
+    box-shadow: 0 8px 22px rgba(62,91,132,.09), inset 0 1px 0 rgba(255,255,255,.92) !important;
+}
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] .markdown-body pre code,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre code,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs {
+    color: #243247 !important;
+    background: transparent !important;
+    text-shadow: none !important;
+}
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-keyword,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-selector-tag,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-literal { color: #7c3aed !important; }
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-string,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-addition { color: #16734b !important; }
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-number,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-attr,
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-built_in { color: #a15c00 !important; }
+html:not(.dark)[data-theme-page="chat"][data-chat-theme="classic"] pre .hljs-comment { color: #667892 !important; }
+

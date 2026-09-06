@@ -112,11 +112,13 @@ function hideCompressSpinner() {
  * 3. 保留 system prompt + 第一条用户消息 + 最近 N 条消息
  * 4. 显示 SVG spinner
  */
-async function compressContextIfNeeded(chatId) {
-    if (chats[chatId]?._compressFailed) return;
-    if (!getChecked('compressToggle')) return;
+async function compressContextIfNeeded(chatId, force) {
+    chatId = chatId || currentChatId;
+    if (!chatId || !chats[chatId]) return false;
+    if (!force && chats[chatId]?._compressFailed) return false;
+    if (!force && !getChecked('compressToggle')) return false;
 
-    var msgs = chats[chatId].messages;
+    var msgs = chats[chatId].messages || [];
     var currentModel = getVal('modelSelect') || DEFAULT_CONFIG.model;
     var contextLimit = getModelContextLength(currentModel);
     var estimatedTokens = estimateMessagesTokenCount(msgs);
@@ -124,24 +126,23 @@ async function compressContextIfNeeded(chatId) {
 
     // 检测是否达到 context 的 80%
     var limit80 = Math.floor(contextLimit * 0.8);
-    if (estimatedTokens < limit80) {
-        // 还没到 80%, 按原消息数量阈值检查
-        var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
-        var partial = msgs.filter(function(m) { return m.partial; });
-        var nonPartial = msgs.filter(function(m) { return m.role !== 'system' && !m.partial && !m.temporary; });
-        if (nonPartial.length <= thresholdPct) return;
+    var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
+    var partial = msgs.filter(function(m) { return m.partial; });
+    var nonPartial = msgs.filter(function(m) { return m.role !== 'system' && !m.partial && !m.temporary; });
+
+    if (!force) {
+        if (estimatedTokens < limit80 && nonPartial.length <= thresholdPct) return false;
+    } else {
+        // 强制压缩: 消息过少则无需压缩
+        if (nonPartial.length <= 2) return false;
     }
 
     showCompressSpinner();
 
     try {
-        var sysMessages = msgs.filter(function(m) { return m.role === 'system' && !m.temporary; });
-        var partial = msgs.filter(function(m) { return m.partial; });
-        var nonPartial = msgs.filter(function(m) { return m.role !== 'system' && !m.partial && !m.temporary; });
-
-        if (nonPartial.length <= thresholdPct && estimatedTokens < limit80) {
+        if (!force && nonPartial.length <= thresholdPct && estimatedTokens < limit80) {
             hideCompressSpinner();
-            return;
+            return false;
         }
 
         // ★ 智能压缩策略:
@@ -186,9 +187,7 @@ async function compressContextIfNeeded(chatId) {
         for (var si = 0; si < toSummarize.length; si++) {
             var m = toSummarize[si];
             if (m.role === 'tool_card') {
-                if (typeof appendToolCallMessage === 'function') {
-                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {}, m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
-                }
+                continue;
             } else if (m.role === 'user') {
                 conv += '用户: ' + (m.text || m.content || '').substring(0, 2000) + '\n';
             } else if (m.role === 'tool') {
@@ -256,9 +255,93 @@ async function compressContextIfNeeded(chatId) {
         hideCompressSpinner();
     }
 }
-async function autoGenerateTitle(chatId) {
+var _titleRetryTimers = window._titleRetryTimers || (window._titleRetryTimers = {});
+var _titleRetryAttempts = window._titleRetryAttempts || (window._titleRetryAttempts = {});
+
+function _hasMeaningfulChatContent(chat) {
+    if (!chat) return false;
+    // ★ 索引/按需加载模式：消息在服务器端持久化存在，必须视为有内容，严禁误判为草稿！
+    if (chat._localIndex || chat._indexOnly || (typeof chat.msgCount === 'number' && chat.msgCount > 0)) {
+        return true;
+    }
+    // 已被用户或系统生成自定义标题（非占位符）的会话，视为有意义会话
+    if (chat.title && !_isPlaceholderTitle(chat.title)) return true;
+    if (!Array.isArray(chat.messages)) return false;
+    return chat.messages.some(function(m) {
+        if (!m) return false;
+        // 跳过系统提示词、临时消息、未附带文本的日期前缀消息
+        if (m.role === 'system' || m.temporary) return false;
+        if (m._datePrefix && !m.text && !m.content) return false;
+        // 仅当对象没有 role 且只有 timestamp/time 时作为纯时间戳伪消息跳过
+        if (!m.role && (m.timestamp || m.time)) return false;
+        if (m.role === 'user') return !!String(m.text || m.content || '').trim() || !!(m.files && m.files.length);
+        if (m.role === 'assistant') return !!String(m.content || m.reasoning || '').trim() || !!(m.tool_calls && m.tool_calls.length) || !!(m.generatedImages && m.generatedImages.length) || !!m.generatedImage;
+        if (m.role === 'tool') return !!String(m.content || '').trim();
+        return !!String(m.text || m.content || '').trim();
+    });
+}
+window._hasMeaningfulChatContent = _hasMeaningfulChatContent;
+window._isEmptyDraftChat = _isEmptyDraftChat;
+
+function _isEmptyDraftChat(id) {
+    if (!id || !chats[id]) return false;
+    if (isAgentChat(id)) return false;
+    if (typeof isTypingMap !== 'undefined' && isTypingMap[id]) return false;
+    // 正在浏览的当前会话不作为背景多余草稿清理
+    if (typeof currentChatId !== 'undefined' && id === currentChatId) return false;
+    var chat = chats[id];
+    if (chat._localIndex || chat._indexOnly || (typeof chat.msgCount === 'number' && chat.msgCount > 0)) return false;
+    if (chat.title && !_isPlaceholderTitle(chat.title)) return false;
+    return !_hasMeaningfulChatContent(chat);
+}
+
+function _isPlaceholderTitle(title) {
+    title = String(title || '').trim();
+    return !title || title === '新对话' || title === 'Agent' || title === 'Agent 会话' || title === '文件消息';
+}
+
+function _pruneEmptyDraftChats() {
+    var ids = Object.keys(chats).filter(_isEmptyDraftChat).sort(function(a, b) {
+        return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+    });
+    if (ids.length <= 1) return ids[0] || null;
+    var keepId = (typeof currentChatId !== 'undefined' && _isEmptyDraftChat(currentChatId)) ? currentChatId : (ids[0] || null);
+    var pruned = false;
+    ids.forEach(function(id) {
+        if (id === keepId) return;
+        delete chats[id];
+        pruned = true;
+        // ★ 严禁在清理本地多余空草稿时写入 _deletedChatIds 或向服务端发送 _syncDeleteToServer！
+        // 只有用户显式点击删除按钮（window.deleteChat）才打墓碑并删除服务器数据。
+    });
+    if (pruned) {
+        slimSaveChats();
+    }
+    return keepId;
+}
+
+function _scheduleTitleRetry(chatId) {
+    if (!chatId || !chats[chatId]) return;
+    // 索引模式消息尚未加载到本地，等 loadChat 之后再生成标题
+    if (chats[chatId]._localIndex || chats[chatId]._indexOnly) return;
+    if (!_hasMeaningfulChatContent(chats[chatId])) return;
+    if (_titleRetryTimers[chatId]) return;
+    var attempt = (_titleRetryAttempts[chatId] || 0) + 1;
+    _titleRetryAttempts[chatId] = attempt;
+    var delay = Math.min(120000, 5000 * Math.pow(2, Math.min(attempt - 1, 5)));
+    _titleRetryTimers[chatId] = setTimeout(function() {
+        delete _titleRetryTimers[chatId];
+        if (!chats[chatId] || !_hasMeaningfulChatContent(chats[chatId])) return;
+        autoGenerateTitle(chatId, true);
+    }, delay);
+}
+
+async function autoGenerateTitle(chatId, isRetry) {
+    if (!chats[chatId] || !_hasMeaningfulChatContent(chats[chatId])) return false;
+    if (chats[chatId]._titleGenerating) return false;
     var msgs = chats[chatId].messages.filter(m => m.role !== 'system' && !m.partial);
-    if (msgs.length < 2) return;
+    if (msgs.length < 2) { _scheduleTitleRetry(chatId); return false; }
+    chats[chatId]._titleGenerating = true;
     let recent = ''
     for (const m of msgs.slice(0, 4)) {
         if (m.role === 'user') recent += '用户: ' + buildUserContent(m.text, m.files) + '\n';
@@ -271,8 +354,11 @@ async function autoGenerateTitle(chatId) {
     var _titleApiKey = getVal('apiKey');
     var _isLocalTitle = _titleBaseUrl.includes('localmodels') || _titleBaseUrl.includes('localhost') || _titleBaseUrl.includes('127.0.0.1');
     var _isMiniMax = _titleBaseUrl.includes('minimaxi.com');
-    if (!model) return;
-    if (!_titleApiKey && !_isLocalTitle) return;
+    if (!model || (!_titleApiKey && !_isLocalTitle)) {
+        chats[chatId]._titleGenerating = false;
+        _scheduleTitleRetry(chatId);
+        return false;
+    }
     try {
         var body = {
             model,
@@ -341,8 +427,29 @@ async function autoGenerateTitle(chatId) {
             finalTitle = firstUserMsg ? firstUserMsg.text.slice(0, TITLE_MAX_LENGTH) : '新对话';
         }
         if (finalTitle.length > TITLE_MAX_LENGTH) finalTitle = finalTitle.slice(0, TITLE_MAX_LENGTH);
-        typeTitle(chatId, finalTitle);
-    } catch (e) { /* 静默失败 */ }
+        // 标题属于会话元数据，不需要逐字动画。逐字保存会制造几十次服务器写入和
+        // 多端广播，并在动画开始时把当前标题短暂清空，导致其他设备看到“无标题”。
+        if (!chats[chatId]) return;
+        chats[chatId].title = finalTitle;
+        // 只有新创建的会话或原本没有合法时间戳的会话才设为当前时间，历史时间戳严格保留
+        var _curTitleTs = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[chatId], chatId) : Number(chats[chatId].updated_at || 0);
+        if (!_curTitleTs || _curTitleTs <= 0) {
+            chats[chatId].updated_at = Date.now();
+        }
+        renderChatHistory();
+        updateHeaderTitle();
+        delete _titleRetryAttempts[chatId];
+        if (_titleRetryTimers[chatId]) { clearTimeout(_titleRetryTimers[chatId]); delete _titleRetryTimers[chatId]; }
+        delete chats[chatId]._titleGenerating;
+        if (typeof window._saveAndBroadcast === 'function') window._saveAndBroadcast(chatId);
+        else saveChats(true);
+        return true;
+    } catch (e) {
+        if (chats[chatId]) delete chats[chatId]._titleGenerating;
+        console.warn('[autoGenerateTitle] 标题生成失败，将延迟重试:', e.message);
+        _scheduleTitleRetry(chatId);
+        return false;
+    }
 }
 
 async function typeTitle(chatId, finalTitle, index = 0) {
@@ -376,39 +483,76 @@ async function typeTitle(chatId, finalTitle, index = 0) {
     }
 }
 
-function saveChats(forceServer) {
+function saveChats(forceServer, targetChatId) {
+    // ★ 捕获变更所属会话，避免保存完成时用户已切换会话而广播错 chat_id。
+    var _broadcastChatId = targetChatId || currentChatId;
     // ★ 立即保存到 localStorage (图片等关键数据不能等 idle callback)
     slimSaveChats();
 
-    // ★ 先存服务器，完成后再广播（确保其他设备能拉到最新数据）
-    var _promise = saveChatsToServer(forceServer);
+    // ★ 当前会话先写独立小文件（即时主存储），再异步维护 all.json 汇总备份。
+    var _singlePromise = _broadcastChatId && typeof saveSingleChatToServer === 'function' ? saveSingleChatToServer(_broadcastChatId, !!forceServer) : Promise.resolve(false);
+    var _promise = Promise.resolve(_singlePromise).then(function() { return saveChatsToServer(forceServer); });
     if (_promise && typeof _promise.then === 'function') {
         _promise.then(function() {
-            if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
-                window._broadcastChatUpdate(currentChatId);
+            if (_broadcastChatId && typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(_broadcastChatId, { force: !!forceServer, finished: !!forceServer });
             }
         }).catch(function() {
             // 即使服务器保存失败也要广播（本地数据已保存）
-            if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
-                window._broadcastChatUpdate(currentChatId);
+            if (_broadcastChatId && typeof window._broadcastChatUpdate === 'function') {
+                window._broadcastChatUpdate(_broadcastChatId, { force: !!forceServer, finished: !!forceServer });
             }
         });
     } else {
-        // 节流返回 false 时直接广播
-        if (currentChatId && typeof window._broadcastChatUpdate === 'function') {
-            window._broadcastChatUpdate(currentChatId);
+        // 节流返回 false 时仍只广播调用时锁定的目标会话。
+        if (_broadcastChatId && typeof window._broadcastChatUpdate === 'function') {
+            window._broadcastChatUpdate(_broadcastChatId, { force: !!forceServer, finished: !!forceServer });
         }
     }
 }
 
 // ★ 强制保存到服务器并广播(用于多端同步关键节点)
 window._saveAndBroadcast = function(chatId) {
+    if (chatId && chats[chatId] && typeof window._ensureChatMessageIds === 'function') {
+        window._ensureChatMessageIds(chats[chatId], chatId);
+    }
     slimSaveChats();
-    saveChatsToServer(true).then(function() {
+    var traceId = '';
+    try { if (window.SyncTrace && SyncTrace.enabled()) traceId = SyncTrace.id('save-broadcast:' + chatId); } catch(e) {}
+    if (traceId) SyncTrace.log('save_broadcast_begin', { trace_id: traceId, chat_id: chatId, msg_count: chats[chatId] && Array.isArray(chats[chatId].messages) ? chats[chatId].messages.length : 0 });
+    var single = typeof saveSingleChatToServer === 'function' ? saveSingleChatToServer(chatId, true) : Promise.resolve(false);
+    return Promise.resolve(single).then(function(saved) {
+        if (traceId) SyncTrace.log('save_broadcast_saved', { trace_id: traceId, chat_id: chatId, saved: !!saved });
+        // all.json 仅作为后台汇总备份，不再阻塞用户消息落盘与广播。
+        saveChatsToServer(true).catch(function(){});
         if (chatId && typeof window._broadcastChatUpdate === 'function') {
-            window._broadcastChatUpdate(chatId);
+            return window._broadcastChatUpdate(chatId, { force: true, trace_id: traceId });
         }
-    }).catch(function() {});
+        return false;
+    }).catch(function(err) {
+        if (traceId) SyncTrace.log('save_broadcast_failed', { trace_id: traceId, chat_id: chatId, error: err && err.message || String(err) });
+        return false;
+    });
+};
+
+// ★ 会话权威截断/分支（用于编辑重发、还原对话、重新生成）
+// 必须严格单调递增 revision 并立即单文件落盘广播，彻底防止刷新后服务端旧消息复活
+window.truncateChatMessages = function(chatId, remainingMessages) {
+    if (!chatId || !chats[chatId]) return;
+    var chat = chats[chatId];
+    chat.messages = Array.isArray(remainingMessages) ? remainingMessages : [];
+    chat.updated_at = Date.now();
+    chat.revision = Math.max(Number(chat.revision || 0) + 1, chat.messages.length + 1);
+    chat._truncatedAt = Date.now();
+    slimSaveChats();
+    if (typeof window._saveAndBroadcast === 'function') {
+        window._saveAndBroadcast(chatId);
+    } else if (typeof saveSingleChatToServer === 'function') {
+        saveSingleChatToServer(chatId, true).catch(function(){});
+    }
+    if (currentChatId === chatId && typeof loadChat === 'function') {
+        loadChat(chatId);
+    }
 };
 
 // 压缩聊天记录(现在只做浅拷贝,不删除任何图片数据)
@@ -462,7 +606,7 @@ function compressChatsForStorage(chatsObj) {
                         var isMedia = f.isImage || f.isVideo || (f.type && (f.type.startsWith('image/') || f.type.startsWith('video/')));
                         if (isMedia && f.content && f.content.length > 200000) {
                             // 大图片(>200KB base64): 只保留元数据, 刷新后无法恢复 base64
-                            return { name: f.name, type: f.type || (f.isImage ? 'image/png' : 'video/mp4'), size: f.size, isImage: f.isImage, isVideo: f.isVideo, content: '', serverUrl: f.serverUrl || '' };
+                            return { name: f.name, type: f.type || (f.isImage ? 'image/png' : 'video/mp4'), size: f.size, isImage: f.isImage, isVideo: f.isVideo, content: '', serverUrl: f.serverUrl || '', serverPath: f.serverPath || '' };
                         }
                         // 中小图片: 保留 base64 (刷新后 xAI 仍可用)
                         // ★ 清除 Office 文档内嵌图片（base64 太大，刷新后需重新上传才能看到图片）
@@ -485,7 +629,7 @@ function compressChatsForStorage(chatsObj) {
     });
     return slim;
 }
-function slimSaveChats() {
+function slimSaveChats(syncServer) {
     // ★ DB模式: localStorage只存元数据索引,完整数据走服务器SQLite
     //    元数据索引 ~1KB/聊天, 100个聊天也仅~100KB — 永不超过配额
     var _slim = compressChatsForStorage(chats);
@@ -501,7 +645,9 @@ function slimSaveChats() {
         } catch(e) { /* fall through to DB mode */ }
     }
 
-    // ★ DB模式: 数据>3.5MB → 本地仅存索引, 完整数据走服务器
+    // ★ DB模式: 数据>3.5MB → 所有聊天只存索引，完整消息以服务器数据库为准。
+    // Agent 会话往往包含大量工具调用和长输出；保留其完整内容会让“索引模式”
+    // 仍然超过浏览器配额，并在每次保存时反复失败。
     console.log('[slimSaveChats] DB模式: ' + _size + ' chars → 索引本地 + 全量服务器');
     try {
         var _index = {};
@@ -512,7 +658,8 @@ function slimSaveChats() {
                 title: _c.title || '新对话',
                 updated_at: _c.updated_at || '',
                 userId: _c.userId || '',
-                msgCount: (_c.messages || []).length
+                msgCount: (_c.messages || []).length,
+                _localIndex: true
             };
         }
         var _idxJson = JSON.stringify(_index);
@@ -525,7 +672,9 @@ function slimSaveChats() {
         try {
             var _mini = {};
             var _allIds = Object.keys(chats).sort(function(a, b) {
-                return (chats[b].updated_at || 0) - (chats[a].updated_at || 0);
+                var ta = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[a], a) : (Number(chats[a].updated_at) || 0);
+                var tb = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[b], b) : (Number(chats[b].updated_at) || 0);
+                return tb - ta;
             });
             _allIds.slice(0, 30).forEach(function(id) {
                 _mini[id] = { title: chats[id].title || '新对话', updated_at: chats[id].updated_at || '' };
@@ -536,12 +685,62 @@ function slimSaveChats() {
         }
     }
 
-    // 确保服务器保存(主存储)
-    if (typeof saveChatsToServer === 'function') {
+    // 仅在明确要求时才触发全量服务器备份；普通本地存储绝不发起昂贵的全量备份
+    if (syncServer && typeof saveChatsToServer === 'function') {
         saveChatsToServer(true);
     }
     return true;
 }
+
+// ★ 统一权威时间戳解析函数 (数字/ISO字符串/消息时间/ID时间戳安全解析, 绝不返回 NaN)
+function getChatTimestamp(chat, id) {
+    if (!chat && id && typeof chats !== 'undefined' && chats[id]) chat = chats[id];
+    if (!chat) {
+        if (id) {
+            var mId = String(id).match(/_(\d{13})/);
+            if (mId) {
+                var nid = Number(mId[1]);
+                if (nid > 1000000000000 && nid < 2500000000000) return nid;
+            }
+        }
+        return 0;
+    }
+    var val = chat.updated_at != null && chat.updated_at !== '' ? chat.updated_at : (chat.time || chat.created_at || 0);
+    if (typeof val === 'number' && val > 0) {
+        return val < 100000000000 ? Math.round(val * 1000) : Math.round(val);
+    }
+    if (typeof val === 'string' && val.trim() !== '') {
+        var num = Number(val);
+        if (!isNaN(num) && num > 0) {
+            return num < 100000000000 ? Math.round(num * 1000) : Math.round(num);
+        }
+        var parsed = Date.parse(val);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    if (Array.isArray(chat.messages) && chat.messages.length > 0) {
+        for (var i = chat.messages.length - 1; i >= 0; i--) {
+            var m = chat.messages[i];
+            if (m && typeof m === 'object') {
+                var mt = m.timestamp || m.time || m.created_at;
+                if (typeof mt === 'number' && mt > 1000000000000) return Math.round(mt);
+                if (typeof mt === 'string') {
+                    var mp = Date.parse(mt);
+                    if (!isNaN(mp) && mp > 0) return mp;
+                }
+            }
+        }
+    }
+    var targetId = id || chat.id || chat.chat_id;
+    if (targetId) {
+        var mId2 = String(targetId).match(/_(\d{13})/);
+        if (mId2) {
+            var nid2 = Number(mId2[1]);
+            if (nid2 > 1000000000000 && nid2 < 2500000000000) return nid2;
+        }
+    }
+    return 0;
+}
+window.getChatTimestamp = getChatTimestamp;
 
 let _saveDebounceTimer = null;
 function saveChatsDebounced(wait = 300) {
@@ -555,54 +754,180 @@ function saveChatsDebounced(wait = 300) {
 function renderChatHistory() {
     var list = getEl('chatHistoryList');
     if (!list) { console.log('[renderChatHistory] list元素不存在'); return; }
+    _pruneEmptyDraftChats();
+    Object.keys(chats).forEach(function(id) {
+        if (!isAgentChat(id) && _hasMeaningfulChatContent(chats[id]) && _isPlaceholderTitle(chats[id].title)) {
+            _scheduleTitleRetry(id);
+        }
+    });
     // ★ 严格分隔: Agent 视图(agent/yolo 模式)只显示 Agent 会话,普通视图只显示普通聊天
     //   _agent_main(当前会话) + _agent_old_*(归档会话) 归 Agent 域,chat_* 归普通域
     var _isAgentView = isAgentToolsActive();
+    // ★ 子代理会话默认隐藏,用户可在配置栏开启(所有模式下均生效)
+    var _showSubAgent = localStorage.getItem('showSubAgentSessions') === 'true';
     // ★ 登录用户只显示自己账号的聊天记录
     var _uid = localStorage.getItem('authUserId') || '';
-    var _chatIds = Object.keys(chats).filter(function(id) {
-        if (isAgentChat(id) !== _isAgentView) return false;
+    // ★ 过滤函数: 子代理/内部测试会话仅在 Agent 视图且开关开启时显示，普通视图绝不显示
+    var _filterChat = function(id) {
+        var _isAgent = isAgentChat(id);
+        if (_isAgent) {
+            // 处于普通聊天视图时，彻底拦截所有 Agent 域会话
+            if (!_isAgentView) return false;
+            // 处于 Agent 视图时，主会话(_agent_main)、归档(_agent_old_*)、Claude Code(claude_*)、Codex(codex_*)正常显示
+            var _agentMainId = (typeof AGENT_CHAT_ID !== 'undefined') ? AGENT_CHAT_ID : '_agent_main';
+            var _isDirectAgentItem = (id === _agentMainId || id.indexOf('_agent_old_') === 0 || id.indexOf('claude_') === 0 || id.indexOf('codex_') === 0);
+            if (!_isDirectAgentItem) {
+                // 子代理/测试会话需开启开关
+                return _showSubAgent && (!_uid || !chats[id].userId || chats[id].userId === _uid);
+            }
+            return !_uid || !chats[id].userId || chats[id].userId === _uid;
+        }
+        // 普通会话：仅在普通视图下显示；空白草稿像 DSH 一样不进入历史列表。
+        if (_isAgentView) return false;
+        if (_isEmptyDraftChat(id)) return false;
         return !_uid || !chats[id].userId || chats[id].userId === _uid;
-    });
+    };
+    var _chatIds = Object.keys(chats).filter(_filterChat);
     if (_chatIds.length === 0 && _uid) {
         var _cached = localStorage.getItem('chats');
         if (_cached) {
             try {
                 var _parsed = JSON.parse(_cached);
-                if (_parsed && Object.keys(_parsed).length > 0) {
-                    chats = _parsed;
-                    _chatIds = Object.keys(chats).filter(function(id) {
-                        if (isAgentChat(id) !== _isAgentView) return false;
-                        return !_uid || !chats[id].userId || chats[id].userId === _uid;
+                if (_parsed && typeof _parsed === 'object') {
+                    var _restoredAny = false;
+                    Object.keys(_parsed).forEach(function(_pk) {
+                        if (!chats[_pk]) {
+                            chats[_pk] = _parsed[_pk];
+                            _restoredAny = true;
+                        }
                     });
+                    if (_restoredAny) {
+                        _chatIds = Object.keys(chats).filter(_filterChat);
+                    }
                 }
             } catch(e) {}
         }
     }
-    // ★ 按更新时间排序,最新的在最上面
+    // ★ 按更新时间排序,最新的在最上面 (统一纯数字比较, 绝无 NaN 导致乱跳)
     _chatIds.sort(function(a, b) {
-        var ta = chats[a].updated_at || chats[a].time || 0;
-        var tb = chats[b].updated_at || chats[b].time || 0;
+        var ta = getChatTimestamp(chats[a], a);
+        var tb = getChatTimestamp(chats[b], b);
         if (ta !== tb) return tb - ta;
         // ★ 时间相同时按聊天ID降序稳定排序,避免刷新后乱跳
-        return a < b ? 1 : (a > b ? -1 : 0);
+        return String(b).localeCompare(String(a));
     });
-    // ★ 史诗级 v2: 按更新时间分组渲染 (今天/昨天/更早) + 对话图标
+    // ★ 史诗级 v2: 分组与折叠渲染
+    // 从 localStorage 读取折叠状态
+    var _collapsedGroups = {};
+    try {
+        _collapsedGroups = JSON.parse(localStorage.getItem('_historyCollapsedGroups') || '{}');
+    } catch(e) {}
+
+    window.toggleHistoryGroup = function(gKey) {
+        try {
+            var map = JSON.parse(localStorage.getItem('_historyCollapsedGroups') || '{}');
+            map[gKey] = !map[gKey];
+            localStorage.setItem('_historyCollapsedGroups', JSON.stringify(map));
+            renderChatHistory();
+        } catch(e) {}
+    };
+
     var _now = new Date();
     var _dayStart = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()).getTime();
     var _ydayStart = _dayStart - 86400000;
     var _groups = [];
-    var _curGroup = null;
-    _chatIds.forEach(function(id) {
-        var _t = chats[id].updated_at || chats[id].time || 0;
-        var _g = _t >= _dayStart ? '今天' : (_t >= _ydayStart ? '昨天' : '更早');
-        if (!_curGroup || _curGroup.name !== _g) {
-            _curGroup = { name: _g, items: [] };
-            _groups.push(_curGroup);
+    var _groupMap = {};
+
+    function _historyGroupSvg(kind) {
+        var _common = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+        var _icons = {
+            'folder-code': '<svg ' + _common + '><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="10 13 8 15 10 17"/><polyline points="14 13 16 15 14 17"/></svg>',
+            'layers': '<svg ' + _common + '><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+            'globe': '<svg ' + _common + '><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+            'user': '<svg ' + _common + '><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+            'folder': '<svg ' + _common + '><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+            'claude': '<svg ' + _common + '><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v5h5"/><path d="M10 13h5M10 17h5"/></svg>',
+            'codex': '<svg ' + _common + '><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="8 9 5.5 12 8 15"/><polyline points="16 9 18.5 12 16 15"/><line x1="13" y1="8" x2="11" y2="16"/></svg>',
+            'calendar': '<svg ' + _common + '><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+            'calendar-clock': '<svg ' + _common + '><path d="M8 2v4M16 2v4M3 10h18"/><path d="M19 14.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h8.5"/><circle cx="18" cy="18" r="3"/><path d="M18 16.5V18l1 1"/></svg>',
+            'archive': '<svg ' + _common + '><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>'
+        };
+        return _icons[kind] || _icons.folder;
+    }
+
+    function _stripImportedSessionPrefix(title) {
+        return String(title || '').replace(/^\s*(?:\[(?:claude|codex)\]|【(?:claude|codex)】)\s*/i, '');
+    }
+
+    function _addToGroup(gKey, gName, id, orderWeight, iconKind) {
+        if (!_groupMap[gKey]) {
+            _groupMap[gKey] = { key: gKey, name: gName, icon: iconKind || '', items: [], weight: orderWeight || 100 };
+            _groups.push(_groupMap[gKey]);
         }
-        _curGroup.items.push(id);
-    });
+        _groupMap[gKey].items.push(id);
+    }
+
+    if (_isAgentView) {
+        // ★ DSH 架构：Agent 模式下按工作区 (Workspace) 区分并组织会话
+        var _wm = window.WorkspaceManager;
+        var _wsList = _wm ? _wm.getWorkspaces() : [{ id: 'oneapichat', name: 'oneapichat', icon: 'folder-code' }];
+        var _curWs = _wm ? _wm.getCurrentWorkspace() : { id: 'oneapichat', name: 'oneapichat' };
+        var _wsMap = {};
+        _wsList.forEach(function(w, idx) {
+            var isCurrent = w.id === _curWs.id;
+            _wsMap[w.id] = {
+                ws: w,
+                key: 'ws_' + w.id,
+                name: w.name + (isCurrent ? ' (当前)' : ''),
+                icon: w.icon || 'folder',
+                weight: isCurrent ? 1 : (idx + 2)
+            };
+        });
+
+        // 确保当前激活工作区无论是否有历史会话都先建好分组
+        if (_wsMap[_curWs.id]) {
+            _addToGroup(_wsMap[_curWs.id].key, _wsMap[_curWs.id].name, null, 1, _wsMap[_curWs.id].icon);
+        }
+
+        _chatIds.forEach(function(id) {
+            if (id.indexOf('claude_') === 0) {
+                _addToGroup('claude_imports', 'Claude Code 会话', id, 200, 'claude');
+            } else if (id.indexOf('codex_') === 0) {
+                _addToGroup('codex_imports', 'Codex 会话', id, 210, 'codex');
+            } else {
+                var targetWsId = (_wm && typeof _wm.getChatWorkspaceId === 'function') ? _wm.getChatWorkspaceId(id) : null;
+                if (!targetWsId || !_wsMap[targetWsId]) {
+                    targetWsId = 'oneapichat'; // 缺省默认归属主工作区
+                }
+                var gMeta = _wsMap[targetWsId] || { key: 'ws_other', name: '其它工作区', icon: 'folder', weight: 100 };
+                _addToGroup(gMeta.key, gMeta.name, id, gMeta.weight, gMeta.icon);
+            }
+        });
+
+        // 清理由于提前建分组产生的 null 项
+        _groups.forEach(function(g) {
+            g.items = g.items.filter(Boolean);
+        });
+
+        // 过滤掉非当前工作区且没有任何会话的空预设分组
+        _groups = _groups.filter(function(g) {
+            if (g.items.length > 0) return true;
+            return g.key === ('ws_' + _curWs.id);
+        });
+
+        _groups.sort(function(a, b) { return a.weight - b.weight; });
+    } else {
+        _chatIds.forEach(function(id) {
+            var _t = getChatTimestamp(chats[id], id);
+            var _g = _t >= _dayStart ? '今天' : (_t >= _ydayStart ? '昨天' : '更早');
+            var _w = _t >= _dayStart ? 1 : (_t >= _ydayStart ? 2 : 3);
+            _addToGroup('norm_' + _g, _g, id, _w, _g === '今天' ? 'calendar' : (_g === '昨天' ? 'calendar-clock' : 'archive'));
+        });
+        _groups.sort(function(a, b) { return a.weight - b.weight; });
+    }
+
     list.innerHTML = _groups.map(function(grp) {
+        var _isCollapsed = !!_collapsedGroups[grp.key];
         var _itemsHtml = grp.items.map(function(id) {
             var _isBgRunning = isTypingMap[id] && id !== currentChatId;
             var _bgDot = _isBgRunning ? '<span class="bg-running-dot" title="后台生成中" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px;animation:bg-pulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>' : '';
@@ -612,19 +937,32 @@ function renderChatHistory() {
             var _delBtn = (id === AGENT_CHAT_ID)
                 ? ''
                 : '<button onclick="window.deleteChat(event, \'' + id + '\')" class="chat-history-del" title="删除对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>';
-            // ★ Agent 视图: 归档会话标题去掉 📦 前缀(历史列表已按域分隔,前缀冗余)
-            //   子代理会话标题去掉 🤖 前缀(已用域分隔区分)
+            // ★ Agent 视图: 一级分组已经表达会话来源，单条标题不再重复携带 Emoji/Claude/Codex 前缀。
             var _title = chats[id].title || '';
             if (_isAgentView && id !== AGENT_CHAT_ID && isAgentChat(id)) {
                 _title = _title.replace(/^📦\s*/, '').replace(/^🤖\s*/, '');
             }
+            if (id.indexOf('claude_') === 0 || id.indexOf('codex_') === 0) {
+                _title = _stripImportedSessionPrefix(_title);
+            }
             return `
-            <div onclick="window.loadChat('${id}')" class="chat-history-item${_active ? ' active' : ''}" title="${escapeHtml(chats[id].title)}">
+            <div onclick="window.loadChat('${id}')" class="chat-history-item${_active ? ' active' : ''}" title="${escapeHtml(_title)}">
                 <span class="chat-history-title truncate">${_bgDot}${escapeHtml(_title)}</span>
                 ${_delBtn}
             </div>`;
         }).join('');
-        return '<div class="chat-history-group"><div class="chat-history-group-label">' + grp.name + '</div>' + _itemsHtml + '</div>';
+        var _chevronIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+        return '<div class="chat-history-group' + (_isCollapsed ? ' collapsed' : '') + '">' +
+            '<div class="chat-history-group-header" onclick="window.toggleHistoryGroup(\'' + grp.key + '\')">' +
+                '<div class="chat-history-group-title-wrap">' +
+                    '<span class="chat-history-group-chevron">' + _chevronIcon + '</span>' +
+                    '<span class="chat-history-group-icon chat-history-group-kind-icon">' + _historyGroupSvg(grp.icon) + '</span>' +
+                    '<span class="chat-history-group-label">' + escapeHtml(grp.name) + '</span>' +
+                '</div>' +
+                '<span class="chat-history-group-count">' + grp.items.length + '</span>' +
+            '</div>' +
+            '<div class="chat-history-group-items">' + _itemsHtml + '</div>' +
+        '</div>';
     }).join('');
 }
 
@@ -636,9 +974,9 @@ window.RAG_ENABLED = RAG_ENABLED;
 async function _syncDeleteToServer(id) {
     var token = localStorage.getItem('authToken');
     if (!token) return false;
-    var url = SERVER_API_BASE + '/chat.php?chat_id=' + encodeURIComponent(id) + '&auth_token=' + token;
+    var url = SERVER_API_BASE + '/chat.php?chat_id=' + encodeURIComponent(id);
     try {
-        var resp = await fetch(url, { method: 'DELETE' });
+        var resp = await fetch(url, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
         if (resp.ok) {
             console.log('[deleteChat] 服务器删除成功:', id);
             delete _deletedChatIds[id];
@@ -704,7 +1042,11 @@ window.deleteChat = async function (e, id) {
     });
     // ★ 删除后切换到同域最近会话;无则新建(普通模式建普通聊天,Agent 模式建新 _agent_main)
     if (myKeys.length) {
-        myKeys.sort(function(a,b) { return (chats[b].updated_at||0) - (chats[a].updated_at||0); });
+        myKeys.sort(function(a,b) {
+            var ta = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[a], a) : (Number(chats[a].updated_at) || 0);
+            var tb = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[b], b) : (Number(chats[b].updated_at) || 0);
+            return tb - ta;
+        });
         loadChat(myKeys[0]);
     }
     else createNewChat();
@@ -712,6 +1054,23 @@ window.deleteChat = async function (e, id) {
 };
 
 window.createNewChat = function () {
+    // DSH 风格：普通模式始终只有一个空白草稿。重复点击“新建”只回到它，不再堆积空会话。
+    if (getAgentMode() === 'off') {
+        var _emptyIds = Object.keys(chats).filter(_isEmptyDraftChat).sort(function(a, b) {
+            var ta = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[a], a) : (Number(chats[a].updated_at) || 0);
+            var tb = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[b], b) : (Number(chats[b].updated_at) || 0);
+            return tb - ta;
+        });
+        var _draftId = _emptyIds[0] || null;
+        _emptyIds.slice(1).forEach(function(_emptyId) { delete chats[_emptyId]; });
+        if (_draftId) {
+            chats[_draftId].updated_at = Date.now();
+            loadChat(_draftId);
+            renderChatHistory();
+            updateHeaderTitle();
+            return _draftId;
+        }
+    }
     // ★ Agent 模式 /new: 归档旧 _agent_main 为子代理会话
     //   只要 Agent 模式下主会话有内容就归档(不论当前打开的是哪个聊天),
     //   防止在归档会话/其他聊天中按 /new 时旧主会话被静默覆盖丢失
@@ -762,20 +1121,61 @@ window.createNewChat = function () {
             { role: 'system', content: getVal('systemPrompt') || DEFAULT_CONFIG.system }
         ]
     };
-    saveChats();
+    if (typeof _deletedChatIds !== 'undefined' && _deletedChatIds[id]) {
+        delete _deletedChatIds[id];
+        try { localStorage.setItem('_deletedChatIds', JSON.stringify(_deletedChatIds)); } catch(e) {}
+    }
+    slimSaveChats();
     loadChat(id);
     renderChatHistory();
     updateHeaderTitle();
+    return id;
 };
 
 window.loadChat = async function (id) {
     if (!chats[id]) { console.warn('[loadChat] 聊天不存在:', id); return; }
-    if (!chats[id].messages) chats[id].messages = [];
+    if (!Array.isArray(chats[id].messages)) chats[id].messages = [];
+    // ★ 索引/按需模式：点击或恢复当前会话时，仅拉取这一条会话完整正文。
+    // 不能再等待 16MB all.json；否则超时后只剩标题索引，刷新表现为消息被吞。
+    var _needsHydration = !!(chats[id]._localIndex || chats[id]._indexOnly || ((chats[id].msgCount || 0) > 0 && chats[id].messages.length === 0));
+    if (_needsHydration && typeof window.loadSingleChatFromServer === 'function') {
+        var _existingTs = typeof getChatTimestamp === 'function' ? getChatTimestamp(chats[id], id) : (Number(chats[id].updated_at) || 0);
+        var _hydratedChat = await window.loadSingleChatFromServer(id);
+        if (_hydratedChat && Array.isArray(_hydratedChat.messages)) {
+            var _localShell = chats[id];
+            var _hydratedTs = typeof getChatTimestamp === 'function' ? getChatTimestamp(_hydratedChat, id) : (Number(_hydratedChat.updated_at) || 0);
+            chats[id] = Object.assign({}, _localShell, _hydratedChat);
+            delete chats[id]._localIndex;
+            delete chats[id]._indexOnly;
+            chats[id].msgCount = chats[id].messages.length;
+            // 严格保持时间戳稳定：只读加载绝不因 hydration 改写真实更新时间，杜绝点击时位置突变跳动
+            if (_existingTs > 0) {
+                chats[id].updated_at = _existingTs;
+            } else if (_hydratedTs > 0) {
+                chats[id].updated_at = _hydratedTs;
+            }
+            slimSaveChats(false);
+        }
+    }
+    // 历史/索引模式可能带回不完整消息对象，先修正形状再执行 length/filter。
+    chats[id].messages = chats[id].messages.filter(function(msg) {
+        if (!msg || typeof msg !== 'object') return false;
+        if (msg.role === 'assistant' && msg.tool_calls != null && !Array.isArray(msg.tool_calls)) msg.tool_calls = [];
+        if (msg.role === 'tool' && msg.content != null && typeof msg.content !== 'string') {
+            try { msg.content = JSON.stringify(msg.content); } catch(e) { msg.content = String(msg.content); }
+        }
+        return true;
+    });
     try {
-    // ★ 会话切换：先保存旧会话队列
+    // ★ 会话切换：先保存旧会话队列与计划状态
     var _oldChatId = currentChatId;
-    if (_oldChatId && _oldChatId !== id && window._messageQueue && !window._agentModeSwitching) {
-        window._saveQueue();  // 普通切换：保存旧队列
+    if (_oldChatId && _oldChatId !== id) {
+        if (window._messageQueue && !window._agentModeSwitching) {
+            window._saveQueue();  // 普通切换：保存旧队列
+        }
+        if (typeof window.savePlanState === 'function') {
+            window.savePlanState(_oldChatId);
+        }
     }
     // ★ 临时授权跟随会话：切走时隐藏,切回时恢复
     if (_oldChatId && _oldChatId !== id) {
@@ -790,6 +1190,30 @@ window.loadChat = async function (id) {
     // 切换 currentChatId
     currentChatId = id;
     localStorage.setItem('lastChatId', id);
+    // ★ 工作区联动：同步恢复该会话绑定的工作区 (DSH Workspace)
+    if (window.WorkspaceManager && typeof window.WorkspaceManager.syncWithCurrentChat === 'function') {
+        window.WorkspaceManager.syncWithCurrentChat(id);
+    }
+    var _todoBook = chats[id] && chats[id]._vibeTodos;
+    if (_todoBook && Array.isArray(_todoBook.todos) && _todoBook.todos.length > 0) {
+        window._todoBooks = window._todoBooks || {};
+        window._todoBooks[id] = _todoBook;
+        var _todoDone = _todoBook.todos.filter(function(t){ return t.status === 'completed'; }).length;
+        var _todoPct = _todoBook.todos.length ? Math.round(_todoDone / _todoBook.todos.length * 100) : 0;
+        var _hasUnfinished = _todoPct < 100 && _todoBook.todos.some(function(t){ return t.status === 'pending' || t.status === 'in_progress'; });
+        if (_hasUnfinished && typeof window._renderTodoHud === 'function') {
+            window._renderTodoHud(_todoBook.todos, _todoPct, { isRestore: true });
+        } else if (typeof window._renderTodoHud === 'function') {
+            window._renderTodoHud([], 0);
+        }
+    } else if (typeof window._renderTodoHud === 'function') {
+        window._renderTodoHud([], 0);
+    }
+    // ★ 任务计划流面板联动：切换会话或刷新页面时，自动恢复该会话的 Plan 面板
+    if (typeof window.restorePlanForChat === 'function') {
+        window.restorePlanForChat(id);
+    }
+    try { sessionStorage.setItem('_oneapiLastChatId', id); } catch(e) {}
     // 可恢复状态必须在清理 partial 之前接管 typing 标记，否则刷新时目标气泡
     // 会先被 loadChat 删除，只能等下一个 token 才重新出现。
     var _hasResumeState = false;
@@ -802,6 +1226,87 @@ window.loadChat = async function (id) {
             window.ResumeStream.hasPending(id);
         if (_hasResumeState) isTypingMap[id] = true;
     } catch(e) {}
+    // ★ 刷新恢复保护：DB 模式本地只有索引时，先把 ResumeStream 的运行快照
+    // 注入聊天历史，再渲染 DOM。否则 hydrate 只能找到空数组，正在生成的气泡会完全消失。
+    if (_hasResumeState && window.ResumeStream && typeof window.ResumeStream.peek === 'function') {
+        try {
+            var _rsHydrateState = window.ResumeStream.peek(id);
+            if (_rsHydrateState) {
+                var _resumeMsgs = chats[id].messages;
+                var _resumeMsg = _resumeMsgs.find(function(m) {
+                    if (!m || m.role !== 'assistant') return false;
+                    return (!!_rsHydrateState.msgId && m._rsMsgId === _rsHydrateState.msgId) ||
+                        (!!_rsHydrateState.sid && m._rsStreamId === _rsHydrateState.sid);
+                });
+                if (!_resumeMsg) {
+                    _resumeMsg = {
+                        role: 'assistant',
+                        content: _rsHydrateState.content || '',
+                        reasoning: _rsHydrateState.reasoning || '',
+                        tool_calls: Array.isArray(_rsHydrateState.toolCalls) ? _rsHydrateState.toolCalls : [],
+                        partial: true,
+                        _recovered: true,
+                        _rsMsgId: _rsHydrateState.msgId || '',
+                        _rsStreamId: _rsHydrateState.sid || '',
+                        time: Date.now()
+                    };
+                    _resumeMsgs.push(_resumeMsg);
+                } else {
+                    _resumeMsg.content = _rsHydrateState.content || _resumeMsg.content || '';
+                    _resumeMsg.reasoning = _rsHydrateState.reasoning || _resumeMsg.reasoning || '';
+                    if (_rsHydrateState.msgId) _resumeMsg._rsMsgId = _rsHydrateState.msgId;
+                    if (_rsHydrateState.sid) _resumeMsg._rsStreamId = _rsHydrateState.sid;
+                    _resumeMsg.partial = true;
+                    _resumeMsg._recovered = true;
+                }
+                console.log('[loadChat] 已从 ResumeStream 快照恢复生成中消息:', id,
+                    'contentLen=' + String(_resumeMsg.content || '').length);
+            }
+        } catch (_resumeHydrateError) {
+            console.warn('[loadChat] ResumeStream 快照注入失败:', _resumeHydrateError.message);
+        }
+    }
+    // ★ 旧版/极早刷新兜底：若 ResumeStream 状态尚未写入，但 beforeunload 已保存了当前流，
+    // 先恢复气泡，并把 stream 身份迁移到 legacy 键供 ResumeStream 接管。
+    if (!_hasResumeState) {
+        try {
+            var _savedPartialFallback = JSON.parse(localStorage.getItem('_savedPartial') || 'null');
+            if (_savedPartialFallback && _savedPartialFallback.chatId === id &&
+                (Date.now() - (_savedPartialFallback.time || 0) < 60000) &&
+                (_savedPartialFallback.content || _savedPartialFallback.reasoning ||
+                    (_savedPartialFallback.toolCalls && _savedPartialFallback.toolCalls.length))) {
+                if (_savedPartialFallback.streamId) {
+                    localStorage.setItem('_rs_sid', _savedPartialFallback.streamId);
+                    localStorage.setItem('_rs_cid', id);
+                    localStorage.setItem('_rs_msgid', _savedPartialFallback.msgId || '');
+                    localStorage.setItem('_rs_ts', String(_savedPartialFallback.time || Date.now()));
+                    _hasResumeState = window.ResumeStream && window.ResumeStream.hasPending(id);
+                    if (_hasResumeState) isTypingMap[id] = true;
+                }
+                var _fallbackHasMsg = chats[id].messages.some(function(m) {
+                    return m && m.role === 'assistant' &&
+                        ((_savedPartialFallback.msgId && m._rsMsgId === _savedPartialFallback.msgId) ||
+                         (_savedPartialFallback.streamId && m._rsStreamId === _savedPartialFallback.streamId));
+                });
+                if (!_fallbackHasMsg) {
+                    chats[id].messages.push({
+                        role: 'assistant',
+                        content: _savedPartialFallback.content || '',
+                        reasoning: _savedPartialFallback.reasoning || '',
+                        tool_calls: Array.isArray(_savedPartialFallback.toolCalls) ? _savedPartialFallback.toolCalls : [],
+                        partial: true,
+                        _recovered: true,
+                        _rsMsgId: _savedPartialFallback.msgId || '',
+                        _rsStreamId: _savedPartialFallback.streamId || '',
+                        time: _savedPartialFallback.time || Date.now()
+                    });
+                }
+                console.log('[loadChat] 已从 _savedPartial 兜底恢复生成中消息:', id);
+            }
+        } catch (_savedPartialError) {
+            console.warn('[loadChat] _savedPartial 兜底恢复失败:', _savedPartialError.message);
+        }
+    }
     // ★ 初始加载或切换后：同步临时授权状态(确保横幅正确显示/隐藏)
     if (window._tempAgentGranted && window._tempAgentChatId === id) {
         if (typeof _updateTempGrantBanner === 'function') _updateTempGrantBanner(true);
@@ -810,13 +1315,19 @@ window.loadChat = async function (id) {
     }
     // ★ 并行对话: 保存旧队列→加载新队列, 不阻断旧对话
     if (_oldChatId && _oldChatId !== id) {
-        window._saveQueue();  // 先保存旧会话队列
+        if (typeof window._saveQueue === 'function') {
+            window._saveQueue(undefined, _oldChatId);  // 明确保存到旧会话
+        }
         window._isQueueProcessing = false;
         window._isQueueMessage = false;
         window._messageQueue = [];
-        var _restored = window._loadQueue();
-        if (!_restored) window._clearPersistedQueue();
-        window._updateQueueUI();
+        var _restored = typeof window._loadQueue === 'function' ? window._loadQueue(undefined, id) : false;
+        if (!_restored && typeof window._clearPersistedQueue === 'function') {
+            window._clearPersistedQueue(id);
+        }
+        if (typeof window._updateQueueUI === 'function') {
+            window._updateQueueUI();
+        }
         if (_restored && !isTypingMap[currentChatId]) {
             setTimeout(function() { window._drainQueue(); }, 500);
         }
@@ -830,6 +1341,8 @@ window.loadChat = async function (id) {
 
     // ★ 彻底清空DOM: innerHTML + removeChild双重保险
     while (container.firstChild) container.removeChild(container.firstChild);
+    // 会话重绘先退出 Agent 空态；若当前仍为空，showWelcome() 会重新添加。
+    container.classList.remove('agent-welcome-active');
     // ★ 清除旧程序滚动标记(防止旧会话的 __lastAutoScrollTarget 误匹配新位置导致吸附失效)
     if (typeof window.clearFollowState === 'function') window.clearFollowState();
     var prefix = container.classList.contains('paragraph-prefix-dot') ? 'dot' : (container.classList.contains('paragraph-prefix-dash') ? 'dash' : 'none');
@@ -840,50 +1353,26 @@ window.loadChat = async function (id) {
         var _before = chats[id].messages.length;
         chats[id].messages = chats[id].messages.filter(function(m) {
             if (!m.partial) return true;
-            // ★ 保留正在生成中的 partial (后台并行对话不丢失)
-            if (isTypingMap[id]) return true;
-            return false;
+            // 有稳定流身份或持久快照的 partial 是可恢复事实，不能因本地 typing 标志尚未
+            // 初始化而删除；只有完全无身份、无内容的孤儿占位才可清理。
+            if (isTypingMap[id] || _hasResumeState || m._rsMsgId || m._rsStreamId || m._recovered) return true;
+            var _hasPartialData = !!((m.content && String(m.content).trim()) || (m.reasoning && String(m.reasoning).trim()) || (Array.isArray(m.tool_calls) && m.tool_calls.length));
+            return _hasPartialData;
         });
         if (chats[id].messages.length !== _before) {
             console.log('[loadChat] 清理了 ' + (_before - chats[id].messages.length) + ' 条残留 partial, 剩余 ' + chats[id].messages.length + ' 条');
         }
     }
-    // ★ 删除残留的 typing DOM 气泡（sendMessage 创建但流已完成的）
-    if (container) {
+    // ★ 删除残留的 typing DOM 气泡（非本地生成时清理）
+    if (container && !isTypingMap[id]) {
         var _typingBubbles = container.querySelectorAll('.bubble.assistant.typing');
         _typingBubbles.forEach(function(b) { b.remove(); });
     }
 
-    // ★ WebSocket 续接：恢复上次未完成的流
-    if (localStorage.getItem('__enableResumeStream') !== '0') {
-        try {
-            var _savedSid = localStorage.getItem('_wsStreamId') || '';
-            var _savedCnt = parseInt(localStorage.getItem('_wsChunkCount') || '0');
-            if (_savedSid && _savedCnt > 0) {
-                // 等待 WS 连接（_wsInit 已调用但可能还在连接中）
-                var _w = 0;
-                while ((!window._wsClient || window._wsClient.readyState !== WebSocket.OPEN) && _w < 3000) {
-                    await new Promise(function(r) { setTimeout(r, 100); });
-                    _w += 100;
-                }
-                if (window._wsClient && window._wsClient.readyState === WebSocket.OPEN) {
-                    chats[id].messages = chats[id].messages.filter(function(m) { return !m.partial; });
-                    var _rsPm = { role:'assistant', content:'', reasoning:'', partial:true, _recovered:true }
-                    chats[id].messages.push(_rsPm);
-                    window._wsClient.send(JSON.stringify({
-                        action: 'resume', stream_id: _savedSid, since: _savedCnt
-                    }));
-                    window._wsStreamId = _savedSid;
-                    window._wsChunkCount = _savedCnt;
-                    console.log('[WS] Resume:', _savedSid, 'since:', _savedCnt);
-                    window._backendRecovered = true;
-                    return;
-                }
-            }
-        } catch(e) {}
-        // 未建立 WebSocket 续接时不要删除 partial。HTTP/SSE ResumeStream 会用它
-        // 立即恢复首屏和工具状态；旧逻辑在真正恢复前先把目标消息清掉了。
-    }
+    // 旧 WebSocket 网关已停用，残留的全局 stream id 既不绑定 chatId，又会在清空 DOM 后
+    // 阻塞/早退。统一清理并由按 msg_id 持久化的 ResumeStream/SSE 接管恢复。
+    try { localStorage.removeItem('_wsStreamId'); } catch(e) {}
+    try { localStorage.removeItem('_wsChunkCount'); } catch(e) {}
 
     // ★ 恢复刷新前未完成的流式消息(仅在开关关闭时使用旧方案兜底)
     // ★ 先检查是否被用户主动停止 — 如果是则跳过续接
@@ -952,12 +1441,12 @@ window.loadChat = async function (id) {
             try {
             // ★ 原始消息索引(用于判断是否最后一条assistant)
             var _origIdx = chats[id].messages.indexOf(m);
-            // ★ 修复: 清理已保存的 [object Object] 残留
+            // ★ 修复: 清理已保存的 [object Object] 与 (empty) 假占位符残留
             if (typeof m.content === 'string') {
                 if (m.content === '[object Object]') {
                     m.content = '';
                 } else {
-                    m.content = m.content.replace(/\[object Object\]/g, '');
+                    m.content = m.content.replace(/\[object Object\]/g, '').replace(/\(empty\)/gi, '').trim();
                 }
             } else if (m.content && typeof m.content === 'object') {
                 var extracted = m.content.text || m.content.content || m.content.value || '';
@@ -972,60 +1461,69 @@ window.loadChat = async function (id) {
                 m.content = '';
             }
             if (m.role === 'tool_card') {
-                // ★ 工具调用卡片: 受 toggle 控制
-                if (typeof appendToolCallMessage === 'function' && localStorage.getItem('toolCards') !== '0') {
-                    appendToolCallMessage(m._tcName || 'unknown', m._tcArgs || {},
-                        m.content || '', m._tcDur || 0, id, m._tcExecDetails || null);
-                }
+                // 旧版 tool_card 格式已收敛由 assistant.tool_calls 统一时间线渲染，不再渲染独立空行
             } else if (m.role === 'user') {
                 // ★ 保留推入标记 (消息在模型生成中途被推入时显示角标)
-                appendMessage('user', m.text || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx, !!m._injected);
+                appendMessage('user', m.text || m.content || '', m.files || null, null, null, null, i === displayMsgs.length - 1, null, null, false, _origIdx, !!m._injected);
             } else {
-                // ★ 工具调用历史：可折叠卡片式列表
+                // ★ DSH 风格智能体操作时间线 (超过2项自动折叠收纳)'
                 var toolDisplayHtml = '';
                 if (m.tool_calls && m.tool_calls.length > 0) {
-                    var _hasToolCards = chats[id].messages.some(function(_cm) { return _cm._toolCard; });
-                    toolDisplayHtml = '<details class="tool-calls-history"' + (_hasToolCards ? '' : '') + '>';
-                    toolDisplayHtml += '<summary style="font-size:11px;color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:4px;padding:2px 0;line-height:1.2;">' +
-                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>' +
-                        m.tool_calls.length + ' 次工具调用' +
-                        '<span class="tool-calls-chevron" style="margin-left:auto;transition:transform 0.2s;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
-                    '</summary>';
-                    toolDisplayHtml += '<div style="display:flex;flex-wrap:wrap;gap:2px 4px;margin-top:2px;">';
+                    var badgesHtml = '';
                     m.tool_calls.forEach(function(tc) {
                         var _tn = tc.function && tc.function.name ? tc.function.name : 'unknown';
-                        var iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">';
-                        if (_tn === 'web_search') iconSvg += '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8a3 3 0 0 0-3 3"/></svg>';
-                        else if (_tn === 'web_fetch') iconSvg += '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-                        else if (_tn.indexOf('generate_image') !== -1 || _tn === 'mmx_image') iconSvg += '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
-                        else if (_tn.indexOf('agent') !== -1 || _tn === 'delegate_task') iconSvg += '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
-                        else if (_tn.indexOf('cron') !== -1) iconSvg += '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-                        else if (_tn.indexOf('server_') !== -1) iconSvg += '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
-                        else if (_tn.indexOf('browser') !== -1) iconSvg += '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
-                        else if (_tn.indexOf('mmx_') !== -1) iconSvg += '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
-                        else if (_tn.indexOf('file_') !== -1 || _tn === 'server_file_read' || _tn === 'server_file_write' || _tn === 'server_file_edit') iconSvg += '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
-                        else if (_tn === 'plan_update') iconSvg += '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>';
-                        else if (_tn === 'analyze_image' || _tn === 'mmx_vision') iconSvg += '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-                        else iconSvg += '<circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
-                        var _color = '#6b7280';
-                        if (_tn.indexOf('server_') !== -1) _color = '#6366f1';
-                        else if (_tn === 'web_search' || _tn === 'web_fetch') _color = '#059669';
-                        else if (_tn.indexOf('agent') !== -1 || _tn === 'delegate_task') _color = '#8b5cf6';
-                        else if (_tn.indexOf('cron') !== -1) _color = '#f59e0b';
-                        else if (_tn.indexOf('mmx_') !== -1 || _tn.indexOf('generate') !== -1) _color = '#ec4899';
-                        toolDisplayHtml += '<span style="display:inline-flex;align-items:center;gap:1px;padding:0 5px;border-radius:999px;background:#f3f4f6;font-size:10px;color:' + _color + ';line-height:1.6;">' +
-                            iconSvg + escapeHtml(_tn) + '</span>';
+                        var _argsObj = {};
+                        try { _argsObj = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
+                        var _summary = '';
+                        if (_argsObj.command) _summary = _argsObj.command;
+                        else if (_argsObj.file_path || _argsObj.path) _summary = _argsObj.file_path || _argsObj.path;
+                        else if (_argsObj.query || _argsObj.keywords || _argsObj.q) _summary = _argsObj.query || _argsObj.keywords || _argsObj.q;
+                        else if (_argsObj.url) _summary = _argsObj.url;
+                        else if (_argsObj.prompt) _summary = _argsObj.prompt.substring(0, 45);
+                        else _summary = JSON.stringify(_argsObj).substring(0, 45);
+
+                        var _icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
+                        if (_tn.indexOf('search') !== -1 || _tn.indexOf('fetch') !== -1) {
+                            _icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+                        } else if (_tn.indexOf('file') !== -1 || _tn.indexOf('read') !== -1 || _tn.indexOf('write') !== -1) {
+                            _icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+                        } else if (_tn.indexOf('image') !== -1) {
+                            _icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+                        } else if (_tn.indexOf('agent') !== -1 || _tn.indexOf('delegate') !== -1) {
+                            _icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
+                        }
+
+                        badgesHtml += '<div class="dsh-step-badge">' +
+                            '<span class="dsh-step-icon">' + _icon + '</span>' +
+                            '<span class="dsh-step-name"># ' + escapeHtml(_tn) + '</span>' +
+                            (_summary ? '<span class="dsh-step-desc">· ' + escapeHtml(_summary) + '</span>' : '') +
+                            '<span class="dsh-step-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>' +
+                            '</div>';
                     });
-                    toolDisplayHtml += '</div></details>';
+
+                    if (m.tool_calls.length > 2) {
+                        toolDisplayHtml = '<details class="dsh-timeline-group">' +
+                            '<summary class="dsh-timeline-group-summary">' +
+                                '<span class="dsh-timeline-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>' +
+                                '<span class="dsh-timeline-title">Agent 执行了 ' + m.tool_calls.length + ' 步操作</span>' +
+                                '<span class="dsh-timeline-badge">已完成</span>' +
+                            '</summary>' +
+                            '<div class="dsh-steps-timeline">' + badgesHtml + '</div>' +
+                            '</details>';
+                    } else {
+                        toolDisplayHtml = '<div class="dsh-steps-timeline">' + badgesHtml + '</div>';
+                    }
                 }
-                var displayText = compressNewlines(m.content, 2);
+                var _cleanContent = typeof m.content === 'string' ? m.content.replace(/\(empty\)/gi, '').trim() : (m.content || '');
+                var displayText = _cleanContent ? compressNewlines(_cleanContent, 2) : '';
                 if (toolDisplayHtml) {
-                    displayText = toolDisplayHtml + displayText;
+                    displayText = toolDisplayHtml + (displayText ? '\n\n' + displayText : '');
                 }
-                var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial, _origIdx);
-                // ★ 恢复时也渲染 web_fetch 链接列表
-                if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
-                    _renderWebFetchUrls(_bubble, m._webFetchUrls);
+                if (displayText.trim() || (m.generatedImages && m.generatedImages.length) || m.generatedImage || m.reasoning || m.partial) {
+                    var _bubble = appendMessage('assistant', displayText, null, m.reasoning, m.usage, m.time, i === displayMsgs.length - 1, m.generatedImage || null, m.generatedImages || null, !!m.partial, _origIdx);
+                    if (_bubble && m._webFetchUrls && m._webFetchUrls.length > 0) {
+                        _renderWebFetchUrls(_bubble, m._webFetchUrls);
+                    }
                 }
             }
             } catch(e) {
@@ -1036,13 +1534,37 @@ window.loadChat = async function (id) {
         window._suppressRowAnim = false;
         // ★ 批量插入完成后再挂载到容器(一次布局, 而非逐条)
         container.appendChild(_loadFrag);
+        if (typeof window.attachImageFallbacks === 'function') {
+            window.attachImageFallbacks(container);
+        }
     }
 
-    if (isTypingMap[id] && displayMsgs.length) {
+    var _isTypingActive = !!isTypingMap[id];
+    if (_isTypingActive && displayMsgs.length) {
         // 工具结果卡片可能是最后一个可见节点，不能据此认定流式目标不存在。
         // 直接选择最后一个 assistant 气泡，刷新首帧即可挂载工具运行状态。
         var _assistantBubbles = container.querySelectorAll('.bubble.assistant');
-        activeBubbleMap[id] = _assistantBubbles.length ? _assistantBubbles[_assistantBubbles.length - 1] : null;
+        var _targetBubble = _assistantBubbles.length ? _assistantBubbles[_assistantBubbles.length - 1] : null;
+        var _lastMsg = displayMsgs[displayMsgs.length - 1];
+        // ★ 核心修复: 只有当最新一条消息确实是进行中状态 (partial/未闭合/正在生成) 时才作为活跃气泡打上 typing 类
+        //   若消息已完成 (非 partial 且已有完整内容)，绝不误打 typing/加载三点
+        if (_targetBubble && _lastMsg && (_lastMsg.partial || _lastMsg._recovered || !_lastMsg.content || !_lastMsg.content.trim())) {
+            activeBubbleMap[id] = _targetBubble;
+            _targetBubble.classList.add('typing', 'gen-active');
+            if (!_lastMsg.content || !_lastMsg.content.trim()) {
+                if (window.ModelStatus && typeof window.ModelStatus.ensureTypingIndicator === 'function') {
+                    window.ModelStatus.ensureTypingIndicator(_targetBubble);
+                }
+            }
+        } else {
+            delete activeBubbleMap[id];
+            if (_targetBubble) {
+                _targetBubble.classList.remove('typing', 'gen-active', 'streaming');
+                if (window.ModelStatus && typeof window.ModelStatus.removeTypingIndicator === 'function') {
+                    window.ModelStatus.removeTypingIndicator(_targetBubble);
+                }
+            }
+        }
     } else {
         delete activeBubbleMap[id];
     }
@@ -1062,15 +1584,22 @@ window.loadChat = async function (id) {
     renderChatHistory();
     updateHeaderTitle();
 
-    if (isTypingMap[id]) {
-        if ($.sendBtn) $.sendBtn.classList.add('hidden');
-        if ($.stopBtn) {
-            $.stopBtn.classList.remove('hidden');
-            $.stopBtn.classList.add('visible');
-        }
+    if (typeof window.updateSendStopButtons === 'function') {
+        window.updateSendStopButtons(!!isTypingMap[id]);
     } else {
-        if ($.sendBtn) $.sendBtn.classList.remove('hidden');
-        if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        var _agSend = document.getElementById('agentSendBtn');
+        var _agStop = document.getElementById('agentStopBtn');
+        if (isTypingMap[id]) {
+            if ($.sendBtn) $.sendBtn.classList.add('hidden');
+            if ($.stopBtn) { $.stopBtn.classList.remove('hidden'); $.stopBtn.classList.add('visible'); }
+            if (_agSend) _agSend.classList.add('hidden');
+            if (_agStop) _agStop.classList.remove('hidden');
+        } else {
+            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+            if (_agSend) _agSend.classList.remove('hidden');
+            if (_agStop) _agStop.classList.add('hidden');
+        }
     }
 
     if (isMobile()) {

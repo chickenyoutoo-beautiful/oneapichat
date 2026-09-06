@@ -17,6 +17,11 @@ from __future__ import annotations
 import base64
 import logging
 import asyncio
+import threading
+import ipaddress
+import socket
+import time
+from urllib.parse import urlparse
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -24,13 +29,51 @@ logger = logging.getLogger(__name__)
 # ── CDP 配置 ──────────────────────────────────────────
 CDP_URL = "http://127.0.0.1:9222"
 BROWSER_VIEWPORT = {"width": 1280, "height": 720}
+_url_safety_cache: dict[str, tuple[float, bool]] = {}
+_url_safety_lock = threading.RLock()
+
+
+async def is_safe_browser_url(url: str) -> bool:
+    """Reject browser navigation and requests to local/private network targets."""
+    try:
+        parsed = urlparse(str(url or ""))
+        if parsed.scheme in {"about", "data", "blob"}:
+            return True
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        host = parsed.hostname.rstrip(".").lower()
+        if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+            return False
+        now = time.monotonic()
+        with _url_safety_lock:
+            cached = _url_safety_cache.get(host)
+            # Cache only denials. Re-resolve allowed hosts for every request to reduce
+            # DNS-rebinding exposure between browser navigations.
+            if cached and cached[1] is False and now - cached[0] < 60:
+                return False
+        loop = asyncio.get_running_loop()
+        infos = await loop.run_in_executor(None, lambda: socket.getaddrinfo(host, parsed.port or 0, type=socket.SOCK_STREAM))
+        safe = bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
+        with _url_safety_lock:
+            if safe:
+                _url_safety_cache.pop(host, None)
+            else:
+                _url_safety_cache[host] = (now, False)
+            if len(_url_safety_cache) > 2048:
+                stale = sorted(_url_safety_cache, key=lambda item: _url_safety_cache[item][0])[:512]
+                for item in stale:
+                    _url_safety_cache.pop(item, None)
+        return safe
+    except Exception:
+        return False
 
 
 class BrowserManager:
     """浏览器管理器 - 通过 CDP 连接现有 Chromium 实例"""
 
-    def __init__(self, cdp_url: str = CDP_URL):
+    def __init__(self, cdp_url: str = CDP_URL, user_id: str = ""):
         self.cdp_url = cdp_url
+        self.user_id = str(user_id or "")
         self._playwright = None
         self._browser = None
         self._context = None
@@ -64,15 +107,27 @@ class BrowserManager:
             # connect_over_cdp 也可接受 WebSocket URL 直连
             self._browser = await self._playwright.chromium.connect_over_cdp(ws_url)
 
-            # 获取已有的 context 或创建新的
+            # Authenticated users always receive a fresh incognito context. The empty
+            # internal namespace keeps the legacy default context for server-owned jobs.
             contexts = self._browser.contexts
-            if contexts:
+            if self.user_id:
+                self._context = await self._browser.new_context(
+                    viewport=BROWSER_VIEWPORT, locale="zh-CN"
+                )
+            elif contexts:
                 self._context = contexts[0]
             else:
                 self._context = await self._browser.new_context(
-                    viewport=BROWSER_VIEWPORT,
-                    locale="zh-CN",
+                    viewport=BROWSER_VIEWPORT, locale="zh-CN"
                 )
+
+            if self.user_id:
+                async def _guard_route(route):
+                    if await is_safe_browser_url(route.request.url):
+                        await route.continue_()
+                    else:
+                        await route.abort("blockedbyclient")
+                await self._context.route("**/*", _guard_route)
 
             # 获取已有的 page 或创建新的
             pages = self._context.pages
@@ -147,6 +202,8 @@ class BrowserManager:
 
     async def navigate(self, url: str, timeout: int = 30000) -> dict:
         """导航到 URL"""
+        if self.user_id and not await is_safe_browser_url(url):
+            return {"ok": False, "error": "blocked private or invalid browser URL"}
         await self._ensure_page()
         # 代理链路瞬时故障容错: 代理节点抖动 (net::ERR_EMPTY_RESPONSE 等) 会令单次 goto
         # 失败, 网络级错误自动重试 1 次 (800ms 退避); 非网络级错误不重试
@@ -431,20 +488,45 @@ class BrowserManager:
 
 # ── 全局单例 ──────────────────────────────────────────
 
-_browser_manager: Optional[BrowserManager] = None
+_browser_managers: dict[str, BrowserManager] = {}
+_browser_manager_access: dict[str, float] = {}
+_browser_managers_lock = threading.RLock()
 
 
-def get_browser_manager() -> BrowserManager:
-    """获取全局 BrowserManager 单例"""
-    global _browser_manager
-    if _browser_manager is None:
-        _browser_manager = BrowserManager()
-    return _browser_manager
+def get_browser_manager(user_id: str = "") -> BrowserManager:
+    """Get an isolated BrowserManager for one authenticated user."""
+    key = str(user_id or "")
+    with _browser_managers_lock:
+        manager = _browser_managers.get(key)
+        if manager is None:
+            manager = BrowserManager(user_id=key)
+            _browser_managers[key] = manager
+        _browser_manager_access[key] = time.monotonic()
+        return manager
 
 
-async def ensure_browser_connected() -> BrowserManager:
-    """确保浏览器已连接"""
-    bm = get_browser_manager()
+async def prune_browser_managers(max_idle_seconds: float = 3600.0) -> int:
+    cutoff = float('inf') if float(max_idle_seconds) <= 0 else time.monotonic() - float(max_idle_seconds)
+    stale: list[BrowserManager] = []
+    with _browser_managers_lock:
+        for key, accessed in list(_browser_manager_access.items()):
+            if accessed >= cutoff:
+                continue
+            manager = _browser_managers.pop(key, None)
+            _browser_manager_access.pop(key, None)
+            if manager is not None:
+                stale.append(manager)
+    for manager in stale:
+        try:
+            await manager.disconnect()
+        except Exception:
+            pass
+    return len(stale)
+
+
+async def ensure_browser_connected(user_id: str = "") -> BrowserManager:
+    """Ensure one user's isolated browser context is connected."""
+    bm = get_browser_manager(user_id)
     if not bm._connected:
         await bm.connect()
     return bm

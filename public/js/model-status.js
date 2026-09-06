@@ -1,29 +1,41 @@
-// model-status.js — 蕾米状态 GIF 控制器
-// 把 Cloudreve 分享的 Q 版蕾米动画嵌入到界面，用来表示模型/Agent 的状态：
-//   待机  idle.gif        = 动画A-待机
-//   思考  thinking.gif    = 动画B
-//   满意  satisfied.gif   = 动画C
-//   创作  creating.gif    = 动画D（奋笔疾书）
-//   难题  stuck.gif       = 动画E
-//   完成  done.gif        = 动画A-胜利（另备 done-alt.gif = 动画D-胜利）
+// model-status.js — 蕾米纯程序桌宠状态控制器
+// 使用 HTML/CSS 矢量部件与状态动画表示模型/Agent 状态，不再依赖 GIF：
+// 借鉴 jackuh105/remielle-dsh-plugin 的事件投影思想：
+// idle / thinking / working / creating / waiting / celebrate / failed
+// 只复用 Apache-2.0 状态机设计，不使用其受限 GIF/PNG 角色素材。
 (function () {
     if (window.__remiStatusLoaded) return;
     window.__remiStatusLoaded = true;
 
-    var GIFS = {
-        idle: './src/remi/idle.gif',
-        thinking: './src/remi/thinking.gif',
-        satisfied: './src/remi/satisfied.gif',
-        creating: './src/remi/creating.gif',
-        stuck: './src/remi/stuck.gif',
-        done: './src/remi/done.gif',
-        doneAlt: './src/remi/done-alt.gif'
+    var MOODS = { idle: 1, thinking: 1, working: 1, creating: 1, waiting: 1, celebrate: 1, failed: 1, satisfied: 1, stuck: 1, done: 1, doneAlt: 1 };
+    var ASSET_BASE = './src/remi-official/';
+    var MOOD_ASSETS = {
+        idle: '02.gif', thinking: '05.gif', working: '01.gif', creating: '03.gif',
+        waiting: '05.gif', celebrate: '06.gif', failed: '04.gif'
     };
+    var MOOD_CLASSES = 'mood-idle mood-thinking mood-working mood-creating mood-waiting mood-celebrate mood-failed mood-satisfied mood-stuck mood-done mood-doneAlt remi-trick-peek remi-trick-bounce';
+
+    function applyMoodToAvatar(el, mood) {
+        if (!el) return;
+        var normalized = canonicalMood(mood);
+        el.classList.remove.apply(el.classList, MOOD_CLASSES.split(' '));
+        el.classList.add('mood-' + normalized);
+        if (el.tagName === 'IMG' && MOOD_ASSETS[normalized]) {
+            var nextSrc = ASSET_BASE + MOOD_ASSETS[normalized];
+            if (el.getAttribute('src') !== nextSrc) el.setAttribute('src', nextSrc);
+        }
+        el.setAttribute('aria-label', LABELS[mood] || LABELS.idle);
+        el.setAttribute('title', LABELS[mood] || LABELS.idle);
+    }
     var LABELS = {
         idle: '蕾米 · 待机中',
         thinking: '蕾米 · 思考中',
         satisfied: '蕾米 · 搞定啦',
+        working: '蕾米 · 工具执行中',
         creating: '蕾米 · 奋笔疾书中',
+        waiting: '蕾米 · 等待你的确认',
+        celebrate: '蕾米 · 完成啦！',
+        failed: '蕾米 · 执行失败了',
         stuck: '蕾米 · 遇到难题了',
         done: '蕾米 · 完成！',
         doneAlt: '蕾米 · 完成！'
@@ -34,6 +46,15 @@
     var moodTimer = null;
     var activeBubble = null;
     var lastAvatarRow = null;
+    var lastCelebrateAt = 0;
+    var idleTrickTimer = null;
+    var CELEBRATE_COOLDOWN = 12000;
+
+    function canonicalMood(mood) {
+        if (mood === 'done' || mood === 'doneAlt' || mood === 'satisfied') return 'celebrate';
+        if (mood === 'stuck') return 'failed';
+        return mood;
+    }
 
     function moodFromText(text) {
         if (!text) return null;
@@ -46,46 +67,54 @@
 
     function applyMood(mood) {
         var tg = document.getElementById('thinkingGif');
-        if (tg && GIFS[mood] && mood !== 'idle') {
-            if (tg.getAttribute('src') !== GIFS[mood]) {
-                tg.setAttribute('src', GIFS[mood]);
-            }
-        }
+        if (tg && MOODS[mood]) applyMoodToAvatar(tg, mood);
         var titleSpan = document.querySelector('#thinkingIndicator .thinking-title span');
         if (titleSpan) {
             var titleMap = {
                 idle: '待机中',
                 thinking: '思考中',
                 satisfied: '搞定啦',
+                working: '工具执行中',
                 creating: '创作中',
+                waiting: '等待确认',
+                celebrate: '完成！',
+                failed: '执行失败',
                 stuck: '遇到难题',
                 done: '完成！',
                 doneAlt: '完成！'
             };
             titleSpan.textContent = titleMap[mood] || '思考中';
         }
+        // 不依赖 activeBubble：DSH 主题会隐藏历史头像，且图片工具状态可能先于气泡 class 变更。
+        // 始终同步当前最后一枚助手头像，保证侧边/放大悬浮窗和真实生成状态一致。
         var avatarImg = null;
         if (activeBubble) {
             var row = activeBubble.closest ? activeBubble.closest('.message-row') : null;
-            avatarImg = row ? row.querySelector('.avatar.assistant img') : null;
-            if (avatarImg) {
-                if (avatarImg.getAttribute('src') !== GIFS[mood]) {
-                    avatarImg.setAttribute('src', GIFS[mood]);
-                }
-                avatarImg.setAttribute('title', LABELS[mood] || LABELS.idle);
-            }
+            avatarImg = row ? row.querySelector('.avatar.assistant .avatar-remi-gif') : null;
         }
-        // ★ 放大小窗同步: 小窗打开期间跟随头像表情变化
-        if (document.body.classList.contains('remi-zoom-open')) {
-            var zoomImg = document.getElementById('remi-zoom-img');
-            if (zoomImg && avatarImg) zoomImg.setAttribute('src', avatarImg.getAttribute('src'));
-            var zoomTitle = document.getElementById('remi-zoom-title');
-            if (zoomTitle && LABELS[mood]) zoomTitle.textContent = LABELS[mood];
+        if (!avatarImg && container) {
+            var allAvatarImgs = container.querySelectorAll('.message-row.assistant .avatar.assistant .avatar-remi-gif');
+            avatarImg = allAvatarImgs.length ? allAvatarImgs[allAvatarImgs.length - 1] : null;
         }
+        if (avatarImg) applyMoodToAvatar(avatarImg, mood);
+        // ★ 放大小窗同步：即使气泡头像暂时不可见，也直接更新悬浮窗图片
+        var zoomImg = document.getElementById('remi-zoom-img');
+        if (zoomImg) applyMoodToAvatar(zoomImg, mood);
+        var zoomTitle = document.getElementById('remi-zoom-title');
+        if (zoomTitle && LABELS[mood]) zoomTitle.textContent = LABELS[mood];
     }
 
     function setMood(mood, source, stickyMs) {
-        if (!GIFS[mood]) return;
+        mood = canonicalMood(mood);
+        if (!MOODS[mood]) return;
+        // 审批是最高优先级：等待用户期间，普通 DOM 变化不得把表情抢回思考/创作。
+        if (window._approvalPending && mood !== 'waiting' && mood !== 'failed') mood = 'waiting';
+        // 庆祝动作设冷却，避免一轮多个工具完成时不断闪烁。
+        if (mood === 'celebrate') {
+            var now = Date.now();
+            if (now - lastCelebrateAt < CELEBRATE_COOLDOWN && source !== 'force') mood = 'idle';
+            else lastCelebrateAt = now;
+        }
         if (mood === currentMood && source !== 'force') return;
         currentMood = mood;
         moodSeq++;
@@ -107,17 +136,17 @@
         if (!el || !el.classList || !el.classList.contains('search-status')) return;
         var textSpan = el.querySelector('span.remi-status-text');
         var raw = textSpan ? (textSpan.textContent || '') : (el.textContent || '');
-        if (raw === (el.dataset.remiText || '') && el.querySelector('img.remi-status-gif')) return;
+        if (raw === (el.dataset.remiText || '') && el.querySelector('.remi-status-gif')) return;
 
-        var mood = moodFromText(raw) || 'thinking';
+        var mood = moodFromText(raw) || 'working';
         el.dataset.remiText = raw;
         el.textContent = '';
 
         var img = document.createElement('img');
-        img.className = 'remi-status-gif';
-        img.setAttribute('src', GIFS[mood]);
-        img.setAttribute('alt', '蕾米');
-        img.setAttribute('title', LABELS[mood] || LABELS.idle);
+        img.className = 'remi-status-gif remi-character-asset';
+        img.alt = '蕾米埃尔';
+        img.draggable = false;
+        applyMoodToAvatar(img, mood);
 
         var span = document.createElement('span');
         span.className = 'remi-status-text';
@@ -133,6 +162,30 @@
 
     function bubbleIsActive(bubble) {
         return bubble.classList.contains('typing') || bubble.classList.contains('gen-active');
+    }
+
+    // 使用真实 DOM 三圆点，不再依赖容易被全局伪元素规则污染的 ::after。
+    function ensureTypingIndicator(bubble) {
+        if (!bubble || bubble.querySelector('.remi-typing-indicator')) return;
+        var md = bubble.querySelector('.markdown-body');
+        if (!md) return;
+        // 等待器只能挂载到当前 activeBubbleMap 对应的空占位气泡，绝不能回挂历史正文气泡。
+        var ownerChatId = bubble.dataset ? bubble.dataset.chatId : '';
+        var mappedBubble = ownerChatId && window.activeBubbleMap ? window.activeBubbleMap[ownerChatId] : null;
+        if (mappedBubble && mappedBubble !== bubble) return;
+        if (mdBodyText(md).trim().length > 0) return;
+        var loader = document.createElement('span');
+        loader.className = 'remi-typing-indicator';
+        loader.setAttribute('role', 'status');
+        loader.setAttribute('aria-label', '正在等待模型输出');
+        loader.innerHTML = '<i></i><i></i><i></i>';
+        md.appendChild(loader);
+    }
+
+    function removeTypingIndicator(bubble) {
+        if (!bubble) return;
+        var loader = bubble.querySelector('.remi-typing-indicator');
+        if (loader) loader.remove();
     }
 
     function inActiveBubble(el) {
@@ -162,7 +215,7 @@
         var text = mdBodyText(md) + ' ' + ((status && status.textContent) || '');
         if (/(失败|错误|❌|出错|异常|无法)/.test(text)) {
             setMood('stuck', 'bubble-final', 6000);
-        } else if (text && text.trim().length > 0) {
+        } else if (text && text.trim().length > 0 || bubble.querySelector('.gen-image-container, .generated-images-container, img.gen-image')) {
             setMood('done', 'bubble-final', 6000);
         } else {
             setMood('idle', 'bubble-final', 0);
@@ -178,7 +231,7 @@
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
             if (r.classList.contains('tool-call-row')) continue;
-            if (!r.querySelector('.avatar.assistant img')) continue;
+            if (!r.querySelector('.avatar.assistant .avatar-remi-gif')) continue;
             candidates.push(r);
         }
         if (lastAvatarRow && !document.body.contains(lastAvatarRow)) lastAvatarRow = null;
@@ -236,6 +289,7 @@
                 }
                 if (node.classList && node.classList.contains('bubble') && node.classList.contains('assistant') && bubbleIsActive(node)) {
                     activeBubble = node;
+                    ensureTypingIndicator(node);
                     setMood('thinking', 'bubble-start');
                     node.dataset.remiWasActive = '1';
                 }
@@ -267,9 +321,13 @@
             if (t.classList.contains('bubble') && t.classList.contains('assistant')) {
                 if (bubbleIsActive(t)) {
                     activeBubble = t;
+                    ensureTypingIndicator(t);
                     setMood('thinking', 'bubble-class');
                 } else if (t.dataset && t.dataset.remiWasActive === '1') {
+                    removeTypingIndicator(t);
                     finalizeBubble(t);
+                } else {
+                    removeTypingIndicator(t);
                 }
                 if (t.dataset) t.dataset.remiWasActive = bubbleIsActive(t) ? '1' : '0';
             }
@@ -305,7 +363,7 @@
             var statusEl = bubble.querySelector('.search-status');
             var statusMood = statusEl ? moodFromText(statusEl.textContent) : null;
             if (statusMood) {
-                setMood(statusMood, 'bubble-status');
+                setMood(statusMood === 'thinking' ? 'working' : statusMood, 'bubble-status');
                 continue;
             }
             var md = bubble.querySelector('.markdown-body');
@@ -318,12 +376,56 @@
     });
     textObserver.observe(container, { subtree: true, childList: true, characterData: true });
 
+    // DSH 风格行为层：审批弹窗是真实 waiting 事件，而不是依靠中文文本猜测。
+    var approvalObserver = new MutationObserver(function () {
+        var pending = !!document.querySelector('.approval-overlay');
+        if (pending) {
+            window._approvalPending = true;
+            setMood('waiting', 'approval', 0);
+        } else if (window._approvalPending) {
+            window._approvalPending = false;
+            setMood(activeBubble && bubbleIsActive(activeBubble) ? 'thinking' : 'idle', 'approval-resolved', 0);
+        }
+    });
+    approvalObserver.observe(document.body, { childList: true, subtree: false });
+
+    // 空闲微动作：只改变纯 CSS 部件，且不覆盖工作/等待/失败状态。
+    function scheduleIdleTrick() {
+        if (idleTrickTimer) clearTimeout(idleTrickTimer);
+        idleTrickTimer = setTimeout(function () {
+            idleTrickTimer = null;
+            if (currentMood !== 'idle' || document.hidden) { scheduleIdleTrick(); return; }
+            var avatars = document.querySelectorAll('.remi-character-asset');
+            var trick = Math.random() < 0.5 ? 'remi-trick-peek' : 'remi-trick-bounce';
+            for (var i = 0; i < avatars.length; i++) avatars[i].classList.add(trick);
+            setTimeout(function () {
+                for (var j = 0; j < avatars.length; j++) avatars[j].classList.remove(trick);
+                scheduleIdleTrick();
+            }, 1200);
+        }, 7000 + Math.random() * 7000);
+    }
+    scheduleIdleTrick();
+
+    // 供主聊天、工具执行、恢复流直接投递结构化事件。
+    window.remiReact = function (eventName, detail) {
+        detail = detail || {};
+        var map = {
+            'turn/start': 'thinking', 'reasoning': 'thinking', 'tool/call': 'working',
+            'output': 'creating', 'approval/asked': 'waiting', 'turn/completed': 'celebrate',
+            'turn/error': 'failed', 'turn/blocked': 'waiting', 'turn/idle': 'idle'
+        };
+        var mood = map[eventName];
+        if (!mood) return;
+        var sticky = mood === 'celebrate' ? 5000 : (mood === 'failed' ? 7000 : 0);
+        setMood(mood, detail.source || eventName, sticky);
+    };
+
     // 5) 蕾米放大小窗: 点击可见头像 → 左下角弹窗放大细节; 小窗打开期间小头像隐藏
     var remiZoomOpen = false;
 
     // 当前聊天内可见的蕾米头像 (最新助手消息)
     function getVisibleAvatarImg() {
-        var imgs = container.querySelectorAll('.message-row.assistant .avatar.assistant img');
+        var imgs = container.querySelectorAll('.message-row.assistant .avatar.assistant .avatar-remi-gif');
         for (var i = imgs.length - 1; i >= 0; i--) {
             var avatar = imgs[i].closest ? imgs[i].closest('.avatar') : null;
             if (avatar && !avatar.classList.contains('remi-avatar-hide')) return imgs[i];
@@ -341,8 +443,14 @@
         var img = getVisibleAvatarImg();
         var zoomImg = document.getElementById('remi-zoom-img');
         var zoomTitle = document.getElementById('remi-zoom-title');
-        if (img && zoomImg) zoomImg.setAttribute('src', img.getAttribute('src'));
-        if (zoomTitle && img && img.title) zoomTitle.textContent = img.title;
+        if (zoomImg) {
+            if (typeof applyMoodToAvatar === 'function') applyMoodToAvatar(zoomImg, currentMood);
+            else if (img && img.getAttribute && zoomImg.setAttribute) zoomImg.setAttribute('src', img.getAttribute('src'));
+        }
+        if (zoomTitle) {
+            if (typeof LABELS !== 'undefined') zoomTitle.textContent = LABELS[currentMood] || LABELS.idle;
+            else if (img && img.title) zoomTitle.textContent = img.title;
+        }
         win.hidden = false;
         document.body.classList.add('remi-zoom-open');
         remiZoomOpen = true;
@@ -376,10 +484,15 @@
     // 头像点击打开 (头像动态生成, 委托监听)
     container.addEventListener('click', function (e) {
         var t = e.target;
-        if (t && t.classList && t.classList.contains('avatar-remi-gif')) {
+        if (t && t.closest && t.closest('.avatar-remi-gif')) {
             openRemiZoom();
         }
     });
+    // 双击头像/小窗触发一次庆祝彩蛋；单击仍只负责打开小窗。
+    container.addEventListener('dblclick', function (e) {
+        if (e.target && e.target.closest && e.target.closest('.avatar-remi-gif')) setMood('celebrate', 'force', 3200);
+    });
+
     // 关闭按钮
     var closeBtn = document.getElementById('remi-zoom-close');
     if (closeBtn) closeBtn.addEventListener('click', function (e) {
@@ -557,21 +670,9 @@
         if (window.visualViewport) window.visualViewport.addEventListener('resize', onZoomViewportChange);
     }
 
-    // ★ 刷新后恢复小窗: 若上次关闭时小窗是打开的, 页面加载完成后自动重新打开
-    //   头像可能在聊天加载后才渲染, 轮询等待头像就绪再开 (最多 ~8s)
-    var _remiRestoreTries = 0;
-    function _restoreRemiZoom() {
-        var _wasOpen = false;
-        try { _wasOpen = localStorage.getItem('remiZoomOpen') === '1'; } catch(e) {}
-        if (!_wasOpen) return;
-        if (remiZoomOpen) return;
-        if (getVisibleAvatarImg() || document.querySelector('.avatar-remi-gif')) {
-            openRemiZoom();
-            return;
-        }
-        if (_remiRestoreTries++ < 40) setTimeout(_restoreRemiZoom, 200);
-    }
-    setTimeout(_restoreRemiZoom, 600);
+    // 默认头像模式：刷新时不自动弹出大窗；用户点击头像后才进入桌宠小窗模式。
+    // 清理旧版本残留的“保持打开”标记，避免首次进入页面直接遮挡聊天。
+    try { localStorage.removeItem('remiZoomOpen'); } catch(e) {}
 
     // 6) 暴露调试/外部调用接口
     window.setRemiMood = setMood;

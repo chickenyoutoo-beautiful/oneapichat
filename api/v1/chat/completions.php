@@ -10,6 +10,7 @@
 
 require_once __DIR__ . '/../../init.php';
 require_once __DIR__ . '/../../auth_helpers.php';
+require_once __DIR__ . '/../../engine_bridge.php';
 setApiCorsHeaders();
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -156,11 +157,11 @@ if (empty($tools) && !isset($body['tools'])) {
     $tools = [];
 
     // 1. 从引擎加载
-    $engineToolsJson = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, stream_context_create(['http' => ['timeout' => 3, 'ignore_errors' => true]]));
+    $engineToolsJson = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, oneapichatEngineContext(['timeout' => 3]));
     if ($engineToolsJson) {
         $engineToolsData = @json_decode($engineToolsJson, true);
         foreach (($engineToolsData['tools'] ?? []) as $t) {
-            if (!is_array($t) || empty($t['name'])) continue;
+            if (!is_array($t) || empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
             $schema = $t['input_schema'] ?? $t['parameters'] ?? null;
             if (!is_array($schema) || empty($schema['type']) || !isset($schema['properties']) || !is_array($schema['properties'])) continue;
             if (empty($schema['required'])) unset($schema['required']);
@@ -168,14 +169,14 @@ if (empty($tools) && !isset($body['tools'])) {
         }
     }
 
-    // 2. 从 MCP Server 加载全部 69 工具 (动态注册, 包括 generate_docx/xlsx/pdf, bilibili_*, cr_*, mmx_*, chaoxing_* 等)
+    // 2. 从 MCP Server 加载动态工具（MMX 工具已下线）
     $mcpToolsJson = @file_get_contents('http://127.0.0.1:18788/mcp/api/tools', false, stream_context_create([
         'http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'timeout' => 5, 'ignore_errors' => true],
     ]));
     if ($mcpToolsJson) {
         $mcpToolsData = @json_decode($mcpToolsJson, true);
         foreach (($mcpToolsData['tools'] ?? []) as $t) {
-            if (!is_array($t) || empty($t['name'])) continue;
+            if (!is_array($t) || empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
             // 跳过引擎已有的工具
             $exists = false;
             foreach ($tools as $existing) {

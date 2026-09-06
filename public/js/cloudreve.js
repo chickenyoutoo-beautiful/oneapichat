@@ -2,10 +2,13 @@
 // cloudreveApiHandler / 文件搜索 / 上传 / 下载
 
 // ==================== Cloudreve 云盘 API 处理器 ====================
+function _cloudreveAuthHeaders() {
+    var token = typeof getAuthToken === 'function' ? getAuthToken() : (localStorage.getItem('authToken') || '');
+    return token ? { Authorization: 'Bearer ' + token } : {};
+}
+
 async function cloudreveApiHandler(action, args) {
-    var token = localStorage.getItem('authToken') || '';
-    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-    let base = '/oneapichat/api/cloudreve_api.php?action=' + action + authSuffix;
+    let base = '/oneapichat/api/cloudreve_api.php?action=' + action;
 
     // 拼接额外参数
     if (args) {
@@ -17,7 +20,7 @@ async function cloudreveApiHandler(action, args) {
     }
 
     try {
-        var r = await fetch(base, { signal: AbortSignal.timeout(60000) });
+        var r = await fetch(base, { signal: AbortSignal.timeout(60000), headers: _cloudreveAuthHeaders() });
         var d = await r.json();
         if (d.success) {
             return { result: JSON.stringify(d, null, 2) };
@@ -45,7 +48,7 @@ window.syncCloudreveAccount = async function(silent) {
     var token = localStorage.getItem('authToken') || '';
     if (!token) return;
     try {
-        var r = await fetch('/oneapichat/api/cloudreve_api.php?action=auto_login&oneapichat_token=' + encodeURIComponent(token), { cache: 'no-store' });
+        var r = await fetch('/oneapichat/api/cloudreve_api.php?action=auto_login', { cache: 'no-store', headers: _cloudreveAuthHeaders() });
         var d = await r.json();
         if (d.success) {
             if (!silent && typeof showToast === 'function') {
@@ -57,6 +60,45 @@ window.syncCloudreveAccount = async function(silent) {
         }
     } catch(e) {
         if (!silent && typeof showToast === 'function') showToast('☁️ 云盘同步异常: ' + e.message, 'warning', 3000);
+    }
+};
+
+/** 在 Cloudreve 新标签页中建立与当前 OneAPIChat 用户匹配的完整会话。 */
+window.openCloudreveWeb = async function() {
+    var token = localStorage.getItem('authToken') || '';
+    if (!token) {
+        if (typeof showToast === 'function') showToast('请先登录主项目', 'warning', 2500);
+        return;
+    }
+    var win = window.open('about:blank', 'cloudreve_sso');
+    if (win) {
+        try { win.opener = null; win.document.write('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#f5f7fb;color:#64748b;font:14px system-ui">正在安全登录 Cloudreve…</body>'); } catch (_) {}
+    }
+    try {
+        var response = await fetch('/oneapichat/api/cloudreve_sso.php', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            cache: 'no-store'
+        });
+        var data = await response.json();
+        if (!response.ok || !data.success || !data.ticket) throw new Error(data.error || '云盘单点登录失败');
+        // Cloudreve 的 Workbox NavigationRoute 会把未知 GET（包括 cr_login.php?t=...）
+        // 拦截成 SPA index.html，最终显示“页面不存在”。表单 POST 不匹配其 GET
+        // NavigationRoute，能够可靠到达 PHP 消费端。
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = data.action_url || 'https://cloudreve.naujtrats.xyz/api/oneapichat-sso';
+        form.target = win ? 'cloudreve_sso' : '_self';
+        form.style.display = 'none';
+        var input = document.createElement('input');
+        input.type = 'hidden'; input.name = 't'; input.value = data.ticket;
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    } catch (e) {
+        if (win) win.close();
+        if (typeof showToast === 'function') showToast('☁️ ' + e.message, 'warning', 4500);
     }
 };
 
@@ -91,7 +133,7 @@ window.toggleCloudrevePanel = async function() {
     document.body.appendChild(overlay);
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     overlay.querySelector('.cr-close').onclick = function() { overlay.remove(); };
-    document.getElementById('crBtnHome').onclick = function() { window.open(_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz', '_blank'); };
+    document.getElementById('crBtnHome').onclick = window.openCloudreveWeb;
     document.getElementById('crBtnUp').onclick = function() {
         var p = _crPanelState.path;
         if (!p) return;
@@ -242,8 +284,8 @@ window.toggleCloudrevePanel = async function() {
         body.innerHTML = html;
         foot.innerHTML = '<span>登录后可在此浏览文件, 完整管理请打开云盘主页</span>';
 
-        document.getElementById('crOpenHome').onclick = function() { window.open(_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz', '_blank'); };
-        document.getElementById('crGoRegister').onclick = function() { window.open((_crPanelState.webUrl || 'https://cloudreve.naujtrats.xyz') + '/signup', '_blank'); };
+        document.getElementById('crOpenHome').onclick = window.openCloudreveWeb;
+        document.getElementById('crGoRegister').onclick = function() { window.open((_crPanelState.webUrl || (window.location.origin + '/cloudreve')) + '/signup', '_blank'); };
         var chips = body.querySelectorAll('.cr-acc-chip');
         for (var i = 0; i < chips.length; i++) {
             chips[i].onclick = function() { document.getElementById('crLoginEmail').value = this.getAttribute('data-acc'); };
@@ -298,9 +340,30 @@ async function _parseEngineJson(r) {
 }
 
 async function engineApiHandler(action, args) {
-    // 所有引擎 API 调用带上 auth_token 实现用户隔离
-    var token = localStorage.getItem('authToken') || '';
-    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
+    // Engine API authenticates with the same-site session cookie (and supports bearer
+    // credentials); never append the reusable token to an operational URL.
+    // ★ 统一补 Bearer Header：部分浏览器/跨子域场景不携带 auth_token Cookie，
+    //    否则 server_file_grep/server_exec 会被 engine_api.php 判定为“未登录”。
+    var _engineNativeFetch = window.fetch.bind(window);
+    var fetch = function(_url, _options) {
+        var _opts = Object.assign({}, _options || {});
+        var _headers = {};
+        if (_opts.headers instanceof Headers) {
+            _opts.headers.forEach(function(v, k) { _headers[k] = v; });
+        } else if (Array.isArray(_opts.headers)) {
+            _opts.headers.forEach(function(h) { _headers[h[0]] = h[1]; });
+        } else if (_opts.headers) {
+            _headers = Object.assign({}, _opts.headers);
+        }
+        _opts.headers = Object.assign({}, _cloudreveAuthHeaders(), _headers);
+        if (window._fullFileAccessGrantId && window._fullFileAccessChatId) {
+            _opts.headers['X-OneAPIChat-Grant'] = window._fullFileAccessGrantId;
+            _opts.headers['X-OneAPIChat-Chat'] = window._fullFileAccessChatId;
+        }
+        return _engineNativeFetch(_url, _opts);
+    };
+    var token = typeof getAuthToken === 'function' ? getAuthToken() : (localStorage.getItem('authToken') || '');
+    var authSuffix = '';
 
     try {
         if (action === 'cron_list') {
@@ -335,39 +398,46 @@ async function engineApiHandler(action, args) {
             return { error: d.error || '删除失败' };
         }
         if (action === 'agent_create') {
-            // 继承当前用户的 API Key 和 baseUrl
-            var currentKey = localStorage.getItem('apiKey') || '';
-            var currentUrl = localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1';
-            var currentModel = args.model || localStorage.getItem('model') || 'deepseek-chat';
+            var currentProvider = args.provider || (typeof getVal === 'function' ? getVal('baseUrlProvider') : null) || localStorage.getItem('baseUrlProvider') || '';
+            var currentUrl = args.base_url || (typeof getVal === 'function' ? getVal('baseUrl') : null) || localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1';
+            var currentModel = args.model || (typeof getVal === 'function' ? getVal('modelSelect') : null) || localStorage.getItem('model_' + currentProvider) || localStorage.getItem('model') || 'deepseek-chat';
             var agentRole = args.role || 'general';
-            var url = '/oneapichat/api/engine_api.php?action=agent_create&name=' + encodeURIComponent(args.name);
-            url += '&prompt=' + encodeURIComponent(args.prompt || args.task || '');
-            url += '&role=' + encodeURIComponent(agentRole);
-            url += '&model=' + encodeURIComponent(currentModel);
-            url += '&api_key=' + encodeURIComponent(currentKey);
-            url += '&base_url=' + encodeURIComponent(currentUrl);
-            url += authSuffix;
+            var _agentHeaders = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+            if (token) _agentHeaders.Authorization = 'Bearer ' + token;
             try {
-                var r = await fetch(url);
-                var d = await r.json();
-                if (d.ok) {
-                    // 创建后自动运行(不等待完成,避免阻塞并行工具调用)
-                    fetch(_apiBase + '?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix).catch(function(){});
-                    return { result: '✅ 子代理 ' + args.name + ' 已创建并启动(角色:' + agentRole + ')' };
+                var r = await fetch('/oneapichat/api/engine_api.php?action=agent_create', {
+                    method: 'POST', headers: _agentHeaders,
+                    body: JSON.stringify({
+                        name: args.name, prompt: args.prompt || args.task || '', role: agentRole,
+                        model: currentModel, base_url: currentUrl, provider: currentProvider,
+                        proxy_url: args.proxy_url || '', proxy_enabled: args.proxy_enabled || ''
+                    })
+                });
+                var d = await _parseEngineJson(r);
+                if (d && d.ok) {
+                    // 若调用方未显式禁用 auto_run，则自动启动
+                    if (args.auto_run !== false) {
+                        fetch(_apiBase + '?action=agent_run', {
+                            method: 'POST', headers: _agentHeaders, body: JSON.stringify({ name: args.name })
+                        }).catch(function(){});
+                    }
+                    return { ok: true, result: '✅ 子代理 ' + args.name + ' 已创建并启动(角色:' + agentRole + ')' };
                 }
-                return { error: d.error || '创建失败' };
+                return { error: d && d.error || '创建失败' };
             } catch(e) {
                 return { error: '引擎服务异常: ' + e.message };
             }
         }
         if (action === 'agent_run') {
-            var _arUrl = _apiBase + '?action=agent_run&name=' + encodeURIComponent(args.name) + authSuffix;
-            if (args.message) _arUrl += '&message=' + encodeURIComponent(args.message);
-            if (args.from_ask) _arUrl += '&from_ask=' + encodeURIComponent(args.from_ask);
-            var _arRes = await fetch(_arUrl);
-            var _arData = await _arRes.json();
-            if (_arData.ok) return { result: '✅ 子代理 ' + args.name + ' 已启动' };
-            return { error: _arData.error || '启动失败' };
+            var _arHeaders = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+            if (token) _arHeaders.Authorization = 'Bearer ' + token;
+            var _arRes = await fetch(_apiBase + '?action=agent_run', {
+                method: 'POST', headers: _arHeaders,
+                body: JSON.stringify({ name: args.name, message: args.message || '', from_ask: !!args.from_ask })
+            });
+            var _arData = await _parseEngineJson(_arRes);
+            if (_arData && _arData.ok) return { result: '✅ 子代理 ' + args.name + ' 已启动' };
+            return { error: _arData && _arData.error || '启动失败' };
         }
         if (action === 'agent_status') {
             var r = await fetch(_apiBase + '?action=agent_status&name=' + encodeURIComponent(args.name) + authSuffix);
@@ -475,6 +545,13 @@ async function engineApiHandler(action, args) {
             }
             return { error: d.error || '命令执行失败' };
         }
+        if (action === 'run_code') {
+            var _rcResp = await fetch(_apiBase + '?action=run_code' + authSuffix, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args || {})});
+            var _rcData = await _parseEngineJson(_rcResp);
+            if (!_rcData) return {error:'run_code 网关返回非 JSON'};
+            if (_rcData.ok) return {result:_rcData.result,tool_calls:_rcData.tool_calls || [],logs:_rcData.logs || [],todos:_rcData.todos || []};
+            return {error:_rcData.error || 'run_code 失败',code:_rcData.code || '',capability:_rcData.capability || '',retryable:!!_rcData.retryable,tool_calls:_rcData.tool_calls || []};
+        }
         if (action === 'python') {
             var r = await fetch(_apiBase + '?action=python&timeout=' + (args.timeout || 30) + authSuffix + '&t=' + Date.now(), {
                 method: 'POST',
@@ -493,10 +570,18 @@ async function engineApiHandler(action, args) {
             }
             return { error: d.error || 'Python 脚本执行失败' };
         }
+        if (action === 'self_context') {
+            var _selfUrl = '/engine/self/context?query=' + encodeURIComponent(args.query || '') + '&budget=' + encodeURIComponent(args.budget || 14000);
+            var _selfResp = await fetch(_selfUrl);
+            var _selfData = await _selfResp.json();
+            if (_selfData && _selfData.ok) return { result: _selfData.context && _selfData.context.text || JSON.stringify(_selfData.context) };
+            return { error: (_selfData && _selfData.error) || '项目自描述暂时不可用' };
+        }
         if (action === 'file_read') {
             let _frUrl = _apiBase + '?action=file_read&path=' + encodeURIComponent(args.path) + '&max_lines=' + (args.max_lines || 200);
             if (args.start_line) _frUrl += '&start_line=' + args.start_line;
             if (args.end_line) _frUrl += '&end_line=' + args.end_line;
+            if ((typeof window.hasFullFileAccess === 'function' && window.hasFullFileAccess()) || args.full_access) _frUrl += '&full_access=true';
             // ★ 字符偏移分页: 压缩 JSON 等单行巨长文件按行读不到内容, 用 offset/max_chars 分页
             if (args.offset !== undefined && args.offset !== null && args.offset !== '') _frUrl += '&offset=' + args.offset;
             if (args.max_chars) _frUrl += '&max_chars=' + args.max_chars;
@@ -510,7 +595,7 @@ async function engineApiHandler(action, args) {
                 var out = '📄 ' + args.path + _range + ' (' + (d.size || 0) + ' bytes)\n' + d.content;
                 return { result: out };
             }
-            return { error: d.error || '读取失败' };
+            return { error: d.error || '读取失败', code: d.code || '', capability: d.capability || '', retryable: !!d.retryable, path: d.path || args.path || '' };
         }
         if (action === 'parse_document') {
             let _pdUrl = _apiBase + '?action=parse_document&path=' + encodeURIComponent(args.path);
@@ -523,7 +608,7 @@ async function engineApiHandler(action, args) {
                 var _pdOut = '📄 文档解析: ' + (_pdd.filename || args.path) + ' (格式: ' + (_pdd.format || '?') + ', 大小: ' + (_pdd.file_size || 0) + ' bytes)\n\n' + _pdd.content + _truncMark;
                 return { result: _pdOut };
             }
-            return { error: _pdd.error || '解析失败' };
+            return { error: _pdd.error || '解析失败', code: _pdd.code || '', capability: _pdd.capability || '', retryable: !!_pdd.retryable, path: _pdd.path || args.path || '' };
         }
         // ═══════════════════════════════════════════════════
         // ★ 股票数据工具 (A股 — 东方财富数据源)
@@ -534,11 +619,15 @@ async function engineApiHandler(action, args) {
             let _d = await _r.json();
             if (_d.ok) {
                 let _arrow = _d.change_pct >= 0 ? '🔴📈' : '🟢📉';
+                let _volume = Number(_d.volume) || 0;
+                let _amount = Number(_d.amount) || 0;
+                let _turnover = Number(_d.turnover) || 0;
+                let _marketCap = Number(_d.market_cap) || 0;
                 let _out = '📈 **' + _d.name + ' (' + _d.symbol + ')** 实时行情\n\n' +
                     _arrow + ' 最新价: **' + _d.price + '**  涨跌幅: **' + (_d.change_pct >= 0 ? '+' : '') + _d.change_pct + '%**  涨跌额: ' + (_d.change_amt >= 0 ? '+' : '') + _d.change_amt + '\n' +
                     '📊 今开: ' + _d.open + '  最高: ' + _d.high + '  最低: ' + _d.low + '  昨收: ' + _d.prev_close + '\n' +
-                    '💰 成交量: ' + (_d.volume / 10000).toFixed(2) + '万手  成交额: ' + (_d.amount / 100000000).toFixed(2) + '亿  换手率: ' + _d.turnover + '%\n';
-                if (_d.pe) _out += '📐 市盈率(动): ' + _d.pe + '  总市值: ' + (_d.market_cap / 100000000).toFixed(0) + '亿';
+                    '💰 成交量: ' + (_volume / 10000).toFixed(2) + '万  成交额: ' + (_amount / 100000000).toFixed(2) + '亿  换手率: ' + _turnover + '%\n';
+                if (_d.pe) _out += '📐 市盈率(动): ' + _d.pe + (_marketCap ? '  总市值: ' + (_marketCap / 100000000).toFixed(0) + '亿' : '');
                 return { result: _out };
             }
             return { error: _d.error || '获取行情失败' };
@@ -604,10 +693,14 @@ async function engineApiHandler(action, args) {
             let _r = await fetch(_u);
             let _d = await _r.json();
             if (_d.ok) {
-                let _total = ((_d.sh_connect.net_inflow || 0) + (_d.sz_connect.net_inflow || 0)) / 100000000;
+                // 兼容当前引擎扁平字段与旧版嵌套字段，避免接口成功时读取 undefined.net_inflow。
+                let _sh = Number(_d.sh_net_inflow != null ? _d.sh_net_inflow : (_d.sh_connect && _d.sh_connect.net_inflow)) || 0;
+                let _sz = Number(_d.sz_net_inflow != null ? _d.sz_net_inflow : (_d.sz_connect && _d.sz_connect.net_inflow)) || 0;
+                let _totalRaw = Number(_d.total_net_inflow != null ? _d.total_net_inflow : (_sh + _sz)) || 0;
+                let _total = _totalRaw / 100000000;
                 let _out = '🌊 **北向资金实时流向**\n\n' +
-                    '📥 沪股通净流入: **' + ((_d.sh_connect.net_inflow || 0) / 100000000).toFixed(2) + '亿**\n' +
-                    '📥 深股通净流入: **' + ((_d.sz_connect.net_inflow || 0) / 100000000).toFixed(2) + '亿**\n' +
+                    '📥 沪股通净流入: **' + (_sh / 100000000).toFixed(2) + '亿**\n' +
+                    '📥 深股通净流入: **' + (_sz / 100000000).toFixed(2) + '亿**\n' +
                     '💰 合计净流入: **' + (_total >= 0 ? '+' : '') + _total.toFixed(2) + '亿**';
                 return { result: _out };
             }
@@ -668,13 +761,31 @@ async function engineApiHandler(action, args) {
             let _u = _apiBase + '?action=stock_market_overview' + authSuffix;
             let _r = await fetch(_u);
             let _d = await _r.json();
-            if (_d.ok && _d.data) {
-                let _out = '🏛️ **A股市场主要指数**\n\n';
-                _d.data.forEach(function(idx) {
-                    let _arrow = idx.change_pct >= 0 ? '🔴📈' : '🟢📉';
-                    _out += _arrow + ' **' + idx.name + '**: ' + idx.price + ' (' + (idx.change_pct >= 0 ? '+' : '') + idx.change_pct + '%)\n';
-                });
-                return { result: _out };
+            // ★ 引擎实际返回 { ok, beijing_time, us_eastern_time, us/cn/hk_market_status,
+            //   us_indices[], cn_indices[], hk_indices[], global_indices[] } —— 没有顶层 data 字段
+            if (_d.ok) {
+                let _out = '🏛️ **全球市场全景**\n';
+                if (_d.beijing_time) _out += '🕐 北京时间: ' + _d.beijing_time + '\n';
+                if (_d.us_eastern_time) _out += '🇺🇸 美东时间: ' + _d.us_eastern_time + '\n';
+                if (_d.us_market_status) _out += '🇺🇸 美股: ' + _d.us_market_status + '\n';
+                if (_d.cn_market_status) _out += '🇨🇳 A股: ' + _d.cn_market_status + '\n';
+                if (_d.hk_market_status) _out += '🇭🇰 港股: ' + _d.hk_market_status + '\n';
+                var _renderIdx = function(title, list) {
+                    if (!list || !list.length) return '';
+                    var s = '\n**' + title + '**\n';
+                    list.forEach(function(idx) {
+                        var _pct = Number(idx.change_pct) || 0;
+                        var _arrow = _pct >= 0 ? '🔴📈' : '🟢📉';
+                        s += _arrow + ' ' + (idx.name || idx.symbol || idx.code || '') + ': ' + (idx.price || '-')
+                           + ' (' + (_pct >= 0 ? '+' : '') + _pct + '%)\n';
+                    });
+                    return s;
+                };
+                _out += _renderIdx('📈 美股核心指数', _d.us_indices);
+                _out += _renderIdx('🏛️ A股主要指数', _d.cn_indices);
+                _out += _renderIdx('🇭🇰 港股指数', _d.hk_indices);
+                _out += _renderIdx('🌍 全球外盘', _d.global_indices);
+                return { result: _out.trim() };
             }
             return { error: _d.error || '获取市场概览失败' };
         }
@@ -684,6 +795,7 @@ async function engineApiHandler(action, args) {
             if (args.file_pattern) _fgUrl += '&file_pattern=' + encodeURIComponent(args.file_pattern);
             if (args.max_results) _fgUrl += '&max_results=' + args.max_results;
             if (args.ignore_case === false) _fgUrl += '&ignore_case=false';
+            if ((typeof window.hasFullFileAccess === 'function' && window.hasFullFileAccess()) || args.full_access) _fgUrl += '&full_access=true';
             _fgUrl += authSuffix;
             var _fgr = await fetch(_fgUrl);
             var _fgd = await _fgr.json();
@@ -703,7 +815,7 @@ async function engineApiHandler(action, args) {
                 }
                 return { result: _fgOut };
             }
-            return { error: _fgd.error || '搜索失败' };
+            return { error: _fgd.error || '搜索失败', code: _fgd.code || '', capability: _fgd.capability || '', retryable: !!_fgd.retryable, path: _fgd.path || args.path || '' };
         }
         if (action === 'file_edit') {
             var _fePath = args.path || args.file_path || args.file || '';
@@ -721,7 +833,7 @@ async function engineApiHandler(action, args) {
             if (_fed.ok) {
                 return { result: '✅ 已编辑 ' + _fePath + ' (' + _fed.replaced + ' 处替换)' + (_fed.backup ? ' [备份: ' + _fed.backup + ']' : '') };
             }
-            return { error: _fed.error || '编辑失败', old_string_preview: _fed.old_string_preview };
+            return { error: _fed.error || '编辑失败', code: _fed.code || '', capability: _fed.capability || '', retryable: !!_fed.retryable, path: _fed.path || _fePath, old_string_preview: _fed.old_string_preview, validation: _fed.validation || null };
         }
         if (action === 'file_write') {
             var _fwPath = args.path || args.file_path || args.file || args.filename || '';
@@ -750,7 +862,7 @@ async function engineApiHandler(action, args) {
                 }
                 return { result: _resultMsg };
             }
-            return { error: d.error || '写入失败' };
+            return { error: d.error || '写入失败', code: d.code || '', capability: d.capability || '', retryable: !!d.retryable, path: d.path || _fwPath, validation: d.validation || null };
         }
         if (action === 'agent_stop') {
             var r = await fetch(_apiBase + '?action=agent_stop&name=' + encodeURIComponent(args.name) + authSuffix);
@@ -769,7 +881,7 @@ async function engineApiHandler(action, args) {
             var _r = await fetch(_apiBase + '?action=ps' + authSuffix);
             var _d = await _r.json();
             if (_d.ok) return { result: _d.stdout, total: _d.total };
-            console.warn('[ps] failed:', JSON.stringify(_d).substring(0,200));
+            console.warn('[ps] failed:', { status: _r.status, responseKeys: _d && typeof _d === 'object' ? Object.keys(_d).slice(0, 20) : [] });
             return { error: _d.error || 'unreachable' };
         }
         if (action === 'disk') {
@@ -789,7 +901,7 @@ async function engineApiHandler(action, args) {
             if (_bmethod === 'POST') {
                 var _r = await fetch(_burl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(args || {}) });
                 var _d = await _r.json();
-                if (_d.error) return { error: _d.error };
+                if (_d.error) return { error: _d.error, code: _d.code || "", capability: _d.capability || "", chat_id: _d.chat_id || "", retryable: !!_d.retryable };
                 // ★ 修复: 返回实际内容而非空壳 '操作完成'
                 if (_d.content !== undefined) return { result: _d.content };
                 if (_d.snapshot !== undefined) return { result: typeof _d.snapshot === 'string' ? _d.snapshot : JSON.stringify(_d.snapshot) };
@@ -813,7 +925,7 @@ async function engineApiHandler(action, args) {
                 });
                 var _r = await fetch(_burl);
                 var _d = await _r.json();
-                if (_d.error) return { error: _d.error };
+                if (_d.error) return { error: _d.error, code: _d.code || "", capability: _d.capability || "", chat_id: _d.chat_id || "", retryable: !!_d.retryable };
                 // screenshot: 带 image base64
                 if (_d.image) return { result: '截图完成', image: _d.image };
                 if (_d.content) return { result: _d.content, url: _d.url };
@@ -825,6 +937,21 @@ async function engineApiHandler(action, args) {
         // ===== 引擎直通工具 (通过 engine_api.php 的 security_checks + 转发到 engine_server) =====
         var directActions = ['sys_info', 'ps', 'disk', 'network', 'docker', 'db_query', 'file_search', 'file_op', 'file_read', 'file_write'];
         if (directActions.indexOf(action) >= 0) {
+            // Docker deployment uses JSON POST to avoid URL length/escaping failures.
+            if (action === 'docker' && args && ['doctor','pull','yatori_deploy','logs','stop','remove'].indexOf(String(args.action || 'ps')) >= 0) {
+                try {
+                    var _dr = await fetch(_apiBase + '?action=docker' + authSuffix, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(args)
+                    });
+                    var _dd = await _dr.json();
+                    if (_dd.error) return { error: _dd.error, code: _dd.code || '', retryable: !!_dd.retryable, hint: _dd.hint || '' };
+                    if (_dd.result !== undefined) return _dd;
+                    if (_dd.ok) return { result: JSON.stringify(_dd), data: _dd };
+                    return _dd;
+                } catch (_dockerTransportError) {
+                    return { error: 'Docker API 请求失败: ' + _dockerTransportError.message, code: 'DOCKER_TRANSPORT' };
+                }
+            }
             let _url = _apiBase + '?action=' + encodeURIComponent(action) + authSuffix;
             // 把 args 里的参数都拼到 URL (跳过与路径冲突的 action 和 php 保留字)
             var _skipKeys = ['action_cmd', 'auth_token'];
@@ -845,7 +972,7 @@ async function engineApiHandler(action, args) {
             try {
                 var _r = await fetch(_url);
                 var _d = await _r.json();
-                if (_d.error) return { error: _d.error };
+                if (_d.error) return { error: _d.error, code: _d.code || "", capability: _d.capability || "", chat_id: _d.chat_id || "", retryable: !!_d.retryable };
                 // 引擎返回的是对象 (如 {ok:true, stdout:"..."}), 直接返回
                 if (_d.ok) {
                     if (_d.stdout) return { result: _d.stdout, stderr: _d.stderr };
@@ -935,9 +1062,8 @@ function queryRAG() {
     var uid = localStorage.getItem('authUserId') || '';
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var ns = uid ? uid + '_' + coll : coll;
-    var _token = getAuthToken();
-    fetch(RAG_API + '?action=search&collection=' + encodeURIComponent(ns) + '&auth_token=' + encodeURIComponent(_token), {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+    fetch(RAG_API + '?action=search&collection=' + encodeURIComponent(ns), {
+        method: 'POST', headers: Object.assign({'Content-Type': 'application/json'}, _cloudreveAuthHeaders()),
         body: JSON.stringify({question: q})
     }).then(function(r) { return r.json(); })
       .then(function(d) {
@@ -957,9 +1083,8 @@ function deleteDocument(docId) {
     var uid = localStorage.getItem('authUserId') || '';
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var ns = uid ? uid + '_' + coll : coll;
-    var _token = getAuthToken();
     showToast('删除中...', 'info');
-    fetch(RAG_API + '?action=knowledge&collection=' + encodeURIComponent(ns) + '&doc_id=' + encodeURIComponent(docId) + '&auth_token=' + encodeURIComponent(_token), {method: 'DELETE'})
+    fetch(RAG_API + '?action=knowledge&collection=' + encodeURIComponent(ns) + '&doc_id=' + encodeURIComponent(docId), { method: 'DELETE', headers: _cloudreveAuthHeaders() })
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (d && d.success) {
@@ -977,10 +1102,8 @@ function loadEmbedConfig() {
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var uid = localStorage.getItem('authUserId') || '';
     var ns = uid ? encodeURIComponent(uid + '_' + coll) : encodeURIComponent(coll);
-    var _token = getAuthToken();
-
     // 先获取模型列表填充下拉框,再加载当前配置设置选中值(链式避免竞态)
-    fetch(RAG_API + '?action=list_models&auth_token=' + encodeURIComponent(_token))
+    fetch(RAG_API + '?action=list_models', { headers: _cloudreveAuthHeaders() })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var sm = getEl('ragEmbedModel');
@@ -1002,7 +1125,7 @@ function loadEmbedConfig() {
             if (curVal) sm.value = curVal;
 
             // 下拉框就绪后再加载当前配置设置选中值
-            return fetch(RAG_API + '?action=embed_config&collection=' + ns + '&auth_token=' + encodeURIComponent(_token));
+            return fetch(RAG_API + '?action=embed_config&collection=' + ns, { headers: _cloudreveAuthHeaders() });
         })
         .then(function(r) { return r ? r.json() : null; })
         .then(function(d) {

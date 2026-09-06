@@ -16,6 +16,14 @@ window.analyzeImage = async function(imageInput, focus) {
     if (_visProvider === 'custom') {
         storedVisionUrl = localStorage.getItem('visionApiUrlCustom');
         storedVisionKey = localStorage.getItem('visionApiKeyCustom');
+    } else if (_visProvider === 'openai') {
+        // ★ 修复：openai 提供商应使用独立存储的 OpenAI 端点（如 gpt.naujtrats.xyz/v1 的 gemini/gpt），
+        //   此前误读 minimax 默认端点导致识别慢/失败。
+        storedVisionUrl = localStorage.getItem('visionApiUrlOpenAI') || '';
+        storedVisionKey = localStorage.getItem('visionApiKeyOpenAI') || localStorage.getItem('visionApiKey');
+    } else if (_visProvider === 'xai') {
+        storedVisionUrl = localStorage.getItem('visionApiUrlXAI') || '';
+        storedVisionKey = localStorage.getItem('visionApiKeyXAI') || localStorage.getItem('visionApiKey');
     } else {
         storedVisionUrl = localStorage.getItem('visionApiUrl');
         storedVisionKey = localStorage.getItem('visionApiKey');
@@ -56,7 +64,7 @@ window.analyzeImage = async function(imageInput, focus) {
                 console.warn('[analyzeImage] 浏览器下载失败, 尝试服务端代理:', e.message);
                 try {
                     var _proxyPath2 = imageInput.replace(/^https?:\/\/[^\/]+/, '');
-                    var _proxyResp3 = await fetch('/oneapichat/api/image_proxy.php?action=get&path=' + encodeURIComponent(_proxyPath2) + '&auth_token=' + encodeURIComponent(window.getAuthToken() || ''));
+                    var _proxyResp3 = await fetch('/oneapichat/api/image_proxy.php?action=get&path=' + encodeURIComponent(_proxyPath2), { headers: { Authorization: 'Bearer ' + (window.getAuthToken() || '') } });
                     if (_proxyResp3.ok) {
                         var _proxyData3 = await _proxyResp3.json();
                         if (_proxyData3.success && _proxyData3.dataUrl) {
@@ -72,7 +80,7 @@ window.analyzeImage = async function(imageInput, focus) {
                         }
                     } else {
                         var _proxyErrText3 = await _proxyResp3.text().catch(function() { return ''; });
-                        console.warn('[analyzeImage] 代理HTTP错误:', _proxyResp3.status, _proxyErrText3.substring(0, 200));
+                        console.warn('[analyzeImage] 代理HTTP错误:', { status: _proxyResp3.status, responseLength: _proxyErrText3.length, contentType: _proxyResp3.headers.get('content-type') || '' });
                     }
                 } catch(_proxyErr3) {
                     console.warn('[analyzeImage] 服务端代理也失败:', _proxyErr3.message);
@@ -133,13 +141,17 @@ window.analyzeImage = async function(imageInput, focus) {
         }
     }
     var mcpEndpoint = visionApiUrl.replace(/\/$/, '');
+    // ★ 识别 OpenAI 兼容端点（以 /v1 结尾，如 gpt.naujtrats.xyz/v1 的 gemini/gpt）：
+    //   直连时需拼 /chat/completions 且用 OpenAI messages 格式，否则请求打到 /v1 或 body 格式错误。
+    var _isOpenAICompat = isDirectApi && (/\/v1$/.test(mcpEndpoint) || /gpt\.naujtrats|\.naujtrats\.xyz/.test(mcpEndpoint) || /api\.x\.ai/.test(mcpEndpoint));
     if (!isDirectApi) {
         // MCP 代理模式: 确保以 /analyze 结尾
         if (!mcpEndpoint.endsWith('/analyze')) {
             mcpEndpoint = mcpEndpoint + '/analyze';
         }
+    } else if (_isOpenAICompat && !mcpEndpoint.endsWith('/chat/completions')) {
+        mcpEndpoint = mcpEndpoint + '/chat/completions';
     }
-    // 直连模式: 直接使用 visionApiUrl,不做路径修改
     // 创建 AbortController 用于超时控制
     var controller = new AbortController();
     var timeoutId = setTimeout(() => {
@@ -157,6 +169,20 @@ window.analyzeImage = async function(imageInput, focus) {
             // 直连 API 需要 model 字段和 API Key
             var _visionModel = localStorage.getItem('visionModel') || DEFAULT_CONFIG.visionModel || 'MiniMax-M2';
             var _reqWithModel = JSON.parse(JSON.stringify(requestBody));
+            if (_isOpenAICompat) {
+                // ★ OpenAI 兼容格式: messages content 数组 + image_url；GPT/Gemini 更快。
+                var _promptOa = requestBody.prompt || focus || '请详细描述这张图片的所有内容,包括物体、场景、文字等可见信息。';
+                var _imgOa = requestBody.image_url || requestBody.image || '';
+                _reqWithModel = {
+                    model: _visionModel,
+                    messages: [{ role: 'user', content: [
+                        { type: 'text', text: _promptOa },
+                        { type: 'image_url', image_url: { url: _imgOa, detail: 'auto' } }
+                    ]}],
+                    max_tokens: 2048,
+                    stream: false
+                };
+            }
             _reqWithModel.model = _visionModel;
             _fetchBody = JSON.stringify(_reqWithModel);
             var _rawVisionKey = storedVisionKey || '';
@@ -213,7 +239,7 @@ window.analyzeImage = async function(imageInput, focus) {
         clearTimeout(timeoutId);
         if (!response.ok) {
             var errorText = await response.text();
-            console.error('[analyzeImage] HTTP 错误:', response.status, errorText);
+            console.error('[analyzeImage] HTTP 错误:', { status: response.status, responseLength: errorText.length, contentType: response.headers.get('content-type') || '' });
 
             if (isDirectApi) {
                 if (response.status === 401 || response.status === 403) {
@@ -259,10 +285,12 @@ window.analyzeImage = async function(imageInput, focus) {
         clearTimeout(timeoutId);
 
         try {
-            console.error('[analyzeImage] 捕获异常:');
-            console.error('  类型:', error?.constructor?.name);
-            console.error('  消息:', error?.message);
-            console.error('  原因:', error?.cause);
+            console.error('[analyzeImage] 请求失败:', {
+                errorType: error?.constructor?.name || 'Error',
+                errorCode: error?.code || '',
+                messageLength: typeof error?.message === 'string' ? error.message.length : 0,
+                hasCause: !!error?.cause
+            });
         } catch(e) {}
 
         if (error && typeof error.name === 'string' && error.name === 'AbortError') {
@@ -291,75 +319,88 @@ window.analyzeImage = async function(imageInput, focus) {
 }
 
 window.analyzeVideo = async function(videoInput, query) {
-    if (!videoInput) throw new Error('无效视频');
+    if (!videoInput || typeof videoInput !== 'string') throw new Error('无效视频');
     var enginePath = videoInput;
-    if (videoInput.startsWith('http')) enginePath = videoInput.replace(window.location.origin, '');
-    
-    // 1. 获取视频元信息
-    var infoRes = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'info',params:{},input_path:enginePath}) });
-    var infoData = await infoRes.json();
-    if (infoData.error) throw new Error(infoData.error);
-    var infoJson = JSON.parse(infoData.result || '{}');
+    if (videoInput.startsWith(window.location.origin)) enginePath = videoInput.slice(window.location.origin.length);
+    var _endpoint = '/engine/video_edit';
+    var _vHeaders = typeof getSessionAuthHeaders === 'function' ? getSessionAuthHeaders({'Content-Type':'application/json'}) : {'Content-Type':'application/json'};
+
+    async function _videoEngineCall(action, params) {
+        var response = await fetch(_endpoint, { method:'POST', headers:_vHeaders, body:JSON.stringify({action:action,params:params||{},input_path:enginePath}) });
+        var raw = await response.text();
+        var data;
+        try { data = JSON.parse(raw); } catch(e) { throw new Error('视频解析服务返回了非 JSON 响应 (HTTP ' + response.status + ')'); }
+        if (!response.ok || data.error) throw new Error(data.error || ('视频解析服务 HTTP ' + response.status));
+        return data;
+    }
+
+    // 获取元信息。错误不再静默吞掉，避免模型误报“没有读取权限”。
+    var infoData = await _videoEngineCall('info', {});
+    var infoJson;
+    try { infoJson = JSON.parse(infoData.result || '{}'); } catch(e) { throw new Error('无法解析视频元信息'); }
     var duration = parseFloat(infoJson.format?.duration || 0);
+    if (!(duration > 0)) throw new Error('无法读取视频时长，请确认 MP4 文件完整且 ffprobe 可用');
     var vStream = (infoJson.streams || []).find(function(s){return s.codec_type==='video';}) || {};
     var width = vStream.width || 0, height = vStream.height || 0, codec = vStream.codec_name || '', fps = vStream.r_frame_rate || '';
-    
-    // 2. 智能帧数 + 关键帧
-    var frameCount = Math.max(8, Math.min(120, Math.ceil(duration) + Math.floor((query||'').length / 3)));
+
+    // 询问结尾时密集覆盖最后两秒与最终定格；其他问题做全片均匀采样。
+    var _q = String(query || '描述视频内容');
+    var _endingFocus = /(结尾|最后|末尾|收尾|定格|最后一两秒|last\s*(?:one|two|1|2)?\s*seconds?|ending|final\s*frame)/i.test(_q);
+    var timestamps = [];
+    if (_endingFocus) {
+        [2, 1.25, 0.7, 0.3, 0.08].forEach(function(beforeEnd) { timestamps.push(Math.max(0, duration - beforeEnd)); });
+    } else {
+        var frameCount = Math.max(6, Math.min(18, Math.ceil(duration / 8) + 4));
+        for (var ti = 0; ti < frameCount; ti++) timestamps.push((duration - 0.08) * ti / Math.max(1, frameCount - 1));
+    }
+    timestamps = timestamps.map(function(v){ return Math.round(v * 1000) / 1000; }).filter(function(v, i, arr){ return i === 0 || Math.abs(v - arr[i-1]) >= 0.03; });
+
+    var frData = await _videoEngineCall('frames', {count:timestamps.length,duration:duration,scale:768,timestamps:timestamps});
+    var frJson;
+    try { frJson = JSON.parse(frData.result || '{}'); } catch(e) { throw new Error('无法解析视频画面帧'); }
+    var frames = frJson.frames || [];
+    var frameTimes = frJson.timestamps || timestamps.slice(0, frames.length);
+    if (!frames.length) throw new Error('视频画面帧提取失败，请确认服务器已安装 ffmpeg 且上传文件仍然存在');
+
+    // 逐帧复用配置栏当前选择的视觉提供商、视觉模型、端点与密钥。
+    var provider = localStorage.getItem('visionProvider') || 'auto';
+    var model = localStorage.getItem('visionModel') || DEFAULT_CONFIG.visionModel || '';
     var frameAnalyses = [];
-    try {
-        var frRes = await fetch('/engine/video_edit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'frames',params:{count:frameCount,duration:duration||10,scale:640},input_path:enginePath}) });
-        var frData = await frRes.json();
-        if (!frData.error && frData.result) {
-            var frJson = JSON.parse(frData.result);
-            var frames = frJson.frames || [];
-            // ★ 智能分批并发: 每批最多 N 个并行请求,适配 MiniMax Token Plan 限流(RPM=20)
-            //    免费用户 20 RPM, 预留 5 给其他调用, 每批最多 15 个并行
-            var _batchSize = Math.min(15, Math.max(1, Math.floor(frames.length / 2)));
-            // 动态调整: 如果之前遇到过限流(60秒内), 用更保守的批次
-            if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 30000) {
-                _batchSize = 5;
-            } else if (window.__minimaxRateLimited && Date.now() - window.__minimaxRateLimited < 60000) {
-                _batchSize = 10;
-            }
-            for (var _bi = 0; _bi < frames.length; _bi += _batchSize) {
-                var _batch = frames.slice(_bi, _bi + _batchSize);
-                var _batchPromises = _batch.map(function(f, fi) {
-                    var _absIdx = _bi + fi;
-                    return window.analyzeImage(f, '第' + (_absIdx + 1) + '/' + frames.length + '帧。' + (query || '描述画面内容'))
-                        .then(function(d) { return '**第' + (_absIdx + 1) + '帧:** ' + (d || '分析完成'); })
-                        .catch(function() { return '第' + (_absIdx + 1) + '帧: 分析失败'; });
-                });
-                var _batchResults = await Promise.all(_batchPromises);
-                frameAnalyses = frameAnalyses.concat(_batchResults);
-                // ★ 限流保护: 如果检测到限流标记(某帧触发了), 当前批完成后等待 5 秒再发下一批
-                if (window.__minimaxRateLimited && _bi + _batchSize < frames.length) {
-                    console.warn('[analyzeVideo] 限流标记检测到,等待 5 秒再发下一批');
-                    await new Promise(function(r) { setTimeout(r, 5000); });
-                }
-            }
-        }
-    } catch(e) {}
-    
-    // 3. 构建结果
-    var result = '🎬 **视频分析结果**\n\n**元信息:**\n';
+    var failures = [];
+    var concurrency = 3;
+    for (var bi = 0; bi < frames.length; bi += concurrency) {
+        var batch = frames.slice(bi, bi + concurrency);
+        var batchResults = await Promise.all(batch.map(function(frame, offset) {
+            var idx = bi + offset;
+            var ts = Number(frameTimes[idx] || 0);
+            var focus = '这是视频在 ' + ts.toFixed(2) + ' 秒处的画面（第' + (idx + 1) + '/' + frames.length + '帧）。请严格依据画面回答：' + _q + '。特别说明人物动作、物体变化、屏幕文字和是否为最终定格；不要猜测不可见内容。';
+            return window.analyzeImage(frame, focus).then(function(text) {
+                return {ok:true,text:'**' + ts.toFixed(2) + 's:** ' + (text || '分析完成')};
+            }).catch(function(err) {
+                return {ok:false,error:(err && err.message) || String(err),time:ts};
+            });
+        }));
+        batchResults.forEach(function(item) { if (item.ok) frameAnalyses.push(item.text); else failures.push(item); });
+    }
+    if (!frameAnalyses.length) {
+        var firstError = failures[0]?.error || '视觉模型未返回结果';
+        throw new Error('关键帧已成功提取，但所选视觉模型分析失败：' + firstError + '。请检查配置栏中的视觉提供商、模型、API 地址与密钥。');
+    }
+
+    var result = '🎬 **视频分析结果**\n\n**解析链路:** ffmpeg 关键帧 → 配置栏视觉模型 ' + provider + '/' + (model || '默认模型') + '\n\n**元信息:**\n';
     result += '- 时长: ' + Math.floor(duration/60) + '分' + Math.round(duration%60) + '秒\n';
     if (width) result += '- 分辨率: ' + width + 'x' + height + '\n';
     if (fps) result += '- 帧率: ' + fps + '\n';
     if (codec) result += '- 编码: ' + codec + '\n';
-    if (frameAnalyses.length > 0) {
-        result += '\n**关键帧分析(' + frameAnalyses.length + '帧):**\n';
-        frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
-    }
-    // ★ 缓存分析结果(30分钟内复用) - 只在成功提取到帧时才缓存
+    result += '- 采样模式: ' + (_endingFocus ? '结尾密集采样（最后两秒 + 最终定格）' : '全片均匀采样') + '\n';
+    result += '\n**关键帧分析(' + frameAnalyses.length + '/' + frames.length + '帧成功):**\n';
+    frameAnalyses.forEach(function(a) { result += '\n' + a + '\n'; });
+    if (failures.length) result += '\n> 另有 ' + failures.length + ' 帧视觉分析失败，已保留成功帧结果。\n';
+
     try {
-        if (currentChatId && chats[currentChatId] && frameAnalyses.length > 0) {
+        if (currentChatId && chats[currentChatId]) {
             if (!chats[currentChatId].videoAnalyses) chats[currentChatId].videoAnalyses = {};
-            chats[currentChatId].videoAnalyses[enginePath] = {
-                time: Date.now(), duration: duration,
-                meta: { width: width, height: height, codec: codec, fps: fps, format: infoJson.format?.format_name },
-                frames: frameAnalyses
-            };
+            chats[currentChatId].videoAnalyses[enginePath + '::' + _q] = {time:Date.now(),duration:duration,meta:{width:width,height:height,codec:codec,fps:fps,format:infoJson.format?.format_name,provider:provider,model:model,endingFocus:_endingFocus},frames:frameAnalyses};
             slimSaveChats();
         }
     } catch(e3) {}
@@ -521,6 +562,22 @@ window.generateImage = async (prompt, options = {}) => {
     }
 };
 
+// 生成图上传时携带聊天定位信息，upload.php 会在返回 URL 前原子绑定气泡。
+// 普通用户上传不使用此选项，因此不会被误挂到助手消息。
+function _generatedUploadOptions(prompt, options, model) {
+    options = options || {};
+    return {
+        name: prompt || '',
+        persistGenerated: !!options.chat_id,
+        chatId: options.chat_id || '',
+        messageIndex: Number.isInteger(options.message_index) ? options.message_index : undefined,
+        prompt: prompt || '',
+        model: model || options.model || '',
+        aspect_ratio: options.aspect_ratio || '1:1',
+        timestamp: Date.now()
+    };
+}
+
 // ===== OpenRouter GPT Image 2 图像生成 =====
 // ★ 通用图片提取: 支持多种 API 返回格式 (chat/completions, images/generations 等)
 function _extractImagesFromResponse(data) {
@@ -673,7 +730,7 @@ async function generateImageOpenRouter(prompt, options = {}) {
             // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
             var _uploaded = [];
             for (var _ui = 0; _ui < images.length; _ui++) {
-                var _srvUrl = await uploadImageToServer(images[_ui]);
+                var _srvUrl = await uploadImageToServer(images[_ui], _generatedUploadOptions(prompt, options, actualModel));
                 _uploaded.push(_srvUrl || images[_ui]); // 上传失败则保留原始 URL
             }
             return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
@@ -728,25 +785,32 @@ async function generateImageOpenAI(prompt, options = {}) {
     var n = Math.min(options.n || 1, 10);
     var size = _aspectRatioToOpenAISize(options.aspect_ratio || '1:1', options);
 
+    // ★ xAI (Grok) 不支持 size / quality 参数,需自动省略避免 400 错误
+    //    用户可能将 xAI 配置在 OpenAI 提供商下(base URL 指向 api.x.ai)
+    var _isXai = (baseUrl.indexOf('x.ai') !== -1) || (model.toLowerCase().indexOf('grok') !== -1);
+
     try {
         var body = {
             model: model,
             prompt: prompt,
             n: n,
-            size: size,
             response_format: 'b64_json'
         };
-        // gpt-image-1 支持 quality / background / moderation 参数
-        if (options.quality) body.quality = options.quality;
+        // xAI 不接受 size / quality,其他 OpenAI 兼容提供商(含 gpt-image-1)保留
+        if (!_isXai) body.size = size;
+        if (options.quality && !_isXai) body.quality = options.quality;
         if (options.background) body.background = options.background;
         if (options.moderation) body.moderation = options.moderation;
 
-        var response = await window.proxyFetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(900000)
-        });
+        var _sendImageRequest = function(key) {
+            return window.proxyFetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(900000)
+            });
+        };
+        var response = await _sendImageRequest(apiKey);
 
         if (!response.ok) {
             var errText = await response.text().catch(function() { return response.statusText; });
@@ -763,7 +827,7 @@ async function generateImageOpenAI(prompt, options = {}) {
         // 上传到服务器获取持久 URL
         var _uploaded = [];
         for (var _ui = 0; _ui < images.length; _ui++) {
-            var _srvUrl = await uploadImageToServer(images[_ui]);
+            var _srvUrl = await uploadImageToServer(images[_ui], _generatedUploadOptions(prompt, options, model));
             _uploaded.push(_srvUrl || images[_ui]);
         }
         return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
@@ -806,20 +870,56 @@ async function generateImageCustom(prompt, options = {}) {
     var n = Math.min(options.n || 1, 10);
     var size = _aspectRatioToOpenAISize(options.aspect_ratio || '1:1', options);
 
-    try {
-        var body = { model: model, prompt: prompt, n: n, size: size, response_format: 'b64_json' };
-        if (options.quality) body.quality = options.quality;
+    // ★ xAI (Grok) 不支持 size / quality 参数,需自动省略避免 400 错误
+    var _isXai = (baseUrl.indexOf('x.ai') !== -1) || (model.toLowerCase().indexOf('grok') !== -1);
 
-        var response = await window.proxyFetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(900000)
-        });
+    try {
+        var body = { model: model, prompt: prompt, n: n, response_format: 'b64_json' };
+        if (!_isXai) body.size = size; // xAI 不接受 size,其他 OpenAI 兼容提供商保留
+        if (options.quality && !_isXai) body.quality = options.quality;
+
+        var _sendImageRequest = function(key) {
+            return window.proxyFetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(900000)
+            });
+        };
+        var response = await _sendImageRequest(apiKey);
+
+        // 图片专用 Key 可能因跨设备同步而滞后。仅当 Custom 主配置指向同一
+        // Base URL 且上游明确返回认证失败时，安全地用已配置的主 Custom Key 重试一次。
+        if (response.status === 401 || response.status === 403) {
+            var _mainCustomBase = (localStorage.getItem('baseUrlCustom') || '').replace(/\/$/, '');
+            if (_mainCustomBase && !_mainCustomBase.endsWith('/v1')) _mainCustomBase += '/v1';
+            var _mainCustomRawKey = localStorage.getItem('apiKeyCustom') || '';
+            if (_mainCustomBase === baseUrl && _mainCustomRawKey && _mainCustomRawKey !== rawKey) {
+                var _mainCustomKey = '';
+                try { _mainCustomKey = await decrypt(_mainCustomRawKey) || ''; } catch(e) {}
+                if (_mainCustomKey) {
+                    console.warn('[generateImageCustom] 图片专用凭据认证失败，使用同源 Custom 主凭据重试');
+                    apiKey = _mainCustomKey;
+                    response = await _sendImageRequest(apiKey);
+                }
+            }
+        }
 
         if (!response.ok) {
             var errText = await response.text().catch(function() { return response.statusText; });
-            throw new Error('自定义生图请求失败 (' + response.status + '): ' + errText.substring(0, 300));
+            // CLIProxy 连接生图上游、尚未拿到响应时偶发 EOF。仅对这类
+            // 传输故障重试一次，不对普通 4xx/5xx 重复生图。
+            var _isPreResponseTransportError = [500, 502, 503, 504].indexOf(response.status) !== -1 &&
+                /(unexpected\s+EOF|connection\s+(?:reset|error)|upstream\s+connect)/i.test(errText || '');
+            if (_isPreResponseTransportError) {
+                console.warn('[generateImageCustom] 上游连接在响应前中断，1.5s 后重试一次');
+                await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+                response = await _sendImageRequest(apiKey);
+                errText = response.ok ? '' : await response.text().catch(function() { return response.statusText; });
+            }
+            if (!response.ok) {
+                throw new Error('自定义生图请求失败 (' + response.status + '): ' + errText.substring(0, 300));
+            }
         }
 
         var data = await response.json();
@@ -830,7 +930,7 @@ async function generateImageCustom(prompt, options = {}) {
 
         var _uploaded = [];
         for (var _ui = 0; _ui < images.length; _ui++) {
-            var _srvUrl = await uploadImageToServer(images[_ui]);
+            var _srvUrl = await uploadImageToServer(images[_ui], _generatedUploadOptions(prompt, options, model));
             _uploaded.push(_srvUrl || images[_ui]);
         }
         return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
@@ -840,7 +940,7 @@ async function generateImageCustom(prompt, options = {}) {
     }
 }
 
-// ★ GPT Image 2 原生图生图 — chat/completions + 多图参考
+// ★ OpenRouter GPT Image 图生图 — chat/completions + 多图参考
 async function _gptImageI2I(prompt, primaryImage, options = {}) {
     // ★ 优先使用用户当前配置的提供商(而非硬编码 OpenRouter)
     var _i2iCurProvider = localStorage.getItem('imageProvider') || 'openrouter';
@@ -856,7 +956,10 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
     try { apiKey = await decrypt(rawKey) || ''; } catch(e) {}
     if (!apiKey) throw new Error('未配置 API Key(提供商: ' + _i2iCurProvider + ')');
 
-    var model = options.model || localStorage.getItem('imageModel_' + _i2iCurProvider) || localStorage.getItem('imageModel_openrouter') || localStorage.getItem('imageModel') || 'openai/gpt-5.4-image-2';
+    // 当前提供商专属模型是唯一权威来源；禁止通用 imageModel / OpenRouter 模型跨提供商串扰。
+    var _i2iConfiguredModel = localStorage.getItem('imageModel_' + _i2iCurProvider) || '';
+    var model = _i2iConfiguredModel || options.model || (_i2iIsCustom ? '' : 'openai/gpt-5.4-image-2');
+    if (!model) throw new Error('未配置图生图模型(提供商: ' + _i2iCurProvider + ')');
     var chatUrl = baseUrl + '/chat/completions';
     var n = options.n || 1;
     var aspectRatio = options.aspect_ratio || '1:1';
@@ -903,16 +1006,19 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
             body.mask_image_url = options.mask_image;
         }
 
-        var response = await window.proxyFetch(chatUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(900000)
-        });
+        var _sendGptI2iRequest = function() {
+            return window.proxyFetch(chatUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(900000)
+            });
+        };
+        var response = await _sendGptI2iRequest();
 
         if (!response.ok) {
             var errText = await response.text().catch(function(){return response.statusText;});
-            throw new Error('GPT Image i2i 请求失败 (' + response.status + '): ' + errText.substring(0, 200));
+            throw new Error('GPT Image i2i 请求失败 (' + response.status + '): ' + errText.substring(0, 300));
         }
 
         var data = await response.json();
@@ -927,7 +1033,7 @@ async function _gptImageI2I(prompt, primaryImage, options = {}) {
         // ★ 上传到服务器后再返回,确保返回的是持久化 URL (与 MiniMax i2i 路径行为一致)
         var _uploadedI2i = [];
         for (var _ui = 0; _ui < images.length; _ui++) {
-            var _srvUrl = await uploadImageToServer(images[_ui]);
+            var _srvUrl = await uploadImageToServer(images[_ui], _generatedUploadOptions(prompt, options, model));
             _uploadedI2i.push(_srvUrl || images[_ui]); // 上传失败则保留原始 URL
         }
         return _uploadedI2i.length === 1 ? _uploadedI2i[0] : _uploadedI2i;
@@ -944,25 +1050,25 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
     var _i2i_model = options.model || localStorage.getItem('imageModel') || 'image-01';
     var _is_gpt_image = _i2i_model.includes('gpt-5.4-image') || _i2i_model.includes('gpt-4o-image') || _i2i_model.includes('gpt-image');
 
-    // ★ GPT Image 2 原生支持图生图 — 用 chat/completions + 多图参考
-    // 支持 OpenRouter 和自定义提供商(用户可能配置了 chatgpt codex 等兼容端点)
-    if (_is_gpt_image && (_i2i_provider === 'openrouter' || _i2i_provider === 'custom')) {
+    // GPT Image 1/2 在 OpenAI 与 CLIProxyAPI 兼容网关上必须走 /v1/images/edits。
+    // 聊天主模型提供商（例如 xAI）与图片提供商完全正交，不参与这里的路由选择。
+    if (_is_gpt_image && (_i2i_provider === 'openai' || _i2i_provider === 'custom')) {
+        return await _openaiImageEdit(prompt, image, options);
+    }
+
+    // OpenRouter 的 GPT Image 扩展使用 chat/completions + modalities。
+    if (_is_gpt_image && _i2i_provider === 'openrouter') {
         return await _gptImageI2I(prompt, image, options);
     }
 
-    // OpenRouter / 自定义 其他模型降级为文生图
+    // OpenRouter / Custom 的其他模型如果没有原生编辑协议，只能走其文生图接口。
     if (_i2i_provider === 'openrouter' || _i2i_provider === 'custom') {
         return window.generateImage(prompt, options);
     }
 
-    // ★ OpenAI / 自定义 原生图生图 — /v1/images/edits
-    if (_i2i_provider === 'openai' || _i2i_provider === 'custom') {
-        try {
-            return await _openaiImageEdit(prompt, image, options);
-        } catch (e) {
-            console.warn('[_openaiImageEdit] 图生图失败,降级为文生图:', e.message);
-            return window.generateImage(prompt, options);
-        }
+    // OpenAI 其他编辑模型也使用 /v1/images/edits；失败应原样上报，禁止静默改成文生图。
+    if (_i2i_provider === 'openai') {
+        return await _openaiImageEdit(prompt, image, options);
     }
 
     // ★ MiniMax API 限制 prompt ≤ 1500 字符,截断避免 2013 错误
@@ -1085,13 +1191,13 @@ window.generateImageI2I = async (prompt, image, options = {}) => {
 
         if (imageResult) {
             // 尝试上传图片到服务器
-            var serverUrl = await uploadImageToServer(imageResult);
+            var serverUrl = await uploadImageToServer(imageResult, _generatedUploadOptions(prompt, options, _i2i_model));
             if (serverUrl) {
                 return serverUrl; // 返回服务器 URL 而不是 base64
             }
             return imageResult; // 上传失败则返回 base64
         } else {
-            console.error('[I2I] 未识别的返回格式:', JSON.stringify(data).substring(0, 500));
+            console.error('[I2I] 未识别的返回格式:', { responseType: Array.isArray(data) ? 'array' : typeof data, responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 20) : [] });
             throw new Error('图像生成 API 返回数据格式异常');
         }
     } catch (e) {
@@ -1179,7 +1285,7 @@ async function _openaiImageEdit(prompt, image, options = {}) {
 
     var _uploaded = [];
     for (var _ui = 0; _ui < images.length; _ui++) {
-        var _srvUrl = await uploadImageToServer(images[_ui]);
+        var _srvUrl = await uploadImageToServer(images[_ui], _generatedUploadOptions(prompt, options, model));
         _uploaded.push(_srvUrl || images[_ui]);
     }
     return _uploaded.length === 1 ? _uploaded[0] : _uploaded;
@@ -1207,5 +1313,3 @@ window.buildImageMeta = function(url, prompt, options) {
         notes: (options && options.notes) || ''  // ★ 新增：用户备注
     };
 };
-
-

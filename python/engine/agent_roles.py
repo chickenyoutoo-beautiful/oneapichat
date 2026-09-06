@@ -55,8 +55,7 @@ AGENT_ROLES = {
                    "browser_type", "browser_get_content", "browser_get_snapshot",
                    "get_current_time", "bilibili_search", "bilibili_video_info",
                    "generate_image", "generate_ppt",
-                   "cr_list_files", "cr_search_files", "cr_upload_file", "cr_create_folder",
-                   "mmx_chat", "mmx_image", "mmx_speech", "mmx_vision"],
+                   "cr_list_files", "cr_search_files", "cr_upload_file", "cr_create_folder"],
         "model_tier": "smart",
         "max_rounds": 30
     }
@@ -477,68 +476,7 @@ ALL_TOOLS_DEF = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "mmx_chat",
-            "description": "MiniMax对话模型。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "description": "提示词"},
-                    "system_prompt": {"type": "string", "description": "系统提示词"}
-                },
-                "required": ["prompt"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mmx_image",
-            "description": "MiniMax图片生成。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "description": "图片描述"},
-                    "n": {"type": "number", "description": "数量"}
-                },
-                "required": ["prompt"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mmx_speech",
-            "description": "MiniMax文本转语音。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "文本"},
-                    "voice_id": {"type": "string", "description": "语音ID"}
-                },
-                "required": ["text"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mmx_vision",
-            "description": "MiniMax图片理解/视觉分析。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "image_url": {"type": "string", "description": "图片URL"},
-                    "prompt": {"type": "string", "description": "分析提示词"}
-                },
-                "required": ["image_url"]
-            }
-        }
-    },
 ]
-
 
 def filter_tools_by_role(role: str) -> list:
     """根据角色过滤工具列表,实现最小权限"""

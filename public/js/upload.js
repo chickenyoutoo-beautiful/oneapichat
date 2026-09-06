@@ -15,7 +15,7 @@ function cleanImageUrl(url) {
     ];
     for (const domain of deadDomains) {
         if (url.includes(domain)) {
-            console.warn('[cleanImageUrl] 拦截无效图片URL:', url.substring(0, 80) + '...');
+            console.warn('[cleanImageUrl] 拦截无效图片URL域名:', domain);
             // 返回一个空的 data URL 占位,由 onerror 处理显示提示
             return 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23fef3c7%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 font-size=%2212%22 fill=%22%2392400e%22%3E图片已失效%3C/text%3E%3C/svg%3E';
         }
@@ -34,6 +34,56 @@ function getImageUrl(imgData) {
     if (typeof imgData === 'object' && imgData.url) return imgData.url;
     return '';
 }
+
+/** 生成图片的稳定身份键：统一同源绝对/相对 URL，并忽略仅用于失败重试的查询参数。 */
+function getImageIdentityKey(imgData) {
+    var raw = getImageUrl(imgData);
+    if (!raw) return '';
+    if (raw.startsWith('data:')) return raw;
+    try {
+        var parsed = new URL(raw, window.location.origin);
+        parsed.hash = '';
+        parsed.searchParams.delete('_img_retry');
+        var normalized = parsed.href;
+        if (parsed.origin === window.location.origin) normalized = parsed.pathname + parsed.search;
+        return normalized.replace(/\/$/, '');
+    } catch(e) {
+        return String(raw).replace(/([?&])_img_retry=\d+(&|$)/, '$1').replace(/[?&]$/, '').replace(/#.*$/, '');
+    }
+}
+
+/** 对画布/气泡图片去重；重复项优先保留元数据更完整的对象。 */
+function dedupeImageList(list) {
+    var result = [];
+    var keyToIndex = new Map();
+    (Array.isArray(list) ? list : []).forEach(function(item) {
+        if (!item) return;
+        var key = getImageIdentityKey(item);
+        if (!key) return;
+        if (!keyToIndex.has(key)) {
+            keyToIndex.set(key, result.length);
+            result.push(item);
+            return;
+        }
+        var pos = keyToIndex.get(key);
+        var oldItem = result[pos];
+        if (typeof item === 'object' && typeof oldItem !== 'object') {
+            result[pos] = item;
+        } else if (typeof item === 'object' && typeof oldItem === 'object') {
+            result[pos] = Object.assign({}, oldItem, item, {
+                url: getImageUrl(item) || getImageUrl(oldItem),
+                prompt: item.prompt || oldItem.prompt || '',
+                model: item.model || oldItem.model || '',
+                aspect_ratio: item.aspect_ratio || oldItem.aspect_ratio || '',
+                timestamp: item.timestamp || oldItem.timestamp || 0,
+                notes: item.notes || oldItem.notes || ''
+            });
+        }
+    });
+    return result;
+}
+window.getImageIdentityKey = getImageIdentityKey;
+window.dedupeImageList = dedupeImageList;
 
 /**
  * ★ 统一提取图片元数据 — 向后兼容
@@ -55,29 +105,44 @@ function getImageMeta(imgData) {
     return { url: url, prompt: '', model: '', aspect_ratio: '', timestamp: 0, notes: '' };
 }
 
-async function uploadImageToServer(imageInput) {
+async function uploadImageToServer(imageInput, options) {
     try {
+        options = options || {};
         var base64Data = imageInput;
 
-        // ★ 如果输入是 HTTP(S) URL,先下载转为 base64 (OpenRouter 等返回 CDN URL)
+        // ★ 如果输入是 HTTP(S) URL,先下载转为 base64 (OpenRouter/CLIProxyAPI 等返回 CDN URL)
         if (imageInput && (imageInput.startsWith('http://') || imageInput.startsWith('https://'))) {
-            try {
-                var _dlResp = await fetch(imageInput);
-                if (!_dlResp.ok) {
-                    console.warn('[uploadImageToServer] 下载图片失败:', _dlResp.status);
-                    return null;
+            var _dlOk = false;
+            for (var _dlAttempt = 0; _dlAttempt <= 2; _dlAttempt++) {
+                if (_dlAttempt > 0) {
+                    var _dlDelay = 1000 * Math.pow(2, _dlAttempt - 1);
+                    console.log('[uploadImageToServer] 下载第' + _dlAttempt + '次重试, 等待' + _dlDelay + 'ms...');
+                    await new Promise(function(_r) { setTimeout(_r, _dlDelay); });
                 }
-                var _blob = await _dlResp.blob();
-                base64Data = await new Promise(function(resolve, reject) {
-                    var reader = new FileReader();
-                    reader.onload = function() { resolve(reader.result); };
-                    reader.onerror = function() { reject(new Error('FileReader failed')); };
-                    reader.readAsDataURL(_blob);
-                });
-            } catch (e) {
-                console.warn('[uploadImageToServer] 下载/转换图片失败:', e.message);
-                return null;
+                try {
+                    var _dlResp = await fetch(imageInput);
+                    if (!_dlResp.ok) {
+                        console.warn('[uploadImageToServer] 下载HTTP ' + _dlResp.status + ', 尝试' + (_dlAttempt + 1));
+                        if (_dlResp.status === 404 || _dlResp.status === 400 || _dlResp.status === 401 || _dlResp.status === 403) {
+                            return null;
+                        }
+                        continue;
+                    }
+                    var _blob = await _dlResp.blob();
+                    base64Data = await new Promise(function(resolve, reject) {
+                        var reader = new FileReader();
+                        reader.onload = function() { resolve(reader.result); };
+                        reader.onerror = function() { reject(new Error('FileReader failed')); };
+                        reader.readAsDataURL(_blob);
+                    });
+                    _dlOk = true;
+                    break;
+                } catch (e) {
+                    console.warn('[uploadImageToServer] 下载失败(尝试' + (_dlAttempt + 1) + '):', e.message);
+                    if (_dlAttempt >= 2) return null;
+                }
             }
+            if (!_dlOk) return null;
         }
 
         // 提取 MIME 类型和实际数据
@@ -94,32 +159,59 @@ async function uploadImageToServer(imageInput) {
 
         console.log('[uploadImageToServer] 上传中... 数据长度:', (base64Data || '').length, 'chars');
 
+        // ★ 人类可读文件名: 从 options.name 派生 (如生图的 prompt)
+        var _name = options.name ? String(options.name) : '';
+
+        // 生成图不能只保存文件：服务端必须在同一次上传事务中把 URL 绑定到
+        // 对应助手消息，否则刷新可能发生在下一次全量聊天保存之前，图片就会从气泡消失。
+        var _uploadPayload = {
+            image: base64Data,
+            name: _name
+        };
+        if (options.persistGenerated && options.chatId) {
+            _uploadPayload.persist_generated = true;
+            _uploadPayload.chat_id = String(options.chatId);
+            if (Number.isInteger(options.messageIndex)) {
+                _uploadPayload.message_index = options.messageIndex;
+            }
+            _uploadPayload.image_meta = {
+                prompt: options.prompt || _name || '',
+                model: options.model || '',
+                aspect_ratio: options.aspect_ratio || '1:1',
+                timestamp: options.timestamp || Date.now(),
+                notes: options.notes || ''
+            };
+        }
+
         var token = getAuthToken();
-        var response = await fetch(SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token), {
+        var response = await fetch(SERVER_API_BASE + '/upload.php', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
             },
-            body: JSON.stringify({
-                image: base64Data
-            })
+            body: JSON.stringify(_uploadPayload)
         });
 
         console.log('[uploadImageToServer] HTTP:', response.status, 'Content-Type:', response.headers.get('content-type'));
 
         if (response.ok) {
             var text = await response.text();
-            console.log('[uploadImageToServer] 响应前100字符:', text.substring(0, 100));
+            console.log('[uploadImageToServer] 响应已接收:', { responseLength: text.length });
             try {
                 var result = JSON.parse(text);
                 if (result.url) {
-                    console.log('[uploadImageToServer] ✅ 上传成功:', result.url);
+                    if (options.persistGenerated && result.chat_persisted !== true) {
+                        console.warn('[uploadImageToServer] 文件已上传但聊天绑定未确认，按失败重试');
+                        return null;
+                    }
+                    console.log('[uploadImageToServer] 上传成功:', { urlLength: String(result.url).length, chatPersisted: result.chat_persisted === true });
                     return result.url;
                 }
-                console.warn('[uploadImageToServer] JSON无url字段:', JSON.stringify(result).substring(0, 200));
+                console.warn('[uploadImageToServer] JSON无url字段:', { responseKeys: result && typeof result === 'object' ? Object.keys(result).slice(0, 20) : [], responseType: Array.isArray(result) ? 'array' : typeof result });
             } catch(jsonErr) {
                 console.error('[uploadImageToServer] JSON解析失败,响应不是JSON:', jsonErr.message);
-                console.error('[uploadImageToServer] 完整响应:', text.substring(0, 500));
+                console.error('[uploadImageToServer] 非JSON响应:', { responseLength: text.length, contentType: response.headers.get('content-type') || '' });
             }
         }
         console.warn('[uploadImageToServer] ❌ 上传失败,状态:', response.status);
@@ -139,16 +231,19 @@ async function uploadVideoBlob(file, progressFn, isBinary) {
     try {
         var formData = new FormData();
         formData.append('image', file, file.name);
+        // multipart 场景下 upload.php 不能从 JSON body 读取 name；显式传入原始文件名，
+        // 后端据此生成可识别的服务器文件名并在推送时恢复下载名。
+        formData.append('name', file.name);
         var token = getAuthToken();
         // ★ binary 模式: 添加 target=generic 让后端跳过图片/MIME验证
-        var url = SERVER_API_BASE + '/upload.php?auth_token=' + encodeURIComponent(token)
-            + (isBinary ? '&target=generic' : '');
+        var url = SERVER_API_BASE + '/upload.php' + (isBinary ? '?target=generic' : '');
         
         // 用 XMLHttpRequest 以支持上传进度
         var result = await new Promise(function(resolve, reject) {
             var xhr = new XMLHttpRequest();
             xhr.open('POST', url, true);
             xhr.withCredentials = true;
+            if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
             xhr.upload.onprogress = function(e) {
                 if (e.lengthComputable && typeof progressFn === 'function') {
                     var pct = 30 + Math.round((e.loaded / e.total) * 55); // 30%~85%
@@ -169,10 +264,18 @@ async function uploadVideoBlob(file, progressFn, isBinary) {
             xhr.onerror = function() { reject(new Error('网络错误')); };
             xhr.send(formData);
         });
-        if (result && !result.startsWith('http')) {
-            result = window.location.origin + result;
+        // result 是结构化对象 {url,path,size,type}，旧代码把它当字符串调用 startsWith，
+        // 导致所有成功上传在最后一步反而进入 catch 并被当作失败。
+        if (result && typeof result === 'object') {
+            if (result.url && !/^https?:\/\//i.test(result.url)) {
+                result.url = window.location.origin + result.url;
+            }
+            return result;
         }
-        return result;
+        if (typeof result === 'string' && result && !/^https?:\/\//i.test(result)) {
+            return { url: window.location.origin + result, path: '', size: 0, type: '' };
+        }
+        return result || null;
     } catch (e) {
         console.warn('[uploadVideoBlob] 失败:', e.message);
         return null;
@@ -201,14 +304,10 @@ const DEFAULT_CONFIG = {
         '3. 生成图表时用Mermaid语法:时序用graph TD/LR,折线用xychart-beta,饼图用pie,甘特用gantt。代码字符串用英文双引号。\n' +
         '4. 【联网搜索与网页抓取】\n' +
         '   - 搜索使用 web_search 工具,结果包含标题+链接+摘要。\n' +
+        '   - `/image 关键词`，以及自然语言中的“搜索/查找/收集/给我找几张图片、照片、梗图、壁纸”，默认都表示搜索互联网已有图片，绝不是生成新图；此类轮次严禁调用 generate_image/generate_image_i2i。限制只作用于当前一轮，后续明确要求画/生成/创作时仍正常生图。若同一句明确要求“先搜图，再参考搜索结果生成”，应先搜索，再调用 generate_image_i2i(reference_source=search_results)，允许一轮完成。\n' +
         '   - 如需查看搜索结果中链接的详细内容,使用 web_fetch 工具。\n' +
         '   - web_fetch 支持批量并行抓取(最多5个URL): 将感兴趣的链接URL数组传入 urls 参数即可。\n' +
         '   - 典型流程: web_search → 分析结果 → web_fetch 深入查看 → 综合回答。\n' +
-        '4.5 【MiniMax 多模态能力 — 你可以直接调用!】\n' +
-        '   - mmx_music: 用户说 生成音乐/歌曲/创作一首歌 时调用。只需 prompt 描述风格即可。\n' +
-        '   - mmx_speech: 需要语音朗读/配音时调用,支持多种音色。\n' +
-        '   - mmx_image: 文生图(备用,主力还是 generate_image)。\n' +
-        '   - mmx_chat: 用 MiniMax 模型对话(适合对比答案或用不同模型)。\n' +
         '5. 【重要-图片生成规则】\n' +
         '   【关键规则】当用户上传了图片时:\n' +
         '   - 如果用户上传了图片并要求生成/创作/换颜色/换风格/换脸等,调用 generate_image_i2i(已支持真正的图生图API)\n' +
@@ -220,8 +319,13 @@ const DEFAULT_CONFIG = {
         '   【Seed参数使用技巧】generate_image的seed参数可让AI自主决定:\n' +
         '   - 用户要求跟之前一样/保持风格/同款续作时:传入一个正整数种子(建议42-99999范围),可以稳定复现相似效果\n' +
         '   - 用户没有明确要求风格一致时:不传seed,让模型自由发挥通常效果更好\n' +
-        '   - 注意:seed只保证大致相似,细节仍有随机性,不能100%复现',
-    enableSearch: false, searchModel: '', searchProvider: 'duckduckgo', searchApiKey: '',
+        '   - 注意:seed只保证大致相似,细节仍有随机性,不能100%复现\n' +
+        '6. 【全球金融行情与实时数据严谨准则】\n' +
+        '   - 查询股票/大盘/指数实时行情时（如 费城半导体SOX、纳斯达克、标普500、道琼斯、A股、港股、英伟达等），必须优先调用 stock_realtime 或 stock_market_overview 工具获取权威结构化最新行情。\n' +
+        '   - 美东时间比北京时间慢 12 小时（夏令时）。北京时间深夜/凌晨（21:30~次日04:00）是美股白天的常规盘中交易时间，绝非休市！\n' +
+        '   - 严格实事求是：严禁凭空推测或强行附会编造解释（例如把历史回撤强行拼凑当成盘中跌幅）。若未获取到实时数据，明确说明数据时效与状态，严禁输出未经核实的因果论断。',
+    lineHeight: 1.65, paragraphMargin: 0.35, bubbleGap: 0.55,
+    enableSearch: false, searchModel: '', searchProvider: 'tavily', searchApiKey: '',
     searchTimeout: 30, maxSearchResults: 3, aiSearchJudge: true, aiSearchJudgeModel: 'deepseek-chat',
     // 强化后的 AI 判断提示词(包含示例和明确规则)
     aiSearchJudgePrompt: '请严格根据以下规则判断是否需要联网搜索,只返回一个单词 true 或 false,不要添加任何解释。\n规则:\n- 如果用户问题涉及当前时间、新闻、实时数据、知识库截止日期后的新事件,返回 true。\n- 如果问题仅需常识、历史知识、数学计算等,返回 false。\n示例:\n用户:今天天气怎么样? -> true\n用户:法国大革命是哪一年? -> false\n用户:现在几点了? -> true\n用户:1+1等于几? -> false\n用户:帮我查一下最新的iPhone价格 -> true\n用户:李白是哪个朝代的? -> false',
@@ -302,4 +406,3 @@ const DEFAULT_CONFIG = {
 - 当所有子代理都完成后,如果用户还在等待,自然整合结果回复一条。否则保持静默
 - 子代理失败也静默,用户不问就不提`
 };
-

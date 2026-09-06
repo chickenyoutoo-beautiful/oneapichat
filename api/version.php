@@ -6,6 +6,7 @@
  * 注意: 指纹基于内容而非文件时间, 避免仅触碰文件不改变内容造成的误报
  */
 $f = dirname(__DIR__) . '/public/index.html';
+$styleFile = dirname(__DIR__) . '/public/css/style.css';
 header('Content-Type: application/json');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 if (!is_file($f)) {
@@ -13,7 +14,8 @@ if (!is_file($f)) {
     exit;
 }
 echo json_encode([
-    'ok'   => true,
-    'v'    => filemtime($f),
-    'hash' => md5_file($f),
+    'ok'       => true,
+    'v'        => filemtime($f),
+    'style_v'  => is_file($styleFile) ? filemtime($styleFile) : null,
+    'hash'     => md5_file($f),
 ]);

@@ -43,17 +43,35 @@ class TestNormalize(unittest.TestCase):
 
 class TestRepeat(unittest.TestCase):
     def test_repeat_3_times_skip(self):
+        # 非幂等工具(video_download)重复调用 → 第 3 次 skip
         g = LoopGuard()
-        self.assertEqual(g.record_tool_call('web_search', {'query': 'q'}), 'execute')
-        self.assertEqual(g.record_tool_call('web_search', {'query': 'q'}), 'execute')
-        self.assertEqual(g.record_tool_call('web_search', {'query': 'q'}), 'skip')
+        self.assertEqual(g.record_tool_call('video_download', {'url': 'magnet:q'}), 'execute')
+        self.assertEqual(g.record_tool_call('video_download', {'url': 'magnet:q'}), 'execute')
+        self.assertEqual(g.record_tool_call('video_download', {'url': 'magnet:q'}), 'skip')
         self.assertIn('重复', g.last_reason)
+
+    def test_idempotent_tools_never_skip(self):
+        # 真正只读的工具反复调用不计入重复检测
+        for tool in ['server_file_read', 'db_query', 'web_search', 'web_fetch']:
+            g = LoopGuard()
+            for _ in range(5):
+                self.assertEqual(g.record_tool_call(tool, {'q': 'x'}), 'execute', '幂等工具 %s 不应 skip' % tool)
+            self.assertEqual(g.soft_triggers, 0, '幂等工具 %s 不应触发 soft' % tool)
+
+    def test_side_effect_tools_are_guarded(self):
+        # exec/server_python/server_file_op 可能写文件或启动任务，第3次相同调用必须 skip
+        for tool in ['exec', 'server_python', 'server_file_op']:
+            g = LoopGuard()
+            self.assertEqual(g.record_tool_call(tool, {'script': 'same-side-effect'}), 'execute')
+            self.assertEqual(g.record_tool_call(tool, {'script': 'same-side-effect'}), 'execute')
+            self.assertEqual(g.record_tool_call(tool, {'script': 'same-side-effect'}), 'skip')
+            self.assertIn('重复', g.last_reason)
 
     def test_repeat_threshold_custom(self):
         g = LoopGuard(max_repeat=5)
         for _ in range(4):
-            self.assertEqual(g.record_tool_call('server_python', {'script': 'print(1)'}), 'execute')
-        self.assertEqual(g.record_tool_call('server_python', {'script': 'print(1)'}), 'skip')
+            self.assertEqual(g.record_tool_call('video_download', {'url': 'magnet:x'}), 'execute')
+        self.assertEqual(g.record_tool_call('video_download', {'url': 'magnet:x'}), 'skip')
 
 
 class TestOscillation(unittest.TestCase):
@@ -89,9 +107,10 @@ class TestOscillation(unittest.TestCase):
 
 
 class TestToolOnlyRounds(unittest.TestCase):
-    def test_6_rounds_abort(self):
+    def test_12_rounds_abort(self):
+        # 阈值已从 6 提高到 12(Agent 模式需要多轮工具调用)
         g = LoopGuard()
-        for _ in range(5):
+        for _ in range(11):
             self.assertEqual(g.record_round(had_content=False, tool_count=2), '')
         self.assertEqual(g.record_round(had_content=False, tool_count=2), 'abort')
 
@@ -101,6 +120,16 @@ class TestToolOnlyRounds(unittest.TestCase):
             g.record_round(had_content=False, tool_count=2)
         g.record_round(had_content=True, tool_count=2)
         self.assertEqual(g.record_round(had_content=False, tool_count=2), '')
+
+    def test_feed_text_empty_does_not_reset(self):
+        # 空文本不重置 content_len,避免续接误判
+        g = LoopGuard()
+        g.feed_text('已有正文内容')  # len=6
+        self.assertEqual(g.content_len, 6)
+        g.feed_text('')
+        self.assertEqual(g.content_len, 6, '空 feed_text 不应重置 content_len')
+        g.feed_text(None)
+        self.assertEqual(g.content_len, 6, 'None feed_text 不应重置 content_len')
 
 
 class TestFeedText(unittest.TestCase):

@@ -1,26 +1,34 @@
 <?php
 /**
- * URL Fetch Proxy v3
+ * Authenticated URL Fetch Proxy v4.
  * GET ?url=...&extract=1&raw=0 → 抓取网页并提取文本
  * POST { urls:[], extract:true } → 并行抓取多个网页
  */
-
+require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
+setApiCorsHeaders();
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
+$token = extractBearerToken() ?: (string)($_COOKIE['auth_token'] ?? '');
+$userId = $token ? verifyAuthToken($token) : null;
+if (!$userId) {
+    http_response_code(401);
+    echo json_encode(['error' => ['code' => 'UNAUTHORIZED', 'message' => 'Authentication required']]);
+    exit;
+}
 
 // ========== 配置 ==========
-set_time_limit(15); // 防止 PHP 超时导致 502
+set_time_limit(45); // HTTP + 浏览器兜底渲染需要更长但仍有硬上限
 define('MAX_URL_LENGTH', 2048);
 define('MAX_CONTENT_SIZE', 2 * 1024 * 1024);
 define('MAX_RESULT_LENGTH', 50000);
 define('FETCH_TIMEOUT', 10);
+define('BROWSER_FETCH_TIMEOUT', 12);
 define('MAX_REDIRECTS', 3);
 define('MAX_PARALLEL', 5);
 
@@ -70,21 +78,26 @@ function recordFailure($host, $httpCode = 0) {
 // ========== 辅助函数 ==========
 
 function isPrivateIP($host) {
-    $resolved = @gethostbyname($host);
-    if ($resolved === $host) return false;
-    $ipLong = ip2long($resolved);
-    if ($ipLong === false) return false;
-    $ranges = [
-        ['10.0.0.0',    '10.255.255.255'],
-        ['172.16.0.0',  '172.31.255.255'],
-        ['192.168.0.0', '192.168.255.255'],
-        ['127.0.0.0',   '127.255.255.255'],
-        ['169.254.0.0', '169.254.255.255'],
-        ['0.0.0.0',     '0.255.255.255'],
-        ['100.64.0.0',  '100.127.255.255'],
-    ];
-    foreach ($ranges as $r) {
-        if ($ipLong >= ip2long($r[0]) && $ipLong <= ip2long($r[1])) return true;
+    $host = strtolower(rtrim((string)$host, '.'));
+    if ($host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.local')) return true;
+    $ips = [];
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        $ips[] = $host;
+    } else {
+        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        if (!is_array($records) || !$records) return true; // fail closed on unresolved names
+        foreach ($records as $record) {
+            if (!empty($record['ip'])) $ips[] = $record['ip'];
+            if (!empty($record['ipv6'])) $ips[] = $record['ipv6'];
+        }
+    }
+    if (!$ips) return true;
+    foreach (array_unique($ips) as $ip) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return true;
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $long = ip2long($ip);
+            if ($long !== false && $long >= ip2long('100.64.0.0') && $long <= ip2long('100.127.255.255')) return true;
+        }
     }
     return false;
 }
@@ -99,9 +112,8 @@ function validateURL($url) {
     if (!in_array($scheme, ['http', 'https'])) return false;
     $host = parse_url($url, PHP_URL_HOST);
     if (!$host || empty($host)) return false;
-    // ★ 白名单: 允许抓取自己的域名（即使是内网IP）
-    $isSelf = (stripos($host, '.naujtrats.xyz') !== false || stripos($host, 'naujtrats.xyz') !== false || $host === 'localhost');
-    if (!$isSelf && isPrivateIP($host)) return false;
+    // Every destination, including application-owned domains, must resolve publicly.
+    if (isPrivateIP($host)) return false;
     return $url;
 }
 
@@ -179,7 +191,7 @@ function extractTextFromHTML($html, $baseUrl = '') {
 }
 
 function fetchSingleURL($url, $uaIndex = 0) {
-    global $USER_AGENTS, $GLOBAL_FAILURES, $proxyUrl;
+    global $USER_AGENTS, $GLOBAL_FAILURES, $proxyUrl, $referer;
     $host = parse_url($url, PHP_URL_HOST);
 
     // 熔断器检查 — ★ 有代理时跳过(代理可能是新路径, 不应被旧失败阻止)
@@ -215,12 +227,14 @@ function fetchSingleURL($url, $uaIndex = 0) {
         $opts = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
+            // Redirects are not followed here: an otherwise-public URL could redirect to localhost.
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_MAXREDIRS => MAX_REDIRECTS,
             CURLOPT_TIMEOUT => FETCH_TIMEOUT,
             CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,
             CURLOPT_USERAGENT => $ua,
             CURLOPT_HTTPHEADER => $curlHeaders,
@@ -298,7 +312,80 @@ function fetchSingleURL($url, $uaIndex = 0) {
     return ['content' => $content, 'status' => $statusCode];
 }
 
+// ========== 浏览器兜底提取 ==========
+// 普通 curl 失败、返回 JS 空壳或遇到 3xx/403/429 时，交给本机 Chromium 渲染。
+// 不绕过验证码，只把可正常加载的公开页面交给真实浏览器执行。
+function browserExtractURL($url, $proxy = '', $referer = '') {
+    $script = __DIR__ . '/../python/web_extract.py';
+    if (!is_file($script)) return null;
+    $cmd = escapeshellarg('/usr/bin/python3') . ' ' . escapeshellarg($script)
+        . ' --url ' . escapeshellarg($url)
+        . ' --timeout ' . BROWSER_FETCH_TIMEOUT;
+    if ($proxy && $proxy !== '__relay_only__') $cmd .= ' --proxy ' . escapeshellarg($proxy);
+    if ($referer) $cmd .= ' --referer ' . escapeshellarg($referer);
+    $pipes = [];
+    $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (!is_resource($proc)) return null;
+    stream_set_timeout($pipes[1], BROWSER_FETCH_TIMEOUT + 3);
+    stream_set_timeout($pipes[2], 3);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($proc);
+    if ($exitCode !== 0 || !$stdout) return null;
+    $data = json_decode($stdout, true);
+    if (!is_array($data) || empty($data['content'])) return null;
+    return ['content' => (string)$data['content'], 'status' => 200, 'browser' => true];
+}
+
+function needsBrowserExtraction($html) {
+    $html = (string)$html;
+    $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+    $lower = strtolower($html);
+    if (preg_match('/just a moment|checking your browser|cf-chl|enable javascript|captcha|verify you are human/i', $lower)) return true;
+    return strlen($html) > 12000 && strlen($plain) < 280;
+}
+
 // ========== 路由 ==========
+
+// ------ 代理配置（本地 Mihomo 集成） ------
+$proxyUrl = isset($_GET['proxy']) ? trim($_GET['proxy']) : '';
+// ★ __relay_only__ 表示前端要求走中继, 由服务端自动走本地 Mihomo
+if ($proxyUrl === '__relay_only__') $proxyUrl = '';
+if ($proxyUrl) {
+    $proxyScheme = strtolower((string)parse_url($proxyUrl, PHP_URL_SCHEME));
+    $proxyHost = (string)parse_url($proxyUrl, PHP_URL_HOST);
+    $allowedPrivateProxies = ['http://192.168.195.226:8890'];
+    $privateProxyBlocked = isPrivateIP($proxyHost) && !in_array(rtrim($proxyUrl, '/'), $allowedPrivateProxies, true);
+    if (!in_array($proxyScheme, ['http', 'https', 'socks4', 'socks5', 'socks5h'], true) || !$proxyHost || $privateProxyBlocked) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Unsafe proxy address blocked']);
+        exit;
+    }
+}
+
+// ★ 本地 Mihomo 代理地址
+$localProxy = 'socks5://127.0.0.1:1081';
+
+$proxyFlag = '';
+if ($proxyUrl) {
+    // 前端指定了代理地址
+    $proxyType = CURLPROXY_HTTP;
+    if (strpos($proxyUrl, 'socks5://') === 0) $proxyType = CURLPROXY_SOCKS5;
+    elseif (strpos($proxyUrl, 'socks4://') === 0) $proxyType = CURLPROXY_SOCKS4;
+    $proxyFlag = ' --proxy ' . escapeshellarg($proxyUrl);
+    if ($proxyType === CURLPROXY_SOCKS5) $proxyFlag .= ' --socks5 ' . escapeshellarg($proxyUrl);
+} else {
+    // ★ 本地集成模式: 未传 proxy 参数时自动走本地 Mihomo
+    $proxyFlag = ' --proxy ' . escapeshellarg($localProxy);
+    $proxyFlag .= ' --socks5 ' . escapeshellarg($localProxy);
+}
+
+// ★ 将代理地址传递给 fetchSingleURL (通过全局变量)
+if (!$proxyUrl) {
+    $proxyUrl = $localProxy;
+}
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -339,17 +426,18 @@ if ($method === 'POST') {
     foreach ($urls as $i => $url) {
         $ua = $USER_AGENTS[$i % count($USER_AGENTS)];
         $outFile = "$tmpDir/fetch_result_$i_" . getmypid() . ".tmp";
-        $cmd = 'curl -s -L ' .
+        $cmd = 'curl -s ' .
             '--tlsv1.2 ' .
             '--connect-timeout 5 ' .
             '--max-time ' . FETCH_TIMEOUT . ' ' .
-            '--max-redirs ' . MAX_REDIRECTS . ' ' .
+            // 批量路径不让 curl 自动跟随重定向；由浏览器兜底统一做公开地址守卫。
+            '--max-redirs 0 ' .
             $proxyFlag . ' ' .
             '-H ' . escapeshellarg("User-Agent: $ua") . ' ' .
             '-H ' . escapeshellarg('Accept: text/html,text/plain;q=0.9') . ' ' .
             '-H ' . escapeshellarg('Accept-Language: zh-CN,zh;q=0.9,en;q=0.8') . ' ' .
             '-H ' . escapeshellarg('Accept-Encoding: identity') . ' ' .
-            '-k ' .
+            '--proto ' . escapeshellarg('=http,https') . ' ' .
             '-o ' . escapeshellarg($outFile) . ' ' .
             '-w ' . escapeshellarg('%{http_code}') . ' > ' . escapeshellarg("$tmpDir/fetch_status_$i_" . getmypid() . ".tmp 2>/dev/null") .
             ' & ' .  // 后台运行
@@ -391,6 +479,16 @@ if ($method === 'POST') {
         }
         @unlink($outFile);
 
+        $browserBatch = false;
+        $browserStatuses = [301, 302, 303, 307, 308, 403, 429, 500, 502, 503, 504];
+        if (in_array($httpCode, $browserStatuses, true) || $content === false || strlen($content) < 10) {
+            $browserResult = browserExtractURL($url, $proxyUrl, '');
+            if ($browserResult) {
+                $content = $browserResult['content'];
+                $httpCode = 200;
+                $browserBatch = true;
+            }
+        }
         if ($httpCode >= 400 || $content === false || strlen($content) < 10) {
             $host = parse_url($url, PHP_URL_HOST);
             recordFailure($host, $httpCode);
@@ -402,8 +500,8 @@ if ($method === 'POST') {
         }
         if ($raw) {
             $results[] = ['url' => $url, 'content' => substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
-        } elseif ($doExtract) {
-            $extracted = extractTextFromHTML($content);
+        } elseif ($doExtract && !$browserBatch) {
+            $extracted = extractTextFromHTML($content, $url);
             $results[] = ['url' => $url, 'content' => substr($extracted, 0, MAX_RESULT_LENGTH), 'error' => ''];
         } else {
             $results[] = ['url' => $url, 'content' => substr($content, 0, MAX_RESULT_LENGTH), 'error' => ''];
@@ -414,38 +512,12 @@ if ($method === 'POST') {
     exit;
 }
 
-// ------ 代理配置（本地 Mihomo 集成） ------
-$proxyUrl = isset($_GET['proxy']) ? trim($_GET['proxy']) : '';
-// ★ __relay_only__ 表示前端要求走中继, 由服务端自动走本地 Mihomo
-if ($proxyUrl === '__relay_only__') $proxyUrl = '';
-
-// ★ 本地 Mihomo 代理地址
-$localProxy = 'socks5h://127.0.0.1:1081';
-
-$proxyFlag = '';
-if ($proxyUrl) {
-    // 前端指定了代理地址
-    $proxyType = CURLPROXY_HTTP;
-    if (strpos($proxyUrl, 'socks5://') === 0) $proxyType = CURLPROXY_SOCKS5;
-    elseif (strpos($proxyUrl, 'socks4://') === 0) $proxyType = CURLPROXY_SOCKS4;
-    $proxyFlag = ' --proxy ' . escapeshellarg($proxyUrl);
-    if ($proxyType === CURLPROXY_SOCKS5) $proxyFlag .= ' --socks5 ' . escapeshellarg($proxyUrl);
-} else {
-    // ★ 本地集成模式: 未传 proxy 参数时自动走本地 Mihomo
-    $proxyFlag = ' --proxy ' . escapeshellarg($localProxy);
-    $proxyFlag .= ' --socks5 ' . escapeshellarg($localProxy);
-}
-
-// ★ 将代理地址传递给 fetchSingleURL (通过全局变量)
-if (!$proxyUrl) {
-    $proxyUrl = $localProxy;
-}
-
 // ------ GET: 单页面抓取 ------
 $url = isset($_GET['url']) ? trim($_GET['url']) : '';
 $doExtract = isset($_GET['extract']) ? ($_GET['extract'] !== '0' && $_GET['extract'] !== 'false') : true;
 $raw = isset($_GET['raw']) ? ($_GET['raw'] === '1' || $_GET['raw'] === 'true') : false;
 $referer = isset($_GET['ref']) ? trim($_GET['ref']) : '';  // ★ 反爬: 传递 Referer 头绕过机器人检测
+if ($referer && validateURL($referer) === false) $referer = '';
 
 if (empty($url)) {
     http_response_code(400);
@@ -461,9 +533,24 @@ if ($url === false) {
 }
 
 $result = fetchSingleURL($url);
+$browserExtracted = false;
+$browserStatuses = [301, 302, 303, 307, 308, 403, 429, 500, 502, 503, 504];
+if (isset($result['error']) && in_array((int)($result['status'] ?? 0), $browserStatuses, true)) {
+    $browserResult = browserExtractURL($url, $proxyUrl, $referer);
+    if ($browserResult) {
+        $result = $browserResult;
+        $browserExtracted = true;
+    }
+} elseif (!isset($result['error']) && needsBrowserExtraction($result['content'] ?? '')) {
+    $browserResult = browserExtractURL($url, $proxyUrl, $referer);
+    if ($browserResult) {
+        $result = $browserResult;
+        $browserExtracted = true;
+    }
+}
 
 if (isset($result['error'])) {
-    http_response_code($result['status']);
+    http_response_code($result['status'] ?? 502);
     echo json_encode(['error' => $result['error'], 'content' => '']);
     exit;
 }
@@ -475,8 +562,8 @@ if ($raw) {
     exit;
 }
 
-if ($doExtract) {
-    $extracted = extractTextFromHTML($content);
+if ($doExtract && !$browserExtracted) {
+    $extracted = extractTextFromHTML($content, $url);
     $extracted = substr($extracted, 0, MAX_RESULT_LENGTH);
     echo json_encode(['content' => $extracted, 'error' => '']);
 } else {

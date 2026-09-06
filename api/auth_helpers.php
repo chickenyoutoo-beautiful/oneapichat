@@ -31,6 +31,29 @@ function extractBearerToken(): string {
 }
 
 /**
+ * 统一提取浏览器登录 session token。新客户端必须使用 Bearer 或同站 Cookie；
+ * 旧 query/form 参数仅作为过渡兼容，避免部署期间中断旧 Electron/PWA 客户端。
+ */
+function extractSessionToken(bool $allowLegacy = true): string {
+    $token = extractBearerToken();
+    if ($token === '' && !empty($_COOKIE['auth_token'])) {
+        $token = (string)$_COOKIE['auth_token'];
+    }
+    if ($token === '' && !empty($_SERVER['HTTP_AUTH_TOKEN'])) {
+        $token = (string)$_SERVER['HTTP_AUTH_TOKEN'];
+    }
+    if ($token === '' && $allowLegacy) {
+        $token = (string)($_GET['auth_token'] ?? $_POST['auth_token'] ?? '');
+    }
+    $token = trim($token);
+    // Reject control characters/oversized values before DB or JSON lookups.
+    if ($token === '' || strlen($token) > 512 || preg_match('/[\x00-\x20\x7f]/', $token)) {
+        return '';
+    }
+    return $token;
+}
+
+/**
  * 验证 auth_token，返回 user_id 或 null
  * @param string $token 用户 token
  * @return string|null 用户 ID 或 null
@@ -73,6 +96,76 @@ function verifyAuthToken(string $token): ?string {
     }
     $info = $sessions[$token] ?? null;
     return $info ? ($info['user_id'] ?? null) : null;
+}
+
+/**
+ * 保存 session token（同时写入 SQLite sessions 表与 sessions.json）
+ */
+function recordSessionToken(string $token, string $userId, ?int $createdAt = null): void {
+    $now = $createdAt ?? time();
+    $dbPath = ONECHAT_ROOT . '/users/oneapichat.db';
+    if (file_exists($dbPath)) {
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("INSERT OR REPLACE INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)");
+            $stmt->execute([$token, $userId, $now]);
+        } catch (Exception $e) {}
+    }
+    $sessionsFile = ONECHAT_ROOT . '/users/sessions.json';
+    $sessions = [];
+    if (file_exists($sessionsFile)) {
+        $raw = @file_get_contents($sessionsFile);
+        $sessions = is_string($raw) ? (json_decode($raw, true) ?: []) : [];
+    }
+    $sessions[$token] = [
+        'user_id' => $userId,
+        'created_at' => $now
+    ];
+    $tmpPath = $sessionsFile . '.' . getmypid() . '.tmp';
+    $json = json_encode($sessions, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if ($json !== false && @file_put_contents($tmpPath, $json, LOCK_EX) !== false) {
+        @chmod($tmpPath, 0660);
+        if (@rename($tmpPath, $sessionsFile)) {
+            @chmod($sessionsFile, 0660);
+        } else {
+            @unlink($tmpPath);
+        }
+    }
+}
+
+/**
+ * 撤销 session token（同时从 SQLite 与 sessions.json 移除）
+ */
+function revokeSessionToken(string $token): void {
+    if (empty($token)) return;
+    $dbPath = ONECHAT_ROOT . '/users/oneapichat.db';
+    if (file_exists($dbPath)) {
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("DELETE FROM sessions WHERE token = ?");
+            $stmt->execute([$token]);
+        } catch (Exception $e) {}
+    }
+    $sessionsFile = ONECHAT_ROOT . '/users/sessions.json';
+    if (file_exists($sessionsFile)) {
+        $raw = @file_get_contents($sessionsFile);
+        $sessions = is_string($raw) ? (json_decode($raw, true) ?: []) : [];
+        if (isset($sessions[$token])) {
+            unset($sessions[$token]);
+            $tmpPath = $sessionsFile . '.' . getmypid() . '.tmp';
+            $json = json_encode($sessions, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            if ($json !== false && @file_put_contents($tmpPath, $json, LOCK_EX) !== false) {
+                @chmod($tmpPath, 0660);
+                if (@rename($tmpPath, $sessionsFile)) {
+                    @chmod($sessionsFile, 0660);
+                } else {
+                    @unlink($tmpPath);
+                }
+            }
+        }
+    }
 }
 
 /**

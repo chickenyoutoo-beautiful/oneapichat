@@ -7,24 +7,35 @@ window._queueIdCounter = 0;
 window._isQueueProcessing = false;
 
 /* 持久化 key — 按模式 + 会话隔离 */
-window._getQueueKey = function() {
-    var _prefix = (getAgentMode() !== 'off') ? 'oc_queue_a_' : 'oc_queue_n_';
-    return _prefix + (currentChatId || 'default');
+window._getQueueKey = function(explicitMode, explicitChatId) {
+    var mode = explicitMode !== undefined ? explicitMode : (typeof getAgentMode === 'function' ? getAgentMode() : (localStorage.getItem('agentMode') || 'off'));
+    var _prefix = (mode !== 'off') ? 'oc_queue_a_' : 'oc_queue_n_';
+    var cid = explicitChatId !== undefined ? explicitChatId : (window.currentChatId || 'default');
+    return _prefix + cid;
 };
 
 /** 持久化队列到 localStorage */
-window._saveQueue = function() {
+window._saveQueue = function(explicitMode, explicitChatId) {
     try {
-        var _key = window._getQueueKey();
-        if (window._messageQueue.length === 0) {
+        var _key = window._getQueueKey(explicitMode, explicitChatId);
+        if (!window._messageQueue || window._messageQueue.length === 0) {
             localStorage.removeItem(_key);
             return;
         }
-        var data = window._messageQueue.map(function(item) {
+        // 过滤空消息
+        var validItems = window._messageQueue.filter(function(item) {
+            return item && (item.text || (item.files && item.files.length));
+        });
+        if (validItems.length === 0) {
+            localStorage.removeItem(_key);
+            window._messageQueue = [];
+            return;
+        }
+        var data = validItems.map(function(item) {
             var safeFiles = (item.files || []).map(function(f) {
                 return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
             });
-            return { id: item.id, text: item.text, files: safeFiles, chatId: item.chatId || '' };
+            return { id: item.id, text: item.text, files: safeFiles, chatId: item.chatId || (explicitChatId || window.currentChatId || '') };
         });
         localStorage.setItem(_key, JSON.stringify(data));
     } catch(e) {
@@ -33,16 +44,26 @@ window._saveQueue = function() {
 };
 
 /** 页面加载时从 localStorage 恢复队列 */
-window._loadQueue = function() {
+window._loadQueue = function(explicitMode, explicitChatId) {
     try {
-        var _key = window._getQueueKey();
+        var _key = window._getQueueKey(explicitMode, explicitChatId);
         var raw = localStorage.getItem(_key);
-        if (!raw) { console.log('[Queue] load: no data for key=' + _key); return false; }
+        if (!raw) return false;
         var data = JSON.parse(raw);
-        if (!Array.isArray(data)) return false;
-        window._messageQueue = data;
+        if (!Array.isArray(data) || data.length === 0) {
+            localStorage.removeItem(_key);
+            return false;
+        }
+        var validData = data.filter(function(item) {
+            return item && (item.text || (item.files && item.files.length));
+        });
+        if (validData.length === 0) {
+            localStorage.removeItem(_key);
+            return false;
+        }
+        window._messageQueue = validData;
         var maxId = 0;
-        data.forEach(function(item) { if (item.id > maxId) maxId = item.id; });
+        validData.forEach(function(item) { if (item.id > maxId) maxId = item.id; });
         window._queueIdCounter = maxId;
         return true;
     } catch(e) {
@@ -51,14 +72,39 @@ window._loadQueue = function() {
     }
 };
 
-/** 清理持久化队列 */
-window._clearPersistedQueue = function() {
-    try { localStorage.removeItem(window._getQueueKey()); } catch(e) {}
+/** 清理持久化队列 (按特定会话、当前会话或全部清理) */
+window._clearPersistedQueue = function(specificChatId, clearAllSessions) {
+    try {
+        var targetCid = specificChatId || window.currentChatId || 'default';
+        localStorage.removeItem('oc_queue_a_' + targetCid);
+        localStorage.removeItem('oc_queue_n_' + targetCid);
+        localStorage.removeItem(window._getQueueKey());
+        if (clearAllSessions) {
+            var keysToRemove = [];
+            for (var i = 0; i < localStorage.length; i++) {
+                var k = localStorage.key(i);
+                if (k && k.indexOf('oc_queue_') === 0) {
+                    keysToRemove.push(k);
+                }
+            }
+            keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+        }
+        sessionStorage.removeItem('_messageQueue');
+    } catch(e) {}
 };
 
 /** 智能发送：如果队列非空，走队列；否则直接发送 */
 window._smartSend = function() {
-    // ★ 图片过多时自动分批入队
+    var input = $.userInput;
+    var userText = input ? input.value.trim() : '';
+
+    // ★ 1. 斜杠命令（/clear, /clearsub, /help, /model 等）最高优先级，绝不进队列
+    if (userText.startsWith('/')) {
+        window.sendMessage();
+        return;
+    }
+
+    // ★ 2. 图片过多时自动分批入队
     if (pendingFiles && pendingFiles.length > 0) {
         var _imgFiles = pendingFiles.filter(function(f) { return f.isImage || (f.type && f.type.startsWith('image/')); });
         var _provider = (getVal?.('provider') || localStorage.getItem('provider') || '').toLowerCase();
@@ -70,8 +116,19 @@ window._smartSend = function() {
             return;
         }
     }
-    if (window._messageQueue && window._messageQueue.length > 0) {
+
+    // ★ 3. 如果 AI 正在生成中，推入消息队列
+    if (isTypingMap[currentChatId]) {
         window.pushToMsgQueue();
+        return;
+    }
+
+    // ★ 4. AI 空闲时：如果队列有残留消息，将新消息入队后立即触发排干；如果队列无消息，直接发送
+    if (window._messageQueue && window._messageQueue.length > 0) {
+        if (userText || (pendingFiles && pendingFiles.length > 0)) {
+            window.pushToMsgQueue();
+        }
+        setTimeout(function() { window._drainQueue(); }, 50);
     } else {
         window.sendMessage();
     }
@@ -150,13 +207,61 @@ window._drainImageBatchQueue = async function() {
 };
 
 /** 推入消息到队列 (不打断当前生成) — 保留原队列行为供 smartSend 使用 */
+/** 立即将某条队列中的消息发送或插话 (Steer / Send) */
+window._sendQueueItemNow = async function(id) {
+    var idx = window._messageQueue.findIndex(function(item) { return item.id === id; });
+    if (idx === -1) return;
+    var item = window._messageQueue.splice(idx, 1)[0];
+    window._saveQueue();
+    window._updateQueueUI();
+    if (item && (item.text || (item.files && item.files.length))) {
+        if (isTypingMap[currentChatId]) {
+            // AI 正在生成中: 立即作为插话推入对话
+            var safeFiles = (item.files || []).map(function(f) {
+                return { name: f.name, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') };
+            });
+            var userMsg = {
+                role: 'user',
+                text: item.text,
+                _injected: true,
+                files: safeFiles
+            };
+            if (chats[currentChatId]) {
+                chats[currentChatId].messages.push(userMsg);
+                appendMessage('user', item.text, userMsg.files, null, null, null, false, null, null, false, -1, true);
+                slimSaveChats();
+                window._hasInjectedMessage = true;
+                showToast('⚡ 已插话推入对话，模型将在当前回复后继续处理', 'info', 2500);
+            }
+        } else {
+            // AI 空闲: 直接发送
+            await window.sendMessage(true, item.text, item.files || []);
+        }
+    }
+};
+
+/** 队列主按钮智能分发 */
+window.handleQueueButtonAction = function() {
+    var input = $.userInput;
+    var hasInput = input && input.value.trim().length > 0;
+    if (hasInput) {
+        window.pushToMsgQueue();
+    } else if (window._messageQueue.length > 0) {
+        window._sendQueueItemNow(window._messageQueue[0].id);
+    }
+};
+
+/** 推入消息到队列 (不打断当前生成) */
 window.pushToMsgQueue = function() {
     var input = $.userInput;
     var text = input ? input.value.trim() : '';
-    if (!text && (!pendingFiles || pendingFiles.length === 0)) return;
+    if (!text && (!pendingFiles || pendingFiles.length === 0)) {
+        showToast('请输入消息或附加文件后再推入队列', 'info', 1500);
+        return;
+    }
 
     var safeFiles = (pendingFiles || []).map(function(f) {
-        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
+        return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '' };
     });
 
     var qItem = {
@@ -171,9 +276,10 @@ window.pushToMsgQueue = function() {
     clearAllFiles();
     window._saveQueue();
     window._updateQueueUI();
+    showToast('📬 消息已加入待发送队列 (' + window._messageQueue.length + ')', 'info', 2000);
 
     if (!isTypingMap[currentChatId]) {
-        window._drainQueue();
+        setTimeout(function() { window._drainQueue(); }, 300);
     }
 };
 
@@ -318,6 +424,7 @@ window._toggleQueueCollapse = function() {
 /** 清空所有队列消息 */
 window._clearAllQueue = function() {
     window._messageQueue = [];
+    window._isQueueProcessing = false;
     window._clearPersistedQueue();
     window._updateQueueUI();
     showToast('🗑️ 消息队列已清空', 'info', 1500);
@@ -370,11 +477,19 @@ window._updateQueueUI = function() {
                 '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>' +
                 item.files.length + '</span>';
         }
+        var isGenerating = !!(isTypingMap[currentChatId]);
+        var actionBtnLabel = isGenerating
+            ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:-1px;margin-right:2px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>插话'
+            : '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="display:inline;vertical-align:-1px;margin-right:2px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>发送';
+        var actionBtnTitle = isGenerating ? '立即插话到当前生成中' : '立即发送此消息';
         html += '<div class="queue-msg-item" title="' + (item.text || '').replace(/"/g,'&quot;') + '">' +
             '<span class="queue-msg-idx">' + (idx + 1) + '</span>' +
             '<span class="queue-msg-text">' + escapeHtml(text || '(空消息)') + '</span>' +
             fileIcon +
-            '<button class="queue-msg-remove" onclick="window._removeQueueItem(' + item.id + ')" title="移除此消息">✕</button>' +
+            '<div class="queue-msg-item-actions">' +
+                '<button class="queue-msg-send-btn" onclick="window._sendQueueItemNow(' + item.id + ')" title="' + actionBtnTitle + '">' + actionBtnLabel + '</button>' +
+                '<button class="queue-msg-remove" onclick="window._removeQueueItem(' + item.id + ')" title="移除此消息">✕</button>' +
+            '</div>' +
             '</div>';
     });
     qList.innerHTML = html;

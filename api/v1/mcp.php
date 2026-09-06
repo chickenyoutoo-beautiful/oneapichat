@@ -168,6 +168,10 @@ switch ($method) {
             sendJsonRpcError($reqId, -32602, 'Missing tool name');
             break;
         }
+        if (str_starts_with($toolName, 'mmx_')) {
+            sendJsonRpcError($reqId, -32601, 'MMX tools have been removed');
+            break;
+        }
         // ★ analyze_image 服务器端执行 (读取数据库 xAI key, 不依赖浏览器)
         //    支持两种认证: 1) 通过 API Key/Session Token 认证  2) 通过 arguments 传入 user_id
         if ($toolName === 'analyze_image') {
@@ -187,6 +191,18 @@ switch ($method) {
             // 方式3: 无用户信息, 尝试用 arguments 中的 image_url 直接调用 xAI (需要 arguments.api_key)
             if (!empty($arguments['image_url']) && !empty($arguments['api_key'])) {
                 sendJsonRpcResult($reqId, analyzeImageWithKey($arguments));
+                break;
+            }
+        }
+        // ★ generate_image / generate_image_i2i 服务器端执行 (读 DB 配置, 多提供商分发)
+        //    绕过 Node.js MCP 的硬编码 MiniMax, 支持 custom/xAI/OpenRouter/OpenAI
+        if ($toolName === 'generate_image' || $toolName === 'generate_image_i2i') {
+            $imgUserId = $userId;
+            if (!$imgUserId && !empty($arguments['user_id'])) {
+                $imgUserId = preg_replace('/[^a-zA-Z0-9_-]/', '', $arguments['user_id']);
+            }
+            if ($imgUserId) {
+                sendJsonRpcResult($reqId, generateImageServerSide($imgUserId, $arguments));
                 break;
             }
         }
@@ -223,7 +239,8 @@ function fetchAllToolsRaw(string $mcpHost): ?string
             $data = json_decode($resp, true);
             if (isset($data['tools']) && is_array($data['tools'])) {
                 foreach ($data['tools'] as $t) {
-                    if (!empty($t['name'])) $allTools[$t['name']] = $t;
+                    if (empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
+                    $allTools[$t['name']] = $t;
                 }
             }
         }
@@ -276,7 +293,8 @@ function fetchAllTools(string $mcpHost): array
             $data = json_decode($resp, true);
             if (isset($data['tools']) && is_array($data['tools'])) {
                 foreach ($data['tools'] as $t) {
-                    if (!empty($t['name'])) $allTools[$t['name']] = $t;
+                    if (empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
+                    $allTools[$t['name']] = $t;
                 }
             }
         }
@@ -296,6 +314,7 @@ function getAnalyzeImageFullSchema(): array {
                 'image_url' => ['type' => 'string', 'description' => '图片 URL（http/https）或 data:image/... base64'],
                 'image_path' => ['type' => 'string', 'description' => '服务器本地图片路径（需在 uploads 目录内）'],
                 'image_index' => ['type' => 'integer', 'description' => '从聊天历史中获取第 N 张图片（0=第一张）'],
+                'image_indexes' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => '并行分析多张图片的索引数组 [0,1,2]'],
                 'focus' => ['type' => 'string', 'description' => '分析重点，如"人物特征"、"文字识别"等'],
                 'api_key' => ['type' => 'string', 'description' => '★ 直接传入 API Key（无认证场景）'],
                 'provider' => ['type' => 'string', 'description' => '视觉提供商: "xai" (默认) / "openai"'],
@@ -403,6 +422,124 @@ function sendJsonRpcResult($id, $result): void
 function sendJsonRpcError($id, int $code, string $msg): void
 {
     echo json_encode(['jsonrpc' => '2.0', 'id' => $id, 'error' => ['code' => $code, 'message' => $msg]], JSON_UNESCAPED_UNICODE);
+}
+
+// ============================================================
+// ★ generate_image / generate_image_i2i 服务器端执行 (供 MCP 第三方客户端使用)
+// 从数据库读取用户配置的 imageProvider, 多提供商分发 (custom/xAI/OpenRouter/OpenAI/MiniMax)
+// ============================================================
+function generateImageServerSide(string $userId, array $arguments): array {
+    $prompt = trim($arguments['prompt'] ?? '');
+    if (empty($prompt)) {
+        return ['error' => 'prompt is required', 'images' => []];
+    }
+
+    // 从 DB 读取用户图像配置
+    $cfg = [];
+    $dbPath = ONECHAT_ROOT . '/users/oneapichat.db';
+    if (file_exists($dbPath)) {
+        try {
+            $pdo = new PDO("sqlite:$dbPath");
+            $stmt = $pdo->prepare("SELECT config_json FROM user_config WHERE user_id = ?");
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) { $cfg = json_decode($row['config_json'], true) ?: []; }
+        } catch (Exception $e) {}
+    }
+    if (empty($cfg)) {
+        // 回退 JSON 文件
+        $cfgFile = ONECHAT_ROOT . '/chat_data/config_user_' . $userId . '.json';
+        if (file_exists($cfgFile)) {
+            $cfg = @json_decode(@file_get_contents($cfgFile), true) ?: [];
+        }
+    }
+
+    $provider = strtolower($cfg['imageProvider'] ?? 'minimax');
+
+    // ── MiniMax ──
+    if ($provider === 'minimax') {
+        $mmxConfig = @json_decode(@file_get_contents(ONECHAT_ROOT . '/config/.mmx_config.json'), true);
+        $mmxKey = $cfg['imageApiKey'] ?? '';
+        if (strpos($mmxKey, 'v2:') === 0) { $mmxKey = decrypt_config_key($mmxKey); }
+        $mmxKey = $mmxKey ?: ($mmxConfig['api_key'] ?? '');
+        if (empty($mmxKey)) {
+            return ['error' => 'MiniMax API key not configured', 'images' => []];
+        }
+        $apiUrl = 'https://api.minimaxi.com/v1/image_generation';
+        $body = json_encode(['model' => 'image-01', 'prompt' => $prompt, 'n' => 1, 'response_format' => 'url']);
+        $ch = curl_init($apiUrl);
+        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $mmxKey], CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120, CURLOPT_CONNECTTIMEOUT => 15]);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        $data = @json_decode($resp, true);
+        if ($httpCode === 200 && !empty($data['data'][0]['image_url'])) {
+            $imgs = array_column(array_filter($data['data'], function($d) { return !empty($d['image_url']); }), 'image_url');
+            return ['images' => $imgs, 'status' => 'ok', 'provider' => 'minimax'];
+        }
+        return ['error' => 'MiniMax 生图失败 (' . $httpCode . ')', 'images' => []];
+    }
+
+    // ── OpenAI 兼容 (openrouter/openai/custom) ──
+    $keyMap = [
+        'openrouter' => ['key' => 'imageApiKeyOpenrouter', 'url' => 'imageBaseUrlOpenrouter', 'model' => 'imageModel_openrouter', 'default_url' => 'https://openrouter.ai/api/v1', 'default_model' => 'openai/gpt-5.4-image-2'],
+        'openai'     => ['key' => 'imageApiKeyOpenai',     'url' => 'imageBaseUrlOpenai',     'model' => 'imageModel_openai',     'default_url' => 'https://api.openai.com/v1', 'default_model' => 'gpt-image-1'],
+        'custom'     => ['key' => 'imageApiKeyCustom',     'url' => 'imageBaseUrlCustom',     'model' => 'imageModel_custom',     'default_url' => '', 'default_model' => ''],
+    ];
+    if (!isset($keyMap[$provider])) {
+        return ['error' => 'Unknown image provider: ' . $provider, 'images' => []];
+    }
+    $km = $keyMap[$provider];
+
+    $apiKey = $cfg[$km['key']] ?? '';
+    if (strpos($apiKey, 'v2:') === 0) { $apiKey = decrypt_config_key($apiKey); }
+    $baseUrl = rtrim($cfg[$km['url']] ?? $km['defaultUrl'], '/');
+    $model = trim($cfg[$km['model']] ?? '') ?: $km['defaultModel'];
+
+    if (empty($apiKey)) {
+        return ['error' => '未配置 ' . $provider . ' 的 API Key', 'images' => []];
+    }
+    if (empty($baseUrl)) {
+        return ['error' => '未配置 ' . $provider . ' 的 API Base URL', 'images' => []];
+    }
+    if (!str_ends_with($baseUrl, '/v1')) $baseUrl .= '/v1';
+
+    // xAI (Grok) 不支持 size 参数
+    $isXai = (strpos($baseUrl, 'x.ai') !== false) || (stripos($model, 'grok') !== false);
+    $n = min($arguments['n'] ?? 1, 10);
+    $body = ['model' => $model, 'prompt' => $prompt, 'n' => $n, 'response_format' => 'b64_json'];
+    if (!$isXai) {
+        $sizeMap = ['1:1' => '1024x1024', '16:9' => '1792x1024', '9:16' => '1024x1792'];
+        $body['size'] = $sizeMap[$arguments['aspect_ratio'] ?? '1:1'] ?? '1024x1024';
+    }
+
+    $apiUrl = $baseUrl . '/images/generations';
+    $ch = curl_init($apiUrl);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($body), CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey], CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120, CURLOPT_CONNECTTIMEOUT => 15]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($err) {
+        return ['error' => '请求失败: ' . $err, 'images' => []];
+    }
+    $data = @json_decode($resp, true);
+    if ($httpCode !== 200) {
+        $errMsg = $data['error']['message'] ?? $data['error'] ?? substr($resp, 0, 300);
+        return ['error' => '生图失败 (' . $httpCode . '): ' . $errMsg, 'images' => [], 'provider' => $provider];
+    }
+    $images = [];
+    if (!empty($data['data']) && is_array($data['data'])) {
+        foreach ($data['data'] as $item) {
+            if (!empty($item['url'])) $images[] = $item['url'];
+            elseif (!empty($item['b64_json'])) $images[] = 'data:image/png;base64,' . $item['b64_json'];
+        }
+    }
+    if (empty($images)) {
+        return ['error' => '未返回图片', 'images' => [], 'raw' => mb_substr($resp, 0, 200)];
+    }
+    return ['images' => $images, 'status' => 'ok', 'provider' => $provider, 'model' => $model];
 }
 
 // ============================================================

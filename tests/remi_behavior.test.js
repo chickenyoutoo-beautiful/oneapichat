@@ -1,0 +1,25 @@
+// remi_behavior.test.js — sourced Remielle assets + state machine regression guards
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const root = path.join(__dirname, '..');
+const js = fs.readFileSync(path.join(root, 'public/js/model-status.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'public/css/style.css'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
+assert.ok(js.includes("working: 1") && js.includes("waiting: 1") && js.includes("celebrate: 1") && js.includes("failed: 1"), '应包含 DSH 扩展状态');
+assert.ok(js.includes("window.remiReact = function"), '应暴露 remiReact');
+for (const ev of ['turn/start','tool/call','approval/asked','turn/completed','turn/error','turn/blocked']) assert.ok(js.includes("'"+ev+"'"), '缺少事件映射: '+ev);
+assert.ok(js.includes("document.querySelector('.approval-overlay')"), '审批应驱动 waiting');
+assert.ok(js.includes('CELEBRATE_COOLDOWN = 12000'), '庆祝应有冷却');
+const expected = {idle:'02.gif',thinking:'05.gif',working:'01.gif',creating:'03.gif',waiting:'05.gif',celebrate:'06.gif',failed:'04.gif'};
+for (const [mood,file] of Object.entries(expected)) assert.ok(js.includes(mood + ": '" + file + "'"), '状态素材映射缺失: '+mood);
+for (let i=1;i<=6;i++) assert.ok(fs.existsSync(path.join(root,'public/src/src/remi-official/0'+i+'.gif')), '缺少线上可访问的蕾米动画 0'+i+'.gif');
+assert.ok(fs.readFileSync(path.join(root, 'public/js/rendering.js'), 'utf8').includes("avatar-remi-gif remi-character-asset"), '聊天头像应使用高还原素材');
+assert.ok(html.includes('src="./src/remi-official/05.gif"'), '思考区应使用蕾米素材');
+assert.ok(html.includes('id="remi-zoom-img" class="remi-character-asset'), '小窗应使用蕾米素材');
+assert.ok(css.includes('.remi-character-asset'), '缺少角色素材样式');
+assert.ok(js.includes('ensureTypingIndicator') && js.includes("loader.className = 'remi-typing-indicator'"), '等待三点必须使用真实 DOM');
+assert.ok(css.includes('.remi-typing-indicator i:nth-child(3)'), '等待三点应有错峰动画');
+const rendering = fs.readFileSync(path.join(root, 'public/js/rendering.js'), 'utf8');
+assert.ok(rendering.includes("remiReact('turn/completed'"), '流结束必须明确投递蕾米完成事件');
+console.log('✅ remi_behavior 高还原素材与状态机回归全部通过');

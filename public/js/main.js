@@ -280,106 +280,121 @@ const Safe = {
     number(val, fallback = 0) { const n = Number(val); return isNaN(n) ? fallback : n; }
 };
 
-// ★ 容错修复工具参数JSON: 未转义引号 → \"、未转义换行 → \\n、截断 → 补齐引号/花括号
+// ★ 容错修复工具参数JSON: 健壮保留长代码/HTML/CSS/JS中的引号与花括号，安全处理换行与截断
 function repairToolArguments(raw) {
     if (typeof raw !== 'string') return '{}';
-    var out = '';
-    var inStr = false;
-    var hadInner = false;
-    for (var i = 0; i < raw.length; i++) {
-        var ch = raw.charAt(i);
-        if (!inStr) {
-            out += ch;
-            if (ch === '"') { inStr = true; hadInner = false; }
+    var trimmed = raw.trim();
+    if (!trimmed) return '{}';
+    try { JSON.parse(trimmed); return trimmed; } catch (e) {}
+
+    var work = trimmed.replace(/^\{\s*,/, '{').replace(/,\s*\}$/, '}').replace(/,\s*,/g, ',');
+    try { JSON.parse(work); return work; } catch (e) {}
+
+    var out = '', inString = false;
+    for (var i = 0; i < work.length; i++) {
+        var c = work[i];
+        if (c === '\\' && inString) {
+            out += c;
+            if (i + 1 < work.length) { out += work[i + 1]; i++; }
             continue;
         }
-        if (ch === '\\') {
-            out += ch;
-            if (i + 1 < raw.length) { out += raw.charAt(i + 1); i++; }
+        if (c === '"') {
+            inString = !inString;
+            out += c;
             continue;
         }
-        if (ch === '\n') { out += '\\n'; continue; }
-        if (ch === '\r') { out += '\\r'; continue; }
-        if (ch === '\t') { out += '\\t'; continue; }
-        if (ch.charCodeAt(0) < 32) { out += ' '; continue; }
-        if (ch === '"') {
-            var j = i + 1;
-            while (j < raw.length && (raw.charAt(j) === ' ' || raw.charAt(j) === '\t')) j++;
-            var nxt = j < raw.length ? raw.charAt(j) : '';
-            if (nxt === ',') {
-                var k = j + 1;
-                while (k < raw.length && (raw.charAt(k) === ' ' || raw.charAt(k) === '\t')) k++;
-                var afterComma = k < raw.length ? raw.charAt(k) : '';
-                if (afterComma === '"' || afterComma === '}' || afterComma === ']' || afterComma === '') {
-                    if (hadInner) {
-                        // 值内引号对刚闭合, 逗号前补一个真正的JSON收尾引号
-                        out += '\\"'; out += '"'; inStr = false;
-                    } else {
-                        out += '"'; inStr = false;
-                    }
-                } else {
-                    out += '\\"'; hadInner = true;
-                }
-            } else if (nxt === '}' || nxt === ']' || nxt === ':' || nxt === '') {
-                out += '"';
-                inStr = false;
-            } else {
-                out += '\\"'; hadInner = true;
-            }
-            continue;
+        if (inString) {
+            if (c === '\n') { out += '\\n'; continue; }
+            if (c === '\r') { out += '\\r'; continue; }
+            if (c === '\t') { out += '\\t'; continue; }
+            if (c.charCodeAt(0) < 32) { out += ' '; continue; }
         }
-        out += ch;
+        out += c;
     }
-    if (inStr) out += '"';
-    var ob = (out.match(/\{/g) || []).length;
-    var cb = (out.match(/\}/g) || []).length;
-    while (cb < ob) { out += '}'; cb++; }
-    return out;
+    try { JSON.parse(out); return out; } catch (e) {}
+
+    var text = out;
+    if (inString) text += '"';
+    text = text.replace(/,\s*$/, '').replace(/:\s*$/, ': null');
+
+    var stack = [], inStr2 = false;
+    for (var j = 0; j < text.length; j++) {
+        var ch = text[j];
+        if (ch === '\\' && inStr2) { j++; continue; }
+        if (ch === '"') { inStr2 = !inStr2; continue; }
+        if (!inStr2) {
+            if (ch === '{' || ch === '[') stack.push(ch);
+            else if (ch === '}' && stack.length && stack[stack.length - 1] === '{') stack.pop();
+            else if (ch === ']' && stack.length && stack[stack.length - 1] === '[') stack.pop();
+        }
+    }
+    if (inStr2) text += '"';
+    while (stack.length > 0) {
+        var open = stack.pop();
+        text += (open === '{' ? '}' : ']');
+    }
+    try { JSON.parse(text); return text; } catch (e) {}
+    return text;
 }
 
-// ★ 工具参数容错提取: server_exec/server_python 的模型参数非法JSON(未转义引号/截断)时尽量恢复
+// ★ 工具参数容错提取: write/server_file_write/edit/server_file_edit/run_code/server_exec/server_python 的大文本参数非法JSON(未转义引号/截断)时完整恢复
 function tolerantToolInput(toolName, raw) {
     if (!raw || typeof raw !== 'string') return null;
     try { return JSON.parse(raw); } catch (e) {}
     try { return JSON.parse(repairToolArguments(raw)); } catch (e2) {}
-    var keys = [];
-    if (toolName === 'server_exec') keys = ['cmd', 'command', 'query'];
-    else if (toolName === 'server_python') keys = ['script', 'code', 'cmd'];
-    var targetKey = toolName === 'server_exec' ? 'cmd' : 'script';
-    var i, j;
-    // 1) 标准 JSON 转义的值
-    for (i = 0; i < keys.length; i++) {
-        var key = keys[i];
-        var re = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
-        var m = raw.match(re);
-        if (m) {
-            var obj = {};
-            obj[targetKey] = m[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-            return obj;
-        }
-    }
-    // 2) 容错: 值内含未转义的引号 → 取 "key": " 之后全部内容, 从末尾找真正的收尾引号
-    for (j = 0; j < keys.length; j++) {
-        var key2 = keys[j];
-        var re2 = new RegExp('"' + key2 + '"\\s*:\\s*"([\\s\\S]*)$');
-        var m2 = raw.match(re2);
-        if (!m2) continue;
-        var val = m2[1].replace(/\s+$/, '');
-        var cut = -1;
-        for (var k = val.length - 1; k >= 0; k--) {
-            if (val.charAt(k) === '"') {
-                var rest = val.substring(k + 1).replace(/^\s+/, '');
-                if (rest === '' || rest.charAt(0) === '}' || rest.charAt(0) === ',') {
-                    cut = k;
-                    break;
+
+    function _extractLongField(str, key) {
+        var p = new RegExp('"' + key + '"\\s*:\\s*"');
+        var m = str.match(p);
+        if (!m) return null;
+        var startIdx = m.index + m[0].length;
+        var rest = str.substring(startIdx);
+        var endIdx = -1;
+        for (var k = rest.length - 1; k >= 0; k--) {
+            if (rest[k] === '"') {
+                var bc = 0;
+                for (var b = k - 1; b >= 0 && rest[b] === '\\'; b--) bc++;
+                if (bc % 2 === 0) {
+                    var after = rest.substring(k + 1).trim();
+                    if (after === '' || after === '}' || after.startsWith(',')) {
+                        endIdx = k;
+                        break;
+                    }
                 }
             }
         }
-        if (cut >= 0) val = val.substring(0, cut);
-        val = val.trim();
-        var obj2 = {};
-        obj2[targetKey] = val.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-        return obj2;
+        var val = endIdx >= 0 ? rest.substring(0, endIdx) : rest;
+        return val.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+
+    function _extractSimpleField(str, keys) {
+        for (var i = 0; i < keys.length; i++) {
+            var re = new RegExp('"' + keys[i] + '"\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"');
+            var m = str.match(re);
+            if (m) return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        }
+        return '';
+    }
+
+    if (toolName === 'write' || toolName === 'server_file_write') {
+        var pVal = _extractSimpleField(raw, ['file_path', 'path', 'file', 'filename']);
+        var cVal = _extractLongField(raw, 'content') || _extractLongField(raw, 'text') || _extractLongField(raw, 'data') || _extractLongField(raw, 'body') || '';
+        return { file_path: pVal, path: pVal, content: cVal };
+    } else if (toolName === 'edit' || toolName === 'server_file_edit') {
+        var epVal = _extractSimpleField(raw, ['file_path', 'path', 'file']);
+        var oVal = _extractLongField(raw, 'old_string') || _extractLongField(raw, 'old_str') || _extractLongField(raw, 'old') || '';
+        var nVal = _extractLongField(raw, 'new_string') || _extractLongField(raw, 'new_str') || _extractLongField(raw, 'new') || '';
+        return { file_path: epVal, path: epVal, old_string: oVal, new_string: nVal };
+    } else if (toolName === 'run_code') {
+        var codeVal = _extractLongField(raw, 'code') || '';
+        var descVal = _extractSimpleField(raw, ['description', 'desc']) || '';
+        return { code: codeVal, description: descVal };
+    } else if (toolName === 'server_exec') {
+        var cmdVal = _extractLongField(raw, 'cmd') || _extractLongField(raw, 'command') || _extractLongField(raw, 'query') || '';
+        return { cmd: cmdVal };
+    } else if (toolName === 'server_python') {
+        var pyVal = _extractLongField(raw, 'script') || _extractLongField(raw, 'code') || _extractLongField(raw, 'cmd') || '';
+        return { script: pyVal };
     }
     return null;
 }
@@ -413,7 +428,7 @@ const ErrorHandler = {
             bubble.classList.remove('typing', 'gen-active', 'streaming');
             var div = document.createElement('div');
             div.className = 'error-message';
-            div.innerHTML = `<span class="error-icon">❌</span> ${escapeHtml(appError.message)}`;
+            div.innerHTML = `<span class="error-icon">${typeof window.getVibeSvg === "function" ? window.getVibeSvg("xCircle", {size:16,className:"text-red-500"}) : ""}</span> ${escapeHtml(appError.message)}`;
             bubble.querySelector('.message-content')?.appendChild(div);
         }
         return appError;
@@ -543,7 +558,8 @@ window._showChainSteps = function(chatId, steps) {
     steps.forEach(function(s) {
         var step = document.createElement('div');
         step.className = 'thinking-step ' + (s.status || 'pending');
-        var icon = s.status === 'done' ? '✅' : (s.status === 'active' ? '\u{1F504}' : '⏳');
+        var iconName = s.status === 'done' ? 'checkCircle' : (s.status === 'active' ? 'spinner' : 'circleDotted');
+        var icon = typeof window.getVibeSvg === 'function' ? window.getVibeSvg(iconName, {size:14,className:'vibe-chain-icon'}) : '';
         step.innerHTML = '<span class="step-icon">' + icon + '</span>' + escapeHtml(s.text);
         container.appendChild(step);
     });
@@ -562,7 +578,7 @@ window._addChainStep = function(chatId, text) {
     }
     // 上一个 active → done
     var steps = container.querySelectorAll('.thinking-step');
-    steps.forEach(function(s) { s.classList.remove('active'); s.classList.add('done'); s.querySelector('.step-icon').textContent = '✅'; });
+    steps.forEach(function(s) { s.classList.remove('active'); s.classList.add('done'); var i=s.querySelector('.step-icon'); if(i)i.innerHTML=typeof window.getVibeSvg==='function'?window.getVibeSvg('checkCircle',{size:14,className:'vibe-chain-icon'}):''; });
     // 新增 active 步骤
     var newStep = document.createElement('div');
     newStep.className = 'thinking-step active';
@@ -580,8 +596,11 @@ window._clearChainSteps = function(chatId) {
 window.stopGeneration = function () {
     if (currentChatId) {
         stopGenerationForChat(currentChatId);
-        if ($.sendBtn) $.sendBtn.classList.remove('hidden');
-        if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(false);
+        else {
+            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        }
     }
 };
 
@@ -614,6 +633,34 @@ function createTemporaryTimestampIfNeeded(text) {
             base += ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ' ' + tz;
         }
         return base;
+    }
+
+    // Tier 0: 金融市场与股票/大盘感知 → 精确时区换算与开盘状态 (防止美股交易时间颠倒与虚假猜测)
+    var financeKeywords = ['股票', '大盘', '行情', '指数', '美股', '港股', 'a股', '纳指', '标普', '道指', '纳斯达克', '费半',
+        'sox', 'nvda', 'aapl', 'tsla', '芯片', '半导体', '股价', '涨跌', '开盘', '收盘', '盘前', '盘后', '跌了', '涨了', '点位', '点数',
+        'stock', 'nasdaq', 'sp500', 'dow', 'futures', '期指', 'bull', 'bear'];
+    if (financeKeywords.some(kw => lowerText.includes(kw))) {
+        var nowUtc = new Date();
+        var m = nowUtc.getUTCMonth() + 1;
+        var isDst = (m >= 3 && m <= 10) || (m === 11 && nowUtc.getUTCDate() < 7);
+        var usOffset = isDst ? -4 : -5;
+        var usDate = new Date(nowUtc.getTime() + usOffset * 3600000);
+        var bjDate = new Date(nowUtc.getTime() + 8 * 3600000);
+        var usW = usDate.getUTCDay();
+        var usMins = usDate.getUTCHours() * 60 + usDate.getUTCMinutes();
+        var usStatus = '夜间闭市';
+        if (usW === 0 || usW === 6) usStatus = '周末休市';
+        else if (usMins >= 570 && usMins < 960) usStatus = '盘中交易中 (美东 09:30~16:00)';
+        else if (usMins >= 240 && usMins < 570) usStatus = '盘前交易中 (美东 04:00~09:30)';
+        else if (usMins >= 960 && usMins < 1200) usStatus = '盘后交易中 (美东 16:00~20:00)';
+
+        var bjStr = bjDate.getUTCFullYear() + '年' + (bjDate.getUTCMonth()+1) + '月' + bjDate.getUTCDate() + '日 ' + daysZh[bjDate.getUTCDay()] + ' ' + pad(bjDate.getUTCHours()) + ':' + pad(bjDate.getUTCMinutes());
+        var usStr = usDate.getUTCFullYear() + '-' + pad(usDate.getUTCMonth()+1) + '-' + pad(usDate.getUTCDate()) + ' ' + pad(usDate.getUTCHours()) + ':' + pad(usDate.getUTCMinutes()) + (isDst ? ' EDT' : ' EST');
+        var financeMsg = '[' + bjStr + ' (UTC+8) | 美东时间 ' + usStr + ' (' + usStatus + ')] 金融与证券市场基准时间。\n' +
+            '⚠️ 严谨准则：\n' +
+            '1. 美东时间比北京时间慢 ' + (isDst ? 12 : 13) + ' 小时。北京时间深夜/凌晨（21:30~次日04:00）是美股白天的常规盘中交易时间，绝非休市！\n' +
+            '2. 查询股票/大盘/指数实时数据必须优先调用 stock_realtime 或 stock_market_overview 工具，严禁凭空推测或强行附会编造解释！';
+        return { role: 'system', content: financeMsg, temporary: true };
     }
 
     // Tier 1: 明确问"现在几点" → 分钟+秒精度
@@ -681,11 +728,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         window._lastMsgTaskId = window.createTask(_msgText, currentChatId);
         console.log('[Agent] 新任务批次开始,taskId=' + window._lastMsgTaskId);
 
-        // ★ 新用户消息: 清除旧计划面板（新任务需要新计划）
-        if (window._agentPlan) {
+        // ★ 用户消息处理：只有当旧计划已全部完成（completed/dismissed）时，才在新任务开始时清理旧计划；进行中的计划保持稳定
+        if (window._agentPlan && (window._agentPlan.status === 'completed' || window._agentPlan.status === 'dismissed')) {
             window.dismissFlowPanel();
             window._agentPlan = null;
-            console.log('[FlowPanel] 新消息，清除旧计划');
+            if (typeof window.clearPlanForChat === 'function') window.clearPlanForChat(currentChatId);
+            console.log('[FlowPanel] 旧计划已完成，开始新任务时清理');
         }
     }
 
@@ -742,6 +790,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     delete userAbortMap[chatId];
 
     if (isTypingMap[chatId]) {
+        // ★ 观察端保护：若当前会话处于 observer 只读流监听或远程生成态，禁止本地推入消息重入
+        if ((window._remoteTypingMap && window._remoteTypingMap[chatId]) ||
+            (window.ResumeStream && window.ResumeStream.peek && window.ResumeStream.peek(chatId) && window.ResumeStream.peek(chatId)._observer)) {
+            console.log('[sendMessage] 当前会话正处于远程设备流生成中(observer)，忽略本地推入');
+            return;
+        }
         // ★ AI 正在生成: 推入对话 (消息立即进入历史, 流结束后自动继续)
         if (!skipUserAdd) {
             var _inputEl = $.userInput;
@@ -755,6 +809,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' + _daysZh[_now.getDay()];
                 var _datePrefix = '[日期: ' + _dateStr + '] ';
                 var userMsg = {
+                    id: 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
                     role: 'user',
                     text: _qText,
                     _datePrefix: _datePrefix,
@@ -771,9 +826,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     appendMessage('user', _qText, userMsg.files, null, null, null, false, null, null, false, -1, true);
                     setTimeout(function() { autoScrollToBottom('inject'); }, 30);
                 }
-                slimSaveChats();
-                if (typeof window._broadcastChatUpdate === 'function') {
-                    window._broadcastChatUpdate(chatId);
+                if (typeof window._saveAndBroadcast === 'function') {
+                    window._saveAndBroadcast(chatId);
+                } else {
+                    slimSaveChats();
+                    if (typeof window._broadcastChatUpdate === 'function') window._broadcastChatUpdate(chatId);
                 }
                 window._hasInjectedMessage = true;
                 showToast('📨 已推入对话，模型将在当前回复后继续处理', 'info', 2500);
@@ -787,7 +844,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     var input = $.userInput;
     let text = skipUserAdd ? userTextForRegen : input?.value.trim() || '';
-    var files = skipUserAdd ? userFilesForRegen : pendingFiles;
+    var files = Array.isArray(skipUserAdd ? userFilesForRegen : pendingFiles) ? (skipUserAdd ? userFilesForRegen : pendingFiles) : (pendingFiles || []);
+    // 工具结果交接后的 sendMessage(true) 是同一条 assistant 轮次的续写，
+    // 不能再创建/替换一个新的聊天消息，否则前一轮已输出的正文会被截断。
+    window.__toolContinuationBaseByChat = window.__toolContinuationBaseByChat || {};
+    var _toolContinuationBase = skipUserAdd ? window.__toolContinuationBaseByChat[chatId] : null;
 
     // ★ 新消息: 重置滚动状态 + 滚动到底部
     if (!skipUserAdd) {
@@ -799,10 +860,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
     // ★ 内部触发时 (skipUserAdd=true): text 可能为 null/undefined, 统一降级
     if (!text && skipUserAdd) { text = ''; }
-    if (!skipUserAdd && !text && !files.length) {
+    if (!skipUserAdd && !text && (!files || !files.length)) {
         stopGenerationForChat(chatId);
-        if ($.sendBtn) $.sendBtn.classList.remove('hidden');
-        if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(false);
+        else {
+            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        }
         return;
     }
 
@@ -819,7 +883,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     window._streamContentRendered = false;
     window._streamCompletedOk = false;  // ★ 流是否正常完成(决定 finally 是否免 loadChat 重建)
     var partialIdx = chats[chatId].messages.findIndex(m => m.partial);
-    if (partialIdx !== -1) chats[chatId].messages.splice(partialIdx, 1);
+    // A tool continuation deliberately reuses the original assistant message;
+    // removing its partial record here would erase the pre-tool preamble before
+    // the follow-up stream has a chance to merge into it.
+    if (partialIdx !== -1 && (!_toolContinuationBase || chats[chatId].messages[partialIdx] !== _toolContinuationBase.message)) {
+        chats[chatId].messages.splice(partialIdx, 1);
+    }
 
     // 停止旧请求(不设置用户停止标记,以便新请求可以正常重试)
     abortExistingRequest(chatId);
@@ -834,12 +903,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     isTypingMap[chatId] = true;
     window._activeStreamChatId = chatId;  // ★ 标记活动流, 防止 fetchModels 中断正在输出的模型
     if (typeof renderChatHistory === 'function') renderChatHistory();  // 后台指示器
-    // ★ 多端同步: 广播流开始到其他设备(非RS路径,引擎侧也会广播)
-    if (typeof window._broadcastEvent === 'function') {
-        window._broadcastEvent('chat:stream_started', { chat_id: chatId, ts: Date.now() });
+    // RS 由后端在 durable task claim 成功后广播唯一的 stream_started；前端预广播没有
+    // stream/msg 身份且会制造重复/乱序。仅直连 HTTP 路径在真正发起前补发一次状态事件。
+    if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(true);
+    else {
+        if ($.sendBtn) $.sendBtn.classList.add('hidden');
+        if ($.stopBtn) $.stopBtn.classList.add('visible');
     }
-    if ($.sendBtn) $.sendBtn.classList.add('hidden');
-    if ($.stopBtn) $.stopBtn.classList.add('visible');
     // ★ AI开始生成:更新队列栏状态
     window._updateQueueUI();
 
@@ -847,15 +917,47 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     var command = parseCommand(text);
     if (command && command.type === 'command') {
         isTypingMap[chatId] = false;
-        if ($.sendBtn) $.sendBtn.classList.remove('hidden');
-        if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(false);
+        else {
+            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        }
         handleSlashCommand(command);
-        input.value = '';
+        if (input && !window._isQueueMessage) {
+            input.value = '';
+            window.autoResize(input);
+        }
         return;
     }
-    var forceSearch = !!command;
-    var queryText = command ? command.query : text;
-    var forcedType = command ? command.kind : null;
+    // 搜索类请求：显式 /search、/news、/image，以及自然语言“帮我找/收集图片”。
+    // 自然语言搜图必须与生图工具硬隔离，不能再让模型仅凭“图片”二字自行猜测。
+    var naturalImageIntent = (!command && typeof window.classifyImageRequestIntent === 'function')
+        ? window.classifyImageRequestIntent(text) : null;
+    var forceSearch = !!((command && command.type === 'search') || naturalImageIntent);
+    var queryText = (command && command.type === 'search')
+        ? (command.query || text)
+        : (naturalImageIntent ? naturalImageIntent.query : text);
+    var forcedType = (command && command.type === 'search')
+        ? command.kind
+        : (naturalImageIntent ? naturalImageIntent.kind : null);
+    // 图片搜索限制是逐轮意图，不写入会话配置。下一条普通生图请求会恢复完整工具集。
+    var imageCommandMode = (forceSearch && forcedType === 'images')
+        ? ((command && command.imageMode) || (naturalImageIntent && naturalImageIntent.imageMode) || 'search_only') : null;
+
+    if (command && command.type === 'search' && !command.query) {
+        isTypingMap[chatId] = false;
+        if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(false);
+        else {
+            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        }
+        appendMessage('system', '💡 请输入搜索关键词。例如: `/' + (forcedType === 'news' ? 'news' : (forcedType === 'images' ? 'image' : 'search')) + ' 今日科技热点`');
+        if (input && !window._isQueueMessage) {
+            input.value = '';
+            window.autoResize(input);
+        }
+        return;
+    }
 
     // 构建历史摘要
     var historySummary = buildHistorySummary(chatId);
@@ -881,17 +983,36 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         var _daysZh = ['周日','周一','周二','周三','周四','周五','周六'];
         var _dateStr = _now.getFullYear() + '年' + (_now.getMonth()+1) + '月' + _now.getDate() + '日 ' + _daysZh[_now.getDay()];
         var _datePrefix = '[日期: ' + _dateStr + '] ';
-        chats[chatId].messages.push({ role: 'user', text: text, _datePrefix: _datePrefix, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
-        // ★ 用户消息发出后立即保存,确保未开新会话时数据不丢
+        var _sentText = text ? String(text).trim() : '';
+        var _userMessageId = 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+        chats[chatId].messages.push({ id: _userMessageId, role: 'user', text: _sentText, _datePrefix: _datePrefix, files: files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })) });
+        chats[chatId].updated_at = Date.now();
+        // 标题必须先于首条服务器保存/广播写入；旧顺序会让其他设备先收到空标题，
+        // 直到下一次会话保存（常见表现为“新建另一个会话后标题才出现”）。
+        var _firstTitle = String(chats[chatId].title || '').trim();
+        if (!_firstTitle || _firstTitle === '新对话' || _firstTitle === 'Agent' || _firstTitle === 'Agent 会话') {
+            chats[chatId].title = _sentText ? _sentText.slice(0, TITLE_MAX_LENGTH) : (files.length ? '文件消息' : '新对话');
+        }
         slimSaveChats();
-        // ★ 多端同步: 广播用户消息已添加到其他设备
-        if (typeof window._broadcastChatUpdate === 'function') {
-            window._broadcastChatUpdate(chatId);
+        // 在当前发送端，用户消息已经直接 push 到内存，无需执行 loadChat 清空重建 DOM
+        if (currentChatId === chatId && typeof appendMessage === 'function') {
+            var _wCont = document.querySelector('.welcome-container, .dsh-welcome-hero');
+            if (_wCont) {
+                _wCont.remove();
+                if ($.chatMessagesContainer) $.chatMessagesContainer.classList.remove('agent-welcome-active');
+            }
+            appendMessage('user', _sentText, files.map(f => ({ name: f.name, content: f.content, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size, type: f.type || (f.isImage ? 'image/' : '') })), null, null, null, false);
+            setTimeout(function() { autoScrollToBottom('send'); }, 30);
         }
-        if (chats[chatId].title === '新对话') {
-            chats[chatId].title = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
+        if (typeof window._saveAndBroadcast === 'function') {
+            window._saveAndBroadcast(chatId);
+        } else {
+            slimSaveChats();
+            if (typeof window.saveSingleChatToServer === 'function') {
+                window.saveSingleChatToServer(chatId, false).catch(function(){});
+            }
+            if (typeof window._broadcastChatUpdate === 'function') window._broadcastChatUpdate(chatId);
         }
-        if (currentChatId === chatId) loadChat(chatId);
         // 输入框已在前面清空
         clearAllFiles();
     } else if (window._isQueueMessage) {
@@ -899,25 +1020,46 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         var _qFiles = (files && files.length > 0) ? files.map(function(f) {
             return { name: f.name, content: f.content || null, serverUrl: f.serverUrl || '', serverPath: f.serverPath || '', size: f.size || 0, type: f.type || (f.isImage ? 'image/' : '') };
         }) : [];
-        chats[chatId].messages.push({ role: 'user', text: text, files: _qFiles });
-        slimSaveChats();
-        // ★ 多端同步: 广播队列消息已添加到其他设备
-        if (typeof window._broadcastChatUpdate === 'function') {
-            window._broadcastChatUpdate(chatId);
+        var _qText = text ? String(text).trim() : '';
+        chats[chatId].messages.push({ id: 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10), role: 'user', text: _qText, files: _qFiles });
+        chats[chatId].updated_at = Date.now();
+        var _queueTitle = String(chats[chatId].title || '').trim();
+        if (!_queueTitle || _queueTitle === '新对话' || _queueTitle === 'Agent' || _queueTitle === 'Agent 会话') {
+            chats[chatId].title = _qText ? _qText.slice(0, TITLE_MAX_LENGTH) : (_qFiles.length ? '文件消息' : '新对话');
         }
-        if (chats[chatId].title === '新对话') {
-            chats[chatId].title = text ? text.slice(0, 10) : (_qFiles.length ? '文件消息' : '新对话');
+        if (typeof window._saveAndBroadcast === 'function') {
+            window._saveAndBroadcast(chatId);
+        } else {
+            slimSaveChats();
+            if (typeof window._broadcastChatUpdate === 'function') window._broadcastChatUpdate(chatId);
         }
         // ★ 立即追加用户气泡到界面
         if (currentChatId === chatId) {
-            appendMessage('user', text, _qFiles, null, null, null, false);
+            appendMessage('user', _qText, _qFiles, null, null, null, false);
             setTimeout(function() { autoScrollToBottom('queue'); }, 30);
         }
     }
 
-    // 创建占位气泡（typing 动画等第一批内容到达时自动移除）
-    var pendingMsg = { role: 'assistant', content: '', reasoning: '', partial: true };
-    chats[chatId].messages.push(pendingMsg);
+    // 创建占位气泡（typing 动画等第一批内容到达时自动移除）。
+    // RS 工具交接会开启一个新的 provider turn，但它仍属于同一条助手回复：
+    // 复用原气泡，只让新 turn 的增量追加到旧正文之后，禁止“搜索结果回来后只剩后半截”。
+    window.__toolContinuationBaseByChat = window.__toolContinuationBaseByChat || {};
+    // Keep provider turns as separate source messages. The visible bubble is
+    // reused, but assistant(tool_calls) -> tool -> assistant(answer) must remain
+    // representable as adjacent wire messages for every subsequent round.
+    var _continuationMessage = null;
+    var pendingMsg = { id: 'asst_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10), role: 'assistant', content: '', reasoning: '', partial: true, model: modelVal || '', provider: (typeof baseUrlProvider !== 'undefined' ? baseUrlProvider : '') };
+    if (_toolContinuationBase) {
+        pendingMsg._toolRoundBaseContent = String(_toolContinuationBase.content || '');
+        pendingMsg._toolRoundBaseReasoning = String(_toolContinuationBase.reasoning || '');
+        pendingMsg._toolVisibleContent = pendingMsg._toolRoundBaseContent;
+        pendingMsg._toolVisibleReasoning = pendingMsg._toolRoundBaseReasoning;
+        // The previous assistant object is already a completed tool-call turn;
+        // keep it non-partial so buildApiMessages preserves its tool pair.
+        delete window.__toolContinuationBaseByChat[chatId];
+    }
+    if (!_continuationMessage) chats[chatId].messages.push(pendingMsg);
+    chats[chatId].updated_at = Date.now();
     let currentBubble = null;
     if (currentChatId === chatId) {
         // ★ 新消息开始: 先清除所有残留的呼吸/生成光晕 (旧流被中止/ID 守卫提前 return 时可能漏清, 导致旧气泡一直发光)
@@ -926,28 +1068,54 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         });
         // ★ 同时移除上一轮的搜索标题滚动条
         document.querySelectorAll('.search-ticker').forEach(function(_t) { _t.remove(); });
-        currentBubble = appendMessage('assistant', '', null, null, null, 0, false);
-        if (currentBubble) currentBubble.classList.add('typing');
-        activeBubbleMap[chatId] = currentBubble;
+        // 工具交接属于同一条可见回复，复用原气泡；普通新请求才创建新气泡。
+        currentBubble = _toolContinuationBase ? (activeBubbleMap[chatId] || null) : null;
+        if (!currentBubble) currentBubble = appendMessage('assistant', '', null, null, null, 0, false);
+        if (currentBubble) {
+            currentBubble.dataset.chatId = chatId;
+            activeBubbleMap[chatId] = currentBubble;
+            currentBubble.classList.add('typing');
+        }
         setTimeout(function() { autoScrollToBottom('sendMessage'); }, 50);
     }
 
     // 执行搜索
     var _modelMiniMax2 = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
     // ★ 修复: MiniMax 也启用工具调用模式,让模型通过 tool_calls 决定何时搜索
-    var useToolCall = getChecked('searchToolCallToggle') || (files.length > 0 && files.some(f => f.isImage || f.type?.startsWith('image/')));
+    var useToolCall = getChecked('searchToolCallToggle') || ((files && files.length > 0) && files.some(f => f.isImage || f.type?.startsWith('image/')));
     let searchResult = { searchPerformed: false, searchResults: null, optimized: null, searchError: null };
-    // 工具调用模式下不主动搜索,让模型通过tool_calls决定何时搜索
-    if (!useToolCall && (getChecked('searchToggle') || forceSearch)) {
+    // 工具调用模式下通常让模型自行决定是否搜索；但显式 /search、/news、/image
+    // 属于确定性用户命令，必须直接执行，不能被 searchToolCallToggle 绕过后交给模型猜测。
+    // 否则 /image 会和 generate_image 的“图片”语义竞争，模型容易误选生图工具。
+    if (forceSearch || (!useToolCall && getChecked('searchToggle'))) {
         searchResult = await handleSearchFlow(chatId, text, forceSearch, queryText, historySummary, abortSearch.signal, currentBubble, forcedType);
     }
 
     // 保存搜索结果
     if (searchResult.searchPerformed && searchResult.optimized) {
+        var _searchPayload = searchResult.optimized;
+        if (forceSearch && forcedType === 'images') {
+            // 缓存最新搜图结果供同轮或后续“参考搜索结果生图”使用；每次 /image 覆盖当前聊天旧结果。
+            window._imageSearchRefsByChat = window._imageSearchRefsByChat || {};
+            var _imageRefs = (searchResult.searchResults || []).map(function(r, i) {
+                return {
+                    url: r.thumbnail || r.image_url || r.url || '',
+                    sourceUrl: r.url || '',
+                    title: r.title || ('搜索图片 ' + (i + 1)),
+                    index: i
+                };
+            }).filter(function(r) { return !!r.url; });
+            window._imageSearchRefsByChat[chatId] = { items: _imageRefs, updatedAt: Date.now() };
+            if (imageCommandMode === 'search_and_generate') {
+                _searchPayload = '【图片搜索复合任务】已完成互联网图片搜索。用户还明确要求参考搜索结果继续生成图片。本轮允许调用 generate_image_i2i；优先传 reference_source="search_results"，可用 reference_indexes 选择搜索结果序号。若用户要求独立创作而非参考，也可调用 generate_image。请先利用下方结果，再完成生成步骤。\n\n' + _searchPayload;
+            } else {
+                _searchPayload = '【图片搜索任务】用户本轮只要求搜索、查找或收集互联网上已有的图片，不是创作新图片。只允许展示搜索工具实际返回的 thumbnail/image_url；每张图片必须同时保留对应的 sourceUrl 来源页面。若搜索工具没有返回真实图片 URL，必须明确说未取得可验证直链并仅提供来源页，严禁根据文件名、目录、哈希或摘要自行猜测/拼接图片直链，也严禁推荐公共代理、修改 Referer 或声称未实际验证的 URL 可访问。严禁调用任何生图工具。若用户后续明确提出创作，下一轮仍可正常生图。\n\n' + _searchPayload;
+            }
+        }
         if (getChecked('searchAppendToSystem')) {
-            chats[chatId].messages.push({ role: 'system', content: searchResult.optimized });
+            chats[chatId].messages.push({ role: 'system', content: _searchPayload });
         } else {
-            chats[chatId].messages.push({ role: 'system', content: searchResult.optimized, temporary: true });
+            chats[chatId].messages.push({ role: 'system', content: _searchPayload, temporary: true });
         }
     }
 
@@ -1045,6 +1213,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 构建API消息
     // ★ 提前设置 MiniMax 标记,供 buildApiMessages 使用
     window.__isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
+    // ★ deepseek 等原生多模态模型必须自身看图（不做外部视觉替换）：保留 image_url 直传。
+    window.__skipVisionPayload = false;
     let apiMessages = buildApiMessages(chatId);
 
     // ★ 注入历史图片分析缓存,避免模型重复调用 analyze_image 工具
@@ -1273,7 +1443,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // 官方当前仅提供 LongCat-2.0，避免历史/搜索模型覆盖后带错模型名。
     if (_isLongCatRequest) model = 'LongCat-2.0';
     var _isNativeAnthropic = _baseUrl.indexOf('api.anthropic.com') >= 0;
-    var _supportsAnthropic = _isNativeAnthropic || _baseUrl.indexOf('api.deepseek.com') >= 0 || _baseUrl.indexOf('api.minimaxi.com') >= 0 || _baseUrl.indexOf('api.minimax.io') >= 0 || _baseUrl.indexOf('api.longcat.chat') >= 0;
+    // 自定义提供商、Anthropic 官方、CLIProxyAPI 及兼容端点均支持在用户开启开关后使用 Anthropic 协议
+    var _supportsAnthropic = _isNativeAnthropic || _baseUrl.indexOf('api.deepseek.com') >= 0 || _baseUrl.indexOf('api.minimaxi.com') >= 0 || _baseUrl.indexOf('api.minimax.io') >= 0 || _baseUrl.indexOf('api.longcat.chat') >= 0 || _providerName === 'custom' || _providerName === 'anthropic' || _baseUrl.indexOf('gpt.naujtrats.xyz') >= 0;
     var _useAnthropicFormat = _isNativeAnthropic || (_supportsAnthropic && localStorage.getItem('useAnthropicFormat') === '1');
     let _aSysContent = '';
     // ★ Anthropic 消息转换 (可复用, 供初始构建和工具循环重建调用)
@@ -1293,7 +1464,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (c.type==='video_url') return {type:'video',source:{type:'url',url:c.video_url.url}};
                     return c;
                 });
-            } else if (_m.role === 'assistant' && _m.tool_calls) {
+            } else if (_m.role === 'assistant' && Array.isArray(_m.tool_calls) && _m.tool_calls.length) {
                 var _blocks = [];
                 var _rc = _m.reasoning_content || _m.reasoning || '';
                 if (_rc && _rc.trim()) _blocks.push({type:'thinking',thinking:_rc});
@@ -1396,6 +1567,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         temperature: parseFloat(getVal('temperature')) || 0.7,
         max_tokens: requestedTokens
     };
+    // ★ 统计权威：以最终实际发给上游的 body.model 为准，避免选择器旧值把所有新调用记成 Gemini。
+    pendingMsg.model = body.model || modelVal || '';
+    pendingMsg.provider = (typeof baseUrlProvider !== 'undefined' ? baseUrlProvider : '');
+    // Canonicalize OpenAI tool turns before any retry/format-specific cleanup.
+    if (!_useAnthropicFormat && Array.isArray(body.messages) && typeof normalizeToolMessagePairs === 'function') {
+        body.messages = normalizeToolMessagePairs(body.messages, 'request-build');
+    }
 
     // ★ 思考强度分级 (全局生效，覆盖 LongCat/MiniMax 原有独立设置)
     var _thinkingIntensity = localStorage.getItem('thinkingIntensity') || 'medium';
@@ -1404,6 +1582,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         Object.keys(_tp).forEach(function(_k) {
             if (_tp[_k] === undefined) delete body[_k]; else body[_k] = _tp[_k];
         });
+        // 请求参数会因提供商映射到 reasoning_effort/thinking_level/thinking，
+        // 但统计需要保留用户实际选择的统一强度，不能只依赖 reasoning 文本猜测。
+        pendingMsg.effort = _thinkingIntensity;
+        body.effort = _thinkingIntensity;
+    } else {
+        // 模型名自带档位后缀检测 (如 gemini-3.8-flash-high -> high)
+        var _mEffortMatch = String(modelName || '').match(/-(off|minimal|low|medium|high|xhigh|max)$/i);
+        if (_mEffortMatch) {
+            pendingMsg.effort = _mEffortMatch[1].toLowerCase();
+            body.effort = pendingMsg.effort;
+        }
     }
 
     // ★ 按模型配置限制 max_tokens 上限 (如 LongCat 限制 ≤131072)
@@ -1476,19 +1665,21 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         } else {
             tools = tools.concat(imageTools);
         }
-        // 文件读取/搜索/解析(基础操作,不限制)
-        tools.push(SERVER_FILE_READ_TOOL);
-        tools.push(SERVER_FILE_SEARCH_TOOL);
-        tools.push(SERVER_FILE_GREP_TOOL);
+        // DSH 标准 Coding 工具作为模型唯一入口；旧 server_file_* 仅保留执行兼容层，不再重复暴露 Schema。
+        if (typeof READ_TOOL !== 'undefined') tools.push(READ_TOOL);
+        if (typeof GREP_TOOL !== 'undefined') tools.push(GREP_TOOL);
+        if (typeof GLOB_TOOL !== 'undefined') tools.push(GLOB_TOOL);
+        if (typeof TODO_WRITE_TOOL !== 'undefined') tools.push(TODO_WRITE_TOOL);
+        if (typeof PROJECT_SELF_DESCRIBE_TOOL !== 'undefined') tools.push(PROJECT_SELF_DESCRIBE_TOOL);
         if (typeof PARSE_DOCUMENT_TOOL !== 'undefined') tools.push(PARSE_DOCUMENT_TOOL);
         // ★ B站工具 — 始终可用(只读获取)
         tools.push({type:'function',function:{name:'bilibili_search',description:'综合搜索B站内容(视频/专栏/用户)',parameters:{type:'object',properties:{keyword:{type:'string',description:'搜索关键词'},search_type:{type:'string',description:'video/article/bili_user,默认video'},limit:{type:'integer',description:'返回条数,默认10'}},required:['keyword']}}});
         tools.push({type:'function',function:{name:'bilibili_video_info',description:'获取B站视频详情(标题/UP主/播放量/弹幕/分P)',parameters:{type:'object',properties:{bvid:{type:'string',description:'视频BV号或AV号或b23.tv链接'}},required:['bvid']}}});
         tools.push({type:'function',function:{name:'bilibili_article_read',description:'阅读B站专栏文章全文',parameters:{type:'object',properties:{cvid:{type:'string',description:'专栏cv号或URL'}},required:['cvid']}}});
         tools.push({type:'function',function:{name:'bilibili_user_profile',description:'获取B站用户主页(昵称/粉丝/投稿)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'}},required:['uid']}}});
-        tools.push({type:'function',function:{name:'bilibili_comment_list',description:'获取B站视频/专栏评论',parameters:{type:'object',properties:{oid:{type:'string',description:'目标ID(视频BV号)'},type:{type:'integer',description:'评论类型:1=视频,12=专栏,默认1'},limit:{type:'integer',description:'条数,默认20'}},required:['oid']}}});
+        tools.push({type:'function',function:{name:'bilibili_comment_list',description:'获取B站视频/专栏/动态评论。单页最多20条，limit>20时工具自动分页，最大100。',parameters:{type:'object',properties:{oid:{type:'string',description:'目标ID(视频BV号/专栏cv号/动态ID)'},type:{type:'integer',description:'评论类型:1=视频,12=专栏,17=动态,默认1',enum:[1,12,17]},limit:{type:'integer',description:'返回条数1-100,默认20',minimum:1,maximum:100}},required:['oid']}}});
         tools.push({type:'function',function:{name:'bilibili_dynamic_list',description:'获取B站动态流(需登录)',parameters:{type:'object',properties:{uid:{type:'string',description:'用户UID'},limit:{type:'integer',description:'条数,默认10'}},required:['uid']}}});
-        tools.push({type:'function',function:{name:'bilibili_qr_login',description:'B站扫码登录。两步流程:①action=qr生成二维码(立即返回)→②action=poll轮询等待扫码(阻塞,拿到结果前不要回复用户)。action=auto一键完成两步。',parameters:{type:'object',properties:{action:{type:'string',description:'qr=生成二维码(返回后必须立即调poll); poll=阻塞等待扫码(不要中断); auto=一键登录',enum:['check','qr','poll','auto']},qrcode_key:{type:'string',description:'poll时传入qr返回的key'},timeout:{type:'integer',description:'超时秒数(默认120)'}},required:['action']}}});
+        tools.push({type:'function',function:{name:'bilibili_qr_login',description:'B站扫码登录。网页端会像超星扫码一样自动单独展示二维码(base64)，禁止上传到Cloudreve或调用cr_upload_file/video_cloudreve_url获取链接；qr生成后必须直接用qrcode_key调用poll等待扫码，action=auto可一键完成。',parameters:{type:'object',properties:{action:{type:'string',description:'qr=生成二维码(返回后必须立即调poll); poll=阻塞等待扫码(不要中断); auto=一键登录',enum:['check','qr','poll','auto']},qrcode_key:{type:'string',description:'poll时传入qr返回的key'},timeout:{type:'integer',description:'超时秒数(默认120)'}},required:['action']}}});
         // PPT生成 — 始终可用
         if (typeof GENERATE_PPT_TOOL !== 'undefined') tools.push(GENERATE_PPT_TOOL);
         // toggle_proxy — 始终可用(非Agent也可用，弹窗确认)
@@ -1500,48 +1691,51 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             tools.push(ASK_AGENT_TOOL);
         }
 
-        // ★ 临时授权的有效范围: 仅当前对话的临时授权才启用 B 类工具
-        var _effectiveAgent = agentModeActive || _hasTempForThisChat;
+        // ★ 临时授权与 Plan 模式的有效范围: 仅当前对话的临时授权或 Agent/Plan 模式才启用对应工具
+        var _isPlan = typeof isPlanMode === 'function' && isPlanMode();
+        var _effectiveAgent = agentModeActive || _hasTempForThisChat || _isPlan;
 
-        // ===== B 类工具: Agent 模式启用后额外可用 =====
+        // ===== B 类工具: Agent / YOLO / Plan 模式启用后额外可用 =====
         if (_effectiveAgent) {
             // RAG 搜索(仅当搜索关闭时加入,避免重复)
             if (!searchOn || !window.RAG_ENABLED) {
                 if (window.RAG_ENABLED) tools.push(RAG_SEARCH_TOOL_DEFINITION);
                 else if (!searchOn) tools.push(RAG_SEARCH_TOOL_DEFINITION);
             }
-            // 服务器操控工具
-            tools.push(SERVER_EXEC_TOOL);
-            tools.push(SERVER_PYTHON_TOOL);
-            tools.push(SERVER_FILE_WRITE_TOOL);
-            tools.push(SERVER_FILE_EDIT_TOOL);
-            tools.push(SERVER_FILE_OP_TOOL);
-            tools.push(SERVER_SYS_INFO_TOOL);
-            tools.push(SERVER_PS_TOOL);
-            tools.push(SERVER_DISK_TOOL);
-            tools.push(SERVER_NETWORK_TOOL);
-            tools.push(SERVER_DOCKER_TOOL);
-            tools.push(SERVER_DB_QUERY_TOOL);
-            // 引擎/Agent工具
-            tools.push(ENGINE_CRON_LIST_TOOL);
-            tools.push(ENGINE_CRON_CREATE_TOOL);
-            tools.push(ENGINE_CRON_DELETE_TOOL);
-            tools.push(DELEGATE_TASK_TOOL);
-            tools.push(DELEGATE_WORKFLOW_TOOL);
-            tools.push(ENGINE_AGENT_STATUS_TOOL);
-            tools.push(ENGINE_AGENT_LIST_TOOL);
-            tools.push(ENGINE_AGENT_DELETE_TOOL);
-            tools.push(ENGINE_AGENT_ASK_TOOL);
-            tools.push(ENGINE_PUSH_TOOL);
-            // 计划更新工具(Agent模式)
+            if (!_isPlan) {
+                // run_code 为优先聚合入口；标准底层工具保留给简单单步调用与兼容模型。
+                if (typeof RUN_CODE_TOOL !== 'undefined') tools.push(RUN_CODE_TOOL);
+                if (typeof BASH_TOOL !== 'undefined') tools.push(BASH_TOOL);
+                if (typeof WRITE_TOOL !== 'undefined') tools.push(WRITE_TOOL);
+                if (typeof EDIT_TOOL !== 'undefined') tools.push(EDIT_TOOL);
+                tools.push(SERVER_FILE_OP_TOOL);
+                tools.push(SERVER_SYS_INFO_TOOL);
+                tools.push(SERVER_PS_TOOL);
+                tools.push(SERVER_DISK_TOOL);
+                tools.push(SERVER_NETWORK_TOOL);
+                tools.push(SERVER_DOCKER_TOOL);
+                tools.push(SERVER_DB_QUERY_TOOL);
+                // 引擎/Agent工具
+                tools.push(ENGINE_CRON_LIST_TOOL);
+                tools.push(ENGINE_CRON_CREATE_TOOL);
+                tools.push(ENGINE_CRON_DELETE_TOOL);
+                tools.push(DELEGATE_TASK_TOOL);
+                tools.push(DELEGATE_WORKFLOW_TOOL);
+                tools.push(ENGINE_AGENT_STATUS_TOOL);
+                tools.push(ENGINE_AGENT_LIST_TOOL);
+                tools.push(ENGINE_AGENT_DELETE_TOOL);
+                tools.push(ENGINE_AGENT_ASK_TOOL);
+                tools.push(ENGINE_PUSH_TOOL);
+                // ===== 浏览器工具(Agent模式) =====
+                tools.push(BROWSER_NAVIGATE_TOOL);
+                tools.push(BROWSER_SCREENSHOT_TOOL);
+                tools.push(BROWSER_CLICK_TOOL);
+                tools.push(BROWSER_TYPE_TOOL);
+                tools.push(BROWSER_GET_CONTENT_TOOL);
+                tools.push(BROWSER_GET_SNAPSHOT_TOOL);
+            }
+            // 计划更新工具(Agent模式与Plan模式均可用)
             tools.push(PLAN_UPDATE_TOOL);
-            // ===== 浏览器工具(Agent模式) =====
-            tools.push(BROWSER_NAVIGATE_TOOL);
-            tools.push(BROWSER_SCREENSHOT_TOOL);
-            tools.push(BROWSER_CLICK_TOOL);
-            tools.push(BROWSER_TYPE_TOOL);
-            tools.push(BROWSER_GET_CONTENT_TOOL);
-            tools.push(BROWSER_GET_SNAPSHOT_TOOL);
             // web_fetch 已在 searchOn 分支添加,此处不再重复
         }
 
@@ -1569,10 +1763,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (agentModeActive) {
             if (typeof WIN_TOOLS !== 'undefined') WIN_TOOLS.forEach(function(t) { tools.push(t); });
         }
-        // ===== MiniMax CLI 工具(始终注册,不受Agent模式影响) =====
-        if (typeof MMX_TOOLS !== 'undefined') {
-            MMX_TOOLS.forEach(function(t) { tools.push(t); });
-        }
         // ===== Cloudreve 云盘工具(始终注册) =====
         if (typeof CLOUDREVE_TOOLS !== 'undefined') {
             if (typeof CLOUDREVE_TOOLS !== 'undefined') CLOUDREVE_TOOLS.forEach(function(t) { tools.push(t); });
@@ -1595,7 +1785,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             try { _customSkills = JSON.parse(localStorage.getItem('customSkills') || '[]'); } catch(e) {}
             for (var _csi = 0; _csi < _customSkills.length; _csi++) {
                 var _cs = _customSkills[_csi];
-                if (typeof _cs === 'object' && _cs.function && _cs.function.name) {
+                if (typeof _cs === 'object' && _cs.function && _cs.function.name && !_cs.function.name.startsWith('mmx_')) {
                     tools.push(_cs);
                 }
             }
@@ -1611,7 +1801,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // ★ MCP 服务器工具(始终注册, 来自已连接的外部 MCP 服务器)
         if (typeof window.getMcpToolsForChat === 'function') {
             var _mcpTools = window.getMcpToolsForChat();
-            _mcpTools.forEach(function(t) { tools.push(t); });
+            // 原生工具定义优先；过滤外部 MCP 的同名旧实现，避免重复 Schema 让模型/执行器选错路由。
+            var _nativeNames = new Set(tools.filter(function(t){ return t && t.function && t.function.name; }).map(function(t){ return t.function.name; }));
+            _mcpTools.forEach(function(t) {
+                var _mcpName = t && t.function && t.function.name;
+                if (_mcpName && !_nativeNames.has(_mcpName)) { tools.push(t); _nativeNames.add(_mcpName); }
+            });
         }
         // ★ 智能工具注入: 根据用户输入动态添加匹配技能的工具
         (function() {
@@ -1734,11 +1929,6 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 'win_restart': 'WIN_RESTART_TOOL',
                 'win_file': 'WIN_FILE_TOOL',
                 'win_screenshot': 'WIN_SCREENSHOT_TOOL',
-                // MiniMax 工具
-                'mmx_chat': 'MMX_CHAT_TOOL', 'mmx_speech': 'MMX_SPEECH_TOOL',
-                'mmx_music': 'MMX_MUSIC_TOOL', 'mmx_voices': 'MMX_VOICES_TOOL',
-                'mmx_quota': 'MMX_QUOTA_TOOL', 'mmx_image': 'MMX_IMAGE_TOOL',
-                'mmx_video': 'MMX_VIDEO_TOOL', 'mmx_vision': 'MMX_VISION_TOOL',
                 // Cloudreve 工具
                 'cr_login': 'CR_LOGIN_TOOL', 'cr_user_info': 'CR_USER_INFO_TOOL',
                 'cr_list_files': 'CR_LIST_FILES_TOOL', 'cr_search_files': 'CR_SEARCH_FILES_TOOL',
@@ -1803,6 +1993,14 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // ★ 暴露映射供 renderToolPanel 自动发现新工具
             window._toolToggleMap = _toolFuncNameToToggleKey;
         })();
+        // 纯 /image 搜图才逐轮隐藏生图 Schema；复合“搜图→参考生成”保留工具。
+        // 该变量由当前输入计算，不进入 localStorage/chats，下一轮自动恢复。
+        if (imageCommandMode === 'search_only') {
+            tools = tools.filter(function(t) {
+                var _name = t && t.function && t.function.name;
+                return _name !== 'generate_image' && _name !== 'generate_image_i2i';
+            });
+        }
         // ★ 检查模型是否已在"不支持工具"列表中(自动降级 + 模型配置内置)
         var _noToolModels = JSON.parse(localStorage.getItem('noToolModels') || '[]');
         // 匹配方式: 列表中的模式如果出现在模型名中就算匹配
@@ -1858,10 +2056,20 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // LongCat: OpenAI /openai/v1/chat → Anthropic /anthropic/v1/messages
             delete body.tool_choice;
             body._anthropicUrl = _baseClean.replace(/\/openai\/v1\/?$/, '') + '/anthropic/v1/messages';
-        } else {
-            // DeepSeek/MiniMax 等: 去 /v1, 拼 /anthropic/v1/messages
+        } else if (_baseUrl2.indexOf('api.deepseek.com') >= 0 || _baseUrl2.indexOf('api.minimaxi.com') >= 0 || _baseUrl2.indexOf('api.minimax.io') >= 0) {
+            // DeepSeek/MiniMax: 去 /v1, 拼 /anthropic/v1/messages
             delete body.tool_choice;
             body._anthropicUrl = _baseClean.replace(/\/v1\/?$/, '').replace(/\/anthropic\/?$/, '') + '/anthropic/v1/messages';
+        } else {
+            // 自定义中继 / CLIProxyAPI / OneAPI: 统一使用 /v1/messages
+            delete body.tool_choice;
+            if (_baseClean.endsWith('/messages')) {
+                body._anthropicUrl = _baseClean;
+            } else if (_baseClean.endsWith('/v1')) {
+                body._anthropicUrl = _baseClean + '/messages';
+            } else {
+                body._anthropicUrl = _baseClean + '/v1/messages';
+            }
         }
         delete body.stream_options;
         // ★ 预检清除空 tool_use_id 的 tool_result（防止 400）
@@ -1973,7 +2181,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     var startTime = Date.now();
 
     // 网络错误重试配置
-    var maxRetries = 3;
+    var maxRetries = 5;
     var _longCatPlainRetryUsed = false;
     // Agent 模式使用自定义最大工具调用轮次
     var maxToolCalls = parseInt(localStorage.getItem('agentMaxToolRounds')) || 1000;
@@ -2002,7 +2210,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     function _fixAllToolCalls(msgs) {
         for (var i = 0; i < msgs.length; i++) {
             var m = msgs[i];
-            if (m.role === 'assistant' && m.tool_calls) {
+            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
                 for (var j = 0; j < m.tool_calls.length; j++) {
                     var tc = m.tool_calls[j];
                     if (tc.function && typeof tc.function.arguments === 'string') {
@@ -2018,11 +2226,12 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         }
     }
     // ★ 终极修复:在发送前对 body 中所有 tool_calls 的 arguments 做 parse+stringify 重编码
+    if (!Array.isArray(body.messages)) body.messages = [];
     _fixAllToolCalls(body.messages);
     // 附加:对 MiniMax 流式产生的 arguments 做深度重编码
     for (var _mi = 0; _mi < body.messages.length; _mi++) {
         var _mm = body.messages[_mi];
-        if (_mm.role === 'assistant' && _mm.tool_calls) {
+        if (_mm && _mm.role === 'assistant' && Array.isArray(_mm.tool_calls)) {
             for (var _tj = 0; _tj < _mm.tool_calls.length; _tj++) {
                 var _tc = _mm.tool_calls[_tj];
                 if (_tc.function && typeof _tc.function.arguments === 'string') {
@@ -2152,7 +2361,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                 }
                                 if (_tu.incomplete) {
                                     _hadIncompleteToolUse = true;
-                                    console.warn('[A-Stream] tool_use 未完成(可能被截断), 丢弃: ' + _tu.name + ' input=' + JSON.stringify((_tu.input_json || '').substring(0, 120)));
+                                    console.warn('[A-Stream] tool_use 未完成(可能被截断), 丢弃:', _tu.name, 'input_length=' + String(_tu.input_json || '').length);
                                 } else {
                                     _toolCalls.push({ id: _tu.id, type: 'function', function: { name: _tu.name, arguments: JSON.stringify(_input) } });
                                 }
@@ -2276,6 +2485,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             if (body.messages) {
                 for (var _etci2 = 0; _etci2 < body.messages.length; _etci2++) {
                     var _em3 = body.messages[_etci2];
+                    if (!_em3 || typeof _em3 !== 'object') continue;
                     if (_em3.role === 'assistant' && _em3.tool_calls !== undefined && _em3.tool_calls !== null) {
                         if (!Array.isArray(_em3.tool_calls) || _em3.tool_calls.length === 0) {
                             delete _em3.tool_calls;
@@ -2283,37 +2493,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                 }
             }
-            // ★ 修复: 确保每个 tool_calls 都有对应的 tool response (DeepSeek API 要求)
-            if (body.messages) {
-                var _pendingToolCallIds = {};  // tool_call_id -> 是否已回复
-                for (var _ti2 = 0; _ti2 < body.messages.length; _ti2++) {
-                    var _msg2 = body.messages[_ti2];
-                    if (_msg2.role === 'assistant' && _msg2.tool_calls && _msg2.tool_calls.length > 0) {
-                        for (var _ci = 0; _ci < _msg2.tool_calls.length; _ci++) {
-                            var _callId = _msg2.tool_calls[_ci] && _msg2.tool_calls[_ci].id;
-                            if (_callId) _pendingToolCallIds[_callId] = true;
-                        }
-                    } else if (_msg2.role === 'tool' && _msg2.tool_call_id) {
-                        delete _pendingToolCallIds[_msg2.tool_call_id];
-                    }
-                }
-                // 如果有未回复的 tool_calls, 删除这些 assistant 消息的 tool_calls
-                var _orphanedCount = Object.keys(_pendingToolCallIds).length;
-                if (_orphanedCount > 0) {
-                    console.warn('[SafeSend] 发现', _orphanedCount, '个未回复的 tool_calls, 自动清理');
-                    for (var _ti3 = 0; _ti3 < body.messages.length; _ti3++) {
-                        var _msg3 = body.messages[_ti3];
-                        if (_msg3.role === 'assistant' && _msg3.tool_calls) {
-                            // 只保留有回复的 tool_calls
-                            _msg3.tool_calls = _msg3.tool_calls.filter(function(_tc) {
-                                return !_tc.id || !_pendingToolCallIds[_tc.id];
-                            });
-                            if (_msg3.tool_calls.length === 0) {
-                                delete _msg3.tool_calls;
-                            }
-                        }
-                    }
-                }
+            // ★ 原子校验工具轮：结果必须紧邻 assistant 且按 tool_call_id 一一对应。
+            // 旧版按全局 ID 统计会留下“半截 assistant + 孤立 tool”组合。
+            if (Array.isArray(body.messages) && typeof normalizeToolMessagePairs === 'function') {
+                body.messages = normalizeToolMessagePairs(body.messages, 'SafeSend');
             }
             // ★ 终极防护: 每次发送前检查 no-tool 列表,确保不发送 tools
             var _curSendModel = getVal('modelSelect') || '';
@@ -2347,9 +2530,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             }
 
+            // Keep custom-provider routing authoritative. Model names such as Gemini may
+            // be aliases implemented by CLIProxyAPI and must not silently switch endpoints.
+            var _requestBaseUrl = getVal('baseUrl') || '';
+            var _requestApiKey = getVal('apiKey') || '';
             // ★ MiniMax 直连: 自定义 URL 和 API Key
-            var _fallbackAUrl = getVal('baseUrl').replace(/\/+$/, '').replace(/\/v1\/?$/, '').replace(/\/anthropic\/?$/, '') + '/anthropic/v1/messages';
-            var _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || _fallbackAUrl) : getVal('baseUrl') + '/chat/completions';
+            var _fallbackAUrl = _requestBaseUrl.replace(/\/+$/, '').replace(/\/v1\/?$/, '').replace(/\/anthropic\/?$/, '') + '/anthropic/v1/messages';
+            var _reqUrl = _useAnthropicFormat ? (body._anthropicUrl || _fallbackAUrl) : _requestBaseUrl.replace(/\/$/, '') + '/chat/completions';
             // ★ 保留 body._anthropicUrl 供重试使用
             var _reqBody = JSON.parse(JSON.stringify(body));
             // 统一声明,后续两个分支都会赋值
@@ -2381,9 +2568,16 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 window.___assignedTcIds = {}; // ★ 每次请求重置 ID 分配追踪
                 for (var _viFix = 0; _viFix < body.messages.length; _viFix++) {
                     var _mFix = body.messages[_viFix];
+                    if (!_mFix || typeof _mFix !== 'object') {
+                        body.messages[_viFix] = {role: 'user', content: ''};
+                        _mFix = body.messages[_viFix];
+                    }
                     if (!_mFix.content && _mFix.content !== 0) {
-                        console.warn('[FIX] messages[' + _viFix + '] missing content, role=' + _mFix.role);
-                        _mFix.content = '(empty)';
+                        if (_mFix.role === 'assistant' && Array.isArray(_mFix.tool_calls) && _mFix.tool_calls.length > 0) {
+                            _mFix.content = null;
+                        } else {
+                            _mFix.content = '';
+                        }
                     }
                     if (_mFix.role === 'tool' && !_mFix.tool_call_id) {
                         // ★ 向前查找匹配的 tool_calls ID（不能用随机 fake ID）
@@ -2391,7 +2585,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         if (!window.___assignedTcIds) window.___assignedTcIds = {};
                         for (var _tli2 = _viFix - 1; _tli2 >= 0; _tli2--) {
                             var _prevM = body.messages[_tli2];
-                            if (_prevM.role === 'assistant' && _prevM.tool_calls) {
+                            if (_prevM && _prevM.role === 'assistant' && Array.isArray(_prevM.tool_calls)) {
                                 for (var _ttj = _prevM.tool_calls.length - 1; _ttj >= 0; _ttj--) {
                                     var _candId = _prevM.tool_calls[_ttj].id;
                                     if (_candId && !window.___assignedTcIds[_candId]) {
@@ -2424,6 +2618,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     }
                 }
             }
+            // 最后一道前端防线：恢复/竞态留下的半截工具轮次不允许进入 RS 或直连 provider。
+            if (Array.isArray(body.messages) && typeof normalizeToolMessagePairs === 'function') {
+                body.messages = normalizeToolMessagePairs(body.messages, 'pre-request');
+            }
 
             // ★ 可恢复流式: 开关打开时走后端引擎
             // ★ MiniMax 模型强制流式（非流式工具调用容易超时/中断）
@@ -2434,28 +2632,57 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             // ★ 工具链的每一轮都建立独立可恢复流。旧版第 9 轮后退回直连，
             // 深工具链恰好在后半段刷新时仍会中断，违背“刷新不断”的语义。
             // ★ Anthropic 格式也支持 RS (引擎新增Anthropic Messages API流式分支)
-            var _useRS = _rsEnabled;
+            var _useRS = _rsEnabled && !_isImageModel;
+            function _isTerminalProviderError(errorText) {
+                var value = String(errorText || '').toLowerCase();
+                return value.indexOf('api key not valid') !== -1
+                    || value.indexOf('invalid api key') !== -1
+                    || value.indexOf('invalid_api_key') !== -1
+                    || value.indexOf('authentication') !== -1
+                    || value.indexOf('unauthorized') !== -1
+                    || value.indexOf('permission_denied') !== -1;
+            }
             if (_useRS) {
-                // ★ 先持久化用户消息到服务器，防止刷新丢失
+                // ★ 单会话快照已在用户消息写入时异步落盘；不要在首 token 关键路径等待
+                // 全量 all.json 的 GET→合并→POST。该低频备份在网络抖动时可能被超时中止，
+                // 旧逻辑因此把每轮可恢复流的创建推迟 10 秒以上。
+                // 引擎 chat_create 自身会先持久化 msg_id/流快照，故即使此处后台保存尚未结束，
+                // 刷新仍可按 msg_id 继续同一个权威流。
                 saveChats();
+                if (typeof saveSingleChatToServer === 'function') {
+                    saveSingleChatToServer(chatId, false).catch(function() {});
+                }
                 // ★ 通过引擎后端创建可恢复流，刷新/断线后无感续接
                 var _rsResult = await ResumeStream.create(
                     body.messages,
-                    { model: body.model, apiKey: getVal('apiKey'), baseUrl: getVal('baseUrl'),
-                      temp: body.temperature, tokens: body.max_tokens, tools: body.tools,
+                    { model: body.model, apiKey: _requestApiKey, baseUrl: _requestBaseUrl,
+                      temp: body.temperature, tokens: body.max_completion_tokens || body.max_tokens, tools: body.tools,
+                      requestBody: body,
                       // ★ Anthropic格式: 传递标志+端点,使RS也支持Anthropic Messages API
                       anthropicFormat: _useAnthropicFormat,
                       anthropicUrl: body._anthropicUrl || '',
                       system: body.system || '',
-                      thinking: body.thinking || null },
+                      thinking: body.thinking || null,
+                      // ★ 思考参数透传 (Gemini reasoning_effort/thinking_level/effort/extra_body)
+                      effort: pendingMsg.effort || body.effort || _thinkingIntensity,
+                      reasoningEffort: body.reasoning_effort,
+                      thinkingLevel: body.thinking_level,
+                      extraBody: body.extra_body },
                     chatId, pendingMsg
                 );
-                console.log('[RS-DEBUG] _rsResult:', _rsResult ? ('fullText=' + (_rsResult.fullText||'').substring(0,60) + ' toolCalls=' + (_rsResult.toolCalls||[]).length + ' completed=' + _rsResult.completed + ' error=' + (_rsResult.error||'none')) : 'NULL');
+                console.log('[RS-DEBUG] _rsResult:', _rsResult ? ('text_length=' + (_rsResult.fullText||'').length + ' tool_calls=' + (_rsResult.toolCalls||[]).length + ' completed=' + _rsResult.completed + ' has_error=' + !!_rsResult.error) : 'NULL');
                 // ★ 停止键: 用户停止时不回退直连(否则会重新发请求继续生成)
                 if (_rsResult && _rsResult.aborted) {
                     console.warn('[RS] 用户已停止, 不再回退直连');
                     if (userAbortMap[chatId]) throw new Error('用户停止');
                     throw new Error('RS: 流已中断');
+                }
+                if (_rsResult && (_rsResult.authFailure || _rsResult.status === 401 || _rsResult.status === 403)) {
+                    var _authMessage = _rsResult.error || '登录状态失效或无权访问引擎';
+                    var _authError = new Error(_authMessage);
+                    _authError.code = _rsResult.errorCode || (_rsResult.status === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN');
+                    _authError.status = _rsResult.status;
+                    throw _authError;
                 }
                 // LongCat 开启思考后可能在 max_tokens 内只产出 reasoning、正文为空。
                 // ★ 保留推理内容直接展示，不丢弃推理去 retry（用户宁可看到推理也不愿它消失）
@@ -2464,13 +2691,22 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     console.warn('[LongCat] 仅收到思考内容，保留推理直接展示（不 retry）');
                     body.thinking = { type: 'disabled' };
                 }
-                if (_rsResult && (_rsResult.fullText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
+                if (_rsResult && (_rsResult.fullText || _rsResult.reasoningText || (_rsResult.toolCalls && _rsResult.toolCalls.length > 0))) {
                     if (!_rsResult.completed) {
+                        if (_rsResult.disconnected && !_rsResult.error) {
+                            // 网络 reset 只断开当前浏览器 reader，后端仍持有唯一生产者。保留 partial
+                            // 与恢复身份，禁止回退直连重复请求或 finally 用旧快照覆盖。
+                            pendingMsg.content = _rsResult.fullText || pendingMsg.content || '';
+                            pendingMsg.reasoning = _rsResult.reasoningText || pendingMsg.reasoning || '';
+                            pendingMsg.partial = true;
+                            slimSaveChats();
+                            throw Object.assign(new Error('RS_TRANSPORT_DETACHED'), { code: 'RS_TRANSPORT_DETACHED', transportDetached: true });
+                        }
                         if (_rsResult.error) {
                             var _rsErrStr = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
                             // 400/网络错误: 回退HTTP直连重试
-                            if (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk') || _rsErrStr.includes('sensitive') || _rsErrStr.includes('422') || _rsErrStr.includes('Connection error') || _rsErrStr.includes('connect') || _rsErrStr.includes('timeout')) {
-                                console.warn('[RS] 引擎连接失败(' + _rsErrStr + '), 回退HTTP直连重试'); window.__rsFallbackRetry = true;
+                            if (!_isTerminalProviderError(_rsErrStr) && (_rsErrStr.includes('400') || _rsErrStr.includes('Content Exists Risk') || _rsErrStr.includes('sensitive') || _rsErrStr.includes('422') || _rsErrStr.includes('Connection error') || _rsErrStr.includes('connect') || _rsErrStr.includes('timeout'))) {
+                                console.info('[RS] 上游请求未接受(' + _rsErrStr + '), 回退HTTP直连重试'); window.__rsFallbackRetry = true;
                                 _useRS = false;
                                 var _rsDone = false;
                             } else {
@@ -2498,24 +2734,27 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         delete pendingMsg.partial;
                         pendingMsg.time = Date.now() - startTime;
                         pendingMsg.usage = usage;
-                        saveChats(true);  // ★ 强制服务器保存+广播到其他设备
-                        // ★ 多端同步: 广播 RS 完成到其他设备
-                        if (typeof window._broadcastChatUpdate === 'function') {
-                            window._broadcastChatUpdate(chatId);
-                        }
+                        // saveChats 内部在服务器持久化完成后再广播，避免其他设备读到旧快照。
+                        saveChats(true);
                     }
                 } else {
                     if (_rsResult && _rsResult.error) {
                         var _rsErrStr2 = typeof _rsResult.error === 'string' ? _rsResult.error : JSON.stringify(_rsResult.error);
-                        // 400安全过滤: 回退HTTP直连走safety_filter重试
-                        if (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk') || _rsErrStr2.includes('Connection error') || _rsErrStr2.includes('connect') || _rsErrStr2.includes('timeout')) {
-                            console.warn('[RS] 400安全过滤(空结果), 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
+                        // Only content/network failures may use the HTTP fallback. Credential
+                        // failures are terminal: replaying the same billable request cannot fix them.
+                        if (!_isTerminalProviderError(_rsErrStr2) && (_rsErrStr2.includes('400') || _rsErrStr2.includes('Content Exists Risk') || _rsErrStr2.includes('Connection error') || _rsErrStr2.includes('connect') || _rsErrStr2.includes('timeout'))) {
+                            console.info('[RS] 上游安全过滤(空结果), 回退HTTP直连重试(保留完整消息)'); window.__rsFallbackRetry = true;
                             _useRS = false;
                             var _rsDone = false;
                         } else {
                             throw new Error('RS: ' + _rsErrStr2);
                         }
                     } else {
+                        if (_rsResult && _rsResult.completed) {
+                            var _emptyRsError = new Error('模型流已结束，但未返回正文、思考或工具调用');
+                            _emptyRsError.code = 'EMPTY_RESPONSE';
+                            throw _emptyRsError;
+                        }
                         console.warn('[RS] Engine stream failed/unavailable, falling back to direct HTTP');
                         _useRS = false;
                         var _rsDone = false;
@@ -2524,6 +2763,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
             } else { var _rsDone = false; }
 
             if (!_useRS && !_rsDone) {
+            // 直连 HTTP 没有后端 durable stream_started 广播，在请求真正开始前只发一次。
+            if (typeof window._broadcastEvent === 'function' && !pendingMsg._directStreamStartedBroadcast) {
+                pendingMsg._directStreamStartedBroadcast = true;
+                window._broadcastEvent('chat:stream_started', {
+                    chat_id: chatId, msg_id: pendingMsg.id || '', ts: Date.now(), model: modelVal || '', transport: 'direct'
+                });
+            }
             // ★ LongCat 清理: 剥离所有非标准字段,防止 apply_chat_template 'list object' 错误
             //    LongCat 的 apply_chat_template 不支持 reasoning_content/reasoning_details 等非标准字段,
             //    迭代消息时会尝试调用 .items() 导致 'list object' has no attribute 'items' 错误
@@ -2572,7 +2818,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
             }
             // ★ 统一走 proxyFetch: 代理OFF直连(走系统代理)→失败回退proxy.php中继; 代理ON走proxy.php+外部代理
-            var _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getVal('apiKey') };
+            var _headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _requestApiKey };
             var _wireBody = JSON.parse(JSON.stringify(body));
             delete _wireBody._anthropicUrl; // 仅为本地路由元数据，不发给上游
             var res = await window.proxyFetch(_reqUrl, {
@@ -2631,24 +2877,38 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         console.warn('[STREAM] 流中断, 丢弃 ' + toolCalls.length + ' 个未确认的工具调用');
                         toolCalls = [];
                     }
-                    // ★ 成本追踪: 累加 token 用量
+                    // ★ 成本追踪: 累加 token 用量并记入使用统计
                     if (usage) {
                         var _pt = usage.prompt_tokens || usage.input_tokens || 0;
                         var _ct = usage.completion_tokens || usage.output_tokens || 0;
                         sessionUsage.promptTokens += _pt;
                         sessionUsage.completionTokens += _ct;
-                        // ★ 统一提取缓存命中(多模型格式: DeepSeek/OpenAI/Anthropic/Gemini/Grok)
+                        // ★ 统一提取缓存命中与缓存写入(多模型格式: DeepSeek/OpenAI/Anthropic/Gemini/Grok)
                         var _cHit = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                        var _cWrite = (window._extractCacheWrite ? window._extractCacheWrite(usage, body.model || currentModel, _pt, _cHit) : 0);
                         sessionUsage.prefixCacheHits += _cHit;
                         if (_cHit > 0) {
                             var _ptBase = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt || _ct;
                             sessionUsage.cacheHitTokens += _cHit;
                             sessionUsage.cacheMissTokens += (_ptBase > _cHit) ? (_ptBase - _cHit) : 0;
                         }
+                        if (_cWrite > 0) {
+                            sessionUsage.cacheWriteTokens = (sessionUsage.cacheWriteTokens || 0) + _cWrite;
+                        }
                         // 估算费用 (基于 DeepSeek V4 定价: $0.5/M input, $2/M output)
                         var pt = _pt / 1000000;
                         var ct = _ct / 1000000;
                         sessionUsage.totalCost += pt * 0.5 + ct * 2;
+                        if (typeof window.recordUsageStats === 'function') {
+                            window.recordUsageStats({
+                                usage: usage,
+                                durationMs: Date.now() - startTime,
+                                model: body.model || (typeof currentModel !== 'undefined' ? currentModel : ''),
+                                provider: baseUrlProvider,
+                                chatId: chatId,
+                                effort: pendingMsg.effort || body.effort || body.reasoning_effort || _thinkingIntensity || ''
+                            });
+                        }
                     }
                     // ★ 确保 reasoning 从结果同步到 pendingMsg(流式期间可能未完全同步)
                     if (result.reasoningText) {
@@ -2670,7 +2930,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _nsFetchFn = window.proxyFetch;  // ★ 统一走 proxyFetch: 直连→回退
                         var _nsRes = await _nsFetchFn(_reqUrl, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getVal('apiKey')}` },
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_requestApiKey}` },
                             body: JSON.stringify(_nsBody),
                             signal: abortCtrl.signal
                         });
@@ -2684,15 +2944,29 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                             sessionUsage.promptTokens += _pt2;
                             sessionUsage.completionTokens += _ct2;
                             var _cHit2 = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                            var _cWrite2 = (window._extractCacheWrite ? window._extractCacheWrite(usage, _nsBody.model || currentModel, _pt2, _cHit2) : 0);
                             sessionUsage.prefixCacheHits += _cHit2;
                             if (_cHit2 > 0) {
                                 var _ptBase2 = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt2 || _ct2;
                                 sessionUsage.cacheHitTokens += _cHit2;
                                 sessionUsage.cacheMissTokens += (_ptBase2 > _cHit2) ? (_ptBase2 - _cHit2) : 0;
                             }
+                            if (_cWrite2 > 0) {
+                                sessionUsage.cacheWriteTokens = (sessionUsage.cacheWriteTokens || 0) + _cWrite2;
+                            }
                             var pt2 = _pt2 / 1000000;
                             var ct2 = _ct2 / 1000000;
                             sessionUsage.totalCost += pt2 * 0.5 + ct2 * 2;
+                            if (typeof window.recordUsageStats === 'function') {
+                                window.recordUsageStats({
+                                    usage: usage,
+                                    durationMs: Date.now() - startTime,
+                                    model: _nsBody.model || (typeof currentModel !== 'undefined' ? currentModel : ''),
+                                    provider: baseUrlProvider,
+                                    chatId: chatId,
+                                    effort: pendingMsg.effort || _nsBody.effort || _nsBody.reasoning_effort || _thinkingIntensity || ''
+                                });
+                            }
                         }
                         toolCalls = _nsResult.toolCalls || [];
                         if (_nsResult.generatedImages && _nsResult.generatedImages.length > 0) {
@@ -2711,7 +2985,17 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                                     // ★ 上传到服务器,确保刷新后图片不消失 (兼容新旧格式)
                                     if (_imgSfUrl && !_imgSfUrl.startsWith(window.location.origin) && !_imgSfUrl.startsWith('/oneapichat')) {
                                         (function(_origSf, _sfIdx, _metaRef) {
-                                            uploadImageToServer(_origSf).then(function(srvUrl) {
+                                            var _nameHint = (typeof _metaRef === 'object' && _metaRef.prompt) ? _metaRef.prompt : '';
+                                            uploadImageToServer(_origSf, {
+                                                name: _nameHint,
+                                                persistGenerated: true,
+                                                chatId: chatId,
+                                                messageIndex: chats[chatId] && chats[chatId].messages
+                                                    ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1,
+                                                prompt: _nameHint,
+                                                model: (typeof _metaRef === 'object' && _metaRef.model) || '',
+                                                aspect_ratio: (typeof _metaRef === 'object' && _metaRef.aspect_ratio) || '1:1'
+                                            }).then(function(srvUrl) {
                                                 if (srvUrl) {
                                                     // ★ 新格式: 更新对象 url 字段; 旧格式: 替换数组元素
                                                     if (typeof _metaRef === 'object' && _metaRef.url) {
@@ -2786,15 +3070,29 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     sessionUsage.promptTokens += _pt3;
                     sessionUsage.completionTokens += _ct3;
                     var _cHit3 = (window._extractCacheHit ? window._extractCacheHit(usage) : 0);
+                    var _cWrite3 = (window._extractCacheWrite ? window._extractCacheWrite(usage, body.model || currentModel, _pt3, _cHit3) : 0);
                     sessionUsage.prefixCacheHits += _cHit3;
                     if (_cHit3 > 0) {
                         var _ptBase3 = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || _pt3 || _ct3;
                         sessionUsage.cacheHitTokens += _cHit3;
                         sessionUsage.cacheMissTokens += (_ptBase3 > _cHit3) ? (_ptBase3 - _cHit3) : 0;
                     }
+                    if (_cWrite3 > 0) {
+                        sessionUsage.cacheWriteTokens = (sessionUsage.cacheWriteTokens || 0) + _cWrite3;
+                    }
                     var pt3 = _pt3 / 1000000;
                     var ct3 = _ct3 / 1000000;
                     sessionUsage.totalCost += pt3 * 0.5 + ct3 * 2;
+                    if (typeof window.recordUsageStats === 'function') {
+                        window.recordUsageStats({
+                            usage: usage,
+                            durationMs: Date.now() - startTime,
+                            model: body.model || (typeof currentModel !== 'undefined' ? currentModel : ''),
+                            provider: baseUrlProvider,
+                            chatId: chatId,
+                            effort: pendingMsg.effort || body.effort || body.reasoning_effort || _thinkingIntensity || ''
+                        });
+                    }
                 }
                 toolCalls = result.toolCalls || [];
                 // ★ 图像模型生成的图片 — 直接插入 DOM (不依赖后续渲染)
@@ -2806,75 +3104,59 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                         var _ph = currentBubble.querySelector('#image-placeholder');
                         if (_ph) _ph.remove();
                     }
-                    // ★ 直接插入图片到气泡
+                    result.generatedImages.forEach(function(_imgData, _idx) {
+                        var _imgDataUrl = typeof _imgData === 'string' ? _imgData : (_imgData && _imgData.url ? _imgData.url : '');
+                        var _exists = pendingMsg.generatedImages.some(function(e) {
+                            return (typeof e === 'string' ? e : (e && e.url ? e.url : '')) === _imgDataUrl;
+                        });
+                        if (!_exists) {
+                            pendingMsg.generatedImages.push(_imgData);
+                            if (_idx === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _imgData;
+                            if (_imgDataUrl && !_imgDataUrl.startsWith(window.location.origin) && !_imgDataUrl.startsWith('/oneapichat')) {
+                                (function(_origUrl, _di, _metaRef) {
+                                    var _nameHint2 = (typeof _metaRef === 'object' && _metaRef.prompt) ? _metaRef.prompt : '';
+                                    uploadImageToServer(_origUrl, {
+                                        name: _nameHint2,
+                                        persistGenerated: true,
+                                        chatId: chatId,
+                                        messageIndex: chats[chatId] && chats[chatId].messages
+                                            ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1,
+                                        prompt: _nameHint2,
+                                        model: (typeof _metaRef === 'object' && _metaRef.model) || '',
+                                        aspect_ratio: (typeof _metaRef === 'object' && _metaRef.aspect_ratio) || '1:1'
+                                    }).then(function(srvUrl) {
+                                        if (srvUrl) {
+                                            if (typeof _metaRef === 'object' && _metaRef.url) {
+                                                _metaRef.url = srvUrl;
+                                            } else {
+                                                var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
+                                                if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
+                                                if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
+                                            }
+                                            var _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
+                                            if (_cmi !== -1) {
+                                                var _cmsg = chats[chatId].messages[_cmi];
+                                                if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _metaRef) {
+                                                    if (typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                    else _cmsg.generatedImages[_di] = srvUrl;
+                                                }
+                                                if (_cmsg.generatedImage === _metaRef && typeof _metaRef === 'object') _metaRef.url = srvUrl;
+                                                else if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
+                                            }
+                                        }
+                                    }).catch(function(e) {
+                                        console.warn('[ImageModel] 上传直接生成图片失败:', e.message);
+                                    });
+                                })(_imgDataUrl, _idx, _imgData);
+                            }
+                        }
+                    });
+                    // ★ 直接渲染图片到气泡
                     var _targetBubble = currentBubble || activeBubbleMap[chatId];
                     if (_targetBubble) {
-                        var _imgCont = _targetBubble.querySelector('.generated-images-container');
-                        if (!_imgCont) {
-                            _imgCont = document.createElement('div');
-                            _imgCont.className = 'generated-images-container';
-                            _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-                            _targetBubble.appendChild(_imgCont);
+                        if (typeof window.renderGeneratedImagesIntoBubble === 'function') {
+                            window.renderGeneratedImagesIntoBubble(_targetBubble, pendingMsg.generatedImages);
                         }
-                        result.generatedImages.forEach(function(_imgData, _idx) {
-                            var _imgDataUrl = typeof _imgData === 'string' ? _imgData : (_imgData && _imgData.url ? _imgData.url : '');
-                            // ★ URL 去重 (对象引用不同但 URL 相同则跳过)
-                            var _exists = pendingMsg.generatedImages.some(function(e) {
-                                return (typeof e === 'string' ? e : (e && e.url ? e.url : '')) === _imgDataUrl;
-                            });
-                            if (!_exists) {
-                                pendingMsg.generatedImages.push(_imgData);
-                                if (_idx === 0 && !pendingMsg.generatedImage) pendingMsg.generatedImage = _imgData;
-                                // ★ 上传到服务器,确保刷新后图片不消失 (兼容新旧格式)
-                                if (_imgDataUrl && !_imgDataUrl.startsWith(window.location.origin) && !_imgDataUrl.startsWith('/oneapichat')) {
-                                    (function(_origUrl, _di, _metaRef) {
-                                        uploadImageToServer(_origUrl).then(function(srvUrl) {
-                                            if (srvUrl) {
-                                                // ★ 新格式: 更新对象 url; 旧格式: 替换数组元素
-                                                if (typeof _metaRef === 'object' && _metaRef.url) {
-                                                    _metaRef.url = srvUrl;
-                                                } else {
-                                                    var _posDi = pendingMsg.generatedImages.indexOf(_origUrl);
-                                                    if (_posDi !== -1) pendingMsg.generatedImages[_posDi] = srvUrl;
-                                                    if (pendingMsg.generatedImage === _origUrl) pendingMsg.generatedImage = srvUrl;
-                                                }
-                                                // ★ 同步到 chats
-                                                var _cmi = chats[chatId] && chats[chatId].messages ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1;
-                                                if (_cmi !== -1) {
-                                                    var _cmsg = chats[chatId].messages[_cmi];
-                                                    if (_cmsg.generatedImages && _cmsg.generatedImages[_di] === _metaRef) {
-                                                        if (typeof _metaRef === 'object') _metaRef.url = srvUrl;
-                                                        else _cmsg.generatedImages[_di] = srvUrl;
-                                                    }
-                                                    if (_cmsg.generatedImage === _metaRef && typeof _metaRef === 'object') _metaRef.url = srvUrl;
-                                                    else if (_cmsg.generatedImage === _origUrl) _cmsg.generatedImage = srvUrl;
-                                                }
-                                            }
-                                        }).catch(function(e) {
-                                            console.warn('[ImageModel] 上传直接生成图片失败:', e.message);
-                                        });
-                                    })(_imgData, _idx);
-                                }
-                            }
-                            // ★ 去重 DOM: 检查是否已有相同 src 的图片
-                            var _existingImgs = _imgCont.querySelectorAll('img');
-                            var _alreadyExists = false;
-                            for (var _exi = 0; _exi < _existingImgs.length; _exi++) {
-                                if (_existingImgs[_exi].src === (_imgData.startsWith('data:') ? _imgData : _imgData)) {
-                                    _alreadyExists = true; break;
-                                }
-                            }
-                            if (_alreadyExists) return;
-                            var _wrap = document.createElement('div');
-                            _wrap.style.cssText = 'position:relative;cursor:pointer;';
-                            var _imgEl = document.createElement('img');
-                            _imgEl.src = _imgData.startsWith('data:') ? _imgData : _imgData;
-                            _imgEl.decoding = 'async';
-                            _imgEl.style.cssText = 'max-width:320px;width:100%;border-radius:8px;display:block;';
-                            _imgEl.onerror = function() { _imgEl.style.display = 'none'; };
-                            _wrap.appendChild(_imgEl);
-                            _imgCont.appendChild(_wrap);
-                        });
                         _targetBubble.classList.remove('typing');
                     }
                 } else {
@@ -2926,19 +3208,31 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 // 过滤掉没有有效function.arguments的碎片
                 var validToolCalls = toolCalls.filter(tc => tc && tc.function && tc.function.name && (typeof tc.function.arguments === 'object' || (typeof tc.function.arguments === 'string' && tc.function.arguments.length >= 2)));
 
-                // ★ 死循环防护1: 同轮内按 "名称+参数" 去重
-                // 模型曾在单轮响应里复读 76 个完全相同的 video_download(同一磁力)，全部被执行导致 79 个重复 aria2 任务。
-                // 去重必须在 normalizedToolCalls 之前做, 保证 assistant 消息的 tool_calls 与实际执行的调用一一对应。
+                // ★ 死循环防护1: 同轮内按“名称+规范化参数”去重。
+                // 不使用模型生成的 tool_call id：同一次语义调用在 RS/HTTP 重放时常换 id，
+                // 也不直接 JSON.stringify：仅键顺序不同的等价对象必须判为同一调用。
+                function _stableToolValue(_value) {
+                    if (Array.isArray(_value)) return _value.map(_stableToolValue);
+                    if (_value && typeof _value === 'object') {
+                        var _out = {};
+                        Object.keys(_value).sort().forEach(function(_k) { _out[_k] = _stableToolValue(_value[_k]); });
+                        return _out;
+                    }
+                    return _value;
+                }
+                function _semanticToolKey(_tc) {
+                    var _fn = _tc && _tc.function || {};
+                    var _ta = _fn.arguments;
+                    try { if (typeof _ta === 'string') _ta = JSON.parse(_ta); } catch(_e) {
+                        try { _ta = tolerantToolInput(_fn.name || '', String(_ta || '')) || String(_ta || ''); } catch(_e2) { _ta = String(_ta || ''); }
+                    }
+                    try { return (_fn.name || '') + '|' + JSON.stringify(_stableToolValue(_ta)); }
+                    catch(_e3) { return (_fn.name || '') + '|' + String(_ta || ''); }
+                }
                 var _seenToolKey = {};
                 var _dedupToolCount = 0;
                 validToolCalls = validToolCalls.filter(function(tc) {
-                    var _ta = tc.function.arguments;
-                    var _key;
-                    try {
-                        _key = tc.function.name + '|' + (typeof _ta === 'string' ? JSON.stringify(JSON.parse(_ta)) : JSON.stringify(_ta));
-                    } catch(e) {
-                        _key = tc.function.name + '|' + String(_ta);
-                    }
+                    var _key = _semanticToolKey(tc);
                     if (_seenToolKey[_key]) { _dedupToolCount++; return false; }
                     _seenToolKey[_key] = true;
                     return true;
@@ -2960,61 +3254,51 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     var argStr = typeof tc.function.arguments === 'string'
                         ? tc.function.arguments
                         : JSON.stringify(tc.function.arguments || {});
-                    // ★ 修复: 确保 arguments 是合法 JSON 字符串(和 executeToolCallForRetry 相同的修复)
+                    // ★ 修复: 确保 arguments 是合法 JSON 字符串
                     try { JSON.parse(argStr); } catch(_e) { argStr = repairToolArguments(argStr); }
-                    // ★ 最终验证: 如果JSON仍无效, 用正则提取参数重新序列化
+                    // ★ 最终验证: 如果JSON仍无效, 优先大文本容错提取
                     try { JSON.parse(argStr); } catch(_argErr) {
-                        console.warn('[normalize] 修复后JSON仍无效, 正则提取:', tc.function.name, _argErr.message);
-                        var _fixed2 = {};
-                        // ★ 预清理: AI有时输出 {, 开头等畸形JSON
-                        var _workStr = argStr;
-                        // 移除开头的 { 后的逗号: {, → {
-                        _workStr = _workStr.replace(/^\{\s*,/, '{');
-                        // 移除末尾 ,} : {...,} → {...}
-                        _workStr = _workStr.replace(/,\s*\}$/, '}');
-                        // 移除重复逗号: ,, → ,
-                        _workStr = _workStr.replace(/,\s*,/g, ',');
-                        // 尝试替换单引号 key/value 为双引号
-                        var _cleanStr = _workStr.replace(/'([^'\\]*)'/g, '"$1"');
-                        try { JSON.parse(_cleanStr); argStr = _cleanStr; _fixed2 = null; } catch(_e2) {
-                        // 双引号 key: string value
-                        var _r = /"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g, _rm;
-                        while ((_rm = _r.exec(_workStr)) !== null) _fixed2[_rm[1]] = _rm[2];
-                        // 双引号 key: number/boolean/null value
-                        var _r2 = /"(\w+)"\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
-                        while ((_rm = _r2.exec(_workStr)) !== null) {
-                            var _v = _rm[2];
-                            _fixed2[_rm[1]] = _v === 'true' ? true : _v === 'false' ? false : _v === 'null' ? null : parseFloat(_v);
-                        }
-                        // 无引号 key (AI有时输出 {key:value} 格式)
-                        var _r3 = /(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"/g;
-                        while ((_rm = _r3.exec(_workStr)) !== null) { if (!_fixed2[_rm[1]]) _fixed2[_rm[1]] = _rm[2]; }
-                        // 无引号 key: number
-                        var _r4 = /(\w+)\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
-                        while ((_rm = _r4.exec(_workStr)) !== null) {
-                            if (!_fixed2[_rm[1]]) {
-                                var _v4 = _rm[2];
-                                _fixed2[_rm[1]] = _v4 === 'true' ? true : _v4 === 'false' ? false : _v4 === 'null' ? null : parseFloat(_v4);
-                            }
-                        }
-                        // 如果仍然没有提取到任何参数, 保留原始 argStr (让后续工具自己报错)
-                        if (Object.keys(_fixed2).length === 0) {
-                            console.warn('[normalize] 无法从JSON中提取任何参数, 原始:', argStr.substring(0, 200));
-                            argStr = '{}';
+                        console.warn('[normalize] 修复后JSON仍无效, 容错提取:', tc.function.name, _argErr.message);
+                        var _tExtracted = tolerantToolInput(tc.function.name, argStr);
+                        if (_tExtracted && Object.keys(_tExtracted).length > 0) {
+                            argStr = JSON.stringify(_tExtracted);
                         } else {
-                            argStr = JSON.stringify(_fixed2);
-                        }
-                        }  // end catch _e2
-                    }
-                    // 针对 engine_agent_create 的 prompt 做特殊处理:截断过长内容
-                    if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
-                        try {
-                            var parsed = JSON.parse(argStr);
-                            if (parsed.prompt && parsed.prompt.length > 500) {
-                                parsed.prompt = parsed.prompt.substring(0, 500) + '...(截断)请完成后用 engine_push 推送结果给用户';
-                                argStr = JSON.stringify(parsed);
+                            var _fixed2 = {};
+                            var _workStr = argStr;
+                            _workStr = _workStr.replace(/^\{\s*,/, '{').replace(/,\s*\}$/, '}').replace(/,\s*,/g, ',');
+                            var _cleanStr = _workStr.replace(/'([^'\\]*)'/g, '"$1"');
+                            try { JSON.parse(_cleanStr); argStr = _cleanStr; _fixed2 = null; } catch(_e2) {
+                                var _r = /"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g, _rm;
+                                while ((_rm = _r.exec(_workStr)) !== null) _fixed2[_rm[1]] = _rm[2];
+                                var _r2 = /"(\w+)"\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
+                                while ((_rm = _r2.exec(_workStr)) !== null) {
+                                    var _v = _rm[2];
+                                    _fixed2[_rm[1]] = _v === 'true' ? true : _v === 'false' ? false : _v === 'null' ? null : parseFloat(_v);
+                                }
+                                var _r3 = /(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+                                while ((_rm = _r3.exec(_workStr)) !== null) { if (!_fixed2[_rm[1]]) _fixed2[_rm[1]] = _rm[2]; }
+                                var _r4 = /(\w+)\s*:\s*(-?\d+(?:\.\d+)?|true|false|null)/g;
+                                while ((_rm = _r4.exec(_workStr)) !== null) {
+                                    if (!_fixed2[_rm[1]]) {
+                                        var _v4 = _rm[2];
+                                        _fixed2[_rm[1]] = _v4 === 'true' ? true : _v4 === 'false' ? false : _v4 === 'null' ? null : parseFloat(_v4);
+                                    }
+                                }
+                                if (Object.keys(_fixed2).length === 0) {
+                                    console.warn('[normalize] 无法从JSON中提取任何参数:', tc.function.name, 'argument_length=' + argStr.length);
+                                    argStr = '{}';
+                                } else {
+                                    argStr = JSON.stringify(_fixed2);
+                                }
                             }
-                        } catch(e) {}
+                        }
+                    }
+                    // engine_agent_create 的任务描述是子代理完成质量的核心上下文。
+                    // 旧逻辑在 500 字处硬截断并强塞 engine_push 指令，既会丢失需求，
+                    // 又会诱导子代理直接向用户推送未经主代理核验的数字/文件。现在保留完整 prompt；
+                    // 上下文总预算由请求层统一控制，不在工具参数层静默改写用户任务。
+                    if (tc.function.name === 'engine_agent_create' && argStr.length > 2000) {
+                        console.info('[normalize] 保留完整 engine_agent_create prompt, argument_length=' + argStr.length);
                     }
                     // ★ 修复: 清理 tool_call_id(避免非法字符导致 400)
                     var tcId = tc.id || '';
@@ -3038,10 +3322,10 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 // 在任何工具 await 之前先持久化 assistant.tool_calls 与恢复日志。
                 // RS 路径可能已经写入同一批原始 tool_calls，这里按 id/签名合并，
                 // 避免刷新恢复后出现重复调用或孤立 tool result。
+                // RS 与当前解析批次可能用不同 id 描述同一个调用；合并必须以语义参数为权威，
+                // 否则 pendingMsg 会同时保留两份，刷新恢复时同一工具可能被执行两次。
                 var _toolCallKey = function(_tc) {
-                    if (_tc && _tc.id) return 'id:' + _tc.id;
-                    var _fn = _tc && _tc.function || {};
-                    return 'fn:' + (_fn.name || '') + '|' + (typeof _fn.arguments === 'string' ? _fn.arguments : JSON.stringify(_fn.arguments || {}));
+                    return _semanticToolKey(_tc);
                 };
                 var _mergedToolCalls = [];
                 var _seenToolCallKeys = {};
@@ -3060,6 +3344,11 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 // ★ 死循环检测: 记录本轮全部工具调用 + 整轮检测
                 // (软触发已在 recordToolCall 内计数; hard 直接中止请求止损)
                 if (_guard) {
+                    // ★ 修复:RS 续接或流结束后,确保 contentLen 与 pendingMsg.content 同步,
+                    // 避免 recordRound 用过期的 contentLen 误判为纯工具轮
+                    if (pendingMsg.content && typeof pendingMsg.content === 'string') {
+                        _guard.feedText(pendingMsg.content);
+                    }
                     normalizedToolCalls.forEach(function(_ntc) {
                         try { _guard.recordToolCall(_ntc.function.name, JSON.parse(_ntc.function.arguments || '{}')); } catch(_lgE) {}
                     });
@@ -3071,6 +3360,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                 }
                 var assistantMsg = {
                     role: 'assistant',
+                    // The API receives only this provider turn. The visible
+                    // pre-tool text is carried separately in _toolVisibleContent
+                    // and merged by the renderer on the next turn.
                     content: (typeof pendingMsg.content === 'string' && pendingMsg.content.trim())
                         ? pendingMsg.content
                         : (pendingMsg.reasoning || ' '),
@@ -3089,9 +3381,9 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
 
                 // 工具调用函数(使用独立的AbortController)
                 async function executeToolCallForRetry(tc, abortSignal) {
-                    // ★ 按需加载 tools-exec.js (101KB, 仅在第一次工具执行时加载)
-                    if (!window.executeToolCallForRetry && window.__LAZY_TOOLS_EXEC) {
-                        await ensureScript(window.__LAZY_TOOLS_EXEC);
+                    // Resolve tool execution through the discovered client plugin manifest.
+                    if (!window.executeToolCallForRetry && window.OneAPIChatPlugins) {
+                        await window.OneAPIChatPlugins.ensure('tool-execution');
                     }
                     return await window.executeToolCallForRetry(tc, abortSignal, {
                         body: body, pendingMsg: pendingMsg, chatId: chatId,
@@ -3130,18 +3422,25 @@ window.useAlternativeVisionModel = function() {
 // 核心原理: 模型同一轮发出的所有工具调用本质上是独立的（模型在发出前看不到任何结果），
 // 因此默认全部并行执行。只有明确标记为"需串行"的工具才排除。
 //
-// 需串行的工具（有副作用冲突风险或依赖去重逻辑）:
-//   - video_download/bili_download: 一次性下载，重复调用会开多个 aria2 任务
-//   - video_upload_cloudreve/cr_upload_file/cr_create_share: 一次性上传/分享
-//   - server_file_write/server_file_append: 同路径写入可能冲突
+// ★ DSH Vibe Coding 规范：所有具有写入、编辑、删除或命令副作用的工具必须串行执行，
+// 仅有纯读/搜索工具（read/grep/glob/web_search/web_fetch 等）允许 Promise.all 并行。
 var _sequentialOnlyTools = Object.create(null);
+_sequentialOnlyTools['write'] = true;
+_sequentialOnlyTools['edit'] = true;
+_sequentialOnlyTools['server_file_write'] = true;
+_sequentialOnlyTools['server_file_edit'] = true;
+_sequentialOnlyTools['server_file_write_chunked'] = true;
+_sequentialOnlyTools['server_file_append'] = true;
+_sequentialOnlyTools['server_file_op'] = true;
+_sequentialOnlyTools['bash'] = true;
+_sequentialOnlyTools['server_exec'] = true;
+_sequentialOnlyTools['server_python'] = true;
+_sequentialOnlyTools['run_code'] = true;
 _sequentialOnlyTools['video_download'] = true;
 _sequentialOnlyTools['bili_download'] = true;
 _sequentialOnlyTools['video_upload_cloudreve'] = true;
 _sequentialOnlyTools['cr_upload_file'] = true;
 _sequentialOnlyTools['cr_create_share'] = true;
-_sequentialOnlyTools['server_file_write'] = true;
-_sequentialOnlyTools['server_file_append'] = true;
 
 var _parallelToolResults = {};
 var _parallelToolIndices = new Set();
@@ -3256,6 +3555,21 @@ if (_parallelToolIndices.size >= 2) {
                         window.ResumeStream.markToolRunning(chatId, tc, _toolExecIndex);
                     }
                     if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', _argPreview, 'running', chatId, tc.id || '');
+                    // ★ 多端同步广播：实时向其他设备广播工具开始执行事件，让 Observer 端毫秒级呈现进度
+                    if (typeof window._broadcastEvent === 'function') {
+                        window._broadcastEvent('agent:tool_status', {
+                            chat_id: chatId,
+                            tool: tc.function?.name || '...',
+                            preview: _argPreview,
+                            status: 'running',
+                            tool_call_id: tc.id || ''
+                        });
+                    }
+                    // 实时保存工具轨迹，流式生成中也能立即展示步骤。
+                    if (pendingMsg) {
+                        pendingMsg._liveToolCalls = pendingMsg._liveToolCalls || [];
+                        pendingMsg._liveToolCalls.push({ id: tc.id || '', name: tc.function?.name || '...', preview: _argPreview, status: 'running', startedAt: Date.now() });
+                    }
 
                     // ★ 记录工具开始时间（用于详情卡片展示耗时）
                     var _toolStartTime = Date.now();
@@ -3307,7 +3621,7 @@ if (_parallelToolIndices.size >= 2) {
                         toolResult = _parallelToolResults[_toolExecIndex];
                         console.log('[ParallelTool] 取用并行结果 [' + _toolExecIndex + ']:', tc.function.name, toolResult.error ? '❌' : '✅');
                     } else if (_executedBefore) {
-                        console.warn('[ToolGuard] 跨轮重复调用已自动跳过:', tc.function.name, String(tc.function.arguments || '').substring(0, 120));
+                        console.warn('[ToolGuard] 跨轮重复调用已自动跳过:', tc.function.name, 'argument_length=' + String(tc.function.arguments || '').length);
                         toolResult = { result: '【系统提示】该调用(名称+参数)在本对话中已成功执行过，为避免重复下载/重复操作已自动跳过。请直接查看历史中的执行结果，不要再发起相同调用。' };
                     } else if (_guard && (_guard.isDuplicateTool(tc.function.name, _parseGuardArgs(tc.function.arguments)) || _guard.oscillationActive())) {
                         // ★ 死循环检测软跳过: 跨轮重复(名称+参数)或工具振荡 → 不执行, 注入提示引导模型收敛
@@ -3316,7 +3630,7 @@ if (_parallelToolIndices.size >= 2) {
                             ? '重复调用(名称+参数相同)'
                             : '工具振荡(反复切换)';
                         console.warn('[LoopGuard] 软跳过:', tc.function.name, _guardSkipReason);
-                        toolResult = { result: '【系统提示】系统检测到' + _guardSkipReason + '。该调用未执行。请立即停止调用工具，直接基于已有结果回答用户问题。' };
+                        toolResult = { result: '【系统提示】检测到' + _guardSkipReason + '已跳过,请基于已有结果直接回答。' };
                     } else {
                         toolResult = await executeToolCallForRetry(tc, _toolAbortCtrl.signal);
                     }
@@ -3339,6 +3653,13 @@ if (_parallelToolIndices.size >= 2) {
                         });
                     }
                     var resultContent = toolResult.error || toolResult.result || '(empty)';
+                    if (toolResult.diffHtml) {
+                        resultContent = String(resultContent) + '\n\n' + toolResult.diffHtml;
+                        if (pendingMsg) {
+                            pendingMsg._vibeDiffs = pendingMsg._vibeDiffs || [];
+                            pendingMsg._vibeDiffs.push({tool:tc.function.name,path:(args.path || args.file_path || ''),html:toolResult.diffHtml,time:Date.now()});
+                        }
+                    }
 
                     // 确保content是字符串
                     var contentStr = typeof resultContent === 'string'
@@ -3361,7 +3682,21 @@ if (_parallelToolIndices.size >= 2) {
                     if (window.ResumeStream && typeof window.ResumeStream.markToolResult === 'function') {
                         window.ResumeStream.markToolResult(chatId, tc, _toolExecIndex, contentStr, !!toolResult.error);
                     }
-                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', '', toolResult.error ? 'error' : 'success', chatId, tc.id || '');
+                    if (typeof showToolStatus === 'function') showToolStatus(tc.function?.name || '...', toolResult.error ? contentStr : '', toolResult.error ? 'error' : 'success', chatId, tc.id || '');
+                    // ★ 多端同步广播：实时向其他设备广播工具完成/失败结果，保持全端步骤对齐
+                    if (typeof window._broadcastEvent === 'function') {
+                        window._broadcastEvent('agent:tool_status', {
+                            chat_id: chatId,
+                            tool: tc.function?.name || '...',
+                            preview: toolResult.error ? contentStr : '',
+                            status: toolResult.error ? 'error' : 'success',
+                            tool_call_id: tc.id || ''
+                        });
+                    }
+                    if (pendingMsg && Array.isArray(pendingMsg._liveToolCalls)) {
+                        var _liveRecord = pendingMsg._liveToolCalls.find(function(x) { return String(x.id) === String(tc.id || ''); });
+                        if (_liveRecord) { _liveRecord.status = toolResult.error ? 'error' : 'success'; _liveRecord.finishedAt = Date.now(); }
+                    }
 
                     body.messages.push({
                         role: 'tool',
@@ -3398,7 +3733,7 @@ if (_parallelToolIndices.size >= 2) {
                                     status.textContent = `✅ 工具完成: ${tc.function.name}`;
                                 }
                                 // ★ server_file_edit: 在气泡中展示 diff 预览卡片
-                                if (tc.function.name === 'server_file_edit' && !toolResult.error && toolResult.result) {
+                                if ((tc.function.name === 'server_file_edit' || tc.function.name === 'edit') && !toolResult.error && toolResult.result && !toolResult.diffHtml) {
                                     try {
                                         var _args = {};
                                         try { _args = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
@@ -3418,79 +3753,24 @@ if (_parallelToolIndices.size >= 2) {
                                     if (pendingMsg.generatedImage) chats[chatId].messages[msgIdx].generatedImage = pendingMsg.generatedImage;
                                     if (pendingMsg.generatedImages) chats[chatId].messages[msgIdx].generatedImages = pendingMsg.generatedImages.slice();
                                 }
-                                // ★ 立即 DOM 渲染：链式模式下不等完整回复
+                                // ★ 立即 DOM 渲染：复用统一的 renderGeneratedImagesIntoBubble，带全套操作栏与灯箱
                                 var _imgBubble = currentBubble || activeBubbleMap[chatId];
                                 if (_imgBubble && currentChatId === chatId) {
-                                    var _imgCont = _imgBubble.querySelector('.generated-images-container');
-                                    if (!_imgCont) {
-                                        _imgCont = document.createElement('div');
-                                        _imgCont.className = 'generated-images-container';
-                                        _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-                                        _imgBubble.appendChild(_imgCont);
-                                    }
                                     var _imgs = pendingMsg.generatedImages || (pendingMsg.generatedImage ? [pendingMsg.generatedImage] : []);
-                                    // 去重: 跨迭代持久化集合 + DOM 兜底 (兼容新旧格式: 对象取 url, 字符串直接用)
-                                    _imgCont.querySelectorAll('img').forEach(function(el) { _scheduledImgSrcs.add(el.src); });
-                                    _imgs.forEach(function(_imgData, _idx) {
-                                        var _imgUrl = typeof _imgData === 'string' ? _imgData : (_imgData && _imgData.url ? _imgData.url : '');
-                                        if (!_imgUrl || _scheduledImgSrcs.has(_imgUrl)) return;
-                                        _scheduledImgSrcs.add(_imgUrl);
-                                        setTimeout(function() {
-                                            var _wrap = document.createElement('div');
-                                            _wrap.className = 'gen-image-wrapper';
-                                            var _imgEl = document.createElement('img');
-                                            _imgEl.src = _imgUrl;
-                                            _imgEl.decoding = 'async';
-                                            _imgEl.className = 'gen-image';
-                                            _imgEl.style.maxWidth = '320px';
-                                            _imgEl.setAttribute('loading', 'lazy');
-                                            _imgEl.addEventListener('click', function() {
-                                                if (typeof showImageLightbox === 'function') showImageLightbox(_imgs, _idx);
-                                            });
-                                            _imgEl.onerror = function() { this.style.display = 'none'; };
-                                            _wrap.appendChild(_imgEl);
-                                            _imgCont.appendChild(_wrap);
-                                        }, _idx * 50);
-                                    });
+                                    if (typeof window.renderGeneratedImagesIntoBubble === 'function') {
+                                        window.renderGeneratedImagesIntoBubble(_imgBubble, _imgs);
+                                    }
                                     if (!userScrolled) { requestAnimationFrame(function() { followToBottom($.chatBox); }); }
                                 }
                             }
                             // ★ B站扫码登录: QR已由tools-exec.js渲染为独立消息, 这里不重复处理
                             // base64不入pendingMsg(避免被buildApiMessages塞进API请求浪费token)
-                            // ★ 如果生成了音频/音乐,确保存入消息对象（持久化 & 刷新不丢）
-                            if ((tc.function.name === 'mmx_speech' || tc.function.name === 'mmx_music') && pendingMsg._audioResults && pendingMsg._audioResults.length > 0) {
-                                var _aMsgIdx = chats[chatId].messages.findIndex(m => m === pendingMsg);
-                                if (_aMsgIdx !== -1) {
-                                    chats[chatId].messages[_aMsgIdx]._audioResults = pendingMsg._audioResults.slice();
-                                }
-                            }
                             // ★ 移除隐藏思考模式下注入的占位元素(工具卡片创建后或卡片禁用时均清理)
                             var _phEl = currentBubble.querySelector('.tool-executing-placeholder');
                             if (_phEl) _phEl.remove();
 
-                            // ★ 追加可折叠工具调用详情卡片（必须在 for 循环内, currentBubble 块内）
-                            if (typeof appendToolCallMessage === 'function' && localStorage.getItem('toolCards') !== '0') {
-                                var _cardDur = Date.now() - (_toolStartTime || Date.now());
-                                var _cardArgs = {};
-                                try { _cardArgs = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
-                                var _cardResult = toolResult.error || toolResult.result || '(empty)';
-                                var _cardRow = appendToolCallMessage(tc.function.name, _cardArgs,
-                                    _cardResult, _cardDur, chatId, toolResult._execDetails || null);
-                                // ★ 持久化卡片到数据模型，避免重渲染后消失
-                                if (_cardRow) {
-                                    chats[chatId].messages.push({
-                                        role: 'tool_card',
-                                        content: _cardResult,
-                                        _tcName: tc.function.name,
-                                        _tcArgs: _cardArgs,
-                                        _tcDur: _cardDur,
-                                        _tcExecDetails: toolResult._execDetails || null,
-                                        _tcId: tc.id || '',
-                                        _toolCard: true,
-                                        time: Date.now()
-                                    });
-                                }
-                            }
+                            // 移除旧版独立 message-row tool_card 注入，改为由 assistant 消息内的 tool_calls 统一渲染 DSH 步骤时间线
+                            if (_phEl) _phEl.remove();
                         }
                     }
                 }
@@ -3516,7 +3796,7 @@ if (_parallelToolIndices.size >= 2) {
                 // ★ 死循环检测软告知: 本轮有软跳过 → 追加系统提示给模型(双写 body + chats 历史, 同 _guardNote 模式)
                 if (_guard && _guard.lastSoftTrigger()) {
                     var _softTriggerInfo = _guard.lastSoftTrigger();
-                    var _softNote = '【系统提示】系统检测到' + _softTriggerInfo.reason + '，相关调用已被跳过未执行。请立即停止调用工具，直接基于已有结果回答用户问题。';
+                    var _softNote = '【系统提示】检测到' + _softTriggerInfo.reason + ',相关调用已跳过,请停止调用工具并直接回答。';
                     if (body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'tool') {
                         var _lastToolMsg2 = body.messages[body.messages.length - 1];
                         _lastToolMsg2.content += '\n\n' + _softNote;
@@ -3537,6 +3817,25 @@ if (_parallelToolIndices.size >= 2) {
                     pendingMsg._webFetchUrls = _allWebFetchUrls;
                 }
                 // tool_calls 已在执行任何工具前合并并持久化，避免 await 期间刷新丢失。
+
+                // ★ 防复读与增量收尾引导:
+                // 若模型在发起工具调用时已经输出了回答正文(>30字),
+                // 下一轮模型看到工具返回结果时,极易从头将全部盘点/正文重写一遍(导致气泡内容完全重复)。
+                // 在工具消息末尾强力注入约束,要求其仅针对工具结果进行展示或收尾,严禁从头重复之前已经输出过的正文内容。
+                var _hadSubstantialText = (typeof pendingMsg.content === 'string' && pendingMsg.content.trim().length > 30);
+                if (_hadSubstantialText) {
+                    var _noDuplicatePrompt = '【系统提示】你在上一轮已给出了部分或全部回答正文。当前工具已全部执行完毕并返回结果，请直接针对上述工具结果进行简要收尾或补充，严禁从头重复之前已经输出过的正文！';
+                    if (body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'tool') {
+                        var _lastTMsg = body.messages[body.messages.length - 1];
+                        _lastTMsg.content += '\n\n' + _noDuplicatePrompt;
+                        for (var _rki = chats[chatId].messages.length - 1; _rki >= 0; _rki--) {
+                            if (chats[chatId].messages[_rki].role === 'tool' && chats[chatId].messages[_rki].tool_call_id === _lastTMsg.tool_call_id) {
+                                chats[chatId].messages[_rki].content += '\n\n' + _noDuplicatePrompt;
+                                break;
+                            }
+                        }
+                    }
+                }
 
                 // ★ Agent 模式下:创建子代理后引导模型自主总结,自然结束本轮
                 if (window._hasCreatedSubAgent) {
@@ -3619,8 +3918,9 @@ if (_parallelToolIndices.size >= 2) {
                     if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
                     try { localStorage.removeItem('_savedPartial'); } catch(e) {}
 
-                    // 2. 最终化当前气泡（不再追加内容）— 三个光标类全清, 防残留
+                    // 2. 最终化当前气泡（不再追加内容）— 彻底收敛增量流结构，并清除所有光标状态
                     if (currentChatId === chatId) {
+                        try { cleanupStreamState(chatId); } catch(e) {}
                         var _bub = activeBubbleMap[chatId];
                         if (_bub) {
                             _bub.classList.remove('typing', 'gen-active', 'streaming');
@@ -3629,14 +3929,22 @@ if (_parallelToolIndices.size >= 2) {
                         }
                         // ★ 创建新气泡用于下一轮流式输出
                         var _newBubble = appendMessage('assistant', '', null, null, null, 0, false);
-                        if (_newBubble) _newBubble.classList.add('typing');
-                        activeBubbleMap[chatId] = _newBubble;
+                        if (_newBubble) {
+                            _newBubble.dataset.chatId = chatId;
+                            activeBubbleMap[chatId] = _newBubble;
+                            _newBubble.classList.add('typing');
+                        }
                         setTimeout(function() { autoScrollToBottom('chain'); }, 30);
                     }
 
                     // 3. 创建新的 pendingMsg 用于下一轮
                     var _nextRound = (pendingMsg._chainRound || 1) + 1;
-                    var _newPending = { role: 'assistant', content: '', reasoning: '', partial: true, _chainRound: _nextRound };
+                    var _newPending = {
+                        role: 'assistant', content: '', reasoning: '', partial: true, _chainRound: _nextRound,
+                        model: pendingMsg.model || body.model || modelName || '',
+                        provider: pendingMsg.provider || (typeof baseUrlProvider !== 'undefined' ? baseUrlProvider : ''),
+                        effort: pendingMsg.effort || _thinkingIntensity || ''
+                    };
                     chats[chatId].messages.push(_newPending);
                     pendingMsg = _newPending;
                 } else if (window._chainMode && pendingMsg && toolCalls && toolCalls.length > 0) {
@@ -3666,6 +3974,32 @@ if (_parallelToolIndices.size >= 2) {
                 // ★ 清除 _savedPartial: 链式模式上面已清, 非链式模式也需清, 否则刷新时
                 //   loadChat 会误认为流仍在进行中, 触发虚假日志恢复 → 气泡进入"生成中"状态
                 try { localStorage.removeItem('_savedPartial'); } catch(e) {}
+                // ★ 关闭当前 provider 工具轮，创建独立的后续 assistant 轮。
+                // API 语义必须是 assistant(tool_calls) → tool → assistant(answer)。
+                // 两条 source message 仍复用同一个可见气泡，避免下一轮首 token
+                // 较短时清空前置正文，同时不把两轮错误拼成一个 tool turn。
+                if (!window._chainMode) {
+                    var _previousToolRound = pendingMsg;
+                    var _nextToolRound = {
+                        id: 'asst_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
+                        role: 'assistant', content: '', reasoning: '', partial: true,
+                        model: body.model || modelName || '',
+                        provider: (typeof baseUrlProvider !== 'undefined' ? baseUrlProvider : ''),
+                        _toolContinuationOf: _previousToolRound.id || '',
+                        _toolRoundBaseContent: typeof _previousToolRound._toolVisibleContent === 'string'
+                            ? _previousToolRound._toolVisibleContent : String(_previousToolRound.content || ''),
+                        _toolRoundBaseReasoning: typeof _previousToolRound._toolVisibleReasoning === 'string'
+                            ? _previousToolRound._toolVisibleReasoning : String(_previousToolRound.reasoning || '')
+                    };
+                    delete _previousToolRound.partial;
+                    chats[chatId].messages.push(_nextToolRound);
+                    pendingMsg = _nextToolRound;
+                } else {
+                    pendingMsg._toolRoundBaseContent = typeof pendingMsg._toolVisibleContent === 'string'
+                        ? pendingMsg._toolVisibleContent : (typeof pendingMsg.content === 'string' ? pendingMsg.content : '');
+                    pendingMsg._toolRoundBaseReasoning = typeof pendingMsg._toolVisibleReasoning === 'string'
+                        ? pendingMsg._toolVisibleReasoning : (typeof pendingMsg.reasoning === 'string' ? pendingMsg.reasoning : '');
+                }
                 // ★ 重建API消息(包含本轮新添加的工具结果和assistant消息)
                 body.messages = buildApiMessages(chatId);
                 // ★ Anthropic 格式: 重建后需重新转换 tool→user+tool_result
@@ -3694,7 +4028,13 @@ if (_parallelToolIndices.size >= 2) {
             pendingMsg.time = Date.now() - startTime;
             pendingMsg.usage = usage;
             window._streamCompletedOk = true;  // ★ 流正常完成标记(finally 免全量重建)
-            saveChats(true);  // ★ 强制服务器保存+广播到其他设备
+            window._justProducedStreamMap = window._justProducedStreamMap || {};
+            window._justProducedStreamMap[chatId] = Date.now();  // ★ 生产者保护期(防远程延迟事件覆盖刚生成的回复)
+            if (typeof window._saveAndBroadcast === 'function') {
+                window._saveAndBroadcast(chatId);  // 锁定真正完成的后台会话，切换页面也不会串台
+            } else {
+                saveChats(true, chatId);
+            }
             // ★ 修复: 不使用 loadChat(全量重渲染),仅更新现有气泡内容
             if (currentChatId === chatId) {
                 var _bubble = activeBubbleMap[chatId];
@@ -3717,31 +4057,10 @@ if (_parallelToolIndices.size >= 2) {
                     // ★ 追加生成的图片到气泡(如果有)
                     console.log('[ImageModel] render: generatedImages count=', pendingMsg.generatedImages ? pendingMsg.generatedImages.length : 0, 'bubble=', !!_bubble);
                     if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
-                        var _existingImg = _bubble.querySelector('.generated-images-container');
-                        if (!_existingImg) {
-                            var _imgCont = document.createElement('div');
-                            _imgCont.className = 'generated-images-container';
-                            _imgCont.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-                            _bubble.appendChild(_imgCont);
-                            // ★ 清除图像生成占位符
-                            var _ph = _bubble.querySelector('#image-placeholder');
-                            if (_ph) _ph.remove();
-                            // ★ 异步渲染每张图片,避免卡死
-                            pendingMsg.generatedImages.forEach(function(_imgData, _idx) {
-                                setTimeout(function() {
-                                    var _wrap = document.createElement('div');
-                                    _wrap.style.cssText = 'position:relative;cursor:pointer;';
-                                    var _imgEl = document.createElement('img');
-                                    _imgEl.src = _imgData.startsWith('data:') ? _imgData : _imgData;
-                                    _imgEl.decoding = 'async';
-                                    var _maxW = pendingMsg.generatedImages.length > 1 ? '160px' : '320px';
-                                    _imgEl.style.cssText = 'max-width:' + _maxW + ';width:100%;border-radius:8px;display:block;';
-                                    _imgEl.setAttribute('loading', 'lazy');
-                                    _wrap.appendChild(_imgEl);
-                                    _imgCont.appendChild(_wrap);
-                                }, _idx * 50);
-                            });
+                        if (typeof window.renderGeneratedImagesIntoBubble === 'function') {
+                            window.renderGeneratedImagesIntoBubble(_bubble, pendingMsg.generatedImages);
                         }
+                        if (typeof window.setRemiMood === 'function') window.setRemiMood('done', 'image-generation');
                     }
                     // ★ 渲染生成的音频/音乐（与图片一样放在气泡末尾，避免被工具调用覆盖）
                     if (pendingMsg._audioResults && pendingMsg._audioResults.length > 0) {
@@ -3775,7 +4094,9 @@ if (_parallelToolIndices.size >= 2) {
                     var _userText = _userBubble ? (_userBubble.querySelector('.markdown-body')?.textContent || '') : '';
                     var _editBtn = document.createElement('div');
                     _editBtn.className = 'msg-action-btn edit-btn';
-                    _editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
+                    _editBtn.setAttribute('title', '编辑此条消息并重新发送');
+                    _editBtn.setAttribute('aria-label', '编辑');
+                    _editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
                     _editBtn.onclick = function(e) {
                         e.stopPropagation();
                         var _msgs = chats[chatId].messages;
@@ -3784,9 +4105,14 @@ if (_parallelToolIndices.size >= 2) {
                         var _sys = _msgs.filter(function(m) { return m.role === 'system' && !m.temporary && !m.timestamp; });
                         var _ts = _msgs.find(function(m) { return m.timestamp; });
                         var _others = _msgs.slice(0, _idx).filter(function(m) { return m.role !== 'system' || m.temporary || m.timestamp; });
-                        chats[chatId].messages = _sys.concat(_others).concat(_ts ? [_ts] : []);
-                        saveChatsDebounced();
-                        loadChat(chatId);
+                        var remaining = _sys.concat(_others).concat(_ts ? [_ts] : []);
+                        if (typeof window.truncateChatMessages === 'function') {
+                            window.truncateChatMessages(chatId, remaining);
+                        } else {
+                            chats[chatId].messages = remaining;
+                            saveChatsDebounced();
+                            loadChat(chatId);
+                        }
                         if ($.userInput) {
                             $.userInput.value = _userText || '';
                             window.autoResize($.userInput);
@@ -3803,9 +4129,10 @@ if (_parallelToolIndices.size >= 2) {
                 setTimeout(function() { window._processAgentNotifyQueue(); }, 1000);
             }
             // ★ 保存聊天到 localStorage (确保图片等数据持久化,工具路径和直接路径都需要)
-            saveChats(true);  // ★ 强制服务器保存+广播到其他设备
-            var defaultTitle = text ? text.slice(0, 10) : (files.length ? '文件消息' : '新对话');
-            if (!skipUserAdd && chats[chatId].title === defaultTitle) {
+            if (typeof window._saveAndBroadcast === 'function') window._saveAndBroadcast(chatId);
+            else saveChats(true, chatId);
+            var defaultTitle = text ? text.trim().slice(0, TITLE_MAX_LENGTH) : ((files && files.length) ? '文件消息' : '新对话');
+            if (!skipUserAdd && chats[chatId] && (chats[chatId].title === defaultTitle || chats[chatId].title === 'Agent' || chats[chatId].title === 'Agent 会话')) {
                 autoGenerateTitle(chatId);
             }
             // ★ Agent 模式: 主动建议(不阻塞主流程)
@@ -3891,7 +4218,43 @@ if (_parallelToolIndices.size >= 2) {
             var isUpstreamError = e.message === 'UPSTREAM_ERROR' || e.message.includes('upstream') || e.message.includes('bad response');
             var isHTTP2Error = (e.name === 'TypeError' && (e.message.includes('fetch') || e.message.includes('Failed to') || e.message.includes('net::') || e.message.includes('ERR_')))
                 || e.message.includes('HTTP2') || e.message.includes('h2') || e.message.includes('protocol error') || e.message.includes('protocol_error');
-            var isNetError = e.name === 'AbortError' || e.message.includes('timeout') || e.message.includes('aborted') || isUpstreamError || isHTTP2Error;
+            // ★ EOF/连接中断 — 长任务通过代理时常见的瞬态错误
+            var isConnectionError = e.message && (
+                e.message.includes('EOF') || e.message.includes('ECONNRESET') || e.message.includes('ECONNREFUSED') ||
+                e.message.includes('ETIMEDOUT') || e.message.includes('socket hang up') || e.message.includes('socket_hang_up') ||
+                e.message.includes('aborted') || e.message.includes('network error')
+            );
+            var isNetError = e.name === 'AbortError' || e.message.includes('timeout') || isConnectionError || isUpstreamError || isHTTP2Error;
+            var is429Error = /(?:^|\s|:)HTTP\s*429\b|\b429\b|rate[_ -]?limit|too many requests|请求过于频繁/i.test(String(e.message || ''));
+
+            // ★ 429 单独处理：不能走普通网络错误，也不能让 typing 状态永久悬挂。
+            // 只在前两次尝试有限退避；耗尽后交给 handleError，明确结束气泡和停止按钮。
+            if (is429Error) {
+                var _rateKey = '_429retry_' + chatId;
+                var _rateCount = Number(window[_rateKey] || 0);
+                var _rateLimit = Math.min(2, maxRetries);
+                if (_rateCount < _rateLimit) {
+                    window[_rateKey] = _rateCount + 1;
+                    var _rateDelay = Math.min(15000, 2500 * Math.pow(2, _rateCount));
+                    showToast('请求过于频繁，' + Math.ceil(_rateDelay / 1000) + '秒后自动重试（' + (_rateCount + 1) + '/' + _rateLimit + '）', 'warning', _rateDelay);
+                    if (currentBubble) {
+                        currentBubble.classList.remove('gen-active');
+                        var _rateBody = currentBubble.querySelector('.markdown-body');
+                        if (_rateBody && !pendingMsg.content) _rateBody.textContent = '请求过于频繁，正在稍后重试…';
+                    }
+                    await new Promise(function(resolve) { setTimeout(resolve, _rateDelay); });
+                    try { abortCtrl.abort(); } catch(_rateAbortErr) {}
+                    var _rateCtrl = new AbortController();
+                    abortControllerMap[chatId] = _rateCtrl;
+                    var _rateTimer = setTimeout(function() { _rateCtrl.abort(); }, timeout);
+                    return attemptRequestWithFreshAbort(attempt + 1, _rateCtrl, _rateTimer);
+                }
+                delete window[_rateKey];
+                e.message = '请求过于频繁，服务商暂时限流。请稍后重新发送，或切换模型/降低并发请求。';
+                e.code = 'RATE_LIMIT';
+                handleError(e, chatId, pendingMsg, currentBubble);
+                return;
+            }
 
             // ★ 400/404 错误智能重试: 解析错误原因，尝试修复后重试
             var is400Error = e.message && (e.message.startsWith('HTTP 400') || e.message.includes('HTTP 400:') || e.message.startsWith('HTTP 404') || e.message.includes('HTTP 404:') || e.message.startsWith('HTTP 422') || e.message.includes('HTTP 422:'));
@@ -3961,7 +4324,7 @@ if (_parallelToolIndices.size >= 2) {
                             console.warn('[400-Retry] max_tokens 超限，自动修正并记住:', _curMax2, '→', _limitVal, '(已持久化)');
                         }
                     }
-                } else if (_errType === 'context_length_exceeded' || (_errMsg.includes('too long') && _errMsg.includes('context')) || _errMsg.includes('maximum context length')) {
+                } else if (_errType === 'context_length_exceeded' || (_errMsg.includes('too long') && _errMsg.includes('context')) || _errMsg.includes('maximum context length') || _errMsg.match(/exceeds?\s+(the\s+)?(available\s+)?context\s+(size|length|limit)/i) || _errMsg.match(/context\s+(size|length|limit)\s+exceeded/i) || _errMsg.match(/(token|request)\s+\(\d+\s+tokens?\)\s+exceeds?/i) || _errMsg.match(/prompt\s+is\s+too\s+(long|large)/i) || _errMsg.match(/input\s+too\s+long/i)) {
                     // 真正的上下文过长 → 裁剪消息历史重试
                     _shouldRetry = true;
                     _retryAction = 'trim_context';
@@ -4006,28 +4369,80 @@ if (_parallelToolIndices.size >= 2) {
                 }
 
                 if (_shouldRetry) {
-                    console.warn('[400-Retry] 检测到 400 错误，尝试修复:', _retryAction, '| 原因:', _errMsg.substring(0, 120));
-                    // ★ 同时用 console.error 打印完整错误（红色醒目 + DevTools 持久）
-                    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                    console.error('[HTTP 400 完整错误] ' + _retryAction);
-                    console.error(_errMsg);
-                    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                    console.info('[400-Retry] 检测到 400 错误并进入修复流程:', {
+                        action: _retryAction,
+                        attempt: attempt + 1,
+                        maxRetries: maxRetries,
+                        errorLength: _errMsg.length
+                    });
 
                     if (_retryAction === 'trim_context') {
                         // 裁剪消息历史：保留 system + 最后 N 条消息
+                        // ★ 智能裁剪：根据超限比例决定保留比例，严重超限时裁剪更多
                         var _sysMsgs = body.messages.filter(function(m) { return m.role === 'system'; });
                         var _nonSysMsgs = body.messages.filter(function(m) { return m.role !== 'system'; });
-                        var _keepCount = Math.max(2, Math.floor(_nonSysMsgs.length * 0.5));
-                        body.messages = _sysMsgs.concat(_nonSysMsgs.slice(-_keepCount));
-                        // ★ 同时降低 max_tokens 防止输出超限 (OpenRouter 报 "in the output")
-                        if (_errMsg.includes('in the output') || _errMsg.includes('output')) {
-                            var _curOut = body.max_completion_tokens || body.max_tokens || 4096;
-                            if (_curOut > 4096) {
-                                body.max_completion_tokens = 4096;
-                                body.max_tokens = 4096;
+                        // 从错误信息中提取 token 数和限制值，计算裁剪比例
+                        var _trimRatio = 0.5; // 默认保留 50%
+                        var _tokenMatch = _errMsg.match(/(\d+)\s+tokens?\s+exceeds?.*?(?:context\s+size|limit|length)\s*\(?\s*(\d+)/i)
+                            || _errMsg.match(/exceeds?.*?(\d+).*?\((\d+)\s+tokens?\)/i)
+                            || _errMsg.match(/(\d+)\s+tokens?.*?(?:maximum|limit|available).*?(\d+)/i);
+                        var _contextLimit = 0;
+                        if (_tokenMatch) {
+                            var _requestedTokens = parseInt(_tokenMatch[1]);
+                            _contextLimit = parseInt(_tokenMatch[2]);
+                            if (_requestedTokens > _contextLimit && _contextLimit > 0) {
+                                // 超限比例越高，保留越少（最少保留 1 条，最多保留 60%）
+                                var _overflow = _requestedTokens / _contextLimit;
+                                if (_overflow > 2) _trimRatio = 0.2;      // 超限 2 倍以上 → 只保留 20%
+                                else if (_overflow > 1.5) _trimRatio = 0.3; // 超限 1.5 倍 → 保留 30%
+                                else if (_overflow > 1.2) _trimRatio = 0.4; // 超限 1.2 倍 → 保留 40%
                             }
                         }
-                        showToast('⚠️ 上下文过长，已自动裁剪消息历史后重试...', 'warning', 10000);
+                        var _keepCount = Math.max(1, Math.floor(_nonSysMsgs.length * _trimRatio));
+                        body.messages = _sysMsgs.concat(_nonSysMsgs.slice(-_keepCount));
+                        // ★ 关键修复：当消息很少但 token 仍超限（系统提示词+工具定义本身过大）时
+                        // 裁剪消息历史是不够的，必须同时裁剪系统提示词和减少工具数量
+                        if (_tokenMatch && _contextLimit > 0) {
+                            var _estSysPromptTokens = _requestedTokens - (_nonSysMsgs.length * 50); // 粗估系统提示词+工具占用的 token
+                            var _sysOverflow = _estSysPromptTokens / _contextLimit;
+                            // 如果系统提示词+工具占用超过限制的 60%，说明问题在系统提示词而非消息历史
+                            if (_sysOverflow > 0.6 || _nonSysMsgs.length <= 2) {
+                                // 阶段1：裁剪系统提示词（保留前 1500 字符的核心指令）
+                                var _sysTrimmed = false;
+                                for (var _si2 = 0; _si2 < body.messages.length; _si2++) {
+                                    if (body.messages[_si2].role === 'system' && typeof body.messages[_si2].content === 'string') {
+                                        var _sc2 = body.messages[_si2].content;
+                                        if (_sc2.length > 1500) {
+                                            body.messages[_si2].content = _sc2.substring(0, 1500) + '\n\n[System prompt truncated: removed ' + (_sc2.length - 1500) + ' chars to fit context limit]';
+                                            _sysTrimmed = true;
+                                        }
+                                    }
+                                }
+                                // 阶段2：如果超限严重（>1.5x），同时减少工具数量
+                                if (_sysOverflow > 1.0 && body.tools && body.tools.length > 10) {
+                                    var _keptTools = Math.max(10, Math.floor(body.tools.length * 0.3)); // 只保留 30% 工具（至少 10 个）
+                                    body.tools = body.tools.slice(0, _keptTools);
+                                    _sysTrimmed = true;
+                                }
+                                if (_sysTrimmed) {
+                                    console.warn('[trim_context] 系统提示词+工具过大（预估占限制 ' + Math.round(_sysOverflow * 100) + '%），已裁剪系统提示词' + (_sysOverflow > 1.0 && body.tools ? '并减少工具至 ' + body.tools.length + ' 个' : ''));
+                                }
+                            }
+                        }
+                        // ★ 上下文过长时，同时降低 max_tokens 为输出预留空间
+                        // 如果错误信息中有上下文限制值，按该限制计算安全的输出 token 数
+                        var _curOut = body.max_completion_tokens || body.max_tokens || 4096;
+                        var _safeOut = _curOut;
+                        if (_tokenMatch && _contextLimit > 0) {
+                            // 限制值 - 预估输入占用 = 安全输出空间（至少 512）
+                            var _estInputTokens = Math.floor(_contextLimit * 0.7); // 裁剪后预估占 70%
+                            _safeOut = Math.max(512, _contextLimit - _estInputTokens);
+                        }
+                        if (_safeOut < _curOut) {
+                            body.max_completion_tokens = _safeOut;
+                            body.max_tokens = _safeOut;
+                        }
+                        showToast('⚠️ 上下文过长（' + (_tokenMatch ? _tokenMatch[1] + '/' + _tokenMatch[2] + ' tokens' : '') + '），已自动裁剪消息历史（保留 ' + Math.round(_trimRatio * 100) + '%）' + (_tokenMatch && _contextLimit > 0 && (_requestedTokens - _nonSysMsgs.length * 50) / _contextLimit > 0.6 ? '+系统提示词/工具' : '') + '后重试...', 'warning', 10000);
                     } else if (_retryAction === 'adjust_max_tokens') {
                         // ★ 如果错误消息已提取到精确限制值，直接用；否则保守缩减
                         var _curMax = body.max_completion_tokens || body.max_tokens || 4096;
@@ -4054,7 +4469,7 @@ if (_parallelToolIndices.size >= 2) {
                         var _discardedIds = {}; // ★ 记录被丢弃的 tool_call_id，精确删除对应 tool 结果
                         for (var _tmi = 0; _tmi < body.messages.length; _tmi++) {
                             var _tmsg = body.messages[_tmi];
-                            if (_tmsg.role === 'assistant' && _tmsg.tool_calls) {
+                            if (_tmsg.role === 'assistant' && Array.isArray(_tmsg.tool_calls)) {
                                 for (var _tcj = 0; _tcj < _tmsg.tool_calls.length; _tcj++) {
                                     var _tcall = _tmsg.tool_calls[_tcj];
                                     if (_tcall.function && typeof _tcall.function.arguments === 'string') {
@@ -4145,18 +4560,10 @@ if (_parallelToolIndices.size >= 2) {
                                 _orphanToolIds[body.messages[_oj].tool_call_id] = true;
                             }
                         }
-                        // ★ v2.6: 找到最后一个 assistant 消息的索引，不过滤其 tool_calls（工具仍在执行）
-                        var _lastAsstIdx = -1;
-                        for (var _lai0 = body.messages.length - 1; _lai0 >= 0; _lai0--) {
-                            if (body.messages[_lai0].role === 'assistant' && body.messages[_lai0].tool_calls) {
-                                _lastAsstIdx = _lai0;
-                                break;
-                            }
-                        }
+                        // ★ 所有 assistant 工具轮都必须完整配对；不能豁免最后一轮。
                         var _removedOrphans = 0;
                         for (var _ok = 0; _ok < body.messages.length; _ok++) {
-                            if (_ok === _lastAsstIdx) continue;  // ★ 跳过最后一轮
-                            if (body.messages[_ok].role === 'assistant' && body.messages[_ok].tool_calls) {
+                            if (body.messages[_ok].role === 'assistant' && Array.isArray(body.messages[_ok].tool_calls)) {
                                 var _beforeCount = body.messages[_ok].tool_calls.length;
                                 body.messages[_ok].tool_calls = body.messages[_ok].tool_calls.filter(function(tc) {
                                     return tc.id && _orphanToolIds[tc.id];
@@ -4174,7 +4581,7 @@ if (_parallelToolIndices.size >= 2) {
                         // ★ 同时清理孤立 tool 消息：收集剩余有效的 tool_call_id
                         var _validTcIds = {};
                         for (var _vk = 0; _vk < body.messages.length; _vk++) {
-                            if (body.messages[_vk].role === 'assistant' && body.messages[_vk].tool_calls) {
+                            if (body.messages[_vk].role === 'assistant' && Array.isArray(body.messages[_vk].tool_calls)) {
                                 body.messages[_vk].tool_calls.forEach(function(tc) { if (tc.id) _validTcIds[tc.id] = true; });
                             }
                         }
@@ -4296,7 +4703,7 @@ if (_parallelToolIndices.size >= 2) {
                     } else {
                         // generic_retry: 显示完整错误详情，持续 12 秒便于排查
                         var _shortMsg = _errMsg.substring(0, 200);
-                        console.error('[400-Detail]', _errMsg);
+                        console.info('[400-Retry] 未识别的 400 错误，执行通用重试:', { attempt: attempt + 1, maxRetries: maxRetries, errorLength: _errMsg.length });
                         showToast('🔴 HTTP 400: ' + _shortMsg + ' (' + (attempt + 1) + '/' + maxRetries + ' 重试中...)', 'error', 12000);
                     }
 
@@ -4435,10 +4842,10 @@ if (_parallelToolIndices.size >= 2) {
         if (e.message && (/503/.test(e.message)) && (/auth_unavailable|service_unavailable|no auth available/.test(e.message))) {
             var _503Key = '_503retry_' + chatId;
             var _503Count = (window[_503Key] || 0);
-            if (_503Count < 3) {
+            if (_503Count < 5) {
                 window[_503Key] = _503Count + 1;
-                console.warn('[503-Retry] 检测到 auth_unavailable，自动重试 (' + (_503Count + 1) + '/3):', e.message);
-                showToast('⚠️ 服务暂时不可用 (auth_unavailable)，正在自动重试 (' + (_503Count + 1) + '/3)...', 'warning', 3000);
+                console.warn('[503-Retry] 检测到 auth_unavailable，自动重试 (' + (_503Count + 1) + '/5):', e.message);
+                showToast('⚠️ 服务暂时不可用 (auth_unavailable)，正在自动重试 (' + (_503Count + 1) + '/5)...', 'warning', 3000);
                 if (pendingMsg) { pendingMsg.content = ''; pendingMsg.reasoning = ''; if (pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; } }
                 cleanupStreamState(chatId);
                 if (currentBubble) {
@@ -4451,7 +4858,7 @@ if (_parallelToolIndices.size >= 2) {
                 abortControllerMap[chatId] = _retryCtrl503;
                 clearTimeout(timeoutId);
                 var _retryTimeout503 = setTimeout(function() { _retryCtrl503.abort(); }, timeout);
-                var _503Delay = 2000 * Math.pow(1.5, _503Count); // 2s, 3s, 4.5s
+                var _503Delay = Math.min(10000, 2000 * Math.pow(1.5, _503Count)); // bounded exponential backoff
                 await new Promise(function(_r503) { setTimeout(_r503, _503Delay); }); // ★ 退避等待上游恢复
                 try {
                     await attemptRequestWithFreshAbort(0, _retryCtrl503, _retryTimeout503);
@@ -4463,7 +4870,13 @@ if (_parallelToolIndices.size >= 2) {
             // 重试次数用尽，清理计数
             delete window[_503Key];
         }
-        handleError(e, chatId, pendingMsg, currentBubble);
+        if (e && (e.transportDetached || e.code === 'RS_TRANSPORT_DETACHED')) {
+            console.info('[RS] 浏览器流连接已脱离，后端任务继续执行并将在重连后投影完成态');
+            window._rsTransportDetached = window._rsTransportDetached || {};
+            window._rsTransportDetached[chatId] = true;
+        } else {
+            handleError(e, chatId, pendingMsg, currentBubble);
+        }
     } finally {
         // ★ 停止按钮修复: 若已有新请求接管当前聊天, 跳过所有状态清理(防止新请求被误停)
         if (window._msgReqGen && window._msgReqGen[chatId] !== _myReqGen) {
@@ -4476,8 +4889,13 @@ if (_parallelToolIndices.size >= 2) {
         if (window.__loopGuardMap && window.__loopGuardMap[chatId]) {
             delete window.__loopGuardMap[chatId];
         }
-        delete isTypingMap[chatId];
-        if (window._activeStreamChatId === chatId) window._activeStreamChatId = null;  // ★ 清除活动流标记
+        if (window._streamCompletedOk) {
+            window._justProducedStreamMap = window._justProducedStreamMap || {};
+            window._justProducedStreamMap[chatId] = Date.now();
+        }
+        var _transportDetached = !!(window._rsTransportDetached && window._rsTransportDetached[chatId]);
+        if (!_transportDetached) delete isTypingMap[chatId];
+        if (!_transportDetached && window._activeStreamChatId === chatId) window._activeStreamChatId = null;  // ★ 清除活动流标记
         if (typeof renderChatHistory === 'function') renderChatHistory();  // 清除后台指示器
         // ★ agent模式:AI生成结束,关闭队列轮询 + 处理下一条
         // AI生成结束:处理队列下一条消息
@@ -4486,15 +4904,19 @@ if (_parallelToolIndices.size >= 2) {
             window._queuePollTimer = null;
         }
         // ★ 推入消息: 当前回复结束后自动触发新一轮 (模型会看到推入的用户消息)
-        // 但用户主动停止时不自动续接 (userAbortMap 在下方被删除, 此处提前判断)
+        // 必须确保该聊天确实存在带实质文本的未回复用户消息且非空字符串，避免空轮次误触
         if (window._hasInjectedMessage && !userAbortMap[chatId]) {
             window._hasInjectedMessage = false;
-            setTimeout(function() {
-                // sendMessage(true) = skipUserAdd, 推入的消息已在历史中, 模型会看到并回复
-                if (!isTypingMap[chatId] && typeof window.sendMessage === 'function') {
-                    window.sendMessage(true);
-                }
-            }, 500);
+            var _hasRealUserPending = (chats[chatId] && Array.isArray(chats[chatId].messages)) &&
+                chats[chatId].messages.some(function(m) { return m && m.role === 'user' && !!(m.text && String(m.text).trim()); });
+            if (_hasRealUserPending) {
+                setTimeout(function() {
+                    // sendMessage(true) = skipUserAdd, 推入的消息已在历史中, 模型会看到并回复
+                    if (!isTypingMap[chatId] && typeof window.sendMessage === 'function') {
+                        window.sendMessage(true);
+                    }
+                }, 500);
+            }
         } else {
             window._hasInjectedMessage = false;  // 清除标记, 避免残留
             setTimeout(function() { window._drainQueue(); }, 300);
@@ -4531,11 +4953,11 @@ if (_parallelToolIndices.size >= 2) {
                 }
             }, 800);
         }
-        // ★ 停止流渲染 RAF 循环
-        cleanupStreamState(chatId);
+        // 网络 reset 时保留当前 partial/气泡和恢复身份；真正完成/停止才清理流渲染。
+        if (!_transportDetached) cleanupStreamState(chatId);
         delete abortControllerMap[chatId];
         delete searchAbortControllerMap[chatId];
-        delete activeBubbleMap[chatId];
+        if (!_transportDetached) delete activeBubbleMap[chatId];
         delete userAbortMap[chatId];  // 清理用户中止标记
         window._agentNotifyProcessing = false;
         // ★ 主动检查是否有积压的子代理通知需要处理
@@ -4543,49 +4965,23 @@ if (_parallelToolIndices.size >= 2) {
             window._hasPendingSubAgentNotify = false;
             setTimeout(function() { window._processAgentNotifyQueue(); }, 500);
         }
-        if (currentChatId === chatId) {
-            if ($.sendBtn) $.sendBtn.classList.remove('hidden');
-            if ($.stopBtn) $.stopBtn.classList.remove('visible');
+        if (currentChatId === chatId && !_transportDetached) {
+            if (typeof window.updateSendStopButtons === 'function') window.updateSendStopButtons(false);
+            else {
+                if ($.sendBtn) $.sendBtn.classList.remove('hidden');
+                if ($.stopBtn) $.stopBtn.classList.remove('visible');
+            }
         }
         // ★ 免全量重建: 流正常完成时已在 completion 块就地收尾(操作按钮/页脚/mermaid),
         //   此处不再 loadChat 重建整个消息列表(长对话每轮回复省下数百次 DOM 重建 + 动画)
         //   出错/中止等异常路径保留 loadChat, 保证 DOM 与历史一致
         if (currentChatId === chatId && !window._streamCompletedOk) loadChat(chatId);
-        // ★ 计划面板兜底：回复结束时，将仍为 running 的任务标记为 failed
-        // ★ 但若仍有活跃子代理在运行，跳过兜底（子代理完成后会自动更新计划状态）
-        if (window._agentPlan && window._agentPlan.tasks && window._agentPlan.status === 'running') {
-            var _hasActiveSubAgents = false;
-            if (window._tasks && typeof window._tasks === 'object') {
-                for (var __tk in window._tasks) {
-                    var __t = window._tasks[__tk];
-                    if (__t && __t.agents) {
-                        for (var __ak in __t.agents) {
-                            if (__t.agents[__ak].status === 'running') { _hasActiveSubAgents = true; break; }
-                        }
-                    }
-                    if (_hasActiveSubAgents) break;
-                }
-            }
-            if (_hasActiveSubAgents) {
-                console.log('[FlowPanel] 跳过兜底: 仍有活跃子代理运行中，计划面板保持显示');
-            } else {
-                var _hasStuck = false;
-                window._agentPlan.tasks.forEach(function(pt) {
-                    if (pt.status === 'running') { pt.status = 'failed'; pt.note = '回复中断，任务未完成'; _hasStuck = true; }
-                    if (pt.status === 'pending') { pt.status = 'skipped'; _hasStuck = true; }
-                });
-                if (_hasStuck) {
-                    window.renderPlanTasks(window._agentPlan.tasks);
-                    window._agentPlan.status = 'completed';
-                    console.log('[FlowPanel] 兜底: 标记 ' + window._agentPlan.tasks.filter(function(t){return t.status==='failed'||t.status==='skipped'}).length + ' 个卡住的任务');
-                    setTimeout(function() { window.dismissFlowPanel(); }, 3000);
-                }
-            }
+        // ★ 计划面板状态同步（保持跨轮次连贯性，不破坏未完成任务，确保持久化）
+        if (window._agentPlan && typeof window.savePlanState === 'function') {
+            window.savePlanState(chatId);
         }
-        // ★ 已完成/已关闭计划面板的最终清理
-        if (window._agentPlan && window._agentPlan.status === 'completed') {
-            console.log('[FlowPanel] 响应结束,清理已完成计划面板');
-            window.dismissFlowPanel();
+        if (typeof window._autoCollapsePlanOnFinish === 'function') {
+            window._autoCollapsePlanOnFinish();
         }
         // ★ AI 自主记忆: 对话结束后延迟提取(避开主请求避免抢额度→429)
         if (!window.__autoMemoryPending) {

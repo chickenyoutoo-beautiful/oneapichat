@@ -704,66 +704,40 @@ function requireRoot(e, url) {
 }
 
 // ★ 云盘：已登录即可访问（自动同步 Cloudreve 账号）
-function openCloudreve(e) {
+async function openCloudreve(e) {
+    e.preventDefault();
     e.stopPropagation();
-    if (!localStorage.getItem('authToken')) {
+    var authToken = localStorage.getItem('authToken') || '';
+    if (!authToken) {
         showLoginModal('请先登录以访问云盘', 'cloudreve');
         return;
     }
-    // 有 login_token 直接跳转
-    var loginToken = localStorage.getItem('_cloudLoginToken');
-    if (loginToken) {
-        localStorage.removeItem('_cloudLoginToken');
-        window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(loginToken), '_blank');
-        return;
+    var win = window.open('about:blank', 'cloudreve_sso');
+    if (win) {
+        try { win.opener = null; win.document.write('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#f5f7fb;color:#64748b;font:14px system-ui">正在安全登录 Cloudreve…</body>'); } catch (_) {}
     }
-    // 无 token → 用主页凭据主动同步注册 Cloudreve 账号
-    var username = localStorage.getItem('authUsername') || '';
-    var email = localStorage.getItem('authUserEmail') || (username + '@naujtrats.xyz');
-    var password = sessionStorage.getItem('_authPassword') || '';
-    // 密码为空 → 直接打开 cloudreve 主页
-    if (!password) {
-        window.open('https://cloudreve.naujtrats.xyz', '_blank');
-        return;
+    try {
+        var response = await fetch('/oneapichat/api/cloudreve_sso.php', {
+            method: 'POST', headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'}, cache: 'no-store'
+        });
+        var data = await response.json();
+        if (!response.ok || !data.success || !data.ticket) throw new Error(data.error || '云盘单点登录失败');
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = data.action_url || 'https://cloudreve.naujtrats.xyz/api/oneapichat-sso';
+        form.target = win ? 'cloudreve_sso' : '_self';
+        form.style.display = 'none';
+        var input = document.createElement('input');
+        input.type = 'hidden'; input.name = 't'; input.value = data.ticket;
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    } catch (err) {
+        if (win) win.close();
+        var message = err && err.message ? err.message : '云盘单点登录失败';
+        if (message.indexOf('重新登录') !== -1) showLoginModal(message, 'cloudreve'); else alert(message);
     }
-    // ★ 弹窗拦截修复: 先同步打开一个 about:blank 新 tab (在 onClick 同步上下文, 不被拦截),
-    //   然后 async sync 完成后通过 ref 设置 location
-    var win = window.open('about:blank', 'cloudreve_login');
-    if (!win) {
-        // 弹窗真的被拦截了 (罕见) → 同步用 XMLHttpRequest 重试
-        try {
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '/oneapichat/api/cloudreve_sync.php', false);  // 同步
-            xhr.setRequestHeader('Content-Type', 'application/json');
-            xhr.send(JSON.stringify({username: username, password: password, email: email}));
-            var d = xhr.responseText ? JSON.parse(xhr.responseText) : null;
-            if (d && d.login_token) {
-                window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(d.login_token), '_blank');
-            } else {
-                window.open('https://cloudreve.naujtrats.xyz', '_blank');
-            }
-        } catch (_e) {
-            window.open('https://cloudreve.naujtrats.xyz', '_blank');
-        }
-        return;
-    }
-    // 弹窗已开
-    win.document.write('<html><body style="background:#1a1f35;color:#94a3b8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif"><div>正在同步 Cloudreve 账号…</div></body></html>');
-    // async sync 完成后设置 URL
-    syncCloudreve(username, password, email).then(function(d) {
-        var token2 = localStorage.getItem('_cloudLoginToken');
-        if (token2) {
-            localStorage.removeItem('_cloudLoginToken');
-            try { win.location.href = 'https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2); }
-            catch (_e) { window.open('https://cloudreve.naujtrats.xyz/cr_login.php?t=' + encodeURIComponent(token2), 'cloudreve_login'); }
-        } else {
-            try { win.location.href = 'https://cloudreve.naujtrats.xyz'; }
-            catch (_e) { window.open('https://cloudreve.naujtrats.xyz', 'cloudreve_login'); }
-        }
-    }).catch(function() {
-        try { win.location.href = 'https://cloudreve.naujtrats.xyz'; }
-        catch (_e) { window.open('https://cloudreve.naujtrats.xyz', 'cloudreve_login'); }
-    });
 }
 
 // ★ OpenClaw 标签：登录才可点击
@@ -1039,7 +1013,7 @@ document.addEventListener('keydown', function(e) {
             '</span>' +
             '<span id="userDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:var(--menu-bg);border:1px solid var(--menu-border);border-radius:14px;padding:6px;min-width:150px;box-shadow:0 20px 50px rgba(0,0,0,0.5);backdrop-filter:blur(20px);z-index:99999;">' +
                 '<a href="/oneapichat/profile.html" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;text-decoration:none;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.user + '个人中心</a>' +
-                (isRoot ? '<a href="/manager" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;text-decoration:none;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.settings + '管理后台</a>' : '') +
+                (isRoot ? '<a href="/manager.html?from=home" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;text-decoration:none;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.settings + '管理后台</a>' : '') +
                 '<span onclick="doLogout()" class="nav-btn" style="display:flex;align-items:center;gap:8px;border:none;background:none;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:0.82rem;">' + icons.logout + '退出登录</span>' +
             '</span>' +
         '</span>' +

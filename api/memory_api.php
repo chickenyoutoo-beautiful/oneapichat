@@ -27,7 +27,7 @@ if (in_array($origin, $allowedOrigins, true)) {
     header('Access-Control-Allow-Origin: *');
 }
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, Auth-Token');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
@@ -59,12 +59,12 @@ function writeJson($p, $d) {
 function jsonError($c, $m) { http_response_code($c); echo json_encode(['error'=>$m]); exit; }
 function jsonSuccess($d=[]) { echo json_encode(array_merge(['success'=>true], $d)); exit; }
 
-// 验证 token
-$token = $_GET['token'] ?? $_POST['token'] ?? '';
+// 统一认证：优先 Bearer / Cookie，兼容旧 query token
+require_once __DIR__ . '/auth_helpers.php';
+$token = extractSessionToken(true);
 if (!$token) jsonError(401, '未登录');
 
-$sessions = readJson($sessionsFile);
-$userId = $sessions[$token]['user_id'] ?? null;
+$userId = verifyAuthToken($token);
 if (!$userId) jsonError(401, '登录已过期');
 
 $memoryFile = $usersDir . 'memories_' . $userId . '.json';

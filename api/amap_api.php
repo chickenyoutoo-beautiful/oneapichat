@@ -15,28 +15,18 @@ define('AMAP_WIA_BASE', 'https://restapi.amap.com');
 
 // ═══ 认证中间件 (复用项目统一认证) ═══
 require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-// ═══ 获取当前用户 ID (与 cloudreve_api.php 一致) ═══
-$userId = null;
-$authToken = $_GET['auth_token'] ?? $_POST['auth_token'] ?? '';
-if ($authToken) {
-    $sessionFile = __DIR__ . '/../users/sessions.json';
-    if (file_exists($sessionFile)) {
-        $sessions = json_decode(file_get_contents($sessionFile), true) ?: [];
-        foreach ($sessions as $uid => $sess) {
-            if (!empty($sess['token']) && $sess['token'] === $authToken) {
-                $userId = $uid;
-                break;
-            }
-        }
-    }
-}
+// ═══ 获取当前用户 ID ═══
+// Bearer / 同站 Cookie 优先；legacy query/form 只保留旧客户端兼容。
+$authToken = extractSessionToken(true);
+$userId = $authToken !== '' ? verifyAuthToken($authToken) : null;
 
 // ═══ 获取 Amap API Key ═══
-// 优先级: 用户传入 > 服务器默认配置
-$apiKey = $_GET['amap_key'] ?? $_POST['amap_key'] ?? '';
+// 新客户端使用 X-Amap-Key 避免 key 泄漏到访问日志；query/form 为旧客户端兼容。
+$apiKey = trim((string)($_SERVER['HTTP_X_AMAP_KEY'] ?? $_GET['amap_key'] ?? $_POST['amap_key'] ?? ''));
 if (empty($apiKey)) {
     // 尝试从用户配置读取
     if ($userId) {
@@ -132,7 +122,7 @@ function amap_search_poi_id(string $key, string $name, string $lon = '', string 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 if (empty($apiKey) && $action !== 'config') {
-    echo json_encode(amap_error('未配置高德 API Key。请在设置中填写 Amap Web 服务 API Key，或在 URL 中传入 amap_key 参数。获取地址: https://lbs.amap.com/api/webservice/create-project-and-key'));
+    echo json_encode(amap_error('未配置高德 API Key。请在设置中填写 Amap Web 服务 API Key。获取地址: https://lbs.amap.com/api/webservice/create-project-and-key'));
     exit;
 }
 

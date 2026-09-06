@@ -14,43 +14,14 @@
  */
 
 require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
 // ── 认证 ──
-// ★ 2026-08-03 修复: sessions.json 实际结构是 {token: {user_id, created_at}},
-//   旧逻辑遍历找 $sess['token'] 永远匹配不到 → $userId 恒为 null（下载无法按用户隔离）
-$userId = null;
-$authToken = $_GET['auth_token'] ?? $_POST['auth_token'] ?? '';
-if ($authToken) {
-    // DB 优先（与 verifyAuthToken 同源）
-    $dbPath = __DIR__ . '/../users/oneapichat.db';
-    if (file_exists($dbPath)) {
-        try {
-            $pdo = new PDO("sqlite:$dbPath");
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $stmt = $pdo->prepare("SELECT user_id, created_at FROM sessions WHERE token = ?");
-            $stmt->execute([$authToken]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row && time() - ($row['created_at'] ?? 0) < 30 * 24 * 3600) {
-                $userId = $row['user_id'];
-            }
-        } catch (Exception $e) {}
-    }
-    // 回退: JSON 文件
-    if (!$userId) {
-        $sessionFile = __DIR__ . '/../users/sessions.json';
-        if (file_exists($sessionFile)) {
-            $sessions = json_decode(file_get_contents($sessionFile), true) ?: [];
-            if (isset($sessions[$authToken]['user_id'])) {
-                $sess = $sessions[$authToken];
-                if (time() - ($sess['created_at'] ?? 0) < 30 * 24 * 3600) {
-                    $userId = $sess['user_id'];
-                }
-            }
-        }
-    }
-}
+// Bearer / 同站 Cookie 优先；legacy query/form 只保留旧客户端兼容。
+$authToken = extractSessionToken(true);
+$userId = $authToken !== '' ? verifyAuthToken($authToken) : null;
 
 // ── 辅助函数 ──
 function netdisk_success($data = null, $extra = []) {
@@ -62,6 +33,17 @@ function netdisk_error($msg, $code = 400) {
     http_response_code($code);
     echo json_encode(['success' => false, 'error' => $msg]);
     exit;
+}
+
+// Cookie/动态会话请求头只允许留在服务端下载链路，禁止回传给模型或浏览器日志。
+function netdisk_public_result($value) {
+    if (!is_array($value)) return $value;
+    $out = [];
+    foreach ($value as $key => $item) {
+        if (strtolower((string)$key) === 'headers') continue;
+        $out[$key] = is_array($item) ? netdisk_public_result($item) : $item;
+    }
+    return $out;
 }
 
 function identify_netdisk_type($url) {
@@ -162,7 +144,8 @@ function resolve_parse($type, $url, $password) {
         default:       $local = parse_generic($url, $password); break;
     }
     if (!empty($local['success'])) return $local;
-    if ($type !== 'baidu') {
+    // JxPan 不支持蓝奏云；调用它只会把“密码错误”这类无关信息拼到蓝奏云失败里。
+    if ($type !== 'baidu' && $type !== 'lanzou' && $type !== 'ilanzou') {
         $jx = jxpan_parse($url, $password);
         if ($jx && !empty($jx['success'])) return $jx;
         if ($jx && !empty($jx['error'])) {
@@ -381,16 +364,23 @@ function download_file($url, $filename, $outputDir, $threads, $headers = null) {
 
     $threads = min(max(intval($threads), 1), 32);
     $cmd = sprintf(
-        'aria2c -s %d -x %d -k 1M -d %s --console-log-level=warn --allow-overwrite=true',
+        'aria2c -s %d -x %d -k 4M -d %s --file-allocation=none --continue=true --console-log-level=warn --allow-overwrite=true --max-tries=5 --retry-wait=3 --timeout=60 --connect-timeout=20',
         $threads, $threads,
         escapeshellarg($outputDir)
     );
-    // ★ 带请求头下载(夸克直链需要最新 __pus/__puus Cookie + Referer/UA, 否则CDN回调403)
+    // ★ 带完整会话请求头下载。夸克直链的 Cookie 会动态轮换，且多连接/重试
+    // 必须继续携带 Referer 与 UA，否则 CDN 常返回 403 或反复超时。
     if (is_array($headers)) {
-        foreach (['Cookie', 'Referer', 'User-Agent'] as $hk) {
+        foreach (['Cookie', 'Accept', 'Origin'] as $hk) {
             if (!empty($headers[$hk])) {
                 $cmd .= ' --header=' . escapeshellarg($hk . ': ' . $headers[$hk]);
             }
+        }
+        if (!empty($headers['Referer'])) {
+            $cmd .= ' --referer=' . escapeshellarg($headers['Referer']);
+        }
+        if (!empty($headers['User-Agent'])) {
+            $cmd .= ' --user-agent=' . escapeshellarg($headers['User-Agent']);
         }
     }
     if ($filename) {
@@ -402,6 +392,7 @@ function download_file($url, $filename, $outputDir, $threads, $headers = null) {
 
     if ($returnCode === 0) {
         // ★ 2026-08-03 云盘全面结合: 下载完成自动同步到用户 Cloudreve 账号 OneAPIChat/downloads
+        // ★ 2026-08-09 大文件异步同步: >5GB 走 Python 后台上传, 避免 PHP 超时
         $cloudreve = null;
         if ($userId) {
             $downloadedFile = $filename ? $outputDir . '/' . basename($filename) : '';
@@ -412,17 +403,39 @@ function download_file($url, $filename, $outputDir, $threads, $headers = null) {
                 $downloadedFile = $dirFiles[0] ?? '';
             }
             if ($downloadedFile && is_file($downloadedFile)) {
-                require_once __DIR__ . '/cloudreve_lib.php';
-                $crResult = cr_importFile($userId, $downloadedFile, 'downloads');
-                if (empty($crResult['success'])) {
-                    error_log('[cloudreve] netdisk 下载导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$downloadedFile");
+                $fileSize = filesize($downloadedFile);
+                $asyncThreshold = 5 * 1024 * 1024 * 1024; // 5GB
+                if ($fileSize > $asyncThreshold) {
+                    // 大文件: 后台异步同步
+                    $script = __DIR__ . '/../cloudreve_bg_upload.py';
+                    $logFile = '/tmp/cloudreve_bg_' . md5($downloadedFile) . '.log';
+                    $bgCmd = sprintf(
+                        'nohup python3 %s %s downloads > %s 2>&1 &',
+                        escapeshellarg($script),
+                        escapeshellarg($downloadedFile),
+                        escapeshellarg($logFile)
+                    );
+                    exec($bgCmd);
+                    $cloudreve = [
+                        'synced' => false,
+                        'async' => true,
+                        'message' => '文件较大 (' . round($fileSize / 1024 / 1024 / 1024, 1) . 'GB), 后台同步中, 请稍后刷新云盘查看',
+                    ];
+                    error_log("[cloudreve] 大文件后台同步已启动: $downloadedFile ($fileSize bytes)");
+                } else {
+                    // 小文件: 同步上传
+                    require_once __DIR__ . '/cloudreve_lib.php';
+                    $crResult = cr_importFile($userId, $downloadedFile, 'downloads');
+                    if (empty($crResult['success'])) {
+                        error_log('[cloudreve] netdisk 下载导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$downloadedFile");
+                    }
+                    $cloudreve = [
+                        'synced' => !empty($crResult['success']),
+                        'path' => $crResult['cloudreve_path'] ?? '',
+                        'source' => $crResult['source'] ?? '',
+                        'error' => $crResult['error'] ?? null,
+                    ];
                 }
-                $cloudreve = [
-                    'synced' => !empty($crResult['success']),
-                    'path' => $crResult['cloudreve_path'] ?? '',
-                    'source' => $crResult['source'] ?? '',
-                    'error' => $crResult['error'] ?? null,
-                ];
             }
         }
         return [
@@ -433,10 +446,152 @@ function download_file($url, $filename, $outputDir, $threads, $headers = null) {
             'cloudreve' => $cloudreve,
         ];
     }
+    // aria2 在部分夸克 CDN 节点上会因多连接重定向丢失会话，使用 curl 单连接
+    // 断点续传兜底。它仍携带同一组动态 Cookie/Referer/UA，不再把“直链已解析”误报为失败。
+    if (is_array($headers) && preg_match('/quark\.cn/i', $url) && $filename) {
+        $curlCmd = 'curl --location --fail --silent --show-error --retry 5 --retry-delay 3 --retry-all-errors ' .
+            '--connect-timeout 20 --max-time 0 --continue-at - --output ' .
+            escapeshellarg($outputDir . '/' . basename($filename));
+        foreach (['Cookie', 'Referer', 'User-Agent', 'Accept', 'Origin'] as $hk) {
+            if (!empty($headers[$hk])) {
+                $curlCmd .= ' --header ' . escapeshellarg($hk . ': ' . $headers[$hk]);
+            }
+        }
+        $curlCmd .= ' ' . escapeshellarg($url) . ' 2>&1';
+        exec($curlCmd, $curlOutput, $curlCode);
+        if ($curlCode === 0) {
+            return [
+                'success' => true,
+                'message' => '下载完成(夸克会话流式兜底)',
+                'output_dir' => $outputDir,
+                'threads' => 1,
+                'fallback' => 'curl',
+            ];
+        }
+        $output = array_merge($output, $curlOutput);
+        $returnCode = $curlCode;
+    }
     return [
         'success' => false,
         'error' => '下载失败 (code=' . $returnCode . '): ' . implode("\n", array_slice($output, -5)),
     ];
+}
+
+// ── 大文件异步下载队列 ──
+function netdisk_job_dir() {
+    $dir = __DIR__ . '/../uploads/downloads/.jobs';
+    if (!is_dir($dir)) @mkdir($dir, 0700, true);
+    return $dir;
+}
+
+function queue_download($url, $filename, $outputDir, $threads, $headers = null, $expectedSize = 0) {
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        return ['success' => false, 'error' => '无效的下载链接'];
+    }
+    $realOutputDir = realpath($outputDir);
+    $uploadsDir = realpath(__DIR__ . '/../uploads');
+    if ($realOutputDir === false || !$uploadsDir || strpos($realOutputDir, $uploadsDir) !== 0) {
+        $outputDir = __DIR__ . '/../uploads/downloads';
+        if (!is_dir($outputDir)) @mkdir($outputDir, 0755, true);
+    }
+    $filename = basename($filename ?: ('download_' . date('Ymd_His')));
+    $threads = min(max(intval($threads), 1), 32);
+    $jobId = bin2hex(random_bytes(12));
+    $jobDir = netdisk_job_dir();
+    $jobFile = $jobDir . '/' . $jobId . '.json';
+    $confFile = $jobDir . '/' . $jobId . '.conf';
+    $logFile = $jobDir . '/' . $jobId . '.log';
+    $exitFile = $jobDir . '/' . $jobId . '.exit';
+    $target = $outputDir . '/' . $filename;
+    $conf = [
+        'dir=' . $outputDir,
+        'out=' . $filename,
+        'file-allocation=none',
+        'continue=true',
+        'allow-overwrite=true',
+        'auto-file-renaming=false',
+        'max-tries=5',
+        'retry-wait=3',
+        'timeout=60',
+        'connect-timeout=20',
+        'max-connection-per-server=' . min($threads, 8),
+        'split=' . min($threads, 8),
+        'min-split-size=4M',
+        'console-log-level=warn',
+    ];
+    if (is_array($headers)) {
+        foreach (['Cookie', 'Referer', 'User-Agent', 'Accept', 'Origin'] as $hk) {
+            if (!empty($headers[$hk])) $conf[] = 'header=' . $hk . ': ' . str_replace(["\r", "\n"], '', $headers[$hk]);
+        }
+    }
+    if (@file_put_contents($confFile, implode("\n", $conf) . "\n", LOCK_EX) === false) {
+        return ['success' => false, 'error' => '无法创建下载任务配置'];
+    }
+    @chmod($confFile, 0600);
+    $job = [
+        'job_id' => $jobId,
+        'status' => 'queued',
+        'filename' => $filename,
+        'path' => $target,
+        'output_dir' => $outputDir,
+        'expected_size' => max(0, (int)$expectedSize),
+        'created_at' => time(),
+        'updated_at' => time(),
+        'log' => $logFile,
+        'exit' => $exitFile,
+    ];
+    @file_put_contents($jobFile, json_encode($job, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    $inner = sprintf(
+        'aria2c --conf-path=%s %s; rc=$?; printf "%%s" "$rc" > %s; rm -f %s; exit "$rc"',
+        escapeshellarg($confFile), escapeshellarg($url), escapeshellarg($exitFile), escapeshellarg($confFile)
+    );
+    $launch = 'nohup sh -c ' . escapeshellarg($inner) . ' > ' . escapeshellarg($logFile) . ' 2>&1 & echo $!';
+    $pidLines = [];
+    exec($launch, $pidLines, $launchCode);
+    $pid = (int)trim($pidLines[0] ?? '0');
+    if ($launchCode !== 0 || !$pid) {
+        @unlink($confFile);
+        $job['status'] = 'failed';
+        $job['error'] = '无法启动 aria2 下载进程';
+        @file_put_contents($jobFile, json_encode($job, JSON_UNESCAPED_UNICODE), LOCK_EX);
+        return ['success' => false, 'error' => $job['error']];
+    }
+    $job['status'] = 'running';
+    $job['pid'] = $pid;
+    $job['updated_at'] = time();
+    @file_put_contents($jobFile, json_encode($job, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return [
+        'success' => true,
+        'queued' => true,
+        'job_id' => $jobId,
+        'status' => 'running',
+        'filename' => $filename,
+        'message' => '大文件已进入后台下载队列，请稍后使用 netdisk_status 查询进度',
+    ];
+}
+
+function read_download_job($jobId) {
+    if (!preg_match('/^[a-f0-9]{24}$/', (string)$jobId)) return null;
+    $file = netdisk_job_dir() . '/' . $jobId . '.json';
+    if (!is_file($file)) return null;
+    $job = json_decode(@file_get_contents($file), true);
+    if (!is_array($job)) return null;
+    $exit = isset($job['exit']) && is_file($job['exit']) ? trim((string)@file_get_contents($job['exit'])) : null;
+    $size = is_file($job['path'] ?? '') ? (int)@filesize($job['path']) : 0;
+    if ($exit !== null) {
+        $job['status'] = ($exit === '0') ? 'completed' : 'failed';
+        $job['exit_code'] = (int)$exit;
+        if ($job['status'] === 'failed' && !empty($job['log']) && is_file($job['log'])) {
+            $lines = @file($job['log'], FILE_IGNORE_NEW_LINES);
+            $job['error'] = implode("\n", array_slice($lines ?: [], -5));
+        }
+    } elseif ($job['status'] === 'running') {
+        $job['status'] = 'running';
+    }
+    $job['size'] = $size;
+    $job['updated_at'] = time();
+    @file_put_contents(netdisk_job_dir() . '/' . $jobId . '.json', json_encode($job, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $job;
 }
 
 // ── 路由 ──
@@ -453,7 +608,7 @@ switch ($action) {
 
         if ($result['success']) {
             $result['netdisk_type'] = $netdiskType;
-            netdisk_success($result);
+            netdisk_success(netdisk_public_result($result));
         } elseif (!empty($result['captcha_required'])) {
             // 百度验证码: 返回图片+提示, 客户端可展示给用户人工识别
             $result['netdisk_type'] = $netdiskType;
@@ -466,13 +621,29 @@ switch ($action) {
 
     case 'download':
         $url = $_GET['url'] ?? $_POST['url'] ?? '';
+        $password = $_GET['password'] ?? $_POST['password'] ?? $_GET['pwd'] ?? $_POST['pwd'] ?? '';
         $filename = $_GET['filename'] ?? $_POST['filename'] ?? '';
         $outputDir = $_GET['output_dir'] ?? $_POST['output_dir'] ?? (__DIR__ . '/../uploads/downloads');
         $threads = $_GET['threads'] ?? $_POST['threads'] ?? 16;
 
         if (empty($url)) netdisk_error('缺少下载链接 (url 参数)');
+        // 兼容模型直接调用 netdisk_download(share_url)：自动解析并保留动态会话请求头，
+        // 不再要求模型把夸克 Cookie/直链会话暴露后再手工转发。
+        $downloadHeaders = null;
+        $downloadType = identify_netdisk_type($url);
+        if (preg_match('/(?:pan\.quark\.cn|pan\.baidu\.com|alipan\.com|aliyundrive\.com)/i', $url) && preg_match('/\/(?:s|share)\//i', $url)) {
+            $parsed = resolve_parse($downloadType, $url, $password);
+            if (empty($parsed['success'])) netdisk_error('解析失败: ' . ($parsed['error'] ?? '未知错误'));
+            $downloadHeaders = $parsed['headers'] ?? null;
+            $url = $parsed['direct_url'] ?? '';
+            if (!$filename) $filename = $parsed['filename'] ?? '';
+            $fileSize = (int)($parsed['file_size'] ?? 0);
+            if ($fileSize >= 512 * 1024 * 1024) {
+                netdisk_success(queue_download($url, $filename, $outputDir, $threads, $downloadHeaders, $fileSize));
+            }
+        }
 
-        $result = download_file($url, $filename, $outputDir, $threads);
+        $result = download_file($url, $filename, $outputDir, $threads, $downloadHeaders);
         if ($result['success']) {
             netdisk_success($result);
         } else {
@@ -501,18 +672,39 @@ switch ($action) {
         $directUrl = $parseResult['direct_url'];
         $autoFilename = $filename ?: ($parseResult['filename'] ?? '');
         $downloadHeaders = $parseResult['headers'] ?? null;
-        $downloadResult = download_file($directUrl, $autoFilename, $outputDir, $threads, $downloadHeaders);
+        // 夸克/其他网盘的大文件不能占用一次工具调用等待数分钟；进入后台队列，
+        // 由 netdisk_status(job_id) 查询进度，且队列配置会继续携带动态 Cookie。
+        $fileSize = (int)($parseResult['file_size'] ?? 0);
+        if ($fileSize >= 512 * 1024 * 1024) {
+            $downloadResult = queue_download($directUrl, $autoFilename, $outputDir, $threads, $downloadHeaders, $fileSize);
+        } else {
+            $downloadResult = download_file($directUrl, $autoFilename, $outputDir, $threads, $downloadHeaders);
+        }
 
         netdisk_success([
-            'parse' => $parseResult,
-            'download' => $downloadResult,
+            'parse' => netdisk_public_result($parseResult),
+            'download' => netdisk_public_result($downloadResult),
             'netdisk_type' => $netdiskType,
         ]);
         break;
 
     case 'download_status':
     case 'status':
-        // 检查 aria2 是否可用
+        $jobId = $_GET['job_id'] ?? $_POST['job_id'] ?? '';
+        if ($jobId !== '') {
+            $job = read_download_job($jobId);
+            if (!$job) netdisk_error('下载任务不存在或已过期', 404);
+            netdisk_success([
+                'job_id' => $job['job_id'],
+                'status' => $job['status'],
+                'filename' => $job['filename'] ?? '',
+                'size' => $job['size'] ?? 0,
+                'expected_size' => $job['expected_size'] ?? 0,
+                'error' => $job['error'] ?? null,
+                'path' => ($job['status'] === 'completed') ? ($job['path'] ?? '') : null,
+            ]);
+        }
+        // 无 job_id 时返回服务状态，兼容旧客户端。
         exec('which aria2c 2>/dev/null', $whichOut, $whichRc);
         netdisk_success([
             'aria2_available' => ($whichRc === 0),

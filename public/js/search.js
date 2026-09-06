@@ -41,7 +41,9 @@ async function aiChooseSearchType(text, historySummary, signal) {
 }
 
 async function performWebSearch(query, signal, type = 'web') {
-    var provider = getVal('searchProvider') || 'duckduckgo';
+    var provider = getVal('searchProvider') || 'tavily';
+    // 旧页面或旧配置中的已下线引擎统一迁移到 Tavily。
+    if (provider === 'google' || provider === 'duckduckgo') provider = 'tavily';
     var timeout = parseInt(getVal('searchTimeout')) * 1000;
     var max = parseInt(getVal('maxSearchResults')) || 3;
     var region = getVal('searchRegion') || '';
@@ -72,31 +74,49 @@ async function performWebSearch(query, signal, type = 'web') {
 
     var url = '';
     var headers = { 'Accept': 'application/json' };
+    var requestBody = null;
 
     if (provider === 'brave') {
-        let params = `q=${encodeURIComponent(query)}&count=${max}&_t=${t}`;
+        var count = Math.min(Math.max(max, 1), 20);
+        let params = `q=${encodeURIComponent(query)}&count=${count}&safesearch=off&text_decorations=0&_t=${t}`;
         if (country) params += `&country=${country}`;
-        params += '&safesearch=off';
         var endpoint = type === 'news' ? '/news/search' : (type === 'images' ? '/images/search' : '/web/search');
         url = `https://api.search.brave.com/res/v1${endpoint}?${params}`;
-        // ★ 通过服务器代理避免浏览器CORS
-        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url) + '&header_key=X-Subscription-Token&header_val=' + encodeURIComponent(apiKey);
-    } else if (provider === 'google') {
-        url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(query)}&num=${max}&_t=${t}${country ? '&gl=' + country : ''}`;
-        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url);
+        // ★ 通过服务器代理避免浏览器CORS与GFW封锁
+        requestBody = {
+            provider: 'brave',
+            query: query,
+            type: type,
+            limit: count,
+            country: country,
+            api_key: apiKey
+        };
+        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy';
+    } else if (provider === 'deepseek') {
+        // DeepSeek Responses API 原生联网搜索：tools=[{type:'web_search'}]
+        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy';
+        requestBody = {
+            provider: 'deepseek',
+            query: query,
+            api_key: apiKey,
+            model: getVal('searchModel') || 'deepseek-v4-flash'
+        };
     } else if (provider === 'tavily') {
         // Tavily 搜索通过服务器端代理（绕过浏览器CORS）
-        url = SERVER_API_BASE + '/engine_api.php?action=tavily_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(apiKey);
-        console.log('[Search-Tavily] provider=tavily apiKey_len=' + (apiKey ? apiKey.length : 0) + ' url=' + url.substring(0, 100));
+        url = SERVER_API_BASE + '/engine_api.php?action=tavily_search';
+        requestBody = { q: query, limit: max, api_key: apiKey };
+        console.log('[Search-Tavily] provider=tavily apiKey_len=' + (apiKey ? apiKey.length : 0));
     } else if (provider === 'minimax') {
-        // MiniMax 搜索通过服务器端 CLI 调用
         // MiniMax 搜索通过服务器端 CLI 调用,传 API Key(从聊天模型配置复用)
         var _k = localStorage.getItem('apiKeyMiniMax') || localStorage.getItem('baseApiKey') || '';
         var _mmxApiKey = _k; try { _mmxApiKey = await decrypt(_k) || _k; } catch(e) {}
-        url = SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max + '&api_key=' + encodeURIComponent(_mmxApiKey);
+        url = SERVER_API_BASE + '/engine_api.php?action=minimax_search';
+        requestBody = { q: query, limit: max, api_key: _mmxApiKey };
     } else {
-        url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&_t=${t}${country ? '&kl=' + country : ''}`;
-        url = SERVER_API_BASE + '/engine_api.php?action=search_proxy&url=' + encodeURIComponent(url);
+        // 旧值只可能来自未刷新的标签页，统一走 Tavily 的稳定代理。
+        provider = 'tavily';
+        url = SERVER_API_BASE + '/engine_api.php?action=tavily_search';
+        requestBody = { q: query, limit: max, api_key: apiKey };
     }
 
     var controller = new AbortController();
@@ -104,23 +124,38 @@ async function performWebSearch(query, signal, type = 'web') {
     var combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
 
     try {
-        var res = await fetchWithRetry(url, { method: 'GET', headers, signal: combinedSignal });
+        var _searchAuth = typeof getAuthToken === 'function' ? getAuthToken() : (localStorage.getItem('authToken') || '');
+        if (_searchAuth) headers.Authorization = 'Bearer ' + _searchAuth;
+        if (requestBody) headers['Content-Type'] = 'application/json';
+        var res = await fetchWithRetry(url, {
+            method: requestBody ? 'POST' : 'GET',
+            headers,
+            body: requestBody ? JSON.stringify(requestBody) : undefined,
+            signal: combinedSignal
+        });
         clearTimeout(timeoutId);
         if (!res.ok) throw new Error(`搜索失败: ${res.status}`);
         var rawText = await res.text();
-        // DuckDuckGo 直接API 可能返回HTML而非JSON(限流/反爬)
+        // 上游异常页可能返回 HTML 而非 JSON（限流、网关或反爬）。
         if (rawText.trim().startsWith('<')) {
             throw new Error('搜索API返回HTML(可能被限流), 尝试回退...');
         }
         var data = JSON.parse(rawText);
+        // 向测试按钮和聊天界面透传上游的真实错误，例如 Google Key 过期。
+        if (data && data.error) {
+            var upstreamError = typeof data.error === 'string'
+                ? data.error
+                : (data.error.message || data.error.detail || data.error.code || '上游搜索服务返回错误');
+            throw new Error(upstreamError);
+        }
         var results = parseSearchResults(data, provider, type);
         // ★ Tavily 无结果时自动回退 MiniMax CLI
         if (provider === 'tavily' && (!results || results.length === 0)) {
             console.warn('[Search-Tavily] 无结果, 回退 MiniMax CLI...');
             try {
                 var _tvFbRes = await fetchWithRetry(
-                    SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max,
-                    { method: 'GET', signal: combinedSignal }
+                    SERVER_API_BASE + '/engine_api.php?action=minimax_search',
+                    { method: 'POST', headers: headers, body: JSON.stringify({ q: query, limit: max }), signal: combinedSignal }
                 );
                 if (_tvFbRes.ok) {
                     var _tvFbData = await _tvFbRes.json();
@@ -136,12 +171,12 @@ async function performWebSearch(query, signal, type = 'web') {
     } catch (e) {
         clearTimeout(timeoutId);
         // 回退: 通过服务器端引擎搜索
-        if (provider === 'duckduckgo' || provider === 'brave' || provider === 'tavily' || e.message.includes('HTML')) {
+        if (provider === 'tavily' || e.message.includes('HTML')) {
             try {
                 console.warn('[Search] 直接API失败(' + e.message + '), 回退到服务端搜索...');
                 var fbRes = await fetchWithRetry(
-                    SERVER_API_BASE + '/engine_api.php?action=minimax_search&q=' + encodeURIComponent(query) + '&limit=' + max,
-                    { method: 'GET', signal: combinedSignal }
+                    SERVER_API_BASE + '/engine_api.php?action=minimax_search',
+                    { method: 'POST', headers: headers, body: JSON.stringify({ q: query, limit: max }), signal: combinedSignal }
                 );
                 if (fbRes.ok) {
                     var fbData = await fbRes.json();
@@ -160,33 +195,54 @@ async function performWebSearch(query, signal, type = 'web') {
 function parseSearchResults(data, provider, type = 'web') {
     var results = [];
     if (provider === 'brave') {
-        if (type === 'news' && data.news?.results) {
-            results.push(...data.news.results.slice(0, 5).map(r => ({
-                title: r.title,
-                url: r.url,
-                snippet: r.description || r.content
+        if (data.message || data.error) {
+            console.warn('[Search-Brave] API错误:', data.message || data.error);
+            return results;
+        }
+        if (type === 'news') {
+            var newsItems = (data.results && Array.isArray(data.results)) ? data.results : (data.news?.results || []);
+            results.push(...newsItems.slice(0, 8).map(r => ({
+                title: r.title || '无标题',
+                url: r.url || '',
+                snippet: r.description || r.content || ''
             })));
-        } else if (type === 'images' && data.images?.results) {
-            results.push(...data.images.results.slice(0, 5).map(r => ({
-                title: r.title,
-                url: r.url,
+        } else if (type === 'images') {
+            var imgItems = (data.results && Array.isArray(data.results)) ? data.results : (data.images?.results || []);
+            results.push(...imgItems.slice(0, 8).map(r => ({
+                title: r.title || '无标题',
+                url: r.url || r.properties?.url || '',
                 snippet: r.description || '',
-                thumbnail: r.thumbnail?.src || ''
+                thumbnail: r.thumbnail?.src || r.properties?.url || ''
             })));
         } else if (data.web?.results) {
-            results.push(...data.web.results.slice(0, 5).map(r => ({
-                title: r.title,
-                url: r.url,
-                snippet: r.description
-            })));
+            results.push(...data.web.results.slice(0, 8).map(r => {
+                var desc = r.description || '';
+                if (r.extra_snippets && Array.isArray(r.extra_snippets) && r.extra_snippets.length > 0) {
+                    desc += ' ' + r.extra_snippets.join(' ');
+                }
+                return {
+                    title: r.title || '无标题',
+                    url: r.url || '',
+                    snippet: desc
+                };
+            }));
         }
     } else if (provider === 'google' && data.items) {
+        // 兼容旧版服务端响应；Google 已从前端选项下架。
         results.push(...data.items.slice(0, 5).map(r => ({ title: r.title, url: r.link, snippet: r.snippet })));
-    } else if (provider === 'duckduckgo') {
-        if (data.AbstractText) results.push({ title: data.Heading || '摘要', url: data.AbstractURL || '', snippet: data.AbstractText });
-        if (data.RelatedTopics) data.RelatedTopics.slice(0, 4).forEach(t => {
-            if (t.Text) results.push({ title: t.Text.split('.')[0] || '相关', url: '', snippet: t.Text });
-        });
+    } else if (provider === 'deepseek') {
+        // 服务端已将 Responses API output 标准化为 results。
+        if (data.error) {
+            console.warn('[Search-DeepSeek] API错误:', data.error.message || data.error);
+            return results;
+        }
+        if (Array.isArray(data.results)) {
+            results.push(...data.results.slice(0, 8).map(r => ({
+                title: r.title || 'DeepSeek 联网搜索结果',
+                url: r.url || '',
+                snippet: r.snippet || r.content || ''
+            })));
+        }
     } else if (provider === 'tavily') {
         // Tavily response: { results: [{ title, url, content }] }
         // ★ 检测 Tavily 错误响应 (detail.error 格式, 而不是直接的 error 字段)
@@ -224,6 +280,7 @@ function formatRawResults(results) {
         var line = `${i + 1}. ${r.title}\n   链接: ${r.url}\n   摘要: ${r.snippet}`;
         if (r.thumbnail) {
             line += `\n   ![图片](${r.thumbnail})`;
+            line += `\n   图片来源页: ${r.url || ''}`;
         }
         return line;
     }).join('\n\n');
@@ -267,7 +324,13 @@ async function performWebFetch(urls) {
                 if (_r.ok) {
                     var _d = await _r.json();
                     if (_d.content) {
-                        return { url: url, content: _d.content.substring(0, 100000), error: '' };
+                        var _cnt = _d.content.substring(0, 100000);
+                        // ★ 若为金融行情 SPA 网页, 提示模型调用专门的股票行情工具
+                        var _isFinanceSpa = /eastmoney\.com|finance\.sina\.com\.cn|xueqiu\.com|finance\.yahoo\.com|futunn\.com/i.test(url);
+                        if (_isFinanceSpa && (_cnt.length < 500 || _cnt.indexOf('JavaScript') !== -1 || _cnt.indexOf('加载中') !== -1)) {
+                            _cnt += '\n\n【系统提示：检测到该页面为金融行情 SPA 动态渲染网页，纯文本抓取可能无法渲染实时盘中数字。若需获取最新点位、分时/K线及市场状态，请直接调用 stock_realtime(symbol="...") 或 stock_market_overview() 工具获取权威结构化行情数据。】';
+                        }
+                        return { url: url, content: _cnt, error: '' };
                     }
                 }
                 return null;

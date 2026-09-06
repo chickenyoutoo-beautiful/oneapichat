@@ -4,11 +4,11 @@
 
 参考 DeepSeek-TUI 的 JobRetryMetadata 设计：
 - 指数退避：backoff_base_ms=500
-- 最大尝试次数：max_attempts=3
+- 最大尝试次数：max_attempts=5
 - 状态机：Queued → Running → Paused → Completed/Failed/Cancelled
 
 用法:
-    retrier = RetryEngine(max_attempts=3, backoff_base_ms=500)
+    retrier = RetryEngine(max_attempts=5, backoff_base_ms=500)
     result = await retrier.execute("task-1", my_async_func, arg1="xxx")
 """
 
@@ -73,7 +73,7 @@ class RetryMetadata:
     """完整重试任务元数据"""
     task_id: str
     status: RetryStatus = RetryStatus.QUEUED
-    max_attempts: int = 3
+    max_attempts: int = 5
     backoff_base_ms: float = 500.0
     backoff_max_ms: float = 30000.0
     jitter: bool = True
@@ -152,7 +152,7 @@ class RetryEngine:
 
     def __init__(
         self,
-        max_attempts: int = 3,
+        max_attempts: int = 5,
         backoff_base_ms: float = 500.0,
         backoff_max_ms: float = 30000.0,
         jitter: bool = True,
@@ -426,7 +426,7 @@ class RetryEngine:
 # ── 包装器装饰器 ─────────────────────────────────────
 
 def with_retry(
-    max_attempts: int = 3,
+    max_attempts: int = 5,
     backoff_base_ms: float = 500.0,
     backoff_max_ms: float = 30000.0,
     jitter: bool = True,
@@ -456,7 +456,7 @@ def with_retry(
 # ── 工厂函数 ──────────────────────────────────────────
 
 def create_retry_engine(
-    max_attempts: int = 3,
+    max_attempts: int = 5,
     backoff_base_ms: float = 500.0,
 ) -> RetryEngine:
     """创建重试引擎"""

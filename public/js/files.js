@@ -262,7 +262,7 @@ async function extractFileContent(file) {
             var _token = localStorage.getItem('authToken') || '';
             var _formData = new FormData();
             _formData.append('file', file);
-            var _resp = await fetch('/oneapichat/api/parse.php?auth_token=' + encodeURIComponent(_token), {
+            var _resp = await fetch('/oneapichat/api/parse.php', {
                 method: 'POST',
                 body: _formData
             });
@@ -694,7 +694,7 @@ function addPastedImage(dataUrl, name, size) {
     pendingFiles.push(_fileObj);
     // ★ 立即上传到服务器, 确保刷新后图片不消失
     if (typeof uploadImageToServer === 'function') {
-        uploadImageToServer(dataUrl).then(function(srvUrl) {
+        uploadImageToServer(dataUrl, { name: name }).then(function(srvUrl) {
             if (srvUrl) {
                 _fileObj.serverUrl = srvUrl;
                 updateFilePreviewUI();
@@ -727,8 +727,16 @@ async function processSelectedFiles(fileList) {
         }
 
         // 检查是否是图片文件
-        var isImage = file.type.startsWith('image/');
+        var _fileExt = (file.name.split('.').pop() || '').toLowerCase();
+        var isHeic = (_fileExt === 'heic' || _fileExt === 'heif' || file.type === 'image/heic' || file.type === 'image/heif');
+        var isImage = file.type.startsWith('image/') || isHeic;
         var isVideo = file.type.startsWith('video/');
+
+        // ★ iPhone HEIC 检测提示 (服务器会自动转换为 JPEG)
+        if (isHeic && !sessionStorage.getItem('_heicTipShown')) {
+            showToast('📱 检测到 iPhone HEIC 图片, 上传后将自动转换为 JPEG 格式', 'info', 4000);
+            sessionStorage.setItem('_heicTipShown', '1');
+        }
 
         // ★ 创建进度条容器(文件预览区域内)
         var progressContainer = document.createElement('div');
@@ -892,11 +900,19 @@ async function processSelectedFiles(fileList) {
                         updateFilePreviewUI();
                     }, 600);
                 } else {
-                    _setProgress(20, '解析中...');
+                    _setProgress(12, '上传并解析中...');
+                    // 可解析文档也必须上传原文件。仅把解析文本传给模型会让模型知道内容，
+                    // 却不知道可供 unzip/python-docx 等工具直接使用的真实路径，最终退化成全盘 find。
+                    var _docUploadPromise = uploadVideoBlob(file, function(pct) {
+                        _setProgress(Math.min(55, 12 + Math.round((pct - 30) * 0.45)), '上传原文件中...');
+                    }, true).catch(function() { return null; });
                     var _extractResult = await extractFileContent(file);
+                    var _docUpload = await _docUploadPromise;
+                    var _serverUrl = _docUpload && (_docUpload.url || '') || '';
+                    var _serverPath = _docUpload && (_docUpload.path || '') || '';
                     // ★ 支持 office 文档返回 {text, images, isOfficeDoc} 对象
                     if (_extractResult && typeof _extractResult === 'object' && _extractResult.isOfficeDoc) {
-                        var _fileObj = { name: file.name, content: _extractResult.text || '', size: file.size, isImage: false, type: file.type };
+                        var _fileObj = { name: file.name, content: _extractResult.text || '', size: file.size, isImage: false, type: file.type, serverUrl: _serverUrl, serverPath: _serverPath };
                         if (_extractResult.images && _extractResult.images.length > 0) {
                             _fileObj.extractedImages = _extractResult.images;
                             _fileObj.hasEmbeddedImages = true;
@@ -905,7 +921,7 @@ async function processSelectedFiles(fileList) {
                         pendingFiles.push(_fileObj);
                     } else {
                         var content = typeof _extractResult === 'string' ? _extractResult : (_extractResult ? String(_extractResult) : '');
-                        pendingFiles.push({ name: file.name, content: content, size: file.size, isImage: false, type: file.type });
+                        pendingFiles.push({ name: file.name, content: content, size: file.size, isImage: false, type: file.type, serverUrl: _serverUrl, serverPath: _serverPath });
                     }
                     _setDone();
                     setTimeout(function() {

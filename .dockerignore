@@ -26,4 +26,9 @@ config.ini
 *.log
 *.gz
 *.db
+*.apk
+.archive_backups/
+deploy/dist/
+deploy/node_modules/
+deploy/android/
 rag/

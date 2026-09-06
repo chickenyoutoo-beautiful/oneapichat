@@ -71,6 +71,11 @@ class ToolDef:
     handler: Optional[callable] = None  # 工具执行函数
     enabled: bool = True
     tags: list[str] = field(default_factory=list)  # 自定义标签
+    # DSH-compatible execution/output contract. Existing tools inherit safe defaults.
+    output_schema: dict[str, Any] = field(default_factory=lambda: {})
+    timeout_ms: int = 120_000
+    is_concurrency_safe: bool = True
+    presentation: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_read_only(self) -> bool:
@@ -108,6 +113,12 @@ class ToolDef:
             "tags": self.tags,
             "has_handler": self.handler is not None,
             "parameters": self.parameters or {"type": "object", "properties": {}},
+            "output": {
+                "schema": self.output_schema or {},
+                "presentation": self.presentation or {},
+            },
+            "timeout_ms": max(1, int(self.timeout_ms)),
+            "is_concurrency_safe": bool(self.is_concurrency_safe),
         }
 
 
@@ -200,13 +211,13 @@ def _default_tools() -> list[ToolDef]:
         ),
         ToolDef(
             name="server_file_read",
-            description="读取服务器文件内容。",
+            description="读取服务器上的一个具体文件（不能把目录当文件读）。先用 server_file_search 或 server_exec 查找文件，再把完整文件路径传给本工具；不存在 run_command，命令执行使用 server_exec。",
             capabilities={Capability.ReadOnly, Capability.Sandboxable},
             approval=ApprovalKind.SUGGEST,
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "文件路径"},
+                    "path": {"type": "string", "description": "具体文件的绝对路径（目录请先用 server_file_search 或 server_exec 列出）"},
                 },
                 "required": ["path"],
             },
@@ -393,11 +404,11 @@ class ToolRegistry:
     支持动态注册/移除，按能力过滤，导出多种格式。
     """
 
-    def __init__(self):
+    def __init__(self, register_defaults: bool = True):
         self._tools: dict[str, ToolDef] = {}
-        # 注册默认工具
-        for t in _default_tools():
-            self._tools[t.name] = t
+        if register_defaults:
+            for t in _default_tools():
+                self._tools[t.name] = t
 
     # ── 注册/移除 ────────────────────────────────────
 
@@ -424,6 +435,10 @@ class ToolRegistry:
             parameters=d.get("parameters", {"type": "object", "properties": {}}),
             enabled=d.get("enabled", True),
             tags=d.get("tags", []),
+            output_schema=(d.get("output") or {}).get("schema", d.get("output_schema", {})),
+            timeout_ms=int(d.get("timeout_ms", 120_000)),
+            is_concurrency_safe=bool(d.get("is_concurrency_safe", True)),
+            presentation=(d.get("output") or {}).get("presentation", d.get("presentation", {})),
         )
         return self.register(tool)
 

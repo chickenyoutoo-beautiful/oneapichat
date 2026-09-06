@@ -34,21 +34,28 @@ def init_memory_engine(engine_dir: Path):
     init_memory_db_dir(engine_dir)
     CHROMA_DIR = engine_dir / "chroma"
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    import chromadb
-    _chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    from chromadb.utils import embedding_functions
-    _ef = embedding_functions.DefaultEmbeddingFunction()
-    print("[MemoryEngine] Initialized — chromadb + fastembed ready")
+    try:
+        import chromadb
+        _chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        from chromadb.utils import embedding_functions
+        _ef = embedding_functions.DefaultEmbeddingFunction()
+        print("[MemoryEngine] Initialized — chromadb + fastembed ready")
+    except ImportError:
+        _chroma_client = None
+        _ef = None
+        print("[MemoryEngine] chromadb not installed, falling back to SQLite FTS5 / BM25 memory mode")
 
 
 def _get_client():
     if _chroma_client is None:
-        raise RuntimeError("init_memory_engine() not called")
+        return None
     return _chroma_client
 
 
 def _get_col(user_id: str, kind: str):
     client = _get_client()
+    if client is None:
+        return None
     name = f"mem_{kind}_{user_id}"
     try:
         return client.get_collection(name)
@@ -57,13 +64,19 @@ def _get_col(user_id: str, kind: str):
 
 
 def _embed(text: str) -> list:
+    if _ef is None:
+        return []
     result = _ef([text])
     return result[0].tolist() if hasattr(result[0], 'tolist') else list(result[0])
 
 
 def _chroma_sync(user_id: str, kind: str, item_id: str, text: str, metadata: dict):
+    if _chroma_client is None:
+        return
     try:
         col = _get_col(user_id, kind)
+        if col is None:
+            return
         emb = _embed(text)
         col.upsert(ids=[item_id], embeddings=[emb], metadatas=[metadata], documents=[text[:2000]])
     except Exception as e:
@@ -71,16 +84,24 @@ def _chroma_sync(user_id: str, kind: str, item_id: str, text: str, metadata: dic
 
 
 def _chroma_delete(user_id: str, kind: str, item_id: str):
+    if _chroma_client is None:
+        return
     try:
-        _get_col(user_id, kind).delete(ids=[item_id])
+        col = _get_col(user_id, kind)
+        if col is not None:
+            col.delete(ids=[item_id])
     except Exception as e:
         print(f"[MemoryEngine] chroma delete warning: {e}")
 
 
 def _chroma_search(user_id: str, kind: str, query: str, limit=10) -> list:
     """Returns [(id, score, metadata), ...]"""
+    if _chroma_client is None:
+        return []
     try:
         col = _get_col(user_id, kind)
+        if col is None:
+            return []
         emb = _embed(query)
         results = col.query(query_embeddings=[emb], n_results=limit, include=["metadatas", "distances"])
         if not results.get("ids") or not results["ids"][0]:

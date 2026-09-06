@@ -17,10 +17,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/auth_helpers.php';
 
+/**
+ * 将已落盘的生成图原子地绑定到聊天消息。
+ * 与 chat.php 使用同一个 all.json.lock，确保旧标签页的全量保存不能穿插覆盖。
+ */
+function persistGeneratedImageToChat($userId, array $requestData, string $url): array {
+    if (empty($requestData['persist_generated'])) return ['requested' => false, 'ok' => false];
+    if (!$userId) return ['requested' => true, 'ok' => false, 'error' => 'authentication required'];
+
+    $chatId = isset($requestData['chat_id']) ? (string)$requestData['chat_id'] : '';
+    if ($chatId === '' || !preg_match('/^[a-zA-Z0-9_-]{1,128}$/', $chatId)) {
+        return ['requested' => true, 'ok' => false, 'error' => 'invalid chat_id'];
+    }
+
+    $namespace = 'user_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $userId);
+    $chatFile = dirname(__DIR__) . '/chat_data/' . $namespace . '_all.json';
+    $lockHandle = @fopen($chatFile . '.lock', 'c');
+    if (!$lockHandle || !@flock($lockHandle, LOCK_EX)) {
+        if ($lockHandle) @fclose($lockHandle);
+        return ['requested' => true, 'ok' => false, 'error' => 'chat save busy'];
+    }
+
+    try {
+        $allData = is_file($chatFile) ? json_decode((string)file_get_contents($chatFile), true) : null;
+        if (!is_array($allData) || !isset($allData['chats'][$chatId]) || !is_array($allData['chats'][$chatId])) {
+            return ['requested' => true, 'ok' => false, 'error' => 'chat not found'];
+        }
+        if (!isset($allData['chats'][$chatId]['messages']) || !is_array($allData['chats'][$chatId]['messages'])) {
+            $allData['chats'][$chatId]['messages'] = [];
+        }
+        $messages =& $allData['chats'][$chatId]['messages'];
+
+        $messageIndex = isset($requestData['message_index']) && is_numeric($requestData['message_index'])
+            ? (int)$requestData['message_index'] : -1;
+        if ($messageIndex < 0 || !isset($messages[$messageIndex]) || ($messages[$messageIndex]['role'] ?? '') !== 'assistant') {
+            $messageIndex = -1;
+            for ($i = count($messages) - 1; $i >= 0; $i--) {
+                if (($messages[$i]['role'] ?? '') === 'assistant') {
+                    $messageIndex = $i;
+                    break;
+                }
+            }
+        }
+        if ($messageIndex < 0) {
+            $messages[] = ['role' => 'assistant', 'content' => '', 'time' => (int)round(microtime(true) * 1000)];
+            $messageIndex = count($messages) - 1;
+        }
+
+        $rawMeta = isset($requestData['image_meta']) && is_array($requestData['image_meta'])
+            ? $requestData['image_meta'] : [];
+        $limitText = static function($value, int $max): string {
+            $value = is_scalar($value) ? (string)$value : '';
+            return mb_substr($value, 0, $max, 'UTF-8');
+        };
+        $meta = [
+            'url' => $url,
+            'prompt' => $limitText($rawMeta['prompt'] ?? '', 12000),
+            'model' => $limitText($rawMeta['model'] ?? '', 256),
+            'aspect_ratio' => $limitText($rawMeta['aspect_ratio'] ?? '1:1', 32),
+            'timestamp' => isset($rawMeta['timestamp']) && is_numeric($rawMeta['timestamp'])
+                ? (int)$rawMeta['timestamp'] : (int)round(microtime(true) * 1000),
+            'notes' => $limitText($rawMeta['notes'] ?? '', 2000),
+        ];
+
+        $message =& $messages[$messageIndex];
+        $existing = isset($message['generatedImages']) && is_array($message['generatedImages'])
+            ? $message['generatedImages'] : [];
+        $found = false;
+        foreach ($existing as $idx => $item) {
+            $itemUrl = is_string($item) ? $item : (is_array($item) ? ($item['url'] ?? '') : '');
+            if ($itemUrl === $url) {
+                $existing[$idx] = $meta;
+                $found = true;
+                break;
+            }
+        }
+        if (!$found) $existing[] = $meta;
+        $message['generatedImages'] = $existing;
+        if (empty($message['generatedImage'])) $message['generatedImage'] = $meta;
+
+        $nowMs = (int)round(microtime(true) * 1000);
+        $allData['chats'][$chatId]['updated_at'] = $nowMs;
+        $allData['updated_at'] = date('c');
+        $encoded = json_encode($allData, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        if ($encoded === false) return ['requested' => true, 'ok' => false, 'error' => 'encode failed'];
+
+        $tmpFile = @tempnam(dirname($chatFile), '.generated-image-');
+        if (!$tmpFile || @file_put_contents($tmpFile, $encoded, LOCK_EX) === false || !@rename($tmpFile, $chatFile)) {
+            if ($tmpFile && is_file($tmpFile)) @unlink($tmpFile);
+            return ['requested' => true, 'ok' => false, 'error' => 'chat write failed'];
+        }
+        @chmod($chatFile, 0664);
+        return ['requested' => true, 'ok' => true, 'message_index' => $messageIndex];
+    } finally {
+        @flock($lockHandle, LOCK_UN);
+        @fclose($lockHandle);
+    }
+}
+
 // ---- 获取认证用户信息 ----
-$authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+$authToken = extractBearerToken();
+if (empty($authToken) && !empty($_COOKIE['auth_token'])) {
+    $authToken = preg_replace('/[^a-f0-9]/', '', (string)$_COOKIE['auth_token']);
+}
+if (empty($authToken) && !empty($_SERVER['HTTP_AUTH_TOKEN'])) {
+    $authToken = preg_replace('/[^a-f0-9]/', '', $_SERVER['HTTP_AUTH_TOKEN']);
+}
 if (empty($authToken)) {
-    $authToken = isset($_SERVER['HTTP_AUTH_TOKEN']) ? preg_replace('/[^a-f0-9]/', '', $_SERVER['HTTP_AUTH_TOKEN']) : '';
+    // Compatibility for clients pending the header-auth rollout.
+    $authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
 }
 
 $userId = null;
@@ -61,8 +166,27 @@ function safePath(string $baseDir, string $filename): string {
     return (strpos($fullPath, $realBase) === 0) ? $fullPath : false;
 }
 
+// ---- 文件名提示语净化：将用户输入/提示词转为安全的文件名片段 ----
+function sanitizeFilenameHint(string $input): string {
+    // 取前 40 字符（中文最多约 20 个汉字）
+    $hint = mb_substr($input, 0, 40, 'UTF-8');
+    // 将非字母/数字/汉字/连字符的字符替换为连字符
+    $hint = preg_replace('/[^\p{L}\p{N}\-]+/u', '-', $hint);
+    // 合并连续连字符
+    $hint = preg_replace('/-{2,}/', '-', $hint);
+    // 去除首尾连字符
+    $hint = trim($hint, '-');
+    // 限制最终长度（避免超长文件名）
+    if (mb_strlen($hint, 'UTF-8') > 60) {
+        $hint = mb_substr($hint, 0, 60, 'UTF-8');
+        $hint = rtrim($hint, '-');
+    }
+    return $hint;
+}
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = [];
     $filename = '';
     $imageData = null;
     $ext = 'png';
@@ -116,7 +240,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // 验证文件类型（常见图片格式 + 视频格式）
-    $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif', 'mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
+    $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif', 'heic', 'heif', 'mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
     $videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
     if (!$isGeneric && !in_array($ext, $allowedExts)) {
         $ext = 'png'; // 未知扩展名默认 png (仅图片模式)
@@ -168,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $detectedMime = finfo_buffer($finfo, $imageData);
         }
         finfo_close($finfo);
-        $validMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'image/x-icon'];
+        $validMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'image/x-icon', 'image/heic', 'image/heif'];
         $allowed = false;
         foreach ($validMimes as $vm) {
             if (strpos($detectedMime, $vm) === 0) { $allowed = true; break; }
@@ -197,6 +321,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // ★ HEIC/HEIF 转换: iPhone 默认格式, xAI/OpenAI API 不支持, 转为 JPEG
+    if (!$isGeneric && !$isVideo && in_array(strtolower($ext), ['heic', 'heif'])) {
+        $heicConverted = false;
+        // 优先用 Imagick (支持 HEIC)
+        if (class_exists('Imagick')) {
+            try {
+                $imagick = new Imagick();
+                if ($imageData !== null) {
+                    $imagick->readImageBlob($imageData);
+                } elseif (isset($tmpFile)) {
+                    $imagick->readImage($tmpFile);
+                }
+                $imagick->setImageFormat('jpeg');
+                $imagick->setImageCompressionQuality(90);
+                // ★ 处理 EXIF 方向 (iPhone 竖拍照片 orientation 元数据)
+                $orientation = $imagick->getImageOrientation();
+                switch ($orientation) {
+                    case Imagick::ORIENTATION_RIGHTTOP: $imagick->rotateImage('#000', 90); break;
+                    case Imagick::ORIENTATION_BOTTOMRIGHT: $imagick->rotateImage('#000', 180); break;
+                    case Imagick::ORIENTATION_LEFTBOTTOM: $imagick->rotateImage('#000', 270); break;
+                }
+                $imagick->setImageOrientation(Imagick::ORIENTATION_TOPLEFT);
+                $imageData = $imagick->getImageBlob();
+                $imagick->clear();
+                $ext = 'jpg';
+                $heicConverted = true;
+                error_log('[upload] HEIC→JPEG 转换成功 (Imagick), 输出大小: ' . strlen($imageData) . ' bytes');
+            } catch (Exception $heicErr) {
+                error_log('[upload] Imagick HEIC 转换失败: ' . $heicErr->getMessage());
+            }
+        }
+        // 降级: GD (PHP 8.1+ 支持 HEIC)
+        if (!$heicConverted && function_exists('imagecreatefromstring')) {
+            try {
+                $srcImg = ($imageData !== null) ? imagecreatefromstring($imageData) : imagecreatefromjpeg($tmpFile);
+                if ($srcImg) {
+                    // 尝试用 GD 直接解码 (PHP 8.1+ with libheif)
+                    if ($imageData !== null) {
+                        $tmpHeic = tempnam(sys_get_temp_dir(), 'heic');
+                        file_put_contents($tmpHeic, $imageData);
+                        $gdImg = @imagecreatefromheif($tmpHeic);
+                        @unlink($tmpHeic);
+                        if ($gdImg) { imagedestroy($srcImg); $srcImg = $gdImg; }
+                    }
+                    if ($srcImg) {
+                        ob_start();
+                        imagejpeg($srcImg, null, 90);
+                        $imageData = ob_get_clean();
+                        imagedestroy($srcImg);
+                        $ext = 'jpg';
+                        $heicConverted = true;
+                        error_log('[upload] HEIC→JPEG 转换成功 (GD), 输出大小: ' . strlen($imageData) . ' bytes');
+                    }
+                }
+            } catch (Exception $gdErr) {
+                error_log('[upload] GD HEIC 转换失败: ' . $gdErr->getMessage());
+            }
+        }
+        // 转换失败则拒绝上传, 提示用户
+        if (!$heicConverted) {
+            http_response_code(415);
+            echo json_encode(['error' => 'HEIC 格式转换失败, 请先用相册编辑功能转为 JPEG/PNG 后再上传, 或在 iPhone 设置→相机→格式中选择"兼容性最佳"']);
+            exit;
+        }
+        // 转换后重新检测 mime 确保是合法 JPEG
+        $detectedMime = finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $imageData);
+        if (strpos($detectedMime, 'image/jpeg') !== 0) {
+            http_response_code(415);
+            echo json_encode(['error' => 'HEIC 转换后格式异常: ' . $detectedMime . ', 请转为 JPEG/PNG 后重试']);
+            exit;
+        }
+    }
+
     // 安全生成文件名（防遍历、防重复）
     if ($imageData === null) {
         $hash = substr(hash_file('sha256', $tmpFile), 0, 12);
@@ -205,7 +402,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     // ★ generic 模式用 file_ 前缀, 图片/视频用 img_ 前缀
     $prefix = $isGeneric ? 'file' : 'img';
-    $filename = $prefix . '_' . $hash . '.' . $ext;
+
+    // ★ 人类可读文件名: JSON 上传从 data.name 读取，multipart 从 POST name/原始文件名读取。
+    // 格式: file_<sanitized_name>_<hash>.ext，避免服务器只剩不可辨识哈希名。
+    $nameHint = '';
+    $rawNameHint = '';
+    if (!empty($data['name']) && is_string($data['name'])) {
+        $rawNameHint = $data['name'];
+    } elseif (!empty($_POST['name']) && is_string($_POST['name'])) {
+        $rawNameHint = $_POST['name'];
+    } elseif (!empty($origName)) {
+        $rawNameHint = pathinfo($origName, PATHINFO_FILENAME);
+    }
+    if ($rawNameHint !== '') {
+        $rawNameHint = pathinfo($rawNameHint, PATHINFO_FILENAME);
+        $nameHint = sanitizeFilenameHint($rawNameHint);
+    }
+    if ($nameHint !== '') {
+        $filename = $prefix . '_' . $nameHint . '_' . $hash . '.' . $ext;
+    } else {
+        $filename = $prefix . '_' . $hash . '.' . $ext;
+    }
     $filepath = safePath($uploadDir, $filename);
     if ($filepath === false) {
         http_response_code(403);
@@ -226,30 +443,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         @chmod($filepath, 0644);  // 确保 engine 进程可读
         $url = '/oneapichat/uploads/' . $subDir . '/' . rawurlencode($filename);
 
+        // 生成图的聊天关联属于主事务。绑定失败时返回可重试错误；同一图片按哈希
+        // 使用同一文件名，客户端重试不会制造重复文件或重复图片记录。
+        $chatPersist = persistGeneratedImageToChat($userId, $data, $url);
+        if (!empty($chatPersist['requested']) && empty($chatPersist['ok'])) {
+            http_response_code(503);
+            echo json_encode(['error' => 'Image saved but chat association failed', 'detail' => $chatPersist['error'] ?? 'unknown']);
+            exit;
+        }
+
         // ★ 2026-08-03 云盘全面结合: 已登录用户上传的文件同步到其绑定的 Cloudreve 账号 OneAPIChat/uploads
-        //   失败不阻塞主流程（本地 URL 仍可用），仅记日志
+        //   PHP-FPM 下先把本地 URL 返回浏览器，再在响应结束后同步云盘，避免让气泡多等一次远端 I/O。
         $cloudreve = null;
+        $responsePayload = [
+            'url' => $url,
+            'path' => $filepath,
+            'size' => $finalSize,
+            'type' => $ext,
+            'chat_persisted' => !empty($chatPersist['ok']),
+            'message_index' => $chatPersist['message_index'] ?? null,
+            'cloudreve' => $userId ? ['queued' => true] : null,
+        ];
+
+        if ($userId && function_exists('fastcgi_finish_request')) {
+            echo json_encode($responsePayload);
+            fastcgi_finish_request();
+            require_once __DIR__ . '/cloudreve_lib.php';
+            $crResult = cr_importFile($userId, $filepath, 'uploads');
+            if (empty($crResult['success'])) {
+                error_log('[cloudreve] upload.php 自动导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$filepath");
+            }
+            exit;
+        }
         if ($userId) {
             require_once __DIR__ . '/cloudreve_lib.php';
             $crResult = cr_importFile($userId, $filepath, 'uploads');
-            $cloudreve = [
+            $responsePayload['cloudreve'] = [
                 'synced' => !empty($crResult['success']),
                 'path' => $crResult['cloudreve_path'] ?? '',
                 'source' => $crResult['source'] ?? '',
                 'error' => $crResult['error'] ?? null,
             ];
-            if (empty($crResult['success'])) {
-                error_log('[cloudreve] upload.php 自动导入失败: ' . ($crResult['error'] ?? '未知错误') . " file=$filepath");
-            }
         }
-
-        echo json_encode([
-            'url' => $url,
-            'path' => $filepath,
-            'size' => $finalSize,
-            'type' => $ext,
-            'cloudreve' => $cloudreve,
-        ]);
+        echo json_encode($responsePayload);
     } else {
         http_response_code(500);
         echo json_encode(['error' => 'Failed to save image']);

@@ -218,7 +218,7 @@ function changePassword() {
     }).then(function(r){return r.json()}).then(function(d){
         btn.disabled=false;btn.innerHTML='更新密码';
         if(d.success){
-            $msg('pwdMsg','密码已更新，即将重新登录...',false);
+            $msg('pwdMsg',(d.message||'密码已更新')+'，即将重新登录...',d.cloudreve_synced===false);
             setTimeout(function(){ logout(); }, 1500);
         }
         else $msg('pwdMsg',d.error||'更新失败',true);
@@ -237,7 +237,7 @@ function changeUsername() {
     }).then(function(r){return r.json()}).then(function(d){
         btn.disabled=false;btn.innerHTML='更新用户名';
         if(d.success){
-            $msg('nameMsg',d.message||'用户名已更新',false);
+            $msg('nameMsg',d.message||'用户名已更新',d.cloudreve_synced===false);
             localStorage.setItem('authUsername', name);
             document.getElementById('profileUsername').textContent = name;
             document.getElementById('avatarLetter').textContent = name.charAt(0).toUpperCase();
@@ -286,7 +286,7 @@ function bindEmail() {
     }).then(function(r){return r.json()}).then(function(d){
         btn.disabled=false;btn.textContent='验证并绑定';
         if(d.success){
-            $msg('emailMsg',d.message||'邮箱绑定成功',false);
+            $msg('emailMsg',d.message||'邮箱绑定成功',d.cloudreve_synced===false);
             document.getElementById('boundEmail').textContent = d.email;
             document.getElementById('emailUnbound').style.display = 'none';
             document.getElementById('emailBound').style.display = 'block';
@@ -303,7 +303,7 @@ function unbindEmail() {
         body: JSON.stringify({ token: token })
     }).then(function(r){ return r.json(); }).then(function(d){
         if (d.success) {
-            $msg('emailMsg', '邮箱已解绑', false);
+            $msg('emailMsg', d.message || '邮箱已解绑', d.cloudreve_synced === false);
             document.getElementById('emailBound').style.display = 'none';
             document.getElementById('emailUnbound').style.display = 'block';
             document.getElementById('bindEmail').value = '';

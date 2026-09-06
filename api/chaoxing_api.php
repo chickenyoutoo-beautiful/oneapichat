@@ -1,9 +1,11 @@
 <?php
 header('Content-Type: application/json');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 require_once __DIR__ . '/init.php';
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST');
-header('Access-Control-Allow-Headers: Content-Type, Auth-Token');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, Auth-Token');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
@@ -25,6 +27,55 @@ require_once __DIR__ . '/auth_helpers.php';
  */
 function userConfigPath($userId) {
     return CHAOXING_DIR . '/config_' . $userId . '.ini';
+}
+
+/** 持久化权威副本：/tmp 只供 Python 运行时使用。 */
+function durableUserConfigPath($userId) {
+    $safeId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$userId);
+    return APP_ROOT . '/users/chaoxing/config_' . $safeId . '.ini';
+}
+
+function isValidChaoxingConfig($path) {
+    clearstatcache(true, $path);
+    if (!is_file($path) || filesize($path) <= 0) return false;
+    $ini = @parse_ini_file($path, true, INI_SCANNER_RAW);
+    return is_array($ini) && isset($ini['common']) && is_array($ini['common']);
+}
+
+function atomicWritePrivateFile($path, $contents) {
+    $dir = dirname($path);
+    if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) return false;
+    @chmod($dir, 0770);
+    $tmp = @tempnam($dir, '.sync-');
+    if ($tmp === false) return false;
+    if (@file_put_contents($tmp, $contents, LOCK_EX) === false) {
+        @unlink($tmp);
+        return false;
+    }
+    @chmod($tmp, 0660);
+    if (!@rename($tmp, $path)) {
+        @unlink($tmp);
+        return false;
+    }
+    @chmod($path, 0660);
+    return true;
+}
+
+/** 原子双写持久副本和 Python 运行镜像。 */
+function saveUserConfig($userId, $contents) {
+    $parsed = @parse_ini_string($contents, true, INI_SCANNER_RAW);
+    if (!is_array($parsed) || !isset($parsed['common'])) {
+        throw new RuntimeException('拒绝保存损坏的学习通配置');
+    }
+    $durable = durableUserConfigPath($userId);
+    if (!atomicWritePrivateFile($durable, $contents)) {
+        throw new RuntimeException('学习通持久配置同步失败');
+    }
+    $runtime = userConfigPath($userId);
+    if (!atomicWritePrivateFile($runtime, $contents)) {
+        throw new RuntimeException('学习通运行配置同步失败');
+    }
+    return $runtime;
 }
 
 /**
@@ -118,27 +169,45 @@ function userCoursesCachePath($userId) {
 }
 
 /**
- * 确保用户 config.ini 存在（从模板复制）
+ * 确保用户 config.ini 存在且结构完整。
+ *
+ * /tmp 可能被系统清理，进程中断也可能留下 0 字节文件，
+ * 因此不能只检查 file_exists，必须验证 [common] 节并原子替换。
  */
 function ensureUserConfig($userId) {
     $path = userConfigPath($userId);
-    // ★ 文件不存在或为空时，从模板重新创建
-    if (!file_exists($path) || filesize($path) === 0) {
-        $template = APP_ROOT . '/config.ini.template';
-        if (!file_exists($template)) {
-            $template = APP_ROOT . '/config.ini';
+    $durable = durableUserConfigPath($userId);
+
+    // 持久副本为权威数据：换设备、PHP 重启或 /tmp 清理后都由它恢复。
+    if (isValidChaoxingConfig($durable)) {
+        $contents = @file_get_contents($durable);
+        if ($contents === false) throw new RuntimeException('无法读取学习通持久配置');
+        if (!isValidChaoxingConfig($path) || @hash_file('sha256', $path) !== hash('sha256', $contents)) {
+            if (!atomicWritePrivateFile($path, $contents)) {
+                throw new RuntimeException('无法恢复学习通运行配置');
+            }
         }
-        $dir = dirname($path);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        copy($template, $path);
-        // 清理 course_list
-        $ini = file_get_contents($path);
-        $ini = preg_replace('/^course_list\s*=.*/m', 'course_list = ', $ini);
-        file_put_contents($path, $ini);
+        return $path;
     }
-    return $path;
+
+    // 升级时把旧 /tmp 配置一次性迁移到持久目录。
+    if (isValidChaoxingConfig($path)) {
+        $contents = @file_get_contents($path);
+        return saveUserConfig($userId, $contents);
+    }
+
+    $template = APP_ROOT . '/config.ini.template';
+    if (!is_file($template)) $template = APP_ROOT . '/config.ini';
+    $contents = is_file($template) ? @file_get_contents($template) : false;
+    $templateIni = $contents !== false
+        ? @parse_ini_string($contents, true, INI_SCANNER_RAW)
+        : false;
+    if (!is_array($templateIni) || !isset($templateIni['common'])) {
+        throw new RuntimeException('学习通配置模板缺失或损坏');
+    }
+
+    $contents = preg_replace('/^course_list\s*=.*$/m', 'course_list = ', $contents);
+    return saveUserConfig($userId, $contents);
 }
 
 /**
@@ -147,16 +216,14 @@ function ensureUserConfig($userId) {
  */
 function readIniValue($path, $section, $key, $default = '') {
     if (!file_exists($path)) return $default;
-    $ini = parse_ini_file($path, true);
+    $ini = @parse_ini_file($path, true, INI_SCANNER_RAW);
+    if (!is_array($ini)) return $default;
     return $ini[$section][$key] ?? $default;
 }
 
-// 认证检查
-$authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : (isset($_SERVER['HTTP_AUTH_TOKEN']) ? preg_replace('/[^a-f0-9]/', '', $_SERVER['HTTP_AUTH_TOKEN']) : '');
-$userId = null;
-if (!empty($authToken)) {
-    $userId = verifyAuthToken($authToken);
-}
+// 认证检查：Bearer / 同站 Cookie 优先，query/form 仅保留旧客户端兼容。
+$authToken = extractSessionToken(true);
+$userId = $authToken !== '' ? verifyAuthToken($authToken) : null;
 $action = $_GET['action'] ?? '';
 if ($action === 'search_answer') {
     // 搜题接口不需要认证，放行
@@ -301,7 +368,7 @@ switch ($action) {
         // 写入 course_list 到用户级 config
         $ini = file_get_contents($config_path);
         $ini = preg_replace('/course_list = .*/', 'course_list = ' . $course_ids, $ini);
-        file_put_contents($config_path, $ini);
+        saveUserConfig($userId, $ini);
 
         // 清空日志
         file_put_contents($log_path, '');
@@ -564,7 +631,7 @@ switch ($action) {
         if (file_exists($config_path)) {
             $ini = file_get_contents($config_path);
             $ini = preg_replace('/^course_list\s*=.*/m', 'course_list = ', $ini);
-            file_put_contents($config_path, $ini);
+            saveUserConfig($userId, $ini);
         }
 
         // 删除日志文件
@@ -727,6 +794,8 @@ switch ($action) {
     case 'login':
         $user = $_POST['username'] ?? $_GET['username'] ?? '';
         $pass = $_POST['password'] ?? $_GET['password'] ?? '';
+        $user = str_replace(["\r", "\n"], '', $user);
+        $pass = str_replace(["\r", "\n"], '', $pass);
         if (!$user || !$pass) { echo json_encode(['error' => '请输入账号密码']); exit; }
 
         // 使用独立 config
@@ -740,7 +809,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => '配置文件异常，请刷新页面后重试']);
             exit;
         }
-        file_put_contents($config_path, $ini);
+        saveUserConfig($userId, $ini);
 
         $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));
 if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无法连接超星服务器，请检查网络或稍后重试']); exit; }
@@ -763,7 +832,7 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
             if (strpos(trim($line), '{"error"') === 0) { $json_line = $line; break; }
         }
         if ($json_line && strpos($json_line, '"courses"') !== false) {
-            echo json_encode(['success' => true, 'username' => $user]);
+            echo json_encode(['success' => true, 'username' => $user, 'synced' => true]);
         } elseif ($json_line) {
             $err_data = json_decode($json_line, true);
             $err_msg = $err_data['error'] ?? '登录验证失败，请检查账号密码';
@@ -797,14 +866,14 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         break;
 
     case 'save_tiku':
-        $provider = $_GET['provider'] ?? 'TikuYanxi';
+        $provider = str_replace(["\r", "\n"], '', $_GET['provider'] ?? 'TikuYanxi');
         $submit = ($_GET['submit'] ?? 'true') === 'true' ? 'true' : 'false';
-        $tokens = $_GET['tokens'] ?? '';
-        $true_list = $_GET['true_list'] ?? '正确,对,√,是';
-        $false_list = $_GET['false_list'] ?? '错误,错,×,否,不对,不正确';
-        $ai_base_url = $_GET['ai_base_url'] ?? '';
-        $ai_model = $_GET['ai_model'] ?? '';
-        $ai_key = $_GET['ai_key'] ?? '';
+        $tokens = str_replace(["\r", "\n"], '', $_GET['tokens'] ?? '');
+        $true_list = str_replace(["\r", "\n"], '', $_GET['true_list'] ?? '正确,对,√,是');
+        $false_list = str_replace(["\r", "\n"], '', $_GET['false_list'] ?? '错误,错,×,否,不对,不正确');
+        $ai_base_url = str_replace(["\r", "\n"], '', $_GET['ai_base_url'] ?? '');
+        $ai_model = str_replace(["\r", "\n"], '', $_GET['ai_model'] ?? '');
+        $ai_key = str_replace(["\r", "\n"], '', $_GET['ai_key'] ?? '');
         $ai_search = ($_GET['ai_search'] ?? '0') === '1' || ($_GET['ai_search'] ?? '') === 'true' ? '1' : '0';
         $ai_search_key = $_GET['ai_search_key'] ?? '';
 
@@ -814,9 +883,10 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         if (strpos($provider, 'TikuAI') !== false) {
             $tiku_section .= "\nai_base_url=$ai_base_url\nai_model=$ai_model\nai_key=$ai_key\nai_search=$ai_search\nai_search_key=$ai_search_key";
         }
-        $ini = preg_replace('/\[tiku\].*/s', $tiku_section, $ini);
-        file_put_contents($config_path, $ini);
-        echo json_encode(['success' => true]);
+        // 仅替换 [tiku] 节，不能像旧逻辑一样吞掉后面的 [netdisk] 等配置。
+        $ini = preg_replace('/^\[tiku\]\R.*?(?=^\[[^\]]+\]|\z)/ms', rtrim($tiku_section) . "\n\n", $ini);
+        saveUserConfig($userId, $ini);
+        echo json_encode(['success' => true, 'synced' => true]);
         break;
 
     case 'ai_sync':
@@ -840,15 +910,42 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         }
         if (is_array($mc)) {
             $out['base_url'] = $mc['baseUrl'] ?? '';
-            $out['model'] = $mc['model'] ?? '';
-            // ★ apiKey：按 baseUrlProvider 取对应提供商专属键（v2 加密）解密，通用 apiKey 兜底
-            $rawKey = $mc['apiKey'] ?? '';
+            // ★ 从 baseUrl 反推实际提供商（域名匹配优先于 baseUrlProvider 字段，防残留旧值导致 key/model 错位）
+            $bu = strtolower($mc['baseUrl'] ?? '');
+            $actualProvider = '';
+            if (strpos($bu, 'deepseek') !== false) $actualProvider = 'deepseek';
+            elseif (strpos($bu, 'openai') !== false || strpos($bu, 'chatgpt') !== false) $actualProvider = 'openai';
+            elseif (strpos($bu, 'anthropic') !== false || strpos($bu, 'claude') !== false) $actualProvider = 'anthropic';
+            elseif (strpos($bu, 'gemini') !== false || strpos($bu, 'googleapis') !== false) $actualProvider = 'gemini';
+            elseif (strpos($bu, 'longcat') !== false) $actualProvider = 'longcat';
+            elseif (strpos($bu, 'x.ai') !== false || strpos($bu, 'grok') !== false) $actualProvider = 'xai';
+            elseif (strpos($bu, 'openrouter') !== false) $actualProvider = 'openrouter';
+            elseif (strpos($bu, 'minimax') !== false) $actualProvider = 'minimax';
+            // ★ model：优先按实际提供商选独立键（model_{provider}），通用 model 兜底，并校验模型-提供商匹配
             $provider = $mc['baseUrlProvider'] ?? 'custom';
+            $out['model'] = $mc['model'] ?? '';
+            if ($actualProvider && !empty($mc['model_' . $actualProvider])) {
+                $out['model'] = $mc['model_' . $actualProvider];
+            }
+            // ★ 模型-提供商匹配校验：若模型名明显不属于该提供商，按提供商选默认模型（防 LongCat-2.0 配 DeepSeek 端点等错位）
+            $modelLower = strtolower($out['model']);
+            if ($actualProvider === 'deepseek' && strpos($modelLower, 'deepseek') === false && strpos($modelLower, 'custom') === false) {
+                $out['model'] = 'deepseek-v4-flash';
+            } elseif ($actualProvider === 'openai' && strpos($modelLower, 'gpt') === false && strpos($modelLower, 'o1') === false && strpos($modelLower, 'o3') === false) {
+                $out['model'] = 'gpt-5';
+            } elseif ($actualProvider === 'anthropic' && strpos($modelLower, 'claude') === false) {
+                $out['model'] = 'claude-sonnet-4-20250514';
+            } elseif ($actualProvider === 'gemini' && strpos($modelLower, 'gemini') === false) {
+                $out['model'] = 'gemini-2.5-flash';
+            }
+            // ★ apiKey：优先按 baseUrl 实际域名选提供商 key，baseUrlProvider 作次选，通用 apiKey 兜底
+            $rawKey = $mc['apiKey'] ?? '';
             $provKeyMap = ['deepseek' => 'apiKeyDeepseek', 'openai' => 'apiKeyOpenai', 'xai' => 'apiKeyXAI',
                 'gemini' => 'apiKeyGemini', 'custom' => 'apiKeyCustom', 'minimax' => 'apiKeyMinimax',
                 'anthropic' => 'apiKeyAntthropic', 'openrouter' => 'apiKeyOpenRouter', 'longcat' => 'apiKeyLongCat'];
-            $provKey = $provKeyMap[$provider] ?? '';
-            if ($provKey && !empty($mc[$provKey])) $rawKey = $mc[$provKey];
+            foreach ([$actualProvider, $provider] as $p) {
+                if (!empty($provKeyMap[$p]) && !empty($mc[$provKeyMap[$p]])) { $rawKey = $mc[$provKeyMap[$p]]; break; }
+            }
             if (!empty($rawKey)) $out['api_key'] = decrypt_config_key((string)$rawKey);
             // ★ 联网搜索：按 searchProvider 选 key（tavily 优先专用键，其次通用 searchApiKey）
             $sp = $mc['searchProvider'] ?? '';
@@ -892,6 +989,8 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
         $common = $ini['common'] ?? [];
         $tiku = $ini['tiku'] ?? [];
         echo json_encode([
+            'synced' => true,
+            'sync_source' => 'persistent',
             'username' => $common['username'] ?? '',
             'course_list' => $common['course_list'] ?? '',
             'speed' => $common['speed'] ?? '2',
@@ -937,8 +1036,8 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
             $v = $_GET['chapter_order'] ?? 'sequential';
             $ini_str = preg_replace('/^(brush_mode\s*=.*)$/m', "$1\nchapter_order = $v", $ini_str);
         }
-        file_put_contents($config_path, $ini_str);
-        echo json_encode(['success' => true]);
+        saveUserConfig($userId, $ini_str);
+        echo json_encode(['success' => true, 'synced' => true]);
         break;
 
     case 'models_proxy':
@@ -976,4 +1075,3 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
     default:
         echo json_encode(['error' => 'unknown action']);
 }
-

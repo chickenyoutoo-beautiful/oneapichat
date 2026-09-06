@@ -3,12 +3,27 @@
  * RAG (Retrieval Augmented Generation) Proxy
  * 代理到 Python 引擎的 /engine/rag/ 端点
  */
+require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
+require_once __DIR__ . '/engine_bridge.php';
+setApiCorsHeaders();
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
+$token = extractBearerToken() ?: (string)($_COOKIE['auth_token'] ?? '');
+$userId = $token ? verifyAuthToken($token) : null;
+if (!$userId) {
+    http_response_code(401);
+    echo json_encode(['error' => ['code' => 'UNAUTHORIZED', 'message' => 'Authentication required']]);
+    exit;
+}
+// Legacy callers may still include auth_token in the URL; it is never an engine
+// parameter and must not be forwarded into loopback request logs.
+unset($_GET['auth_token']);
+$_GET['user_id'] = $userId;
 
+// RAG 已内置在 oneapichat-engine (8766) 的 /engine/rag/*，不再依赖不存在的独立 8765 进程。
 $engine_url = 'http://127.0.0.1:8766';
 $action = $_GET['action'] ?? 'search';
 $method = $_SERVER['REQUEST_METHOD'];
@@ -18,12 +33,13 @@ $query = http_build_query($_GET);
 $url = $engine_url . '/engine/rag/' . $action . '?' . $query;
 
 if ($method === 'GET') {
-    $ctx = stream_context_create(['http' => ['timeout' => 60, 'ignore_errors' => true]]);
-    $resp = file_get_contents($url, false, $ctx);
+    $ctx = oneapichatEngineContext(['timeout' => 60]);
+    $resp = @file_get_contents($url, false, $ctx);
     if ($resp !== false) {
         echo $resp;
     } else {
-        echo json_encode(['error' => 'RAG engine unreachable']);
+        http_response_code(502);
+        echo json_encode(['error' => ['code' => 'RAG_UPSTREAM_UNAVAILABLE', 'message' => 'RAG engine unavailable']]);
     }
 } elseif ($method === 'POST') {
     if ($action === 'upload' && !empty($_FILES['file'])) {
@@ -67,7 +83,7 @@ if ($method === 'GET') {
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $jsonBody,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => oneapichatEngineHeaders(['Content-Type: application/json']),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 120,
             CURLOPT_CONNECTTIMEOUT => 5,
@@ -83,7 +99,7 @@ if ($method === 'GET') {
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => oneapichatEngineHeaders(['Content-Type: application/json']),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 120,
             CURLOPT_CONNECTTIMEOUT => 5,
@@ -104,7 +120,7 @@ if ($method === 'GET') {
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => 'DELETE',
         CURLOPT_POSTFIELDS => $deleteBody,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_HTTPHEADER => oneapichatEngineHeaders(['Content-Type: application/json']),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 30,
         CURLOPT_CONNECTTIMEOUT => 5,

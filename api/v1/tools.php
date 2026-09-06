@@ -10,6 +10,7 @@
 
 require_once __DIR__ . '/../init.php';
 require_once __DIR__ . '/../auth_helpers.php';
+require_once __DIR__ . '/../engine_bridge.php';
 setApiCorsHeaders();
 header('Content-Type: application/json; charset=utf-8');
 
@@ -39,7 +40,7 @@ if ($mcpResp) {
     $mcpData = json_decode($mcpResp, true);
     $mcpTools = $mcpData['tools'] ?? [];
     foreach ($mcpTools as $t) {
-        if (!is_array($t) || empty($t['name'])) continue;
+        if (!is_array($t) || empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
 
         $schema = $t['inputSchema'] ?? $t['parameters'] ?? [];
         if (!is_array($schema) || empty($schema['type'])) continue;
@@ -60,14 +61,14 @@ if ($mcpResp) {
 }
 
 // ── 引擎工具补充 (MCP 可能未包含) ──
-$engineResp = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, stream_context_create([
-    'http' => ['timeout' => 3, 'ignore_errors' => true],
+$engineResp = @file_get_contents('http://127.0.0.1:8766/engine/v2/tools/list', false, oneapichatEngineContext([
+    'timeout' => 3,
 ]));
 if ($engineResp) {
     $engineData = @json_decode($engineResp, true);
     $engineTools = $engineData['tools'] ?? [];
     foreach ($engineTools as $t) {
-        if (!is_array($t) || empty($t['name'])) continue;
+        if (!is_array($t) || empty($t['name']) || str_starts_with($t['name'], 'mmx_')) continue;
         $exists = false;
         foreach ($tools as $existing) {
             if (($existing['function']['name'] ?? '') === $t['name']) { $exists = true; break; }

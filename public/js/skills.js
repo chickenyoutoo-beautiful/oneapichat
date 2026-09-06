@@ -40,13 +40,18 @@ window.matchSkills = async function(userText) {
     if (!userText || userText.trim().length < 2) return [];
     try {
         var apiBase = (typeof SERVER_API_BASE !== 'undefined' ? SERVER_API_BASE : '/oneapichat/api');
-        var resp = await fetch(apiBase + '/skills_api.php?action=match&query=' + encodeURIComponent(userText), {
-            signal: AbortSignal.timeout(3000),
+        // 用户消息可能包含很长的历史/提示词注入文本；使用 POST，避免 GET URL 超过 nginx
+        // 的 request line 限制而返回 414，随后把 HTML 错误页误当 JSON 解析。
+        var resp = await fetch(apiBase + '/skills_api.php?action=match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: userText.slice(0, 12000) }),
+            signal: AbortSignal.timeout(6000),
         });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
         var data = await resp.json();
         return data.matched || [];
     } catch(e) {
-        console.warn('[Skills] 匹配失败:', e.message);
         return [];
     }
 };

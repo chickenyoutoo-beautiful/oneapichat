@@ -47,10 +47,13 @@ SCAN_ROOT = PROJECT_ROOT  # 根目录（js/css/lib 都是 symlink）
 # 顺序很重要：core.js 必须在最前，main.js 必须在最后
 CORE_MODULES = [
     ("js/core.js", True, ""),
+    # Theme Studio 初始化 data-theme-page/scope/density 等语义属性，必须早于 UI 渲染。
+    ("js/theme-studio.js", True, ""),
     ("js/translations.js", True, ""),
     ("js/image-gen.js", True, ""),
     ("js/markdown.js", True, ""),
     ("js/agent.js", True, ""),
+    ("js/workspace.js", True, ""),
     ("js/storage.js", True, ""),
     ("js/config.js", True, ""),
     ("js/dialogs.js", True, ""),
@@ -80,6 +83,7 @@ CORE_MODULES = [
     ("js/api-messages.js", True, ""),
     ("js/loop-guard.js", True, ""),
     ("js/stream-handler.js", True, ""),
+    ("js/usage-stats.js", True, ""),
     ("js/main.js", True, ""),
 ]
 
@@ -87,6 +91,9 @@ CSS_MODULES = [
     ("lib/katex/katex.min.css", False, ""),
     ("css/tailwind-index.min.css", False, ""),
     ("css/style.css", False, ""),
+    # Theme Studio 必须位于 style.css 之后，提供 chat theme 的最终覆盖层。
+    ("css/theme-studio.css", False, ""),
+    ("css/usage-stats.css", False, ""),
     ("css/src-console.css", False, ""),
 ]
 

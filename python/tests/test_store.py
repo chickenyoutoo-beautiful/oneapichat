@@ -126,6 +126,20 @@ class TestChatStoreSQLite(unittest.TestCase):
         self.assertGreaterEqual(len(tasks), 1)
         self.assertEqual(tasks[0]["task_id"], "task_1")
 
+    def test_find_running_task_single_producer(self):
+        """同 msg/chat 的活跃任务应可作为服务端唯一生产者被查询。"""
+        self.store.register_task(
+            "task_owner", "stream_owner", "chat_shared", "msg_shared",
+            "test_user", "gpt-4", {"messages": []}
+        )
+        by_msg = self.store.find_running_task("test_user", msg_id="msg_shared")
+        self.assertEqual(by_msg.get("stream_id"), "stream_owner")
+        by_chat = self.store.find_running_task("test_user", chat_id="chat_shared")
+        self.assertEqual(by_chat.get("task_id"), "task_owner")
+        self.assertEqual(self.store.find_running_task("other_user", chat_id="chat_shared"), {})
+        self.store.complete_task("task_owner", "completed")
+        self.assertEqual(self.store.find_running_task("test_user", msg_id="msg_shared"), {})
+
     def test_complete_task(self):
         """complete_task 后任务不应再出现在活跃列表中"""
         self.store.register_task(

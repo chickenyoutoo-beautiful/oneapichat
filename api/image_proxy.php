@@ -8,8 +8,14 @@
 require_once __DIR__ . '/init.php';
 require_once __DIR__ . '/auth_helpers.php';
 
-// ★ 认证: 兼容 auth_token 参数 (与 chat.php / upload.php 一致)
-$authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+// Header/cookie first; keep query fallback only for already-deployed clients.
+$authToken = extractBearerToken();
+if (empty($authToken) && !empty($_COOKIE['auth_token'])) {
+    $authToken = preg_replace('/[^a-f0-9]/', '', (string)$_COOKIE['auth_token']);
+}
+if (empty($authToken)) {
+    $authToken = isset($_GET['auth_token']) ? preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']) : '';
+}
 $userId = $authToken ? verifyAuthToken($authToken) : null;
 if (!$userId) {
     http_response_code(401);
@@ -42,9 +48,9 @@ if ($action === 'get') {
         exit;
     }
 
-    // 检查扩展名
+    // 检查扩展名 (含 iPhone HEIC/HEIF)
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+    $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'];
     if (!in_array($ext, $allowed)) {
         http_response_code(400);
         echo json_encode(['error' => '不支持的文件类型: ' . $ext]);
@@ -63,7 +69,8 @@ if ($action === 'get') {
     $mimeMap = [
         'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg',
         'png' => 'image/png', 'gif' => 'image/gif',
-        'webp' => 'image/webp', 'bmp' => 'image/bmp'
+        'webp' => 'image/webp', 'bmp' => 'image/bmp',
+        'heic' => 'image/heic', 'heif' => 'image/heif'
     ];
     $mime = $mimeMap[$ext] ?? 'image/jpeg';
     $data = file_get_contents($realPath);

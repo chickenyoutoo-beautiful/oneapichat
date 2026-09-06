@@ -63,13 +63,12 @@ function runVM(code, globals) {
 // ═══════════════════ 2. renderChatHistory 过滤谓词 (dialogs.js 真实源码) ═══════════════════
 (function testHistoryFilter() {
     const src = read('dialogs.js');
-    const marker = 'var _chatIds = Object.keys(chats).filter(function(id) {';
+    const marker = 'var _filterChat = function(id) {';
     const s = src.indexOf(marker);
-    assert(s !== -1, 'dialogs.js 找不到历史过滤块');
-    // 从函数体起点配平到闭合 }, 再取其后紧跟的 ");" 完成整个 filter 表达式
+    assert(s !== -1, 'dialogs.js 找不到历史过滤函数');
     const bodyStart = src.indexOf('{', s);
-    const bodyEnd = bodyStart + braceMatch(src, bodyStart).length - 1;  // 函数体闭合 } 的绝对下标
-    const expr = src.slice(s + 'var _chatIds = '.length, src.indexOf(');', bodyEnd) + 2);
+    const bodyEnd = bodyStart + braceMatch(src, bodyStart).length - 1;
+    const filterStmt = src.slice(s, src.indexOf(';', bodyEnd) + 1);
     const ids = ['_agent_main', '_agent_old_1785750000000', 'chat_1', 'chat_2', 'chat_3'];
     const chats = {
         '_agent_main': { userId: 'u1', updated_at: 5 },
@@ -83,9 +82,10 @@ function runVM(code, globals) {
         const ctx = runVM(
             'var _uid = ' + JSON.stringify(_uid) + ';\n' +
             'var _isAgentView = ' + JSON.stringify(_isAgentView) + ';\n' +
-            'var result = ' + expr + ';\n' +
+            'var _showSubAgent = false;\n' + filterStmt + '\n' +
+            'var result = Object.keys(chats).filter(_filterChat);\n' +
             'window.__result = result;',
-            { chats, isAgentChat: id => id === '_agent_main' || (typeof id === 'string' && id.indexOf('_agent_old_') === 0) }
+            { chats, isAgentChat: id => id === '_agent_main' || (typeof id === 'string' && id.indexOf('_agent_old_') === 0), _isEmptyDraftChat: id => false }
         );
         return ctx.window.__result;
     }
@@ -114,6 +114,7 @@ function runVM(code, globals) {
         runVM(block, {
             chats,
             chatKeys,
+            _preferredChatId: null,
             localStorage: {
                 getItem: k => k === 'lastChatId' ? lastChatId : (k === 'lastNormalChatId' ? lastNormalChatId : null)
             },
@@ -172,6 +173,8 @@ function runVM(code, globals) {
             localStorage: { getItem: () => null, setItem: () => {} },
             showToast: () => { calls.archive++; },
             saveChats: () => {},
+            slimSaveChats: () => {},
+            _isEmptyDraftChat: () => false,
             loadChat: id => { if (id === '_agent_main') calls.newAgent++; },
             renderChatHistory: () => {},
             updateHeaderTitle: () => {},
@@ -339,7 +342,7 @@ function runVM(code, globals) {
 (function testSidebarManualExpand() {
     const uiSrc = read('ui.js');
     assert(!uiSrc.includes('Agent 模式下侧边栏已折叠'), 'ui.js toggleSidebar 不得再禁止 Agent 模式展开');
-    assert(uiSrc.includes('Agent 模式允许手动展开'), 'ui.js toggleSidebar 应允许 Agent 模式手动展开');
+    assert(!uiSrc.includes('if (isAgentToolsActive()) return;'), 'ui.js toggleSidebar 不得在 Agent 模式拦截退出');
     const agentSrc = read('agent.js');
     assert(agentSrc.includes('_lastSidebarSyncMode'), 'agent.js updateAgentUI 应使用模式切换门控, 避免状态刷新覆盖手动展开');
     const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
@@ -366,6 +369,38 @@ function runVM(code, globals) {
     const notifySrc = read('agent-notify.js');
     assert(notifySrc.includes("localStorage.removeItem('_wsStreamId')"), 'WS 流结束必须清除 localStorage 残留(否则 loadChat 续接块误触发)');
     console.log('✓ testTransitionOverlayWaitsForLoad');
+})();
+
+// ═══════════════════ 11. Gemini relay credential routing and terminal auth errors ═══════════════════
+(function testGeminiProviderRouting() {
+    const mainSrc = read('main.js');
+    assert(mainSrc.includes('Keep custom-provider routing authoritative'), 'Gemini aliases exposed by a custom provider must stay on that provider');
+    assert.strictEqual(mainSrc.includes("[ProviderRoute] Gemini uses configured official endpoint"), false, 'custom Gemini aliases must not silently switch to Google');
+    assert(mainSrc.includes('_isTerminalProviderError'), 'provider authentication errors must be classified explicitly');
+    assert(mainSrc.includes("value.indexOf('api key not valid')"), 'invalid Gemini API keys must be terminal');
+    assert(mainSrc.includes('!_isTerminalProviderError(_rsErrStr2)'), 'empty RS auth failures must not replay through HTTP fallback');
+    assert(mainSrc.includes('_rsResult.fullText || _rsResult.reasoningText ||'), 'reasoning-only RS output must be accepted without a duplicate HTTP replay');
+    assert(mainSrc.includes("_emptyRsError.code = 'EMPTY_RESPONSE'"), 'completed empty RS output must terminate instead of replaying a billable request');
+    console.log('✓ testGeminiProviderRouting');
+})();
+
+// ═══════════════════ 12. Refresh resume uses exactly one typing indicator ═══════════════════
+(function testSingleResumeTypingIndicator() {
+    const renderingSrc = read('rendering.js');
+    assert(renderingSrc.includes("bubble.classList.add('typing')"), 'partial assistant bubbles should reuse the canonical typing class');
+    assert.strictEqual(renderingSrc.includes("loadingEl.className = 'msg-loading-indicator'"), false, 'partial bubbles must not append a second three-dot DOM loader');
+    console.log('✓ testSingleResumeTypingIndicator');
+})();
+
+// ═══════════════════ 13. 等待器只能属于当前空占位气泡 ═══════════════════
+(function testTypingIndicatorOwnership() {
+    const modelStatusSrc = read('model-status.js');
+    const mainSrc = read('main.js');
+    assert(modelStatusSrc.includes('if (mappedBubble && mappedBubble !== bubble) return;'), '等待器必须拒绝挂到非 activeBubbleMap 当前气泡');
+    assert(modelStatusSrc.includes('if (mdBodyText(md).trim().length > 0) return;'), '有正文的历史气泡不得挂等待器');
+    assert(mainSrc.includes("activeBubbleMap[chatId] = _newBubble;\n                            _newBubble.classList.add('typing')") || mainSrc.includes("activeBubbleMap[chatId] = _newBubble;\n                            _newBubble.classList.add('typing');"), '链式新气泡必须先登记 activeBubbleMap 再加 typing');
+    assert(mainSrc.includes("activeBubbleMap[chatId] = currentBubble;\n            currentBubble.classList.add('typing')") || mainSrc.includes("activeBubbleMap[chatId] = currentBubble;\n            currentBubble.classList.add('typing');"), '初始气泡必须先登记 activeBubbleMap 再加 typing');
+    console.log('✓ testTypingIndicatorOwnership');
 })();
 
 console.log('\n✅ agent_chat_separation 全部通过');

@@ -170,7 +170,7 @@ $proxyEnabled = !empty($userConfig['proxyEnabled']);
 $proxyUrl = $userConfig['proxyUrl'] ?? '';
 
 // 过滤不相关的模型后缀
-$filterSuffixes = ['-preview','experimental','-exp','gemini-3.1-','-embedding','-tts','-audio',
+$filterSuffixes = ['-live-preview','experimental','-exp','-embedding','-tts','-audio',
     'whisper','dall-e','-image','moderation','babbage','davinci','embed','text-embedding','tts-1'];
 
 foreach ($configuredProviders as $prov) {

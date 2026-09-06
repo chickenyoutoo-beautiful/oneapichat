@@ -4,23 +4,26 @@
 
 // ==================== 网盘解析 API 处理器 ====================
 async function netdiskApiHandler(action, args) {
-    var token = localStorage.getItem('authToken') || '';
-    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-
-    let base = '/oneapichat/api/netdisk_api.php?action=' + action + authSuffix;
-
-    // 拼接额外参数
+    var form = new URLSearchParams();
+    form.set('action', action);
     if (args) {
         for (var k in args) {
             if (args.hasOwnProperty(k) && args[k] !== undefined && args[k] !== '') {
                 var val = typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k];
-                base += '&' + k + '=' + encodeURIComponent(val);
+                form.set(k, val);
             }
         }
     }
 
     try {
-        var r = await fetch(base, { signal: AbortSignal.timeout(60000) });
+        var timeoutMs = action === 'parse_and_download' || action === 'parse' ? 180000 : 120000;
+        var r = await fetch('/oneapichat/api/netdisk_api.php', {
+            method: 'POST',
+            headers: getSessionAuthHeaders({ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }),
+            body: form.toString(),
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
         var d = await r.json();
         if (d.success) {
             return { result: JSON.stringify(d, null, 2) };

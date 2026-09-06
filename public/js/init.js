@@ -48,16 +48,6 @@ function injectStyles() {
         @keyframes stream-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
         .search-status { background: rgba(0,0,0,0.03); border-radius: 4px; padding: 4px 8px; margin-bottom: 8px; font-size: 0.9em; color: #666; max-height: 100px; overflow-y: auto; }
         .dark .search-status { background: rgba(255,255,255,0.1); color: #aaa; }
-        .code-actions { position: absolute; top: 4px; right: 4px; z-index: 5; display: flex; gap: 4px; pointer-events: none; opacity: 0; transition: opacity 0.2s; min-width: 0; width: auto; }
-        .markdown-body pre { overflow-x: auto; overflow-y: visible; }
-        .markdown-body pre:hover .code-actions { opacity: 1; }
-        .code-actions > * { pointer-events: auto; }
-        .code-actions .code-run-btn, .code-actions .code-copy-btn { position: static !important; top: auto !important; right: auto !important; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 20px; cursor: pointer; flex-shrink: 0; opacity: 1 !important; z-index: auto !important; }
-        .code-actions .code-copy-btn { background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border: 1px solid #e5e7eb; color: #4b5563; }
-        .dark .code-actions .code-copy-btn { background: #374151; border-color: #4b5563; color: #d1d5db; }
-        .code-actions .code-run-btn { background: rgba(34,197,94,0.85); border: 1px solid #22c55e; color: #fff; }
-        .dark .code-actions .code-run-btn { background: rgba(34,197,94,0.7); border-color: #22c55e; color: #fff; }
-        .code-actions svg { width: 14px; height: 14px; display: block; }
         .rag-panel { margin:0 12px 12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; display:none; }
         .dark .rag-panel { background:#1f2937; border-color:#374151; }
         .rag-panel.open { display:block; }
@@ -124,6 +114,42 @@ function resetConfig() {
 }
 
 
+// 将消息字段安全转换为可导出的纯文本，兼容 user.text / assistant.content 以及多模态数组。
+function _exportTextValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+        return value.map(function(part) {
+            if (part === null || part === undefined) return '';
+            if (typeof part === 'string') return part;
+            if (typeof part === 'object') return part.text || part.content || part.value || '';
+            return String(part);
+        }).filter(Boolean).join('\n');
+    }
+    if (typeof value === 'object') {
+        if (value.text || value.content || value.value) return value.text || value.content || value.value;
+        try { return JSON.stringify(value); } catch (e) { return String(value); }
+    }
+    return String(value);
+}
+
+// 统一用 UTF-8 with BOM 下载文本，兼容 Windows 记事本/Word 等按本地编码猜测的程序。
+function _downloadUtf8Text(filename, text, mime) {
+    var normalized = String(text === null || text === undefined ? '' : text)
+        .replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n');
+    var blob = new Blob(['\uFEFF', normalized], { type: (mime || 'text/plain') + ';charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 延迟释放 Blob URL，兼容仍在排队处理下载点击的旧版浏览器。
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+}
+window._downloadUtf8Text = _downloadUtf8Text;
+
 // ★ 导出聊天记录
 function exportChats() {
     if (!chats || Object.keys(chats).length === 0) {
@@ -135,15 +161,8 @@ function exportChats() {
         exportedAt: new Date().toISOString(),
         chats: chats
     };
-    var blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'oneapichat-chats-' + new Date().toISOString().slice(0,10) + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    var json = JSON.stringify(exportData, null, 2);
+    _downloadUtf8Text('oneapichat-chats-' + new Date().toISOString().slice(0,10) + '.json', json, 'application/json');
     console.log('[export] 导出聊天记录:', Object.keys(chats).length, '个');
 }
 
@@ -155,45 +174,46 @@ function exportCurrentChat() {
     }
     var chat = chats[currentChatId];
     var title = chat.title || '当前对话';
-    var lines = []
+    var lines = [];
     lines.push('标题: ' + title);
     lines.push('导出时间: ' + new Date().toLocaleString('zh-CN'));
     lines.push('='.repeat(50));
     lines.push('');
 
-    var msgs = chat.messages || [];
+    var msgs = Array.isArray(chat.messages) ? chat.messages : [];
+    var includeDebug = false;
+    try { includeDebug = localStorage.getItem('exportChatDebug') === '1'; } catch (e) {}
     msgs.forEach(function(m) {
-        if (m.role === 'system') return;
+        if (!m || m.role === 'system' || m.temporary || m._internal || m.role === 'tool' || m.role === 'tool_card' || m._toolResult || m._toolCard) return;
+        if (m.role !== 'user' && m.role !== 'assistant') return;
         var roleName = m.role === 'user' ? '👤 你' : '🤖 AI';
-        var text = m.content || '';
-        lines.push(roleName + ':');
-        lines.push(text);
-        // 如果有generatedImages
-        if (m.generatedImage) lines.push('[图片: ' + m.generatedImage.substring(0, 50) + '...]');
+        var messageValue = m.text !== undefined ? m.text : m.content;
+        var messageText = _exportTextValue(messageValue).trim();
+        var imageLines = [];
+        if (m.generatedImage) imageLines.push('[图片: ' + String(m.generatedImage).substring(0, 50) + '...]');
         if (m.generatedImages && m.generatedImages.length) {
-            m.generatedImages.forEach(function(img) {
-                lines.push('[图片: ' + img.substring(0, 50) + '...]');
-            });
+            m.generatedImages.forEach(function(img) { imageLines.push('[图片: ' + String(img).substring(0, 50) + '...]'); });
         }
-        // 工具调用
-        if (m.tool_calls && m.tool_calls.length) {
+        if (!messageText && imageLines.length === 0 && !(includeDebug && (m.reasoning || (m.tool_calls && m.tool_calls.length)))) return;
+        lines.push(roleName + ':');
+        if (messageText) lines.push(messageText);
+        imageLines.forEach(function(line) { lines.push(line); });
+        // 默认导出只保留可分享的最终对话，避免把内部思考和工具轨迹再次喂给模型。
+        // 需要诊断时可显式设置 localStorage.exportChatDebug=1。
+        if (includeDebug && m.reasoning) {
+            lines.push('思考过程:');
+            lines.push(_exportTextValue(m.reasoning));
+        }
+        if (includeDebug && m.tool_calls && m.tool_calls.length) {
             m.tool_calls.forEach(function(tc) {
-                if (tc.function) lines.push('[工具调用: ' + tc.function.name + ']');
+                if (tc && tc.function) lines.push('[工具调用: ' + (tc.function.name || '未知工具') + ']');
             });
         }
         lines.push('');
     });
 
-    var text = lines.join('\n');
-    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = title.replace(/[\\/:*?"<>|]/g, '_') + '.txt';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    var filename = title.replace(/[\\/:*?"<>|]/g, '_') + '.txt';
+    _downloadUtf8Text(filename, lines.join('\n'), 'text/plain');
 }
 
 // ★ 导入聊天记录
@@ -284,8 +304,38 @@ async function initializeConfig() {
     if (savedProvider === 'custom') setVal('baseUrl', localStorage.getItem('baseUrlCustom') || '');
     else if (_provCfg.baseUrl) setVal('baseUrl', _provCfg.baseUrl);
     else setVal('baseUrl', localStorage.getItem('baseUrl') || DEFAULT_CONFIG.url);
+    // 当前厂商专属模型拥有最高优先级；全局 model 仅允许作为新设备没有专属记录时的初始化回退。
     var _pm = localStorage.getItem('model_' + savedProvider) || localStorage.getItem('model') || DEFAULT_CONFIG.model;
-    setVal('modelSelect', _pm);
+    // ★ 初始化永远以持久化的 _pm 为权威；即使 ModelsCatalog 尚未加载，也要先建立一个真实 option，不能从空 DOM 反推 DEFAULT_CONFIG。
+    var ms = getEl('modelSelect');
+    if (ms) {
+        var _initialHtml = '';
+        if (window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+            _initialHtml = window.ModelsCatalog.renderModelOptionsHtml([], savedProvider, _pm);
+        }
+        if (_initialHtml) ms.innerHTML = _initialHtml;
+        var _matchedInit = false;
+        if (_pm && !/^(加载中|请输入|获取失败|loading)/i.test(_pm)) {
+            for (var _oiInit = 0; _oiInit < ms.options.length; _oiInit++) {
+                if (ms.options[_oiInit].value.toLowerCase() === _pm.toLowerCase()) {
+                    ms.selectedIndex = _oiInit;
+                    _matchedInit = true;
+                    break;
+                }
+            }
+            if (!_matchedInit) {
+                var _optInit = document.createElement('option');
+                _optInit.value = _pm;
+                _optInit.textContent = _pm;
+                _optInit.selected = true;
+                ms.appendChild(_optInit);
+            }
+        }
+    }
+    if (_pm && !/^(加载中|请输入|获取失败|loading)/i.test(_pm)) {
+        localStorage.setItem('model', _pm);
+        localStorage.setItem('model_' + savedProvider, _pm);
+    }
     setVal('visionModel', localStorage.getItem('visionModel') || DEFAULT_CONFIG.visionModel || '');
     setVal('visionApiUrl', localStorage.getItem('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '');
     var storedVisionKey = await decrypt(localStorage.getItem('visionApiKey') || '');
@@ -387,16 +437,64 @@ async function initializeConfig() {
     var lhSpan = getEl('lineHeightValue');
     if (lhSpan) lhSpan.innerText = lh.toFixed(2);
     document.documentElement.style.setProperty('--chat-line-height', lh);
+    document.body.style.setProperty('--chat-line-height', lh);
+    if ($.chatMessagesContainer) {
+        $.chatMessagesContainer.style.setProperty('--chat-line-height', lh);
+        var applyReadingLineHeight = function(root) {
+            var nodes = [];
+            var isAssistantNode = function(el) {
+                if (!el || !el.closest) return false;
+                return !!el.closest('.message-row.assistant');
+            };
+            var sel = '.message-row.assistant .markdown-body, .message-row.assistant .markdown-body p, .message-row.assistant .markdown-body li, .message-row.assistant .markdown-body blockquote, .message-row.assistant .md-stable, .message-row.assistant .md-tail';
+            if (root && root.matches) {
+                if (root.matches(sel) || (root.matches('.markdown-body, p, li, blockquote, .md-stable, .md-tail') && isAssistantNode(root))) {
+                    nodes.push(root);
+                }
+            }
+            if (root && root.querySelectorAll) {
+                nodes = nodes.concat(Array.from(root.querySelectorAll(sel)));
+            }
+            nodes.forEach(function(node) { node.style.setProperty('line-height', String(localStorage.getItem('lineHeight') || lh), 'important'); });
+        };
+        applyReadingLineHeight($.chatMessagesContainer);
+        if (!window.__readingLineHeightObserver) {
+            window.__readingLineHeightObserver = new MutationObserver(function(records) {
+                records.forEach(function(record) { record.addedNodes.forEach(function(node) { if (node.nodeType === 1) applyReadingLineHeight(node); }); });
+            });
+            window.__readingLineHeightObserver.observe($.chatMessagesContainer, { childList: true, subtree: true });
+        }
+    }
 
     var pm = parseFloat(localStorage.getItem('paragraphMargin') || DEFAULT_CONFIG.paragraphMargin);
     setVal('paragraphMargin', pm);
     var pmSpan = getEl('paragraphMarginValue');
     if (pmSpan) pmSpan.innerText = pm.toFixed(2);
     document.documentElement.style.setProperty('--chat-paragraph-margin', pm + 'rem');
+
+    var bg = parseFloat(localStorage.getItem('bubbleGap') || DEFAULT_CONFIG.bubbleGap);
+    setVal('bubbleGap', bg);
+    var bgSpan = getEl('bubbleGapValue');
+    if (bgSpan) bgSpan.innerText = bg.toFixed(2);
+    document.documentElement.style.setProperty('--chat-bubble-gap', bg + 'rem');
     setChecked('markdownGFM', localStorage.getItem('markdownGFM') !== 'false');
     setChecked('markdownBreaks', localStorage.getItem('markdownBreaks') !== 'false');
+    // ★ 子代理会话显示开关（默认隐藏）— 右侧配置栏
+    var _showSubAgent = localStorage.getItem('showSubAgentSessions') === 'true';
+    var _subToggle = getEl('showSubAgentSessions_config');
+    if (_subToggle) {
+        _subToggle.checked = _showSubAgent;
+        // ★ 使用 addEventListener 避免被其他代码覆盖 onchange 属性
+        _subToggle.addEventListener('change', function() {
+            localStorage.setItem('showSubAgentSessions', this.checked ? 'true' : 'false');
+            if (typeof renderChatHistory === 'function') renderChatHistory();
+        });
+    }
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
+    var savedTheme = localStorage.getItem('chatThemeStyle') || 'dsh';
+    setVal('chatThemeStyle', savedTheme);
+    applyChatTheme(savedTheme);
     // ★ 隐藏推理过程: 恢复持久化状态
     if (typeof window.isHideReasoning === 'function' && window.isHideReasoning()) {
         document.body.classList.add('hide-reasoning');
@@ -422,12 +520,28 @@ async function initializeConfig() {
     var _tiEl = getEl('thinkingIntensity');
     if (_tiEl) _tiEl.value = _tiVal;
     if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
-    // modelSelect 变化时更新思考强度栏可见性
+    // modelSelect 变化时更新思考强度栏可见性并可靠双向同步当前提供商模型
     var _ms = getEl('modelSelect');
-    if (_ms && !_ms._thinkingBound) {
-        _ms._thinkingBound = true;
+    if (_ms && !_ms._globalModelSelectBound) {
+        _ms._globalModelSelectBound = true;
         _ms.addEventListener('change', function () {
+            var val = this.value;
+            var curP = (typeof getEl === 'function' && getEl('baseUrlProvider')?.value) || localStorage.getItem('baseUrlProvider') || 'custom';
+            if (val && !/^(加载中|请输入|获取失败|loading)/i.test(val)) {
+                localStorage.setItem('model', val);
+                localStorage.setItem('model_' + curP, val);
+                localStorage.setItem('_modelSelectionSavedAt', String(Date.now()));
+                console.log('[modelSelect change] provider:', curP, '-> model:', val);
+                if (typeof saveConfigToServer === 'function') {
+                    saveConfigToServer().then(function() {
+                        if (typeof window._broadcastEvent === 'function') {
+                            window._broadcastEvent('config:changed', { ts: Date.now(), model: val, provider: curP });
+                        }
+                    }).catch(function(){});
+                }
+            }
             if (typeof _updateThinkingIntensityVisibility === 'function') _updateThinkingIntensityVisibility();
+            if (typeof window._syncAgentModelCapsule === 'function') window._syncAgentModelCapsule();
         });
     }
     // baseUrlProvider 变化时也检查
@@ -540,8 +654,16 @@ async function initAgentConfig() {
         }
     })();
     setVal('ttsSpeed', localStorage.getItem('ttsSpeed') || '1.0');
+    // Agent 权限胶囊也要在刷新/切换后按持久化值回填，不能依赖默认 Full access。
+    if (typeof window._updatePermissionUI === 'function' && typeof window.getWorkspacePermission === 'function') {
+        window._updatePermissionUI(window.getWorkspacePermission());
+    }
     // 更新三模式选择器
-    updateModeSelector(mode);
+    if (typeof updateModeSelector === 'function') {
+        updateModeSelector(mode);
+    } else if (typeof window.updateModeSelector === 'function') {
+        window.updateModeSelector(mode);
+    }
     // ★ Agent/YOLO 模式下强制启用工具调用
     if (isActive) {
         setChecked('searchToolCallToggle', true);
@@ -665,12 +787,11 @@ function setupEventListeners() {
                     return;
                 }
                 e.preventDefault();
-                if (isTypingMap[currentChatId] || (window._messageQueue && window._messageQueue.length > 0)) {
-                    // ★ AI 生成中 或 队列有消息: 推入队列 (随堆栈逐一推出)
-                    window.pushToMsgQueue();
-                    return;
+                if (typeof window._smartSend === 'function') {
+                    window._smartSend();
+                } else {
+                    sendMessage();
                 }
-                sendMessage();
             }
         });
         window.autoResize($.userInput);
@@ -723,7 +844,9 @@ function loadInitialData() {
         // 延迟 2s 再次尝试从服务器加载
         setTimeout(async function() {
             try {
-                var _schats = await loadChatsFromServer();
+                var _sresult = await loadChatsFromServer();
+                // ★ loadChatsFromServer 返回 {chats, deleted}, 取 chats 部分
+                var _schats = (_sresult && _sresult.chats) ? _sresult.chats : _sresult;
                 if (_schats && typeof _schats === 'object' && Object.keys(_schats).length > 0) {
                     var _added = 0;
                     for (var _scid in _schats) {
@@ -742,35 +865,31 @@ function loadInitialData() {
         }, 2000);
     }
 
-    // ★ 恢复子代理会话到 chats 对象（供侧边栏显示）
-    (function _restoreSubAgentChats() {
-        var _restored = 0;
-        for (var i = 0; i < localStorage.length; i++) {
-            var _k = localStorage.key(i);
-            if (_k && _k.indexOf('agent_chat_') === 0) {
-                var _name = _k.substring('agent_chat_'.length);
-                var _subId = '_agent_sub_' + _name;
-                if (!chats[_subId]) {
-                    try {
-                        var _msgs = JSON.parse(localStorage.getItem(_k) || '[]');
-                        chats[_subId] = {
-                            title: '🤖 ' + _name,
-                            userId: localStorage.getItem('authUserId') || '',
-                            updated_at: _msgs.length > 0 ? (_msgs[_msgs.length - 1].time || Date.now()) : Date.now(),
-                            messages: _msgs.map(function(m) {
-                                return { role: m.role, content: m.content, time: m.time };
-                            }),
-                            _agentSub: true
-                        };
-                        _restored++;
-                    } catch(e) {}
+    // ★ 清理并销毁废弃子代理会话，禁止其进入侧边栏
+    (function _purgeSubAgentChats() {
+        try {
+            var _keysToRemove = [];
+            for (var i = 0; i < localStorage.length; i++) {
+                var _k = localStorage.key(i);
+                if (_k && (_k.indexOf('agent_chat_') === 0 || _k.indexOf('_agent_sub_') === 0)) {
+                    _keysToRemove.push(_k);
                 }
             }
-        }
-        if (_restored > 0) {
-            console.log('[init] 恢复了', _restored, '个子代理会话到侧边栏');
-            try { slimSaveChats(); } catch(e) {}
-        }
+            _keysToRemove.forEach(function(k) {
+                try { localStorage.removeItem(k); } catch(e) {}
+            });
+            // 从当前内存 chats 中彻底剔除任何 _agent_sub_
+            var _changed = false;
+            Object.keys(chats).forEach(function(cid) {
+                if (cid.indexOf('_agent_sub_') === 0 || cid.indexOf('_sub_') === 0) {
+                    delete chats[cid];
+                    _changed = true;
+                }
+            });
+            if (_changed) {
+                try { slimSaveChats(); } catch(e) {}
+            }
+        } catch(e) {}
     })();
 
     // ★ 如果 Agent 模式激活,切换到 agent 独立聊天
@@ -930,6 +1049,14 @@ function initializeApp() {
             var _savedChatId = sessionStorage.getItem('_tempAgentChatId') || null;
             window._tempAgentGranted = true;
             window._tempAgentChatId = _savedChatId;
+            var _grantId = sessionStorage.getItem('_fullFileAccessGrantId') || '';
+            var _grantChat = sessionStorage.getItem('_fullFileAccessChatId') || '';
+            var _grantExpires = Number(sessionStorage.getItem('_fullFileAccessExpiresAt') || 0);
+            if (_grantId && _grantChat === _savedChatId && _grantExpires > Math.floor(Date.now() / 1000)) {
+                window._fullFileAccessGrantId = _grantId;
+                window._fullFileAccessChatId = _grantChat;
+                window._fullFileAccessExpiresAt = _grantExpires;
+            }
             // ★ 延迟恢复 banner: 等 loadChat 设置 currentChatId 后再判断
             // (loadChat 中会检查匹配并显示/隐藏 banner)
         }
@@ -949,11 +1076,17 @@ function initializeApp() {
             (async function() {
                 try {
                     var _ts = Date.now();
-                    var resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token) + '&_=' + _ts, { cache: 'no-store' });
+                    var resp = await fetch('/oneapichat/api/auth.php?action=verify&_=' + _ts, {
+                        headers: getSessionAuthHeaders(),
+                        cache: 'no-store'
+                    });
                     if (!resp.ok) {
                         // ★ 429 限流或网络错误: 重试一次
                         await new Promise(function(r) { setTimeout(r, 2000); });
-                        resp = await fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token) + '&_=' + Date.now(), { cache: 'no-store' });
+                        resp = await fetch('/oneapichat/api/auth.php?action=verify&_=' + Date.now(), {
+                            headers: getSessionAuthHeaders(),
+                            cache: 'no-store'
+                        });
                     }
                     var data = await resp.json();
                     if (!data.valid) {
@@ -980,7 +1113,10 @@ function initializeApp() {
                     // ★ 网络异常/502 HTML: 延迟重试，先检查响应是否为JSON
                     console.warn('[Auth] 验证token失败,2s后重试:', e.message);
                     setTimeout(function() {
-                        fetch('/oneapichat/api/auth.php?action=verify&token=' + encodeURIComponent(token), { cache: 'no-store' })
+                        fetch('/oneapichat/api/auth.php?action=verify', {
+                            headers: getSessionAuthHeaders(),
+                            cache: 'no-store'
+                        })
                             .then(function(r2) {
                                 if (!r2.ok) throw new Error('HTTP ' + r2.status);
                                 return r2.json();
@@ -1037,6 +1173,13 @@ function initializeApp() {
         // ★ 预加载技能列表
         if (typeof window.loadSkills === 'function') {
             window.loadSkills().catch(function() {});
+        }
+
+        // ★ 预加载并自动连接 MCP 服务器 (秒级缓存预热 + 后台并发静默自愈连接)
+        if (typeof window.initMcpServers === 'function') {
+            window.initMcpServers().catch(function(e) {
+                console.warn('[Init] initMcpServers 异常:', e.message);
+            });
         }
 
         // ★ 初始化 _currentProvider (页面加载时不会触发 onProviderChange)
@@ -1151,29 +1294,10 @@ function initializeApp() {
                     if (_needsContinue) {
                         var _age2 = Date.now() - (chats[currentChatId].updated_at || 0);
                         if (_age2 < 300000) {  // 5分钟内
-                            console.log('[AutoRecover] Phase 3: 检测到未完成工具交互, 自动续接 (orphanedAsst=' + _orphanedAsstIdx + ')');
-                            showToast('🔄 检测到未完成的工具调用, 正在继续...', 'info', 3000);
-                            setTimeout(function() {
-                                // ★ Case 2: assistant有tool_calls但工具未执行→先执行工具,追加结果,再交sendMessage续接
-                                if (_orphanedAsstIdx >= 0) {
-                                    _executeOrphanedToolCalls(currentChatId, _orphanedAsstIdx).then(function() {
-                                        sendMessage(true).catch(function(){});
-                                    }).catch(function(_e) {
-                                        console.warn('[AutoRecover] Phase 3 工具执行失败, 回退重发:', _e.message);
-                                        var _lu = _tmsgs[_lastUserIdx];
-                                        if (_lu && _lu.role === 'user') {
-                                            sendMessage(true, _lu.text || '', _lu.files || []).catch(function(){});
-                                        }
-                                    });
-                                    return;
-                                }
-                                // ★ Case 1: 工具已执行无响应→直接续接
-                                var _lu = _tmsgs[_lastUserIdx];
-                                if (_lu && _lu.role === 'user') {
-                                    sendMessage(true, _lu.text || '', _lu.files || []).catch(function(){});
-                                }
-                            }, 800);
-                            return;
+                            // 历史形状不足以证明后台仍在运行。过去这里会自动执行工具或
+                            // 重发最后一条用户请求，导致刷新即“接续”、重复调用和重复扣费。
+                            // 真正活跃的请求只由上面的 Engine active_tasks 恢复。
+                            console.log('[AutoRecover] 检测到未完成工具历史，但 Engine 无活跃任务；保留历史，不自动重放');
                         }
                     }
                 }
@@ -1219,32 +1343,19 @@ function initializeApp() {
                         }
                         window.__internalAgentContext = _ctxMsg;
                     }
-                    showToast('🔄 正在继续生成...', 'info', 4000);
-                    sendMessage(true, _userText, _userFiles).catch(function(e) {
-                        console.warn('[AutoRecover] 续生失败:', e.message);
-                    });
+                    // ★ 冷启动不自动盲目重发旧用户消息，避免刷新产生死循环自发消息
+                    console.log('[AutoRecover] 冷启动已恢复历史状态，不执行自动重发');
                 }, 500);
             })();
         } catch(e) { console.warn('[AutoRecover] 出错:', e.message); }
 
-        // ★ 从 sessionStorage 恢复消息队列(页面刷新不丢)
+        // ★ 冷启动不恢复旧队列：队列只服务于当前页面生命周期，避免残留队列在刷新后污染新会话/重复发送。
         try {
-            if (window._loadQueue && window._loadQueue()) {
-                var _queueLen = window._messageQueue.length;
-                console.log('[Queue] 恢复 ' + _queueLen + ' 条队列消息');
-                if (_queueLen > 0) {
-                    // 有队列消息: 恢复并等待处理
-                    if (!isTypingMap[currentChatId]) {
-                        setTimeout(function() { window._drainQueue(); }, 1500);
-                    }
-                    window._updateQueueUI();
-                    showToast('📦 发现 ' + _queueLen + ' 条待发送消息,正在恢复...', 'info', 3000);
-                } else {
-                    // 空队列: 清理残留
-                    window._clearPersistedQueue();
-                }
-            }
-        } catch(e) { console.warn('[Queue] 恢复失败:', e); }
+            window._messageQueue = [];
+            if (typeof window._clearPersistedQueue === 'function') window._clearPersistedQueue(null, true);
+            if (typeof window._updateQueueUI === 'function') window._updateQueueUI();
+            console.log('[Queue] 冷启动已清理全部持久化队列');
+        } catch(e) { console.warn('[Queue] 清理失败:', e); }
 
         // ★ 周期自动保存:每30秒保存一次聊天(确保未开新会话时数据不丢)
         setInterval(function() {
@@ -1263,6 +1374,13 @@ function initializeApp() {
 
         // ★ 初始化 Agent 模式悬停菜单
     setTimeout(function() { if (typeof _setupAgentPopup === 'function') _setupAgentPopup(); }, 1000);
+
+    // ★ 自动清理过期子代理和内部测试会话（保留最新 10 个且 48 小时内）
+    setTimeout(function() {
+        if (typeof window.cleanupSubAgentSessions === 'function') {
+            window.cleanupSubAgentSessions(48, 10).catch(function() {});
+        }
+    }, 3000);
 
     // ★ 登录/注册成功提示
         try {
@@ -1299,13 +1417,18 @@ function initializeApp() {
                 localStorage.removeItem('_skipUnloadSave');
                 return;
             }
-            // ★ 保存未完成的流式消息(包含用户消息,用于刷新后继续生成)
+            // ★ 保存当前正在生成的流式消息(刷新后恢复当前聊天，而不是随机取第一个聊天)
             try {
-                for (var __cid in chats) {
-                    var __msgs = chats[__cid].messages;
+                var __partialIds = [];
+                if (currentChatId && chats[currentChatId]) __partialIds.push(currentChatId);
+                Object.keys(chats).forEach(function(__fallbackId) {
+                    if (__partialIds.indexOf(__fallbackId) === -1) __partialIds.push(__fallbackId);
+                });
+                for (var __pi = 0; __pi < __partialIds.length; __pi++) {
+                    var __cid = __partialIds[__pi];
+                    var __msgs = chats[__cid] && chats[__cid].messages || [];
                     for (var __i = __msgs.length - 1; __i >= 0; __i--) {
                         if (__msgs[__i].partial) {
-                            // 找到前一条用户消息
                             var __userMsg = null;
                             for (var __j = __i - 1; __j >= 0; __j--) {
                                 if (__msgs[__j].role === 'user') {
@@ -1320,40 +1443,27 @@ function initializeApp() {
                                 toolCalls: __msgs[__i].tool_calls || __msgs[__i]._rsToolCalls || [],
                                 streamId: __msgs[__i]._rsStreamId || '',
                                 msgId: __msgs[__i]._rsMsgId || '',
+                                time: Date.now(),
                                 userText: __userMsg ? __userMsg.text : '',
                                 userFiles: __userMsg ? __userMsg.files : []
                             }));
+                            __pi = __partialIds.length;
                             break;
                         }
                     }
-                    break;
                 }
             } catch(e) {}
             // ★ 保存消息队列到 sessionStorage(刷新后恢复)
             window._saveQueue();
             slimSaveChats();
             try { localStorage.setItem('lastChatId', currentChatId || ''); } catch(e) {}
+            try { sessionStorage.setItem('_oneapiLastChatId', currentChatId || ''); } catch(e) {}
             // ★ 保存聊天记录到服务器(使用 sendBeacon,保证页面关闭时请求送达)
             var token = localStorage.getItem('authToken');
             if (token && chats && Object.keys(chats).length > 0) {
                 try { beaconSaveChats(); } catch(e) {}
             }
-            // ★ 保存配置到服务器(使用 sendBeacon,保证代理状态等不丢失)
-            if (token) {
-                try {
-                    var _unloadCfg = {}
-                    var _skipKeys = ['chats','lastChatId','deviceId','ongoingChats','authToken','authUsername','authUserId','dark','modelContextLength','modelMaxOutputTokens','autoDetectedTextModels','_test','_savedInputText','_savedPartial']
-                    for (var _ui = 0; _ui < localStorage.length; _ui++) {
-                        var _uk = localStorage.key(_ui);
-                        if (!_uk || _skipKeys.indexOf(_uk) !== -1 ||
-                            (window._isTransientRuntimeStorageKey && window._isTransientRuntimeStorageKey(_uk))) continue;
-                        _unloadCfg[_uk] = localStorage.getItem(_uk);
-                    }
-                    var _beaconUrl = SERVER_API_BASE + '/chat.php?auth_token=' + token + '&action=save_config';
-                    navigator.sendBeacon(_beaconUrl, JSON.stringify(_unloadCfg));
-                } catch(_ue) {}
-            }
-            // ★ 保存配置到服务器(使用 sendBeacon)
+            // ★ 配置卸载保存只走唯一的 beaconSaveConfig，避免同一页面连续发两份快照并产生乱序覆盖。
             if (token) {
                 try { beaconSaveConfig(); } catch(e) {}
             }
@@ -1365,12 +1475,16 @@ function initializeApp() {
             slimSaveChats();
         });
 
-        // ★ 全局拦截图片加载错误,静默处理避免控制台刷屏
+        // ★ 全局图片错误兜底：正文图片交给 attachImageFallbacks 的代理重试/来源页卡片，
+        // 禁止再统一 display:none；旧逻辑会抢先隐藏图片，使卡片即使生成也看不到。
         document.addEventListener('error', function(e) {
-            if (e.target && e.target.tagName === 'IMG') {
-                e.target.style.display = 'none';
-                e.preventDefault();
+            if (!e.target || e.target.tagName !== 'IMG') return;
+            if (e.target.closest && e.target.closest('.markdown-body')) {
+                if (typeof window.attachImageFallbacks === 'function') window.attachImageFallbacks(e.target);
+                return;
             }
+            e.target.style.display = 'none';
+            e.preventDefault();
         }, true);
 
         // ★ 聊天内图片/图表点击放大 (委托监听): markdown 渲染的图片(含 stock_chart K线图)
@@ -1390,8 +1504,12 @@ function initializeApp() {
                         _svgClone.setAttribute('width', Math.max(_svgEl.viewBox.baseVal.width || 800, 800));
                         _svgClone.setAttribute('height', Math.max(_svgEl.viewBox.baseVal.height || 600, 600));
                         _svgClone.style.width = _svgClone.style.height = '';
+                        // Mermaid 文本通常位于 foreignObject 中，交给 <img> 的 data URL 在部分浏览器会变成空白；
+                        // 传递原始 SVG，让灯箱直接挂载 SVG DOM，确保图表和文字都可见。
+                        _svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+                        _svgClone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
                         var _svgData = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(_svgClone.outerHTML);
-                        showImageLightbox([_svgData], 0);
+                        showImageLightbox([{ url: _svgData, __svgMarkup: _svgClone.outerHTML }], 0);
                     }
                     return;
                 }

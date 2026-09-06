@@ -34,13 +34,15 @@ const S = {
 // 各提供商映射值：OpenAI=reasoning_effort, Claude=output_config.effort,
 // Gemini=thinking_level, DeepSeek=reasoning_effort, LongCat/MiniMax=thinking.type
 var THINKING_INTENSITY_MAP = {
-    off:    { openai: null,      claude: null,      gemini: null,      binary: 'disabled' },
-    low:    { openai: 'low',     claude: 'low',     gemini: 'low',     binary: 'enabled' },
-    medium: { openai: 'medium',  claude: 'medium',  gemini: 'medium',  binary: 'enabled' },
-    high:   { openai: 'high',    claude: 'high',    gemini: 'high',    binary: 'enabled' },
-    max:    { openai: 'high',    claude: 'xhigh',   gemini: 'high',    binary: 'enabled' },
-    // ultra: OpenAI/Gemini 上限为 high (映射到其天花板), Claude→max, DeepSeek→max
-    ultra:  { openai: 'high',    claude: 'max',     gemini: 'high',    binary: 'enabled' },
+    off:     { openai: null,      claude: null,      gemini: null,      binary: 'disabled' },
+    minimal: { openai: 'low',     claude: 'low',     gemini: 'low',     binary: 'enabled' },
+    low:     { openai: 'low',     claude: 'low',     gemini: 'low',     binary: 'enabled' },
+    medium:  { openai: 'medium',  claude: 'medium',  gemini: 'medium',  binary: 'enabled' },
+    high:    { openai: 'high',    claude: 'high',    gemini: 'high',    binary: 'enabled' },
+    xhigh:   { openai: 'xhigh',   claude: 'xhigh',   gemini: 'high',    binary: 'enabled' },
+    max:     { openai: 'max',     claude: 'xhigh',   gemini: 'high',    binary: 'enabled' },
+    // ultra: Gemini 上限为 high, OpenAI/Claude/DeepSeek→max
+    ultra:   { openai: 'max',     claude: 'max',     gemini: 'high',    binary: 'enabled' },
 };
 
 // ===== 模型配置构建器 =====
@@ -85,6 +87,52 @@ function cfg(opts) {
 // ===== 模型配置列表 =====
 // 按优先级排序: 精确匹配优先于通配匹配
 const configs = [
+    // ──────────── 2026 最新旗舰系列 (Grok-4 / Gemini-3 / Claude-4 / GPT-5) ────────────
+
+    // Grok 4.6 / 4.5 / 4.3 (1M 上下文, 384K 输出, 深度推理与视觉)
+    cfg({
+        match: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-4.20-'],
+        supports: [S.TOOLS, S.VISION, S.REASONING, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
+        contextWindow: 1000000,
+        maxOutputTokens: 384000,
+        safetyMargin: 8192,
+        defaultMaxTokens: 8192,
+        alias: ['grok-4', 'grok-latest']
+    }),
+
+    // Gemini 3.8 / 3.7 / 3.6 / 3.5 系列 (1M 上下文, 128K 输出, 多模态与思考)
+    cfg({
+        match: ['gemini-3.8-', 'gemini-3.7-', 'gemini-3.6-', 'gemini-3.5-', 'gemini-3.1-pro', 'gemini-3-flash'],
+        supports: [S.TOOLS, S.VISION, S.REASONING, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.STOP],
+        contextWindow: 1000000,
+        maxOutputTokens: 128000,
+        safetyMargin: 8192,
+        defaultMaxTokens: 8192,
+        alias: ['gemini-3.8', 'gemini-3.7', 'gemini-3']
+    }),
+
+    // Claude 4.6 系列 (1M 上下文, 128K 输出)
+    cfg({
+        match: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-4-'],
+        supports: [S.TOOLS, S.VISION, S.REASONING, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.MAX_TOKENS_BUDGET],
+        contextWindow: 1000000,
+        maxOutputTokens: 128000,
+        safetyMargin: 8192,
+        defaultMaxTokens: 8192,
+        alias: ['claude-4.6', 'claude-4']
+    }),
+
+    // GPT-5.6 / 5.5 / 5.4 系列 (1M 上下文, 128K 输出)
+    cfg({
+        match: ['gpt-5.6-', 'gpt-5.5', 'gpt-5.4-', 'codex-auto-review'],
+        supports: [S.TOOLS, S.VISION, S.REASONING, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.STOP, S.RESP_FORMAT, S.SEED],
+        contextWindow: 1000000,
+        maxOutputTokens: 128000,
+        safetyMargin: 8192,
+        defaultMaxTokens: 8192,
+        alias: ['gpt-5.6', 'gpt-5']
+    }),
+
 
     // ──────────── DeepSeek 系列 ────────────
 
@@ -92,8 +140,8 @@ const configs = [
     // 推理方式: reasoning_effort (low/medium/high/max) + 通过 extra_body 传 thinking type
     // 工具调用格式: <｜DSML｜tool_calls> XML (但API也兼容 OpenAI format)
     cfg({
-        match: ['deepseek-v4-flash'],
-        supports: [S.TOOLS, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
+        match: ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'],
+        supports: [S.TOOLS, S.VISION, S.REASON_EFFORT, S.THINKING_LEVEL, S.STREAM, S.TEMP, S.TOP_P, S.PRES_PENALTY, S.FREQ_PENALTY, S.STOP, S.LOGPROBS, S.SEED, S.PARALLEL_TOOL],
         bannedParams: ['logit_bias', 'user', 'max_completion_tokens', 'parallel_tool_calls'],
         contextWindow: 1000000,
         maxOutputTokens: 384000,  // ★ DeepSeek V4 官方上限 384K
@@ -1087,6 +1135,18 @@ return {
         return false;
     },
 
+    /** DSH ModelSelect 同款能力目录：返回当前模型实际可选的推理等级。 */
+    getThinkingIntensityLevels: function(name) {
+        if (!this.supportsThinkingIntensity(name)) return [];
+        var n = _normalize(name);
+        var levels = ['off', 'minimal', 'low', 'medium', 'high'];
+        // 对齐 DSH 菜单：向明确声明高阶预算/旗舰推理的模型（DeepSeek V4、Claude、Grok-4、GPT 系列等）追加 XHigh / Max。
+        if (n.indexOf('deepseek-v4') === 0 || n.indexOf('claude') === 0 || n.indexOf('grok-4') === 0 || n.indexOf('gpt') === 0 || n.indexOf('o1') === 0 || n.indexOf('o3') === 0 || n.indexOf('codex') === 0) {
+            levels.push('xhigh', 'max');
+        }
+        return levels;
+    },
+
     /**
      * 获取思考强度分级参数 — 返回合并到请求体的参数对象
      * @param {string} level - off/low/medium/high/max/ultra
@@ -1095,6 +1155,7 @@ return {
      * @returns {object} 合并到 body 的参数 (undefined 值表示删除该 key)
      */
     getThinkingIntensityParams: function(level, modelName, isAnthropicFormat) {
+        if (level === 'default') return {};
         var n = _normalize(modelName);
         var isClaude = isAnthropicFormat && n.indexOf('claude') === 0;
         // Claude effort 支持: Opus 4.6+/Sonnet 4.6+/Sonnet 5+/Opus 5+/Fable 5
@@ -1139,12 +1200,21 @@ return {
             return { thinking: { type: 'adaptive' } };
         }
 
-        // ── Gemini 3 (thinking_level via extra_body) ──
+        // ── Gemini (reasoning_effort + thinking_level) ──
+        // ★ 实测结论 (gpt.naujtrats.xyz cloudcode 中继, 2026-08-14 A/B):
+        //   只有 reasoning_effort 会触发思考文本回传(中继映射为 thinkingConfig +
+        //   includeThoughts); thinking_level 单独只调预算、不回文本;
+        //   extra_body.include_thoughts 对该中继无效(保留以兼容其他中继)。
+        //   同时发: reasoning_effort(触发文本回传+预算) + thinking_level(原生预算)
         if (isGemini) {
-            if (v.gemini === null) {
-                return { extra_body: { thinking_level: undefined } };
+            if (v.gemini === null || v.openai === null) {
+                return { reasoning_effort: undefined, thinking_level: undefined, extra_body: undefined };
             }
-            return { extra_body: { thinking_level: v.gemini } };
+            return {
+                reasoning_effort: v.openai,
+                thinking_level: v.gemini,
+                extra_body: { thinking_level: v.gemini, include_thoughts: true, includeThoughts: true }
+            };
         }
 
         // ── OpenAI / DeepSeek V4 (reasoning_effort) ──

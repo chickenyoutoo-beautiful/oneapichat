@@ -32,6 +32,7 @@ user_ids = _user_ids
 
 try:
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout=5000")
     c = conn.cursor()
 
     # 确保 user_id 列存在
@@ -43,6 +44,23 @@ try:
 
     # 添加索引优化
     c.execute("CREATE INDEX IF NOT EXISTS idx_courses_user_id ON courses(user_id)")
+    conn.commit()
+
+    # 旧版曾在 403/资源异常/未复核时累加完成数，典型特征是 done > count。
+    # 这些 completed 只是本地派生缓存，自动降级后允许用户重新服务端核验。
+    c.execute("""
+        UPDATE courses AS course
+        SET status='in_progress', completed_videos=0, total_videos=0,
+            completed_works=0, total_works=0
+        WHERE course.status IN ('completed', 'in_progress')
+          AND EXISTS (
+              SELECT 1 FROM chapters AS chapter
+              WHERE chapter.course_id=course.id
+                AND chapter.user_id=course.user_id
+                AND (chapter.video_done > chapter.video_count
+                     OR chapter.work_done > chapter.work_count)
+          )
+    """)
     conn.commit()
 
     # ★ 清空该用户缓存（切换账号时用）

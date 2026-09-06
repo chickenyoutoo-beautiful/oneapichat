@@ -1,45 +1,64 @@
-# ========== OneAPIChat docker-compose ==========
-# One-click deployment for OneAPIChat
-# Usage: docker-compose up -d
+# ==============================================================================
+# OneAPIChat 全栈一体化部署配置 (Docker Compose)
+# 包含: OneAPIChat 主站 + Python 引擎 + 刷课 + Cloudreve 云盘 + CPA 代理
+#
+# 快速启动:
+#   docker compose up -d
+#
+# 绑定域名说明:
+#   - 在 .env 中配置 DOMAIN=chat.yourdomain.com
+#   - 容器已内置全自适应网关，无论是直接IP访问还是反代多域名均可平滑接入
+# ==============================================================================
 
 services:
-  web:
+  oneapichat:
+    image: oneapichat:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     container_name: oneapichat
     restart: unless-stopped
     ports:
-      # Public web port (HTTP only - use reverse proxy for HTTPS)
-      - "8080:8080"
+      # 主 Web 访问端口 (含 OneAPIChat、/engine/、/cpa/、/cloudreve/)
+      - "${PORT:-8080}:8080"
+      # 可选直连子端口 (若只需通过 Nginx 统一前缀访问则可注释以下端口)
+      - "${CLOUDREVE_PORT:-5212}:5212"
+      - "${CPA_PORT:-8317}:8317"
     environment:
-      # Flask/Engine settings
-      - ENGINE_PORT=8766
-      - ENGINE_HOST=0.0.0.0
-      # Optional: pre-configure admin credentials
-      # - ADMIN_TOKEN=your-admin-token
-      # Optional: enable debug mode
-      # - DEBUG=true
+      # 绑定自定义域名 (留空则自适应 IP/域名)
+      - DOMAIN=${DOMAIN:-}
+      # 是否在宿主反代启用了 SSL (true/false)
+      - SSL_ENABLED=${SSL_ENABLED:-false}
+      # 自定义 AES-256 加密密钥 (留空则容器启动时自动生成强随机密钥)
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      # Cloudreve 云盘外部完整访问地址 (例如 https://pan.yourdomain.com 或留空由网关自动拼接)
+      - CLOUDREVE_SITE_URL=${CLOUDREVE_SITE_URL:-}
+      # CPA 代理管理密钥
+      - CPA_API_KEY=${CPA_API_KEY:-cpa-oneapichat-default-key}
+      # 子服务开关 (默认全开)
+      - ENABLE_CLOUDREVE=${ENABLE_CLOUDREVE:-true}
+      - ENABLE_CPA=${ENABLE_CPA:-true}
     volumes:
-      # Persist user data and chat history
-      - oneapichat_users:/var/www/html/users
-      - oneapichat_chatdata:/var/www/html/chat_data
-      # Persist刷课 data and logs
-      - oneapichat_chaoxing:/tmp/AutomaticCB
-      - oneapichat_pylib:/tmp/pylib
+      # 1. OneAPIChat 用户体系与个人配置
+      - ./data/users:/var/www/html/oneapichat/users
+      # 2. 聊天历史记录与会话数据
+      - ./data/chat_data:/var/www/html/oneapichat/chat_data
+      # 3. 聊天上传的文件与图片
+      - ./data/uploads:/var/www/html/oneapichat/uploads
+      # 4. 超星刷课记录与用户 Cookies 缓存
+      - ./data/chaoxing_records:/var/www/html/oneapichat/python/chaoxing/learning_records.db
+      - ./data/automatic_cb:/tmp/AutomaticCB
+      # 5. Cloudreve 云盘数据库与文件存储
+      - ./data/cloudreve:/var/www/cloudreve/data
+      - ./data/cloudreve_uploads:/var/www/cloudreve/uploads
+      # 6. CPA 代理授权认证凭证与配置
+      - ./data/cpa_auths:/var/www/cpa/auths
+      - ./data/cpa_config:/var/www/cpa/config.yaml
+      # 7. 系统日志
+      - ./data/logs:/var/log
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-volumes:
-  oneapichat_users:
-    driver: local
-  oneapichat_chatdata:
-    driver: local
-  oneapichat_chaoxing:
-    driver: local
-  oneapichat_pylib:
-    driver: local
+      start_period: 20s

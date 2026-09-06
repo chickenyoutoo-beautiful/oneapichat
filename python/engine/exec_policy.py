@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from pathlib import Path
@@ -340,6 +341,10 @@ class ExecPolicy:
             return
         raw = json.loads(path.read_text(encoding="utf8"))
         self._rules = [ExecRule.from_dict(r) for r in raw]
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
     def save(self, filepath: str | Path = "") -> None:
         """保存规则到 JSON 文件"""
@@ -347,9 +352,30 @@ class ExecPolicy:
         if not path:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([r.to_dict() for r in self._rules],
-                                   ensure_ascii=False, indent=2),
-                        encoding="utf8")
+        payload = json.dumps([r.to_dict() for r in self._rules], ensure_ascii=False, indent=2)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, path)
+            os.chmod(path, 0o600)
+            try:
+                dir_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+        finally:
+            try:
+                if os.path.exists(tmp_name):
+                    os.unlink(tmp_name)
+            except OSError:
+                pass
 
     def _save(self) -> None:
         """自动保存（如果有关联文件）"""

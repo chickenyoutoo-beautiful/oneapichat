@@ -17,10 +17,11 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import glob
+from collections import deque
 
 # ── 代理配置 ────────────────────────────────────────────
 def _load_proxy_config():
-    """从用户配置中加载代理设置,配置 requests 全局代理"""
+    """从用户配置中加载可用代理，不修改进程级环境变量。"""
     try:
         # 读取 localStorage 持久化的配置
         import glob as _glob
@@ -31,30 +32,24 @@ def _load_proxy_config():
                     cfg = json.load(f)
                 if cfg.get('proxyEnabled') == '1' and cfg.get('proxyUrl'):
                     proxy_url = cfg['proxyUrl']
-                    os.environ['HTTP_PROXY'] = proxy_url
-                    os.environ['HTTPS_PROXY'] = proxy_url
-                    os.environ['ALL_PROXY'] = proxy_url
-                    print(f'[Engine] 代理已启用: {proxy_url}')
+                    print('[Engine] 出站代理已启用')
                     return proxy_url
             except Exception:
                 pass
-        # ★ 回退: proxyEnabled=1 但无 proxyUrl → 使用本地 Mihomo
+        # ★ 回退: proxyEnabled=1 但无 proxyUrl → 自动使用 ECS1→GCP 私网链路
         for cf in config_files:
             try:
                 with open(cf, 'r') as f:
                     cfg = json.load(f)
                 if cfg.get('proxyEnabled') == '1':
-                    # ★ 本地集成模式: 使用 Mihomo SOCKS5 代理
-                    _local_proxy = 'socks5h://127.0.0.1:1081'
-                    os.environ['HTTP_PROXY'] = _local_proxy
-                    os.environ['HTTPS_PROXY'] = _local_proxy
-                    os.environ['ALL_PROXY'] = _local_proxy
-                    print(f'[Engine] proxyEnabled=1, 使用本地 Mihomo: {_local_proxy}')
-                    return _local_proxy
+                    # ECS1:8890 只绑定 ZeroTier 地址，并透传到 WireGuard 内的 GCP HTTP 代理。
+                    _gcp_proxy = 'http://192.168.195.226:8890'
+                    print('[Engine] proxyEnabled=1, 自动路由已启用')
+                    return _gcp_proxy
             except Exception:
                 pass
     except Exception as e:
-        print(f'[Engine] 代理配置加载失败: {e}')
+        print(f'[Engine] proxy configuration load failed: {type(e).__name__}')
     return None
 
 # Cross-platform: fcntl is Unix-only
@@ -66,20 +61,89 @@ except ImportError:
 
 # ── Project root detection ────────────────────────────
 PROJECT_ROOT = str(Path(__file__).parent.parent.resolve())
+_SYNC_TRACE_LOG = Path(PROJECT_ROOT) / 'logs' / 'multidevice-sync.jsonl'
+_SYNC_TRACE_LOCK = threading.Lock()
+
+def _sync_trace(stage: str, data: dict | None = None):
+    data = dict(data or {})
+    trace_id = str(data.get('trace_id') or '')[:96]
+    if not trace_id:
+        return
+    entry = {
+        'ts': int(time.time() * 1000),
+        'component': 'engine_server.py',
+        'stage': stage,
+        'trace_id': re.sub(r'[^a-zA-Z0-9_.:-]', '', trace_id),
+    }
+    for key, value in data.items():
+        if key in {'content', 'text', 'messages', 'files', 'body', 'token'}:
+            continue
+        if value is None or isinstance(value, (str, int, float, bool)):
+            entry[key] = value
+    try:
+        _SYNC_TRACE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(entry, ensure_ascii=False, separators=(',', ':'))
+        with _SYNC_TRACE_LOCK:
+            with _SYNC_TRACE_LOG.open('a', encoding='utf-8') as fh:
+                fh.write(line + '\n')
+    except Exception:
+        pass
 
 # ★ _PROXY_URL 依赖 PROJECT_ROOT，必须在 PROJECT_ROOT 之后初始化
 _PROXY_URL = _load_proxy_config()
 
 # ── 全局 Session (带代理) ──────────────────────────────
-_http_session = requests.Session()
-if _PROXY_URL:
-    _http_session.proxies = {'http': _PROXY_URL, 'https': _PROXY_URL}
+# ★ 无代理 Session: 引擎访问自身(127.0.0.1:8766)子代理转发 server_* 工具时使用
+#   避免出站代理导致 localhost 自调用 RemoteDisconnected
+_http_session_no_proxy = requests.Session()
+_http_session_no_proxy.trust_env = False
 
 def _get_proxies():
     """获取请求代理字典"""
     if _PROXY_URL:
         return {'http': _PROXY_URL, 'https': _PROXY_URL}
     return None
+
+def _bypass_auto_proxy_for_base(base_url: str) -> bool:
+    """自有 API 入口一律直连，避免 primary→ECS1→GCP→ECS1 回环。"""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(base_url or '').hostname or '').lower()
+        return host in {'gpt.naujtrats.xyz', 'aliyun.naujtrats.xyz'}
+    except Exception:
+        return False
+
+def _requires_auto_proxy(base_url: str) -> bool:
+    """仅对国内通常无法稳定直连的境外 API 启用 ECS1→GCP。"""
+    if not _PROXY_URL or _bypass_auto_proxy_for_base(base_url):
+        return False
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(base_url or '').hostname or '').lower().rstrip('.')
+    except Exception:
+        return False
+    restricted = (
+        'openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com',
+        'anthropic.com', 'claude.ai', 'x.ai', 'openrouter.ai',
+        'googleapis.com', 'google.com', 'googleusercontent.com',
+        'nvidia.com',
+        'api.search.brave.com', 'brave.com', 'tavily.com', 'api.tavily.com',
+    )
+    return any(host == domain or host.endswith('.' + domain) for domain in restricted)
+
+class _SelectiveProxySession(requests.Session):
+    """共享工具 Session 按目标域名分流，不设置进程级代理。"""
+    def __init__(self):
+        super().__init__()
+        self.trust_env = False
+
+    def request(self, method, url, **kwargs):
+        if 'proxies' not in kwargs and _requires_auto_proxy(url):
+            kwargs['proxies'] = {'http': _PROXY_URL, 'https': _PROXY_URL}
+        return super().request(method, url, **kwargs)
+
+# ── 全局 Session（域名分流）──
+_http_session = _SelectiveProxySession()
 
 def _repair_tool_json(raw):
     """容错修复工具参数JSON: 未转义引号 → \\\"、未转义换行 → \\\\n、截断 → 补齐引号/花括号"""
@@ -230,10 +294,11 @@ from engine.speculation import SpeculationEngine, SpeculationState
 from engine.retry import RetryEngine, RetryStatus
 from engine.tool_registry import ToolRegistry, ToolDef, Capability, ApprovalKind, get_global_registry
 from engine.event_frame import EventFlowBuilder, EventType, EventLog
-from engine.store import EngineStore, ChatStore, get_ns as _store_get_ns, get_chat_store as _store_get_chat_store
+from engine.store import (EngineStore, ChatStore, get_ns as _store_get_ns,
+                          get_chat_store as _store_get_chat_store, harden_all_chat_stores)
 from engine.rag_engine import (rag_list_collections, rag_create_collection, rag_delete_collection,
                                 rag_upload_document, rag_search, rag_list_documents, rag_delete_document,
-                                _get_embedding, _load_json, _save_json, RAG_DIR)
+                                _get_embedding, _load_json, _save_json, _docs_path, RAG_DIR)
 from engine.video_edit import (SUBTITLE_FONTS, DEFAULT_FONT, generate_srt as _video_generate_srt,
     str_to_rgb, color_to_ass, ypos_to_alignment, hex_to_rgba, draw_rounded_rect, init_video_context,
     _apply_subtitle, _apply_filter, _apply_transition, _apply_tts,
@@ -249,8 +314,25 @@ from engine.memory_endpoints import register_memory_endpoints
 from engine.crypto import load_encryption_key, get_aes_key, decrypt_xor
 from engine.agent_memory import read_memory_json, write_memory_json
 from engine.workflow import create_workflow, run_workflow, list_workflows, status_workflow, delete_workflow, get_roles as _wf_get_roles
+from engine.agent_errors import AgentRuntimeError, ErrorCode, classify_provider_error, redact_secrets
+from engine.provider_runtime import (detect_provider, normalize_usage, prepare_openai_request,
+                                     safe_request_snapshot, complete_chat)
+from engine.runtime_auth import EngineAuthMiddleware, get_internal_bridge_secret, require_scope_owner
+from engine.runtime_store import get_agent_runtime_store
+from engine.runtime_api import register_runtime_endpoints
+from engine.tool_pipeline import ToolExecutionContext, ToolExecutionPipeline
+from engine.stream_retention import compact_stream_files
+from engine.self_description import admit_self_context
+from engine.resource_guard import ResourceOwnerGuard
+from engine.goal_runner import DurableGoalRunner
+from engine.browser import prune_browser_managers
+from engine.upload_retention import cleanup_uploads
+from engine.chat_projection import ChatProjectionStore
 
-
+_INTERNAL_BRIDGE_SECRET = get_internal_bridge_secret(PROJECT_ROOT)
+resource_owners = ResourceOwnerGuard(PROJECT_ROOT, Path(PROJECT_ROOT) / '.engine')
+if _INTERNAL_BRIDGE_SECRET:
+    _http_session_no_proxy.headers.update({'X-OneAPIChat-Internal': _INTERNAL_BRIDGE_SECRET})
 
 app = FastAPI(title="OneAPIChat Engine")
 app.add_middleware(CORSMiddleware, allow_origins=[
@@ -258,23 +340,111 @@ app.add_middleware(CORSMiddleware, allow_origins=[
     "https://www.naujtrats.xyz",
     "https://localmodels.naujtrats.xyz",
 ], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Public /engine routes must authenticate against the same session source as PHP.
+# Trusted loopback calls without reverse-proxy headers remain available to engine_api.php.
+app.add_middleware(
+    EngineAuthMiddleware,
+    project_root=PROJECT_ROOT,
+    public_paths={
+        "/engine/health",
+        "/engine/stock_realtime",
+        "/engine/stock_market_overview",
+        "/engine/stock_kline",
+        "/engine/stock_sector_flow",
+        "/engine/stock_dragon_tiger",
+        "/engine/stock_north_flow",
+        "/engine/stock_diagnosis",
+        "/engine/stock_indicators",
+        "/engine/stock_chart",
+    },
+)
 
 ENGINE_DIR = Path(PROJECT_ROOT) / ".engine"
 ENGINE_DIR.mkdir(parents=True, exist_ok=True)
 STREAM_DIR = ENGINE_DIR / "streams"
 STREAM_DIR.mkdir(parents=True, exist_ok=True)
+_stream_maintenance = compact_stream_files(STREAM_DIR, retention_days=30, max_chunks=2048)
+if _stream_maintenance.get('deleted') or _stream_maintenance.get('compacted') or _stream_maintenance.get('errors'):
+    print(f"[Engine] stream maintenance: {_stream_maintenance}")
+_chat_store_hardening = harden_all_chat_stores(ENGINE_DIR, retention_days=30)
+if _chat_store_hardening.get('scrubbed') or _chat_store_hardening.get('pruned') or _chat_store_hardening.get('errors'):
+    print(f"[Engine] chat store migration: {_chat_store_hardening}")
 TEMP_DIR = Path(tempfile.gettempdir())
 init_video_context(PROJECT_ROOT, TEMP_DIR, _http_session)
 
 # ── 引擎层全局实例 ──────────────────────────────────────────
-exec_policy = ExecPolicy(rules_file=str(ENGINE_DIR / "exec_policy.json"))
-speculation_engine = SpeculationEngine()
-retry_engine = RetryEngine(max_attempts=3, backoff_base_ms=500)
+_exec_policies: dict[str, ExecPolicy] = {}
+_runtime_cache_access: dict[str, float] = {}
+_exec_policies_lock = threading.RLock()
+
+def _get_exec_policy(user_id: str) -> ExecPolicy:
+    owner = str(user_id or '').strip()
+    if not owner:
+        raise AgentRuntimeError(ErrorCode.UNAUTHORIZED, 'authenticated user required', status=401)
+    key = uuid.uuid5(uuid.NAMESPACE_URL, 'oneapichat-exec-policy:' + owner).hex
+    with _exec_policies_lock:
+        _runtime_cache_access[owner] = time.monotonic()
+        policy = _exec_policies.get(owner)
+        if policy is None:
+            path = ENGINE_DIR / f'exec_policy_{key}.json'
+            legacy = ENGINE_DIR / 'exec_policy.json'
+            if not path.exists() and legacy.exists() and resource_owners.owner('global_runtime_admin') == owner:
+                path.write_bytes(legacy.read_bytes())
+                os.chmod(path, 0o600)
+            policy = ExecPolicy(rules_file=str(path))
+            if policy._rules_file and not policy._rules_file.exists():
+                policy.save()
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            _exec_policies[owner] = policy
+        return policy
+
+_speculation_engines: dict[str, SpeculationEngine] = {}
+_retry_engines: dict[str, RetryEngine] = {}
+_user_engine_lock = threading.RLock()
+
+def _get_speculation_engine(user_id: str) -> SpeculationEngine:
+    owner = str(user_id or '').strip()
+    if not owner:
+        raise AgentRuntimeError(ErrorCode.UNAUTHORIZED, 'authenticated user required', status=401)
+    with _user_engine_lock:
+        _runtime_cache_access[owner] = time.monotonic()
+        return _speculation_engines.setdefault(owner, SpeculationEngine())
+
+def _get_retry_engine(user_id: str) -> RetryEngine:
+    owner = str(user_id or '').strip()
+    if not owner:
+        raise AgentRuntimeError(ErrorCode.UNAUTHORIZED, 'authenticated user required', status=401)
+    with _user_engine_lock:
+        _runtime_cache_access[owner] = time.monotonic()
+        return _retry_engines.setdefault(owner, RetryEngine(max_attempts=5, backoff_base_ms=500))
+
+def _prune_user_runtime_caches(max_idle_seconds: float = 3600.0) -> int:
+    cutoff = float('inf') if float(max_idle_seconds) <= 0 else time.monotonic() - float(max_idle_seconds)
+    removed = 0
+    with _user_engine_lock, _exec_policies_lock:
+        for owner, accessed in list(_runtime_cache_access.items()):
+            if accessed >= cutoff:
+                continue
+            _runtime_cache_access.pop(owner, None)
+            removed += int(_speculation_engines.pop(owner, None) is not None)
+            removed += int(_retry_engines.pop(owner, None) is not None)
+            removed += int(_exec_policies.pop(owner, None) is not None)
+    return removed
+
 tool_registry = get_global_registry()
 event_log = EventLog()
+agent_runtime = get_agent_runtime_store(ENGINE_DIR)
+tool_pipeline = ToolExecutionPipeline(tool_registry, runtime_store=agent_runtime)
+chat_projection_store = ChatProjectionStore(PROJECT_ROOT)
+_goal_runner = None
 
-if exec_policy._rules_file and not exec_policy._rules_file.exists():
-    exec_policy.save()
+def _dispatch_runtime_goal(goal):
+    return _goal_runner.dispatch(goal) if _goal_runner is not None else False
+
+register_runtime_endpoints(app, agent_runtime, tool_registry, goal_dispatcher=_dispatch_runtime_goal)
 
 # ==================== 存储实例 (EngineStore 由 engine.store 导入) ====================
 cron_store = EngineStore(ENGINE_DIR / "cron.json")
@@ -358,6 +528,19 @@ def heartbeat_push(msg: str = Query(...), user_id: str = Query("")):
 # per-user 的写锁,防止并行子代理写入冲突
 _agent_store_locks: dict = {}
 _agent_store_lock_lock = threading.Lock()
+_agent_cancel_events: dict[tuple[str, str], threading.Event] = {}
+_agent_cancel_events_lock = threading.Lock()
+
+def _get_agent_cancel_event(user_id: str, name: str, *, reset: bool = False) -> threading.Event:
+    key = (str(user_id), str(name))
+    with _agent_cancel_events_lock:
+        if reset or key not in _agent_cancel_events:
+            _agent_cancel_events[key] = threading.Event()
+        return _agent_cancel_events[key]
+
+def _forget_agent_cancel_event(user_id: str, name: str) -> None:
+    with _agent_cancel_events_lock:
+        _agent_cancel_events.pop((str(user_id), str(name)), None)
 
 def _get_agent_store_lock(user_id: str) -> threading.Lock:
     """获取用户级别的写锁(线程安全)"""
@@ -422,12 +605,16 @@ def agent_create(
     prompt: str = Query(...),
     role: str = Query("general"),
     model: str = Query(""),
-    api_key: str = Query(""),
     base_url: str = Query(""),
+    provider: str = Query(""),
     user_id: str = Query(""),
     proxy_url: str = Query(""),
     proxy_enabled: str = Query("")
 ):
+    name = str(name or "").strip()
+    prompt = str(prompt or "").strip()
+    if not name or not prompt:
+        raise HTTPException(400, "agent name and prompt are required")
     store = get_ns("agents", user_id)
     agents = store.get()
     # 自动清理过时子代理
@@ -445,12 +632,27 @@ def agent_create(
         "role": role,
         "status": "idle",
         "created": datetime.now().isoformat(),
+        "model": model or "",
+        "base_url": base_url or "",
+        "provider": provider or "",
         "proxy_url": proxy_url or "",
         "proxy_enabled": proxy_enabled or ""
     }
     agents[name] = agent_data
     store.set(agents)
     return {"ok": True, "agent": name, "role": role}
+
+@app.post("/engine/agent/create")
+async def agent_create_post(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    return agent_create(
+        name=str(body.get("name") or ""), prompt=str(body.get("prompt") or ""),
+        role=str(body.get("role") or "general"), model=str(body.get("model") or ""),
+        base_url=str(body.get("base_url") or ""), provider=str(body.get("provider") or ""),
+        user_id=user_id,
+        proxy_url=str(body.get("proxy_url") or ""),
+        proxy_enabled="1" if body.get("proxy_enabled") in (True, 1, "1") else "",
+    )
 
 @app.get("/engine/agent/run")
 def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Query(""), from_ask: str = Query("")):
@@ -462,27 +664,89 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     agent = agents.get(name)
     if not agent:
         raise HTTPException(404, f"Agent {name} not found")
-    # ★ 防止重复运行: 已完成/运行中的代理不允许再次启动
+    # Running agents cannot be started twice; completed agents remain continuable.
     _current_status = agent.get("status", "")
-    if _current_status in ("running", "completed"):
-        return {"ok": False, "error": f"Agent 已在运行或已完成 (status={_current_status})，请勿重复启动"}
-    # 如果from_ask,把消息追加到agent的prompt
-    if from_ask and message:
-        agent["prompt"] = agent.get("prompt", "") + f"\n\n用户消息: {message}"
+    _is_followup = bool(from_ask and message)
+    if _current_status == "running":
+        return {"ok": False, "error": "Agent 已在运行，请勿重复启动"}
+    if _current_status == "completed" and not _is_followup:
+        return {"ok": False, "error": "Agent 已完成；可通过 agent_ask 继续同一会话"}
+    _base_prompt = str(agent.get("prompt", ""))
+    _previous_result = str(agent.get("result", ""))
+    _run_prompt = str(message) if _is_followup else _base_prompt
 
-    from openai import OpenAI
     # ★ 所有 agent 统一从主聊天配置同步
     main_config = _get_main_chat_config(user_id)
     api_key = main_config.get("api_key", "") or os.getenv("OPENAI_API_KEY", "")
-    base_url = main_config.get("base_url", "") or os.getenv("OPENAI_BASE_URL", "") or "https://api.minimaxi.com/v1"
-    model = main_config.get("model", "") or "MiniMax-M2.7"
+
+    # 子代理路由与模型对齐
+    _agent_has_override = bool(agent.get("independent_route") or agent.get("use_custom_route"))
+    agent_model = str(agent.get("model") or "").strip()
+    agent_base = str(agent.get("base_url") or "").strip()
+
+    if _agent_has_override or (agent_model and agent_base):
+        base_url = agent_base or main_config.get("base_url", "")
+        model = agent_model or main_config.get("model", "")
+    else:
+        base_url = main_config.get("base_url", "") or agent_base or os.getenv("OPENAI_BASE_URL", "") or "https://api.deepseek.com/v1"
+        model = main_config.get("model", "") or agent_model or "deepseek-chat"
+
+    # ★ 终极防串扰保护: 保证 base_url 与 model 严格兼容，杜绝历史跨提供商残留
+    if "api.longcat.chat" in base_url and "longcat" not in model.lower():
+        # LongCat endpoint 不接受异构模型，重置为 main_config 真实路由或 LongCat-2.0
+        if main_config.get("base_url") and "api.longcat.chat" not in main_config.get("base_url"):
+            base_url = main_config.get("base_url")
+            model = main_config.get("model") or model
+        else:
+            model = "LongCat-2.0"
+    if "api.minimaxi.com" in base_url and "minimax" not in model.lower():
+        if main_config.get("base_url") and "api.minimaxi.com" not in main_config.get("base_url"):
+            base_url = main_config.get("base_url")
+            model = main_config.get("model") or model
+        else:
+            model = "MiniMax-M2.7"
+    if "api.deepseek.com" in base_url and "deepseek" not in model.lower():
+        if main_config.get("base_url") and "api.deepseek.com" not in main_config.get("base_url"):
+            base_url = main_config.get("base_url")
+            model = main_config.get("model") or model
+        else:
+            model = "deepseek-chat"
+
     # ★ 防御: model 为无效值(如"加载中...")时回退到默认
     if not model or model.startswith("加载中") or len(model) < 3:
         model = "deepseek-chat" if "deepseek" in base_url else "MiniMax-M2.7"
-    if "api.minimaxi.com" in base_url and "minimax" not in model.lower():
-        model = "MiniMax-M2.7"
+
     if not api_key:
         return {"error": "未配置API Key,请在聊天设置中配置后重试"}
+
+    _provider_info = detect_provider(base_url, model, anthropic_format=bool(main_config.get("anthropic_format")))
+    _cancel_event = _get_agent_cancel_event(user_id, name, reset=True)
+    _parent = agent_runtime.ensure_session(
+        user_id, f"legacy-agent-parent:{name}", origin="legacy-subagent",
+        provider=_provider_info.name, model=model,
+    )
+    _runtime_id = str(agent.get("runtime_agent_id") or "")
+    _runtime_subagent = None
+    if _runtime_id:
+        try:
+            agent_runtime.get_subagent(_runtime_id, user_id=user_id)
+            _runtime_subagent = agent_runtime.update_subagent(
+                _runtime_id, "queued", user_id=user_id, provider=_provider_info.name,
+                model=model, prompt=_run_prompt,
+            )
+        except AgentRuntimeError:
+            _runtime_subagent = None
+    if _runtime_subagent is None:
+        _runtime_subagent = agent_runtime.create_subagent(
+            user_id, _parent["session_id"], name, _run_prompt, role=agent.get("role", "general"),
+            provider=_provider_info.name, model=model,
+        )
+    agent["runtime_agent_id"] = _runtime_subagent["agent_id"]
+    agent["runtime_session_id"] = _runtime_subagent["child_session_id"]
+    agent["provider"] = _provider_info.name
+    agent["model"] = model
+    agents[name] = agent
+    store.set(agents)
 
     # ★ 根据角色选择工具集(最小权限原则)
     agent_role = agent.get("role", "general")
@@ -493,15 +757,11 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     _agent_http_client = None
     if _agent_proxy_enabled == '1' and _agent_proxy_url:
         import httpx as _httpx
-        _agent_http_client = _httpx.Client(proxy=_agent_proxy_url)
-    elif _PROXY_URL:
+        _agent_http_client = _httpx.Client(proxy=_agent_proxy_url, trust_env=False)
+    elif _requires_auto_proxy(base_url):
         import httpx as _httpx
-        _agent_http_client = _httpx.Client(proxy=_PROXY_URL)
-        os.environ['ALL_PROXY'] = _PROXY_URL
-        print(f'[Agent {name}] 代理已启用(全局配置): {_PROXY_URL}')
-    else:
-        for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']:
-            os.environ.pop(k, None)
+        _agent_http_client = _httpx.Client(proxy=_PROXY_URL, trust_env=False)
+        print(f'[Agent {name}] 境外 API 定向代理已启用')
 
     role_config = AGENT_ROLES.get(agent_role, AGENT_ROLES["general"])
     TOOLS = _filter_tools_by_role(agent_role)
@@ -517,29 +777,173 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         # 对于 explorer/planner 减少 max_tokens 节省token
     max_agent_rounds = role_config["max_rounds"]
 
+    def _exec_generate_image_local(uid, tool_name, args):
+        """生图工具本地多提供商分发 (读 DB 配置, 支持 MiniMax/OpenAI/xAI/Custom)"""
+        import sqlite3, urllib.request, urllib.error, base64 as _b64
+
+        # 从 DB 读取用户图像配置
+        db_path = os.path.join(PROJECT_ROOT, "users", "oneapichat.db")
+        cfg = {}
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT config_json FROM user_config WHERE user_id = ?", (uid,))
+            row = cur.fetchone()
+            if row:
+                cfg = json.loads(row[0]) or {}
+            conn.close()
+        except Exception as e:
+            return json.dumps({"error": f"读取配置失败: {e}"})
+
+        provider = (cfg.get("imageProvider") or "minimax").lower()
+        prompt = args.get("prompt", "").strip()
+        if not prompt:
+            return json.dumps({"error": "prompt is required"})
+
+        # ── MiniMax ──
+        if provider == "minimax":
+            mmx_cfg_path = os.path.join(PROJECT_ROOT, "config", ".mmx_config.json")
+            mmx_key = ""
+            try:
+                with open(mmx_cfg_path) as f:
+                    mmx_key = json.load(f).get("api_key", "")
+            except Exception:
+                pass
+            if not mmx_key:
+                return json.dumps({"error": "MiniMax API key not configured"})
+            api_url = "https://api.minimaxi.com/v1/image_generation"
+            body = json.dumps({"model": "image-01", "prompt": prompt, "n": 1, "response_format": "url"}).encode()
+            req = urllib.request.Request(api_url, data=body, headers={"Content-Type": "application/json", "Authorization": f"Bearer {mmx_key}"})
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = json.loads(resp.read())
+                imgs = []
+                for d in (data.get("data") or []):
+                    if isinstance(d, dict) and d.get("image_url"):
+                        imgs.append(d["image_url"])
+                if imgs:
+                    return json.dumps({"images": imgs, "status": "ok", "provider": "minimax"})
+                return json.dumps({"error": "MiniMax 未返回图片", "raw": str(data)[:300]})
+            except Exception as e:
+                return json.dumps({"error": f"MiniMax 请求失败: {e}"})
+
+        # ── OpenAI 兼容 (openrouter/openai/custom) ──
+        key_map = {
+            "openrouter": {"key": "imageApiKeyOpenrouter", "url": "imageBaseUrlOpenrouter", "model": "imageModel_openrouter", "default_url": "https://openrouter.ai/api/v1", "default_model": "openai/gpt-5.4-image-2"},
+            "openai":     {"key": "imageApiKeyOpenai",     "url": "imageBaseUrlOpenai",     "model": "imageModel_openai",     "default_url": "https://api.openai.com/v1",        "default_model": "gpt-image-1"},
+            "custom":     {"key": "imageApiKeyCustom",     "url": "imageBaseUrlCustom",     "model": "imageModel_custom",     "default_url": "",                              "default_model": ""},
+        }
+        if provider not in key_map:
+            return json.dumps({"error": f"Unknown provider: {provider}"})
+        km = key_map[provider]
+
+        # 解密 v2 密钥
+        enc_key = cfg.get(km["key"]) or ""
+        api_key = ""
+        if enc_key.startswith("v2:"):
+            try:
+                api_key = _decrypt_xor(enc_key) or ""
+            except Exception:
+                api_key = enc_key
+        else:
+            api_key = enc_key
+
+        base_url = (cfg.get(km["url"]) or km["default_url"]).rstrip("/")
+        model = (cfg.get(km["model"]) or km["default_model"]).strip()
+
+        if not api_key:
+            return json.dumps({"error": f"未配置 {provider} 的 API Key"})
+        if not base_url:
+            return json.dumps({"error": f"未配置 {provider} 的 API Base URL"})
+        if not base_url.endswith("/v1"):
+            base_url += "/v1"
+
+        # xAI (Grok) 不支持 size 参数
+        is_xai = "x.ai" in base_url.lower() or "grok" in model.lower()
+        n = min(int(args.get("n", 1)), 10)
+        body = {"model": model, "prompt": prompt, "n": n, "response_format": "b64_json"}
+        if not is_xai:
+            size_map = {"1:1": "1024x1024", "16:9": "1792x1024", "9:16": "1024x1792"}
+            body["size"] = size_map.get(args.get("aspect_ratio", "1:1"), "1024x1024")
+
+        api_url = base_url + "/images/generations"
+        req = urllib.request.Request(api_url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+            imgs = []
+            for item in (data.get("data") or []):
+                if isinstance(item, dict):
+                    if item.get("url"):
+                        imgs.append(item["url"])
+                    elif item.get("b64_json"):
+                        imgs.append("data:image/png;base64," + item["b64_json"])
+            if imgs:
+                return json.dumps({"images": imgs, "status": "ok", "provider": provider, "model": model})
+            return json.dumps({"error": "未返回图片", "raw": str(data)[:300]})
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode() if e.fp else ""
+            return json.dumps({"error": f"生图失败 ({e.code}): {err_body[:300]}", "provider": provider})
+        except Exception as e:
+            return json.dumps({"error": f"生图请求异常: {e}", "provider": provider})
+
+    # Register missing role-filtered tools for schema validation and telemetry.
+    for _legacy_spec in TOOLS:
+        _legacy_fn = _legacy_spec.get("function", {})
+        _legacy_name = str(_legacy_fn.get("name") or "")
+        if _legacy_name and tool_registry.get(_legacy_name) is None:
+            tool_registry.register_from_dict({
+                "name": _legacy_name,
+                "description": _legacy_fn.get("description", ""),
+                "parameters": _legacy_fn.get("parameters", {"type": "object", "properties": {}}),
+                "approval": "auto",
+                "timeout_ms": 120000,
+            })
+
     def _execute_tool(tool_name, args):
-        """执行子代理工具调用"""
+        """执行子代理工具调用。文件操作必须回流至 server_tools，禁止绕过统一权限/观察/验证策略。"""
+        def _legacy_file_request(action, payload):
+            try:
+                from engine.runtime_auth import get_internal_bridge_secret
+                headers = {"X-OneAPIChat-Internal": get_internal_bridge_secret(PROJECT_ROOT)}
+                payload = payload if isinstance(payload, dict) else {}
+                path = payload.get("path") or payload.get("file_path") or ""
+                common = {"user_id": user_id, "path": path}
+                if payload.get("cwd"): common["cwd"] = payload.get("cwd")
+                if action == "read":
+                    common["max_lines"] = int(payload.get("max_lines") or payload.get("limit") or 200)
+                    response = _http_session_no_proxy.get("http://127.0.0.1:8766/engine/file/read", params=common, headers=headers, timeout=30)
+                elif action in {"write", "append"}:
+                    common["append"] = "true" if action == "append" else "false"
+                    response = _http_session_no_proxy.post("http://127.0.0.1:8766/engine/file/write", params=common, data=str(payload.get("content", "")).encode("utf-8"), headers={**headers, "Content-Type": "text/plain"}, timeout=45)
+                else:
+                    return "错误:未知文件工具操作"
+                parsed = response.json()
+                return json.dumps(parsed, ensure_ascii=False)
+            except Exception as exc:
+                return f"文件工具桥接失败: {type(exc).__name__}"
+
         if tool_name == "web_search":
             query = args.get("query", "")
             if not query:
                 return "错误:缺少 query 参数"
             try:
                 # 从主聊配置读取搜索 Provider 和对应的 API Key
-                search_provider = ""  # 从配置读取,无配置时用 DuckDuckGo(不需要API Key)
+                search_provider = ""  # 从配置读取；无配置时使用 Tavily/MiniMax 回退链
                 search_api_key = ""
                 try:
                     config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
                     with open(config_path) as f:
                         raw_cfg = json.load(f)
-                    # 读取搜索 Provider (用户可能在配置中选择 brave/google/tavily/duckduckgo)
+                    # 读取搜索 Provider (用户可能在配置中选择 brave/tavily/deepseek/minimax)
                     raw_provider = raw_cfg.get("searchProvider", "") or ""
                     if raw_provider and raw_provider != "not-needed":
                         search_provider = raw_provider
                 except Exception:
                     pass
-                # ★ 未配置或读取失败时,默认 DuckDuckGo(不需要API Key)
+                # ★ 未配置或读取失败时，优先使用 Tavily 配置
                 if not search_provider:
-                    search_provider = "duckduckgo"
+                    search_provider = "tavily"
                 # 读取对应 Provider 的 API Key(优先专用字段,回退到通用 searchApiKey)
                 try:
                     provider_key_fields = {
@@ -562,38 +966,15 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                             break
                 except Exception:
                     search_api_key = ""
-                # ★ 无 key 时强制回退到 DuckDuckGo(不需要 API Key)
-                if not search_api_key and search_provider != "duckduckgo":
-                    print(f"[web_search] provider={search_provider} 无有效 API Key,回退 DuckDuckGo", flush=True)
-                    search_provider = "duckduckgo"
-                print(f"[web_search] user_id={user_id} provider={search_provider} key_len={len(search_api_key) if search_api_key else 0} key_prefix={search_api_key[:10] if search_api_key else 'NONE'}", flush=True)
+                # ★ 无 Key 时改走已有的 MiniMax 搜索回退，不再调用不可达的 DuckDuckGo
+                if not search_api_key and search_provider in {"tavily", "brave", "google"}:
+                    print(f"[web_search] provider={search_provider} 无有效 API Key,回退 MiniMax", flush=True)
+                    search_provider = "minimax"
+                print(f"[web_search] provider={search_provider} credential_configured={bool(search_api_key)}", flush=True)
 
-                # DuckDuckGo: 通过 _http_session 代理直接请求 DDG lite HTML
-                if search_provider == "duckduckgo":
-                    try:
-                        _ddg_url = f"https://lite.duckduckgo.com/lite/?q={requests.utils.quote(query)}"
-                        _ddg_r = _http_session.get(_ddg_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=15)
-                        if _ddg_r.status_code == 200 and len(_ddg_r.text) > 100:
-                            from bs4 import BeautifulSoup
-                            soup = BeautifulSoup(_ddg_r.text, "html.parser")
-                            _ddg_results = []
-                            for link in soup.select("a.result-link")[:8]:
-                                _title = link.get_text(strip=True)
-                                _href = link.get("href", "")
-                                if _href.startswith("//duckduckgo.com/l/?"):
-                                    from urllib.parse import parse_qs, urlparse
-                                    _parsed = urlparse("https:" + _href)
-                                    _uddg = parse_qs(_parsed.query).get("uddg", [""])[0]
-                                    _href = requests.utils.unquote(_uddg) if _uddg else _href
-                                _ddg_results.append(f"- [{_title}]({_href})")
-                            if _ddg_results:
-                                return f"搜索结果 (provider: duckduckgo, query: {query}):\n" + "\n\n".join(_ddg_results) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
-                    except Exception as _ddg_e:
-                        print(f"[web_search] duckduckgo error: {_ddg_e}", flush=True)
-                    # DDG 也失败 → 回退 tavily
-                    search_provider = "tavily"
-
-
+                # 兼容旧配置：已下线的搜索引擎转入现有搜索回退链。
+                if search_provider in {"duckduckgo", "google"}:
+                    search_provider = "minimax"
                 # Tavily 搜索 (失败时自动回退到 PHP 代理 → MiniMax CLI)
                 def _try_tavily(q):
                     import re as _re  # ★ 嵌套函数必须内部 import,否则闭包找不到模块级变量
@@ -695,41 +1076,54 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         return mmx_result
                     return f'搜索 "{query}" 无结果。搜索引擎不可用,请用 web_fetch 或换其他方式获取信息。'
 
-                # Brave 搜索
+                # Brave 搜索 (官方接口 + 代理)
                 if search_provider == "brave":
                     if not search_api_key:
                         return f"搜索出错: 未找到 Brave API Key (请先在设置中配置搜索API Key)"
-                    headers = {"Accept": "application/json", "X-Subscription-Token": search_api_key}
-                    r = _http_session.get(
-                        f"https://api.search.brave.com/res/v1/web/search?q={requests.utils.quote(query)}&count=8&safesearch=off",
-                        headers=headers, timeout=15
-                    )
-                    data = r.json()
-                    results = data.get("web", {}).get("results", [])
-                    if not results:
-                        return f'搜索 "{query}" 无结果。搜索引擎不可用,请用 web_fetch 或换其他方式获取信息。'
-                    lines = []
-                    for res in results[:8]:
-                        title = res.get("title", "")
-                        url = res.get("url", "")
-                        content = res.get("description", "")[:200].replace("\n", " ")
-                        content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
-                        lines.append(f"- [{title}]({url})\n  {content}")
-                    return f"搜索结果 (provider: {search_provider}, query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                    headers = {
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip",
+                        "X-Subscription-Token": search_api_key
+                    }
+                    try:
+                        r = _http_session.get(
+                            f"https://api.search.brave.com/res/v1/web/search?q={requests.utils.quote(query)}&count=8&safesearch=off&text_decorations=0",
+                            headers=headers, timeout=15
+                        )
+                        if r.status_code == 200:
+                            data = r.json()
+                            results = data.get("web", {}).get("results", [])
+                            if results:
+                                lines = []
+                                for res in results[:8]:
+                                    title = res.get("title", "")
+                                    url = res.get("url", "")
+                                    desc = res.get("description", "")
+                                    extra = res.get("extra_snippets", [])
+                                    if extra and isinstance(extra, list):
+                                        desc = desc + " " + " ".join(extra)
+                                    content = desc[:300].replace("\n", " ")
+                                    content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                                    lines.append(f"- [{title}]({url})\n  {content}")
+                                return f"搜索结果 (provider: {search_provider}, query: {query}):\n" + "\n\n".join(lines) + "\n\n注: 如需查看详情请使用 web_fetch 工具抓取网页内容。"
+                        else:
+                            print(f"[web_search] Brave API 返回状态码 {r.status_code}: {r.text[:200]}", flush=True)
+                    except Exception as _brave_err:
+                        print(f"[web_search] Brave 请求失败: {str(_brave_err)}", flush=True)
 
                 # 兜底: 不支持的 provider (如 minimax) 统一先用 MiniMax CLI 搜索
-                print(f"[web_search] 走兜底, search_provider={search_provider}, query={query[:50]}", flush=True)
+                print(f"[web_search] 走兜底, search_provider={search_provider}, query_size={len(query)}", flush=True)
                 try:
                     mmx_result = _try_minimax_search(query)
-                    print(f"[web_search] _try_minimax_search 结果: {str(mmx_result)[:100] if mmx_result else 'None'}", flush=True)
+                    print(f"[web_search] MiniMax fallback returned={bool(mmx_result)} size={len(str(mmx_result or ''))}", flush=True)
                     if mmx_result:
                         return mmx_result
                 except Exception as _mmx_e:
-                    print(f"[web_search] _try_minimax_search 异常: {_mmx_e}", flush=True)
+                    print(f"[web_search] MiniMax fallback error={type(_mmx_e).__name__}", flush=True)
                 # MiniMax 也无结果时,再试试 Tavily
                 print(f"[web_search] 尝试 Tavily 兜底", flush=True)
                 tavily_result = _try_tavily(query)
-                print(f"[web_search] _try_tavily 结果: {str(tavily_result)[:100] if tavily_result else 'None'}", flush=True)
+                print(f"[web_search] Tavily fallback returned={bool(tavily_result)} size={len(str(tavily_result or ''))}", flush=True)
                 if tavily_result:
                     return tavily_result
                 print(f"[web_search] 全部搜索失败,返回无结果", flush=True)
@@ -875,71 +1269,12 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 data["pending_messages"] = pending
                 push_store.set(data)
             return "消息已推送到用户"
-        elif tool_name == "server_sys_info":
-            import shutil
-            mem = subprocess.run("free -h | head -2", shell=True, capture_output=True, text=True).stdout
-            disk = subprocess.run("df -h / | tail -1", shell=True, capture_output=True, text=True).stdout
-            return f"内存:\n{mem}\n磁盘:\n{disk}"
         elif tool_name == "server_file_append":
-            path = args.get("path", "")
-            content = args.get("content", "")
-            if not path or not content:
-                return "错误:缺少 path 或 content 参数"
-            try:
-                # ★ 相对路径基于项目根解析(曾只允许 /tmp, 项目内写入全被拒)
-                if not os.path.isabs(path):
-                    path = os.path.join(PROJECT_ROOT, path)
-                safe_path = os.path.normpath(path)
-                allowed_prefixes = (str(TEMP_DIR) + "/", PROJECT_ROOT + "/")
-                if not safe_path.startswith(allowed_prefixes):
-                    return f"错误:只允许写入 /tmp/ 或项目目录"
-                os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-                mode = "a"  # 追加模式
-                with open(safe_path, mode, encoding="utf-8") as f:
-                    f.write(content + "\n\n")
-                fname = os.path.basename(safe_path)
-                dl_url = "/oneapichat/download.php?file=" + fname
-                # 读取当前文件总大小
-                total = len(open(safe_path, encoding="utf-8").read())
-                return f"内容已追加到: {safe_path}\n下载链接: {dl_url}\n当前文件大小: {total} 字符"
-            except Exception as e:
-                return f"追加失败: {str(e)}"
+            return _legacy_file_request("append", args)
         elif tool_name == "server_file_write":
-            path = args.get("path", "")
-            content = args.get("content", "")
-            if not path or not content:
-                return "错误:缺少 path 或 content 参数"
-            try:
-                # ★ 相对路径基于项目根解析(曾只允许 /tmp, 项目内写入全被拒)
-                if not os.path.isabs(path):
-                    path = os.path.join(PROJECT_ROOT, path)
-                safe_path = os.path.normpath(path)
-                allowed_prefixes = (str(TEMP_DIR) + "/", PROJECT_ROOT + "/")
-                if not safe_path.startswith(allowed_prefixes):
-                    return f"错误:只允许写入 /tmp/ 或项目目录"
-                os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-                with open(safe_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                fname = os.path.basename(safe_path)
-                dl_url = "/oneapichat/download.php?file=" + fname
-                return f"文件已保存: {safe_path}\n下载链接: {dl_url}\n大小: {len(content)} 字符"
-            except Exception as e:
-                return f"写入失败: {str(e)}"
+            return _legacy_file_request("write", args)
         elif tool_name == "server_file_read":
-            path = args.get("path", "")
-            if not path:
-                return "错误:缺少 path 参数"
-            try:
-                if not os.path.isabs(path):  # ★ 相对路径基于项目根解析
-                    path = os.path.join(PROJECT_ROOT, path)
-                if not os.path.isfile(path):
-                    return f"文件不存在: {path}"
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read(10000)
-                return f"{path} 的内容 ({len(content)} 字符):\n\n{content}"
-            except Exception as e:
-                return f"读取失败: {str(e)}"
-        elif tool_name == "browser_navigate":
+            return _legacy_file_request("read", args)
             try:
                 import asyncio
                 from engine.browser import ensure_browser_connected
@@ -1170,6 +1505,14 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             except Exception as _e:
                 return f"PPT生成失败: {str(_e)}"
 
+        # ★ 项目自描述：按需返回有界、可查询的事实，不把整份项目文档注入每轮
+        elif tool_name == "project_self_describe":
+            try:
+                from engine.self_description import admit_self_context
+                _self = admit_self_context(PROJECT_ROOT, query=str(args.get("query", "")), budget=min(int(args.get("budget", 14000) or 14000), 50000))
+                return json.dumps(_self, ensure_ascii=False)
+            except Exception as _e:
+                return json.dumps({"ok": False, "error": "self-description unavailable", "detail": type(_e).__name__}, ensure_ascii=False)
         # ★ 通用转发: 子代理调用未知工具时自动转发到主引擎 API
         elif tool_name.startswith("server_") or tool_name == "engine_cron_list" or tool_name == "engine_cron_create" or tool_name == "engine_cron_delete":
             try:
@@ -1191,38 +1534,81 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if tool_name == "server_exec":
                     _cmd = _params.get("cmd") or _params.get("command") or _params.get("query") or ""
                     _ep = {k: v for k, v in _params.items() if k in ("timeout", "cwd", "max_output", "user_id")}
-                    _r = _http_session.post(_engine_url, params=_ep, data=_cmd.encode('utf-8') if isinstance(_cmd, str) else str(_cmd), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 60) or 60) + 10, 5))
+                    _r = _http_session_no_proxy.post(_engine_url, params=_ep, data=_cmd.encode('utf-8') if isinstance(_cmd, str) else str(_cmd), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 60) or 60) + 10, 5))
                 elif tool_name == "server_python":
                     _script = _params.get("script") or _params.get("code") or _params.get("cmd") or ""
                     _ep = {k: v for k, v in _params.items() if k in ("timeout", "user_id")}
-                    _r = _http_session.post(_engine_url, params=_ep, data=_script.encode('utf-8') if isinstance(_script, str) else str(_script), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 30) or 30) + 10, 5))
+                    _r = _http_session_no_proxy.post(_engine_url, params=_ep, data=_script.encode('utf-8') if isinstance(_script, str) else str(_script), headers={"Content-Type": "text/plain"}, timeout=max(int(_ep.get("timeout", 30) or 30) + 10, 5))
                 elif tool_name == "server_file_edit":
                     # ★ file_edit 端点要求 POST + JSON body (old_string/new_string), path 走 query
                     _ep = {k: v for k, v in _params.items() if k in ("path", "replace_all")}
                     _body = json.dumps({k: args[k] for k in ("old_string", "new_string") if args.get(k) is not None}, ensure_ascii=False)
-                    _r = _http_session.post(_engine_url, params=_ep, data=_body, headers={"Content-Type": "application/json"}, timeout=30)
+                    _r = _http_session_no_proxy.post(_engine_url, params=_ep, data=_body, headers={"Content-Type": "application/json"}, timeout=30)
                 else:
-                    _r = _http_session.get(_engine_url, params=_params, timeout=30);
+                    _r = _http_session_no_proxy.get(_engine_url, params=_params, timeout=30);
                 _d = _r.json();
                 return json.dumps(_d, ensure_ascii=False)
             except Exception as _e:
                 return f"工具执行失败: {str(_e)}"
-        # ★ P0: get_current_time 本地处理
+        # ★ P0: get_current_time 本地处理 (增强全球金融交易时区与市场开闭状态)
         elif tool_name == "get_current_time":
-            from datetime import datetime as _dt
-            _now = _dt.now()
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            _now_utc = _dt.now(_tz.utc)
+            _bj_time = _now_utc + _td(hours=8)
+            # 美东夏令时判定 (3-11月夏令时 UTC-4, 冬令时 UTC-5)
+            _is_dst = 3 <= _now_utc.month <= 10 or (_now_utc.month == 11 and _now_utc.day < 7)
+            _us_offset = 4 if _is_dst else 5
+            _us_eastern = _now_utc - _td(hours=_us_offset)
+            _tz_name = "EDT (UTC-4, 夏令时)" if _is_dst else "EST (UTC-5, 冬令时)"
+            _london_offset = 1 if (3 <= _now_utc.month <= 10) else 0
+            _london = _now_utc + _td(hours=_london_offset)
+            _tokyo = _now_utc + _td(hours=9)
+            _wk_zh = ["周一","周二","周三","周四","周五","周六","周日"][_bj_time.weekday()]
+            _wk_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][_us_eastern.weekday()]
+
+            def _us_m_st(dt):
+                if dt.weekday() >= 5: return "🔴 周末休市 (Closed)"
+                m = dt.hour * 60 + dt.minute
+                if 9*60 + 30 <= m < 16*60: return "🟢 常规盘中交易中 (Regular Trading, 09:30~16:00)"
+                elif 4*60 <= m < 9*60 + 30: return "🟡 盘前交易中 (Pre-market, 04:00~09:30)"
+                elif 16*60 <= m < 20*60: return "🟡 盘后交易中 (After-hours, 16:00~20:00)"
+                else: return "🔴 夜间闭市 (Closed)"
+
+            def _cn_m_st(dt):
+                if dt.weekday() >= 5: return "🔴 周末休市 (Closed)"
+                m = dt.hour * 60 + dt.minute
+                if (9*60 + 30 <= m < 11*60 + 30) or (13*60 <= m < 15*60): return "🟢 盘中交易中"
+                elif 11*60 + 30 <= m < 13*60: return "🟡 午间休市"
+                else: return "🔴 已收盘"
+
+            def _hk_m_st(dt):
+                if dt.weekday() >= 5: return "🔴 周末休市 (Closed)"
+                m = dt.hour * 60 + dt.minute
+                if (9*60 + 30 <= m < 12*60) or (13*60 <= m < 16*60): return "🟢 盘中交易中"
+                elif 12*60 <= m < 13*60: return "🟡 午间休市"
+                else: return "🔴 已收盘"
+
             return json.dumps({
-                "datetime": _now.strftime("%Y-%m-%d %H:%M:%S"),
-                "date": _now.strftime("%Y-%m-%d"),
-                "time": _now.strftime("%H:%M:%S"),
-                "weekday": ["周一","周二","周三","周四","周五","周六","周日"][_now.weekday()],
-                "timezone": "Asia/Shanghai (UTC+8)",
-                "iso": _now.isoformat(),
-                "unix_ms": int(_now.timestamp() * 1000)
+                "beijing_time": f"{_bj_time.strftime('%Y-%m-%d %H:%M:%S')} {_wk_zh} (UTC+8)",
+                "us_eastern_time": f"{_us_eastern.strftime('%Y-%m-%d %H:%M:%S')} {_wk_en} {_tz_name}",
+                "london_time": f"{_london.strftime('%Y-%m-%d %H:%M:%S')} {'BST (UTC+1)' if _london_offset else 'GMT (UTC+0)'}",
+                "tokyo_time": f"{_tokyo.strftime('%Y-%m-%d %H:%M:%S')} JST (UTC+9)",
+                "iso_utc": _now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "global_market_status": {
+                    "us_stock_market": _us_m_st(_us_eastern),
+                    "cn_a_stock_market": _cn_m_st(_bj_time),
+                    "hk_stock_market": _hk_m_st(_bj_time),
+                    "crypto_market": "🟢 全天候 24/7 交易中"
+                },
+                "time_zone_reminder": f"★ 重要时差提醒：美东时间比北京时间慢 {12 if _is_dst else 13} 小时。北京时间深夜/凌晨（21:30~次日04:00）正好是美股白天的常规盘中交易时间，绝非休市！分析美股与全球金融行情时请务必对齐美东交易日与实时状态。"
             }, ensure_ascii=False)
 
+        # ★ 生图工具: 本地多提供商分发 (读 DB 配置, 支持 MiniMax/OpenAI/xAI/Custom)
+        if tool_name in ('generate_image', 'generate_image_i2i'):
+            return _exec_generate_image_local(user_id, tool_name, args)
+
         # ★ P0: MCP工具直连Node.js MCP服务器(port 18788),绕过PHP认证
-        _mcp_prefixes = ('bilibili_', 'cr_', 'src_', 'mmx_', 'generate_', 'chaoxing_', 'win_')
+        _mcp_prefixes = ('bilibili_', 'cr_', 'src_', 'chaoxing_', 'win_')
         if tool_name.startswith(_mcp_prefixes):
             try:
                 _mcp_endpoint = "/bilibili/tools/call" if tool_name.startswith("bilibili_") else "/api/tools/call"
@@ -1286,13 +1672,19 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     except Exception:
         pass
 
-    # 4. P1: CLAUDE.md 项目上下文(前2000字符)
+    # 4. 有界项目自描述：按当前任务关键词选择，不把整份 CLAUDE.md 无条件塞入上下文
+    try:
+        _self_context = admit_self_context(PROJECT_ROOT, query=_run_prompt, budget=12000)
+        if _self_context.get("text"):
+            _agent_system_parts.append("## 项目自描述与运行规则\n" + _self_context["text"])
+    except Exception:
+        pass
+    # 兼容已有项目规则，但只取稳定的操作约束摘要
     try:
         _claude_path = Path(PROJECT_ROOT) / "CLAUDE.md"
         if _claude_path.exists():
-            with open(_claude_path) as f:
-                _claude = f.read()[:2000]
-            _agent_system_parts.append(f"## 项目上下文\n{_claude}")
+            _claude = _claude_path.read_text(encoding="utf-8")[:1200]
+            _agent_system_parts.append(f"## 兼容项目规则摘要\n{_claude}")
     except Exception:
         pass
 
@@ -1306,7 +1698,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
     )
     _agent_system_context = "\n\n".join(_agent_system_parts) if _agent_system_parts else ""
 
-    def _run():
+    def _run_body():
         _lock = _get_agent_store_lock(user_id)
         _lock.acquire()
         try:
@@ -1320,17 +1712,24 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         finally:
             _lock.release()
 
-        MAX_EXECUTION_SECONDS = 600  # 30分钟强制超时
+        MAX_EXECUTION_SECONDS = 600  # 10分钟强制超时
+        _child_session_id = _runtime_subagent["child_session_id"]
+        _turn_id = f"turn_{uuid.uuid4().hex}"
         try:
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=120,
-                            http_client=_agent_http_client)
+            agent_runtime.update_subagent(_runtime_subagent["agent_id"], "running", user_id=user_id)
+            agent_runtime.append_event(_child_session_id, "turn/start", {"turn_id": _turn_id, "agent_id": _runtime_subagent["agent_id"]})
+            agent_runtime.append_event(_child_session_id, "user/message", {"content": _run_prompt, "continuation": _is_followup})
+            messages = []
             if _agent_system_context:
-                messages = [
-                    {"role": "system", "content": _agent_system_context},
-                    {"role": "user", "content": agent.get("prompt", "")}
-                ]
+                messages.append({"role": "system", "content": _agent_system_context})
+            if _is_followup and _previous_result:
+                messages.extend([
+                    {"role": "user", "content": _base_prompt},
+                    {"role": "assistant", "content": _previous_result},
+                    {"role": "user", "content": _run_prompt},
+                ])
             else:
-                messages = [{"role": "user", "content": agent.get("prompt", "")}]
+                messages.append({"role": "user", "content": _run_prompt})
             max_rounds = max_agent_rounds
             result_parts = []
             start_time = time.time()
@@ -1338,6 +1737,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             from engine.loop_guard import LoopGuard
             _lg = LoopGuard()
             _force_summary = False
+            _active_step_id = None
 
             for round_num in range(max_rounds):
                 # 检查总执行时间
@@ -1348,26 +1748,68 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 _is_final_round = (round_num >= max_rounds - 1)
                 _tools_for_call = None if _is_final_round else TOOLS
 
-                resp = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    tools=_tools_for_call,
-                    tool_choice="auto" if not _is_final_round else "none",
-                    temperature=0.3,
-                    max_tokens=4096 if _is_final_round else 2048,
-                    timeout=120
-                )
-                msg = resp.choices[0].message
-                # 用 model_dump 获取所有字段(包括 reasoning_content)
-                msg_dict = msg.model_dump()
-                if msg.content:
-                    cleaned = msg.content
-                    # 剔除 <think>...</think> 思考块
+                if _cancel_event.is_set() or agent_runtime.get_subagent(
+                    _runtime_subagent["agent_id"], user_id=user_id
+                ).get("cancel_requested"):
+                    raise AgentRuntimeError(ErrorCode.CANCELLED, "subagent cancelled", status=499)
+
+                _active_step_id = f"step_{uuid.uuid4().hex}"
+                agent_runtime.append_event(_child_session_id, "step/start", {
+                    "step_id": _active_step_id, "round": round_num + 1,
+                })
+                _completion = None
+                _last_provider_error = None
+                for _provider_attempt in range(5):
+                    try:
+                        _completion = complete_chat({
+                            "model": model,
+                            "base_url": base_url,
+                            "anthropic_format": bool(main_config.get("anthropic_format")),
+                            "messages": messages,
+                            "tools": _tools_for_call or [],
+                            "tool_choice": "auto" if not _is_final_round else "none",
+                            "temperature": 0.3,
+                            "max_tokens": 4096 if _is_final_round else 2048,
+                        }, api_key, http_client=_agent_http_client, timeout=120)
+                        if _completion.content.strip() or _completion.tool_calls:
+                            break
+                    except AgentRuntimeError as _provider_error:
+                        _last_provider_error = _provider_error
+                        if not _provider_error.retryable or _provider_attempt >= 4:
+                            raise
+                    if _provider_attempt < 4:
+                        _retry_after = 0.0
+                        if _last_provider_error and isinstance(_last_provider_error.details, dict):
+                            try:
+                                _retry_after = float(_last_provider_error.details.get("retry_after") or 0)
+                            except (TypeError, ValueError):
+                                _retry_after = 0.0
+                        time.sleep(max(_retry_after, min(8.0, 1.5 * (2 ** _provider_attempt))))
+                if _completion is None or (not _completion.content.strip() and not _completion.tool_calls):
+                    raise AgentRuntimeError(
+                        ErrorCode.EMPTY_RESPONSE, "provider returned an empty response",
+                        status=502, retryable=True, details={"provider": _provider_info.name},
+                    )
+                asst_msg = _completion.as_openai_message()
+                agent_runtime.append_event(_child_session_id, "assistant/message", {
+                    "content": _completion.content,
+                    "reasoning": _completion.reasoning,
+                    "tool_calls": _completion.tool_calls,
+                    "usage": _completion.usage,
+                    "provider": _completion.provider.name,
+                    "model": model,
+                })
+                if _completion.content:
+                    cleaned = _completion.content
                     if '<think>' in cleaned or '</think>' in cleaned:
                         cleaned = re.sub(r'<think>.*?</think>', '', cleaned, flags=re.DOTALL).strip()
                     result_parts.append(cleaned)
-                if not msg.tool_calls:
-                    break  # 模型完成了
+                if not _completion.tool_calls:
+                    agent_runtime.append_event(_child_session_id, "step/end", {
+                        "step_id": _active_step_id, "status": "completed",
+                    })
+                    _active_step_id = None
+                    break
 
                 # ★ 早停: 如果已经获取了足够多数据(>3000字符),强制进入总结轮
                 _total_result_len = sum(len(str(p)) for p in result_parts)
@@ -1375,47 +1817,34 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     # 下一轮将是最终总结轮(无工具)
                     max_rounds = min(max_rounds, round_num + 2)
 
-                # 获取 reasoning_content(DeepSeek 需要传回)
-                asst_msg = {"role": "assistant", "content": msg.content}
-                rc_val = msg_dict.get('reasoning_content', '') or msg_dict.get('reasoning', '')
-                if not rc_val:
-                    rc_val = (getattr(msg, 'model_extra', None) or {}).get('reasoning_content', '')
-                if rc_val:
-                    # DeepSeek 要求传回 reasoning_content(但不显示给用户)
-                    asst_msg["reasoning_content"] = rc_val
-                # 构建 tool_calls — ★ 保留 provider 特定字段(如 Gemini thought_signature)
-                if hasattr(msg.tool_calls, 'model_dump'):
-                    asst_msg["tool_calls"] = msg.tool_calls.model_dump()
-                    # ★ model_dump() 可能不包含 extra 字段,手动补充 thought_signature
-                    for _i, _tc in enumerate(asst_msg["tool_calls"]):
-                        _src_tc = msg.tool_calls[_i]
-                        if hasattr(_src_tc, 'thought_signature') and _src_tc.thought_signature:
-                            _tc["thought_signature"] = _src_tc.thought_signature
-                        if hasattr(_src_tc.function, 'thought_signature') and _src_tc.function.thought_signature:
-                            _tc["function"]["thought_signature"] = _src_tc.function.thought_signature
-                else:
-                    _normalized = []
-                    for tc in msg.tool_calls:
-                        _tc = {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                        # ★ 保留 Gemini thought_signature (Google API 要求回传)
-                        if hasattr(tc, 'thought_signature') and tc.thought_signature:
-                            _tc["thought_signature"] = tc.thought_signature
-                        if hasattr(tc.function, 'thought_signature') and tc.function.thought_signature:
-                            _tc["function"]["thought_signature"] = tc.function.thought_signature
-                        _normalized.append(_tc)
-                    asst_msg["tool_calls"] = _normalized
+                # Canonical completion is already safe to feed back to every provider adapter.
                 messages.append(asst_msg)
 
-                for tc in msg.tool_calls:
-                    tool_name = tc.function.name
+                for tc in _completion.tool_calls:
+                    _tc_function = tc.get("function") or {}
+                    _tc_id = str(tc.get("id") or f"call_{uuid.uuid4().hex}")
+                    tool_name = str(_tc_function.get("name") or "")
+                    _raw_tool_args = _tc_function.get("arguments") or "{}"
                     try:
-                        tool_args = json.loads(tc.function.arguments)
+                        tool_args = _raw_tool_args if isinstance(_raw_tool_args, dict) else json.loads(_raw_tool_args)
                     except json.JSONDecodeError as _je:
                         # ★ 容错: server_exec/server_python 参数含引号导致JSON非法时尝试恢复
-                        tool_args = _tolerant_tool_args(tool_name, tc.function.arguments)
+                        tool_args = _tolerant_tool_args(tool_name, str(_raw_tool_args))
                         if tool_args is None:
+                            _invalid_args_error = AgentRuntimeError(
+                                ErrorCode.INVALID_TOOL_ARGUMENTS,
+                                f"invalid JSON arguments: {_je.msg}", status=400,
+                                details={"line": _je.lineno, "column": _je.colno},
+                            )
+                            agent_runtime.append_event(_child_session_id, "tool/call", {
+                                "call_id": _tc_id, "name": tool_name,
+                                "arguments": json.dumps({"invalid_json": True, "length": len(str(_raw_tool_args))}),
+                            })
+                            agent_runtime.append_event(_child_session_id, "tool/result", {
+                                "call_id": _tc_id, "name": tool_name, "error": _invalid_args_error.to_dict(),
+                            })
                             result_parts.append(f"[工具: {tool_name}] 参数解析失败: 跳过")
-                            messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"[错误] {tool_name} 参数解析失败: {str(_je)}, 请检查参数格式后重试"})
+                            messages.append({"role": "tool", "tool_call_id": _tc_id, "content": f"[错误] {tool_name} 参数解析失败: {str(_je)}, 请检查参数格式后重试"})
                             continue
                         result_parts.append(f"[工具: {tool_name}] 参数JSON非法,已容错恢复: {str(tool_args)[:80]}")
                     if not isinstance(tool_args, dict):
@@ -1425,19 +1854,31 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                         tool_args["cmd"] = tool_args.get("command") or tool_args.get("query") or ""
                     elif tool_name == "server_python" and not tool_args.get("script"):
                         tool_args["script"] = tool_args.get("code") or tool_args.get("cmd") or ""
-                    # ★ 死循环检测: 重复/振荡 → 跳过执行, 注入提示并强制总结轮
-                    if _lg.record_tool_call(tool_name, tool_args) == "skip":
+                    # ★ 死循环检测: 重复/振荡调用仍经过统一管道记录，但不执行副作用。
+                    _skip_tool = _lg.record_tool_call(tool_name, tool_args) == "skip"
+                    if _skip_tool:
                         _guard_msg = f"【系统提示】系统检测到{_lg.last_reason},该调用未执行。请立即停止调用工具,直接根据已有信息输出最终总结。"
-                        result = _guard_msg
                         _force_summary = True
+                        _legacy_handler = lambda _args, _context: _guard_msg
                     else:
-                        try:
-                            result = _execute_tool(tool_name, tool_args)
-                        except Exception as _te:
-                            result = f"[工具执行异常] {tool_name}: {str(_te)[:200]}"
-                    # ★ 日志追踪: 工具名称 + 结果概要
-                    result_preview = str(result)[:80].replace('\n', ' ')
-                    print(f"[子代理:{name}] 工具调用: {tool_name} -> {result_preview}", flush=True)
+                        _legacy_handler = lambda _args, _context, _name=tool_name: _execute_tool(_name, _args)
+                    _tool_result = tool_pipeline.execute(
+                        tool_name, tool_args,
+                        ToolExecutionContext(
+                            user_id=user_id, session_id=_child_session_id, call_id=_tc_id,
+                            agent_id=_runtime_subagent["agent_id"], mode="legacy-subagent",
+                            approved=True, cancel_event=_cancel_event,
+                        ),
+                        handler=_legacy_handler,
+                    )
+                    if _tool_result.ok:
+                        result = _tool_result.value
+                    else:
+                        _tool_error = _tool_result.error or {}
+                        result = f"[工具执行异常] {tool_name}: {_tool_error.get('message', 'unknown error')}"
+                    # Log metadata only; tool output may contain credentials or private file contents.
+                    _result_size = len(str(result))
+                    print(f"[子代理:{name}] 工具调用完成: tool={tool_name} ok={_tool_result.ok} size={_result_size}", flush=True)
                     # ★ 全局净化：移除所有控制字符和 unicode surrogate
                     if isinstance(result, str):
                         result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', result)
@@ -1447,7 +1888,7 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     result_parts.append(f"[工具: {tool_name}] {str(result)[:2000]}")
                     # ★ put 结果时再做一次安全包装
                     safe_content = str(result) if result else '(empty)'
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": safe_content})
+                    messages.append({"role": "tool", "tool_call_id": _tc_id, "content": safe_content})
                     # ★ P1: 广播子代理步骤进度
                     try:
                         _broadcast_to_user(user_id, 'agent:step', {
@@ -1471,8 +1912,16 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                     finally:
                         _lock.release()
 
+                agent_runtime.append_event(_child_session_id, "step/end", {
+                    "step_id": _active_step_id, "status": "completed",
+                    "tool_count": len(_completion.tool_calls),
+                })
+                _active_step_id = None
+
                 # ★ 死循环检测(轮末): 连续纯工具轮 → 终止; 复读/无进展 → 强制总结轮
-                _round_action = _lg.record_round(had_content=bool(msg.content), tool_count=len(msg.tool_calls))
+                _round_action = _lg.record_round(
+                    had_content=bool(_completion.content), tool_count=len(_completion.tool_calls)
+                )
                 if _round_action == "abort":
                     result_parts.append(f"[系统检测到死循环: {_lg.last_reason},已终止本轮工作]")
                     try:
@@ -1491,75 +1940,18 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 if _force_summary:
                     max_rounds = min(max_rounds, round_num + 1)  # 强制进入最终总结轮(无工具)
 
-            # ★ P0: 尝试从累积结果生成结构化输出
-            _structured_output = None
-            try:
-                if role_config.get("model_tier") != "cheap":
-                    _raw_content = "\n".join(result_parts)
-                    if _raw_content.strip():
-                        _struct_messages = [
-                            {"role": "system", "content": "你是一个输出格式化器。将以下子代理工作成果整理为JSON，严格遵循schema。仅输出JSON，不包含其他内容。"},
-                            {"role": "user", "content": "工作记录:\n\n" + _raw_content[:8000]}
-                        ]
-                        _struct_resp = client.chat.completions.create(
-                            model=model,
-                            messages=_struct_messages,
-                            temperature=0.1,
-                            max_tokens=4096,
-                            timeout=30,
-                            response_format={
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "sub_agent_result",
-                                    "strict": True,
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "summary": {"type": "string", "description": "结果的单句摘要"},
-                                            "findings": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "key": {"type": "string"},
-                                                        "value": {"type": "string"},
-                                                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-                                                        "source": {"type": "string"}
-                                                    },
-                                                    "required": ["key", "value", "confidence", "source"]
-                                                },
-                                                "description": "关键发现列表"
-                                            },
-                                            "actions_taken": {"type": "array", "items": {"type": "string"}, "description": "执行的操作列表"},
-                                            "errors": {"type": "array", "items": {"type": "string"}, "description": "遇到的错误"},
-                                            "raw_output": {"type": "string", "description": "原始累积输出文本"}
-                                        },
-                                        "required": ["summary", "findings", "actions_taken", "errors", "raw_output"]
-                                    }
-                                }
-                            }
-                        )
-                        _struct_text = _struct_resp.choices[0].message.content
-                        if _struct_text:
-                            _cleaned_text = _struct_text.strip()
-                            if _cleaned_text.startswith("```"):
-                                _first_nl = _cleaned_text.find("\n")
-                                if _first_nl > 0:
-                                    _cleaned_text = _cleaned_text[_first_nl + 1:]
-                                if _cleaned_text.endswith("```"):
-                                    _cleaned_text = _cleaned_text[:-3].strip()
-                            _parsed = json.loads(_cleaned_text)
-                            if isinstance(_parsed, dict):
-                                _parsed.setdefault("summary", "")
-                                _parsed.setdefault("findings", [])
-                                _parsed.setdefault("actions_taken", [])
-                                _parsed.setdefault("errors", [])
-                                _parsed.setdefault("raw_output", _raw_content[:5000])
-                                _structured_output = _parsed
-                                print(f"[子代理:{name}] 结构化输出成功: {_parsed.get('summary', '')[:80]}", flush=True)
-            except Exception as _se:
-                print(f"[子代理:{name}] 结构化输出失败(跳过): {_se}", flush=True)
-                _structured_output = None
+            # Stable structured projection generated locally; the full raw result remains authoritative.
+            _raw_content = "\n".join(result_parts)
+            _error_lines = [line[:500] for line in result_parts if "错误" in line or "异常" in line]
+            _action_lines = [line[:500] for line in result_parts if line.startswith("[工具:")]
+            _summary_source = next((part for part in reversed(result_parts) if part and not part.startswith("[工具:")), _raw_content)
+            _structured_output = {
+                "summary": str(_summary_source or "")[:1000],
+                "findings": [],
+                "actions_taken": _action_lines[-100:],
+                "errors": _error_lines[-100:],
+                "raw_output": _raw_content[:20000],
+            }
 
             # ★ 最终保存(带锁+重读)
             _lock.acquire()
@@ -1567,20 +1959,60 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
                 current = store.get()
                 current[name] = current.get(name, {})
                 final_result = "\n".join(result_parts)
-                current[name]["result"] = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', final_result)
+                final_result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', final_result)
+                current[name]["result"] = final_result
+                current[name].pop("error", None)
                 if _structured_output:
                     current[name]["_structured"] = json.dumps(_structured_output, ensure_ascii=False)
+                _conversation = current[name].get("_conversation")
+                if not isinstance(_conversation, list):
+                    _conversation = []
+                _conversation.extend([
+                    {"role": "user", "content": _run_prompt[:20000]},
+                    {"role": "assistant", "content": final_result[:50000]},
+                ])
+                current[name]["_conversation"] = _conversation[-20:]
                 current[name]["status"] = "completed"
                 store.set(current)
             finally:
                 _lock.release()
+            agent_runtime.update_subagent(
+                _runtime_subagent["agent_id"], "completed", user_id=user_id,
+                result={"text": final_result, "structured": _structured_output},
+            )
+            agent_runtime.append_event(_child_session_id, "turn/end", {
+                "turn_id": _turn_id, "status": "completed",
+            })
         except Exception as e:
+            _runtime_error = e if isinstance(e, AgentRuntimeError) else AgentRuntimeError(
+                ErrorCode.INTERNAL, str(e), status=500
+            )
+            _cancelled = _runtime_error.code == ErrorCode.CANCELLED
+            if _active_step_id:
+                try:
+                    agent_runtime.append_event(_child_session_id, "step/end", {
+                        "step_id": _active_step_id, "status": "cancelled" if _cancelled else "failed",
+                        "error": _runtime_error.to_dict(),
+                    })
+                except Exception:
+                    pass
+            try:
+                agent_runtime.update_subagent(
+                    _runtime_subagent["agent_id"], "cancelled" if _cancelled else "failed",
+                    user_id=user_id, error=_runtime_error.to_dict(),
+                )
+                agent_runtime.append_event(_child_session_id, "turn/end", {
+                    "turn_id": _turn_id, "status": "cancelled" if _cancelled else "failed",
+                    "error": _runtime_error.to_dict(),
+                })
+            except Exception:
+                pass
             _lock.acquire()
             try:
                 current = store.get()
                 current[name] = current.get(name, {})
-                current[name]["error"] = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', str(e))
-                current[name]["status"] = "failed"
+                current[name]["error"] = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', _runtime_error.message)
+                current[name]["status"] = "stopped" if _cancelled else "failed"
                 store.set(current)
             finally:
                 _lock.release()
@@ -1616,6 +2048,23 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
         _full_result = _latest_agent.get('result', '') or ''
         _structured_raw = _latest_agent.get('_structured', '')
         _structured_data = json.loads(_structured_raw) if _structured_raw else None
+        # 服务端原子落盘子代理会话，无论是否有客户端在线，任务结果永不丢失
+        try:
+            chat_projection_store.commit_subagent(
+                user_id=user_id,
+                agent_name=name,
+                prompt=_run_prompt,
+                result=_full_result,
+                error=_latest_agent.get('error', ''),
+                status=_latest_agent.get('status', 'completed'),
+            )
+            _broadcast_to_user(user_id, 'chat:updated', {
+                'chat_id': f'_agent_sub_{name}',
+                'finished': True,
+                'ts': time.time(),
+            })
+        except Exception as _sub_proj_err:
+            print(f"[subagent] commit_subagent warning: {_sub_proj_err}")
         _broadcast_to_user(user_id, 'agent:result', {
             'agent': name,
             'status': _latest_agent.get('status', 'unknown'),
@@ -1625,9 +2074,32 @@ def agent_run(name: str = Query(...), user_id: str = Query(""), message: str = Q
             'time': notifs[-1]['time']
         })
 
+    def _run():
+        try:
+            _run_body()
+        finally:
+            if _agent_http_client is not None:
+                try:
+                    _agent_http_client.close()
+                except Exception:
+                    pass
+
     t = threading.Thread(target=_run, name=f"agent_{user_id}_{name}", daemon=True)
     t.start()
-    return {"ok": True, "agent": name, "status": "running"}
+    return {
+        "ok": True, "agent": name, "status": "running",
+        "runtime_agent_id": _runtime_subagent["agent_id"],
+        "runtime_session_id": _runtime_subagent["child_session_id"],
+    }
+
+@app.post("/engine/agent/run")
+async def agent_run_post(request: Request, user_id: str = Query("")):
+    body = await request.json()
+    return agent_run(
+        name=str(body.get("name") or ""), user_id=user_id,
+        message=str(body.get("message") or ""),
+        from_ask="1" if body.get("from_ask") in (True, 1, "1") else "",
+    )
 
 @app.get("/engine/agent/status")
 def agent_status(name: str = Query(...), user_id: str = Query("")):
@@ -1650,33 +2122,26 @@ def _decrypt_xor(encoded: str) -> str:
     _aes = _get_aes_key() if (encoded and encoded.startswith("v2:")) else None
     return decrypt_xor(encoded, ENCRYPTION_KEY, _aes)
 def _get_main_chat_config(user_id: str) -> dict:
-    """从 PHP get_config 获取主代理配置(与前端完全统一)
-    PHP 已经处理好 provider/key/model 映射,引擎不需要重复逻辑。
+    """Load the authenticated user's encrypted chat configuration locally.
+
+    The engine already has an owner-bound user_id. A former HTTPS self-request used a
+    fabricated session token, always failed authentication, disabled TLS verification,
+    and then fell back to this same file. Read the per-user source directly instead.
     """
-    result = {"api_key": "", "base_url": "", "model": ""}
+    result = {"api_key": "", "base_url": "", "model": "", "provider": "", "anthropic_format": False}
     if not user_id:
         return result
+    config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
     try:
-        # ★ 调 PHP get_config(与前端 loadConfigFromServer 完全一致)
-        _php_url = f"https://127.0.0.1/oneapichat/api/chat.php?action=get_config"
-        _php_r = _http_session.get(_php_url, headers={"Host": "naujtrats.xyz", "Cookie": f"auth_token=_session_lookup_{user_id}"}, timeout=10, verify=False)
-        if _php_r.status_code == 200:
-            cfg = _php_r.json()
-        else:
-            raise Exception(f"PHP get_config status={_php_r.status_code}")
+        with open(config_path, encoding="utf-8") as config_file:
+            cfg = json.load(config_file)
     except Exception:
-        # 回退: 直接读 JSON
-        config_path = os.path.join(PROJECT_ROOT, f"chat_data/config_user_{user_id}.json")
-        try:
-            with open(config_path) as f:
-                cfg = json.load(f)
-        except Exception:
-            return result
+        return result
 
     # ★ Provider 映射(与前端 API_PROVIDERS 一致)
     PROVIDER_MAP = {
         "openai":    {"key_field": "apiKeyOpenAI",    "base": "https://api.openai.com/v1",         "default_model": "gpt-4o"},
-        "deepseek":  {"key_field": "apiKeyDeepseek",  "base": "https://api.deepseek.com/v1",       "default_model": "deepseek-v4-flash"},
+        "deepseek":  {"key_field": "apiKeyDeepseek",  "base": "https://api.deepseek.com/v1",       "default_model": "deepseek-v4-flash-vision-exp", "vision_model": "deepseek-v4-flash-vision-exp"},
         "longcat":   {"key_field": "apiKeyLongCat",   "base": "https://api.longcat.chat/openai/v1", "default_model": "LongCat-2.0"},
         "minimax":   {"key_field": "apiKeyMiniMax",   "base": "https://api.minimaxi.com/v1",       "default_model": "MiniMax-M2.7"},
         "anthropic": {"key_field": "apiKeyAnth",      "base": "https://api.anthropic.com/v1",      "default_model": "claude-sonnet-4-20250514"},
@@ -1691,19 +2156,48 @@ def _get_main_chat_config(user_id: str) -> dict:
         "custom":    {"key_field": "apiKeyCustom",    "base": "",                                    "default_model": ""},
     }
 
-    # 1. 读 baseUrlProvider 确定当前 provider
+    # 1. Determine the active provider. Older browser settings can retain a stale
+    # baseUrlProvider after the endpoint has been switched (for example LongCat →
+    # DeepSeek); let a known endpoint correct a known, conflicting provider.
     provider = cfg.get("baseUrlProvider", "") or ""
+    raw_base_url = str(cfg.get("baseUrl", "") or "").strip()
+    endpoint_provider = ""
+    if raw_base_url:
+        try:
+            from urllib.parse import urlparse
+            raw_host = (urlparse(raw_base_url).hostname or "").lower()
+            for candidate, candidate_config in PROVIDER_MAP.items():
+                candidate_host = (urlparse(candidate_config.get("base", "")).hostname or "").lower()
+                if raw_host and candidate_host and raw_host == candidate_host:
+                    endpoint_provider = candidate
+                    break
+        except Exception:
+            pass
+    if endpoint_provider and (not provider or (provider != "custom" and provider != endpoint_provider)):
+        provider = endpoint_provider
     if not provider:
         model_select = (cfg.get("modelSelect", "") or "").lower()
         if "deepseek" in model_select: provider = "deepseek"
         elif "gpt" in model_select: provider = "openai"
 
     pm = PROVIDER_MAP.get(provider, {})
+    result["provider"] = provider or "custom"
+    result["anthropic_format"] = provider == "anthropic"
 
-    # ★ 2. 读 key — 与前端完全一致: localStorage.apiKey 就是当前 provider 的 key
-    # 前端 setProvider() 会: 解密 apiKey<Provider> → 写入 localStorage.apiKey
-    # 所以引擎只需要读 apiKey 字段(通用字段),不需要猜 provider-specific 字段
-    stored_key = cfg.get("apiKey", "") or ""
+    # ★ 2. 读 key — 优先读取当前 provider 的专属 Key 字段，回退通用 apiKey，再次回退 apiKeyCustom
+    key_field = pm.get("key_field", "")
+    stored_key = ""
+    if key_field and cfg.get(key_field):
+        stored_key = cfg.get(key_field)
+    elif provider == "custom" and cfg.get("apiKeyCustom"):
+        stored_key = cfg.get("apiKeyCustom")
+    elif cfg.get("apiKey"):
+        stored_key = cfg.get("apiKey")
+    elif cfg.get("apiKeyCustom"):
+        stored_key = cfg.get("apiKeyCustom")
+    elif cfg.get("apiKeyDeepseek"):
+        stored_key = cfg.get("apiKeyDeepseek")
+
     if stored_key:
         decrypted = _decrypt_xor(stored_key)
         result["api_key"] = decrypted if decrypted else stored_key
@@ -1725,8 +2219,58 @@ def _get_main_chat_config(user_id: str) -> dict:
     if not result["model"] or result["model"].startswith("加载中") or len(result["model"]) < 3:
         result["model"] = pm.get("default_model", "gpt-4o")
 
-    print(f"[引擎] 主聊配置: provider={provider} model={result['model']} base={result['base_url'][:40]} key_len={len(result['api_key'])}", flush=True)
+    print(f"[引擎] 主聊配置: provider={provider} model={result['model']} credential_configured={bool(result['api_key'])}", flush=True)
     return result
+
+
+def _goal_create_agent(name: str, prompt: str, user_id: str):
+    return agent_create(
+        name=name, prompt=prompt, role="general", model="", base_url="",
+        user_id=user_id, proxy_url="", proxy_enabled="",
+    )
+
+def _goal_run_agent(name: str, user_id: str, message: str, followup: bool):
+    return agent_run(name=name, user_id=user_id, message=message, from_ask="1" if followup else "")
+
+def _goal_get_agent(name: str, user_id: str):
+    return get_ns("agents", user_id).get().get(name)
+
+_goal_runner = DurableGoalRunner(
+    agent_runtime, create_agent=_goal_create_agent, run_agent=_goal_run_agent,
+    get_agent=_goal_get_agent, stop_agent=lambda name, user_id: agent_stop(name=name, user_id=user_id),
+)
+
+@app.on_event("startup")
+def _resume_durable_goals_on_startup():
+    resumed = _goal_runner.resume_active()
+    if resumed:
+        print(f"[runtime] resumed {resumed} durable goal(s)", flush=True)
+
+_runtime_maintenance_task = None
+
+async def _runtime_cache_maintenance_loop():
+    while True:
+        await asyncio.sleep(900)
+        _prune_user_runtime_caches(3600)
+        await prune_browser_managers(3600)
+
+@app.on_event("startup")
+async def _start_runtime_cache_maintenance():
+    global _runtime_maintenance_task
+    _runtime_maintenance_task = asyncio.create_task(_runtime_cache_maintenance_loop())
+
+@app.on_event("shutdown")
+async def _stop_runtime_cache_maintenance():
+    global _runtime_maintenance_task
+    if _runtime_maintenance_task is not None:
+        _runtime_maintenance_task.cancel()
+        try:
+            await _runtime_maintenance_task
+        except asyncio.CancelledError:
+            pass
+        _runtime_maintenance_task = None
+    _prune_user_runtime_caches(0)
+    await prune_browser_managers(0)
 
 
 # ★ 服务器操控工具 → engine/server_tools.py
@@ -1739,9 +2283,16 @@ def agent_stop(name: str = Query(...), user_id: str = Query("")):
     agent = agents.get(name)
     if not agent:
         return {"ok": False, "error": "Agent not found"}
-    agents[name]["status"] = "stopped"
+    _get_agent_cancel_event(user_id, name).set()
+    _runtime_agent_id = str(agent.get("runtime_agent_id") or "")
+    if _runtime_agent_id:
+        try:
+            agent_runtime.request_subagent_cancel(_runtime_agent_id, user_id, "stopped by user")
+        except AgentRuntimeError:
+            pass
+    agents[name]["status"] = "stopping" if agent.get("status") == "running" else "stopped"
     store.set(agents)
-    return {"ok": True, "agent": name, "status": "stopped"}
+    return {"ok": True, "agent": name, "status": agents[name]["status"]}
 
 @app.get("/engine/agent/delete")
 def agent_delete(name: str = Query(...), user_id: str = Query("")):
@@ -1826,7 +2377,7 @@ def exec_policy_evaluate(
     user_id: str = Query("")
 ):
     """评估一个操作是否需要审批"""
-    policy = exec_policy
+    policy = _get_exec_policy(user_id)
     decision = policy.evaluate(domain, target)
     return {
         "ok": True,
@@ -1845,7 +2396,8 @@ def exec_policy_rules(
     user_id: str = Query("")
 ):
     """获取策略规则列表"""
-    return {"ok": True, "rules": exec_policy.list_rules(domain), "count": len(exec_policy.rules)}
+    policy = _get_exec_policy(user_id)
+    return {"ok": True, "rules": policy.list_rules(domain), "count": len(policy.rules)}
 
 
 @app.get("/engine/v2/exec-policy/add")
@@ -1865,7 +2417,7 @@ def exec_policy_add(
         decision = ExecDecision.forbidden(reason or "禁止操作")
     else:
         decision = ExecDecision.needs_approval(reason or "需要审批")
-    rule = exec_policy.add_rule(domain, pattern, decision, priority=priority, description=description)
+    rule = _get_exec_policy(user_id).add_rule(domain, pattern, decision, priority=priority, description=description)
     return {"ok": True, "rule": rule.to_dict()}
 
 
@@ -1878,15 +2430,16 @@ def exec_policy_remove(
 ):
     """移除策略规则"""
     p = Priority(priority) if priority >= 0 else None
-    removed = exec_policy.remove_rule(domain, pattern, p)
+    removed = _get_exec_policy(user_id).remove_rule(domain, pattern, p)
     return {"ok": removed}
 
 
 @app.get("/engine/v2/exec-policy/reset")
 def exec_policy_reset(user_id: str = Query("")):
     """重置为默认规则"""
-    exec_policy.reset_to_defaults()
-    return {"ok": True, "rules": len(exec_policy.rules)}
+    policy = _get_exec_policy(user_id)
+    policy.reset_to_defaults()
+    return {"ok": True, "rules": len(policy.rules)}
 
 
 # ── 推测执行 API ─────────────────────────────────────
@@ -1897,7 +2450,7 @@ def speculate(
     user_id: str = Query("")
 ):
     """推测指令需要的工具调用"""
-    result = speculation_engine.predict(prompt)
+    result = _get_speculation_engine(user_id).predict(prompt)
     return {
         "ok": True,
         "suggested_tools": [
@@ -1912,8 +2465,9 @@ def speculate(
 @app.get("/engine/v2/speculate/confirm")
 def speculate_confirm(user_id: str = Query("")):
     """确认推测结果（命中）"""
-    speculation_engine.confirm()
-    return {"ok": True, "state": speculation_engine.state.value}
+    engine = _get_speculation_engine(user_id)
+    engine.confirm()
+    return {"ok": True, "state": engine.state.value}
 
 
 @app.get("/engine/v2/speculate/abort")
@@ -1922,14 +2476,15 @@ def speculate_abort(
     user_id: str = Query("")
 ):
     """中止推测"""
-    speculation_engine.abort(reason=reason)
-    return {"ok": True, "state": speculation_engine.state.value}
+    engine = _get_speculation_engine(user_id)
+    engine.abort(reason=reason)
+    return {"ok": True, "state": engine.state.value}
 
 
 @app.get("/engine/v2/speculate/status")
 def speculate_status(user_id: str = Query("")):
     """推测引擎状态"""
-    return {"ok": True, **speculation_engine.summary()}
+    return {"ok": True, **_get_speculation_engine(user_id).summary()}
 
 
 @app.get("/engine/v2/speculate/toggle")
@@ -1939,10 +2494,11 @@ def speculate_toggle(
     user_id: str = Query("")
 ):
     """切换推测引擎"""
+    engine = _get_speculation_engine(user_id)
     if enabled:
-        speculation_engine.enable(yolo_mode=yolo)
+        engine.enable(yolo_mode=yolo)
     else:
-        speculation_engine.disable()
+        engine.disable()
     return {"ok": True, "enabled": enabled, "yolo_mode": yolo}
 
 
@@ -1954,12 +2510,13 @@ def retry_status(
     user_id: str = Query("")
 ):
     """查询重试任务状态"""
+    engine = _get_retry_engine(user_id)
     if task_id:
-        meta = retry_engine.get_status(task_id)
+        meta = engine.get_status(task_id)
         if not meta:
             return {"ok": False, "error": "Task not found (may have completed)"}
         return {"ok": True, "task": meta.to_dict()}
-    return {"ok": True, **retry_engine.summary()}
+    return {"ok": True, **engine.summary()}
 
 
 @app.get("/engine/v2/retry/list")
@@ -1968,27 +2525,29 @@ def retry_list(
     user_id: str = Query("")
 ):
     """列出重试任务"""
+    engine = _get_retry_engine(user_id)
     if status:
         try:
             s = RetryStatus(status)
-            tasks = retry_engine.list_tasks(s)
+            tasks = engine.list_tasks(s)
         except ValueError:
-            tasks = retry_engine.list_active()
+            tasks = engine.list_active()
     else:
-        tasks = retry_engine.list_active()
+        tasks = engine.list_active()
     return {"ok": True, "tasks": [t.to_dict() for t in tasks], "count": len(tasks)}
 
 
 @app.get("/engine/v2/retry/config")
 def retry_config(
-    max_attempts: int = Query(3),
+    max_attempts: int = Query(5),
     backoff_base_ms: int = Query(500),
     user_id: str = Query("")
 ):
     """配置重试参数"""
-    retry_engine.max_attempts = max_attempts
-    retry_engine._default_backoff_base_ms = backoff_base_ms
-    return {"ok": True, "max_attempts": max_attempts, "backoff_base_ms": backoff_base_ms}
+    engine = _get_retry_engine(user_id)
+    engine.max_attempts = max(1, min(int(max_attempts), 10))
+    engine._default_backoff_base_ms = max(50, min(int(backoff_base_ms), 60000))
+    return {"ok": True, "max_attempts": engine.max_attempts, "backoff_base_ms": engine._default_backoff_base_ms}
 
 
 # ── 工具注册表 API ───────────────────────────────────
@@ -2146,8 +2705,41 @@ async def startup():
 
     # ★ 启动定期清理任务(每5分钟检查stuck代理)
     def _periodic_cleanup():
+        _compact_tick = 0
         while True:
             time.sleep(300)  # 5分钟
+            _compact_tick += 1
+            try:
+                # ★ 每 30 分钟压缩/清理一次流快照：30 天过期删除 + 大文件压缩。
+                #   此前只在引擎启动时跑一次，运行中 STREAM_DIR 会持续膨胀。
+                if _compact_tick % 6 == 1:
+                    _mres = compact_stream_files(STREAM_DIR, retention_days=30, max_chunks=2048)
+                    # 上传文件按分层保留：shared交付物30天，用户附件90天。
+                    # 不扫描聊天内容做激进删除；调用方可传入引用路径作为保护清单。
+                    try:
+                        _upload_roots = [PROJECT_ROOT / 'uploads']
+                        # 生产部署的历史附件目录可能位于项目同级 /var/www/html/uploads。
+                        # 只加入真实存在的目录，避免维护线程因目录布局差异报错。
+                        _legacy_upload_root = PROJECT_ROOT.parent / 'uploads'
+                        if _legacy_upload_root.is_dir() and _legacy_upload_root not in _upload_roots:
+                            _upload_roots.append(_legacy_upload_root)
+                        for _upload_root in _upload_roots:
+                            _ures = cleanup_uploads(_upload_root, user_retention_days=90, shared_retention_days=30)
+                            if _ures.get('deleted') or _ures.get('errors'):
+                                print(f"[Engine] upload maintenance ({_upload_root}): {_ures}")
+                    except Exception as _uex:
+                        print(f"[Engine] upload maintenance error: {_uex}")
+                    if _mres.get('deleted') or _mres.get('compacted') or _mres.get('errors'):
+                        print(f"[Engine] stream maintenance: {_mres}")
+                    # ★ 运行时事件/任务/子代理 prune：此前从未被调用，agent_runtime.db 会无上限增长。
+                    try:
+                        _pres = agent_runtime.prune(retention_days=90)
+                        if any(_pres.values()):
+                            print(f"[Engine] runtime prune: {_pres}")
+                    except Exception as _pex:
+                        print(f"[Engine] runtime prune error: {_pex}")
+            except Exception as _mex:
+                print(f"[Engine] stream maintenance error: {_mex}")
             try:
                 now = time.time()
                 for f in ENGINE_DIR.glob("*_agents.json"):
@@ -2232,6 +2824,107 @@ _heartbeat_html = """
 import threading
 import queue
 
+def _normalize_openai_tool_turns(messages, source=''):
+    """Repair a persisted transcript before any OpenAI-compatible provider call.
+
+    Providers require assistant.tool_calls followed immediately by matching tool
+    messages. Refreshes and interrupted tool handoffs can leave only part of a
+    turn, or leave tool messages detached. Keep only complete adjacent pairs in
+    the wire copy so a stale browser transcript cannot produce a 400.
+    """
+    if not isinstance(messages, list):
+        return []
+    normalized = []
+    repaired = 0
+    i = 0
+    while i < len(messages):
+        message = messages[i]
+        if not isinstance(message, dict):
+            i += 1
+            continue
+        if message.get('role') != 'assistant' or not isinstance(message.get('tool_calls'), list) or not message.get('tool_calls'):
+            # A detached tool result is invalid outside an assistant tool turn.
+            if message.get('role') != 'tool':
+                normalized.append(message)
+            i += 1
+            continue
+        calls = []
+        seen_ids = set()
+        for call in message.get('tool_calls') or []:
+            if not isinstance(call, dict):
+                continue
+            call_id = str(call.get('id') or '').strip()
+            if not call_id or call_id in seen_ids:
+                continue
+            seen_ids.add(call_id)
+            fn = call.get('function')
+            if isinstance(fn, dict) and not isinstance(fn.get('arguments'), str):
+                fn['arguments'] = json.dumps(fn.get('arguments') or {}, ensure_ascii=False)
+            calls.append(call)
+        j = i + 1
+        results = {}
+        while j < len(messages) and isinstance(messages[j], dict) and messages[j].get('role') == 'tool':
+            result = messages[j]
+            result_id = str(result.get('tool_call_id') or '').strip()
+            if result_id and result_id not in results:
+                result['content'] = result.get('content') if isinstance(result.get('content'), str) else json.dumps(result.get('content') or '', ensure_ascii=False)
+                results[result_id] = result
+            j += 1
+        valid_calls = [call for call in calls if str(call.get('id')) in results]
+        repaired += len(calls) - len(valid_calls)
+        if valid_calls:
+            message['tool_calls'] = valid_calls
+            normalized.append(message)
+            for call in valid_calls:
+                normalized.append(results[str(call.get('id'))])
+        else:
+            message.pop('tool_calls', None)
+            normalized.append(message)
+            repaired += len(calls)
+        i = j
+    # ★ 防御: API (尤其 Gemini) 严格禁止请求以 assistant (model) 轮次结尾
+    while normalized and normalized[-1].get('role') == 'assistant':
+        last_norm = normalized[-1]
+        c = str(last_norm.get('content') or '').strip()
+        if not c or c == '(empty)':
+            normalized.pop()
+            repaired += 1
+        else:
+            normalized.append({'role': 'user', 'content': '请基于上述内容继续。'})
+            break
+    messages[:] = normalized
+    if repaired and source:
+        print(f'[{source}] normalized {repaired} incomplete tool calls', flush=True)
+    return messages
+
+
+def _tool_calls_are_complete(tool_call_map: dict) -> bool:
+    """Return whether accumulated tool-call deltas form executable calls.
+
+    Some gateways emit ``finish_reason=tool_calls`` before the final argument
+    delta.  The resumable reader uses this predicate before deciding it is safe
+    to drain/close the provider stream.
+    """
+    if not isinstance(tool_call_map, dict) or not tool_call_map:
+        return False
+    for call in tool_call_map.values():
+        if not isinstance(call, dict):
+            return False
+        function = call.get('function') or {}
+        if not str(function.get('name') or '').strip():
+            return False
+        raw_args = function.get('arguments')
+        if not isinstance(raw_args, str) or not raw_args.strip():
+            return False
+        try:
+            parsed = json.loads(raw_args)
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(parsed, dict):
+            return False
+    return True
+
+
 def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id: str):
     """在后台线程中将 OpenAI 流式响应转为 SSE，实时保存进度到 SQLite"""
     from openai import OpenAI
@@ -2254,7 +2947,7 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
         _rp = request_data.get('proxy_url', '')
         if request_data.get('proxy_enabled') and _rp:
             import httpx; _httpc = httpx.Client(proxy=_rp)
-        elif _PROXY_URL:
+        elif _requires_auto_proxy(request_data.get('base_url', '')):
             import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
         is_longcat = _is_longcat_request(request_data)
         client = OpenAI(api_key=request_data.get('api_key', ''),
@@ -2296,6 +2989,7 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             if isinstance(m, dict) and m.get('role') == 'assistant' and 'tool_calls' in m:
                 if not m['tool_calls'] or len(m['tool_calls']) == 0:
                     del m['tool_calls']
+        _normalize_openai_tool_turns(messages, '_stream_openai_to_sse')
         tools = request_data.get('tools', None)
         stream_params = {'model': model, 'messages': messages, 'stream': True}
         if tools:
@@ -2304,6 +2998,16 @@ def _stream_openai_to_sse(request_data: dict, chat_id: str, msg_id: str, user_id
             stream_params['reasoning'] = request_data.get('reasoning')
         if is_longcat:
             stream_params['extra_body'] = {'thinking': _longcat_thinking(request_data)}
+        else:
+            # ★ 转发客户端 extra_body (Gemini thinking_level/include_thoughts 等),
+            #   但跳过 LongCat/MiniMax 风格的 thinking key,避免顶到不支持的上游
+            _eb = request_data.get('extra_body')
+            if isinstance(_eb, dict) and _eb and 'thinking' not in _eb:
+                stream_params['extra_body'] = _eb
+        if request_data.get('reasoning_effort'):
+            stream_params['reasoning_effort'] = request_data['reasoning_effort']
+        if request_data.get('thinking_level'):
+            stream_params['thinking_level'] = request_data['thinking_level']
         # 发送初始事件
         yield sse_event(json.dumps({'type': 'start', 'msg_id': msg_id}))
 
@@ -2559,18 +3263,45 @@ def _sanitize_longcat_openai_messages(messages: list) -> list:
 # StreamBuffer — 磁盘持久化流缓冲（引擎重启不丢 chunks）
 # ═══════════════════════════════════════════════════════════════
 
+MAX_STREAM_REPLAY_CHUNKS = 2048
+MAX_STREAM_REPLAY_BYTES = 4 * 1024 * 1024
+
+
+def _trim_stream_replay(chunks: list) -> tuple[list, int, int]:
+    values = list(chunks or [])
+    sizes = [len(item.encode('utf-8', errors='ignore')) if isinstance(item, str) else len(json.dumps(item, ensure_ascii=False).encode('utf-8')) for item in values]
+    total = sum(sizes)
+    dropped = 0
+    while values and (len(values) > MAX_STREAM_REPLAY_CHUNKS or total > MAX_STREAM_REPLAY_BYTES):
+        values.pop(0)
+        total -= sizes.pop(0)
+        dropped += 1
+    return values, dropped, max(0, total)
+
+
 class StreamBuffer:
     """msg_id 粒度的流缓冲，并持久化可立即恢复的聚合快照。"""
     __slots__ = (
         'msg_id', 'path', 'chunks', 'content', 'reasoning', 'tool_calls',
         'usage', 'finished', 'error', 'stop_reason', 'truncated',
-        'stream_id', 'chat_id', 'user_id',
+        'stream_id', 'chat_id', 'user_id', 'chunk_base_offset', 'total_events', 'replay_bytes',
         '_last_save', '_lock'
     )
 
     def __init__(self, msg_id: str):
-        self.msg_id = msg_id
-        self.path = STREAM_DIR / f"{msg_id}.json"
+        # 严格校验 msg_id 防止路径遍历或异常字符
+        safe_msg_id = re.sub(r'[^a-zA-Z0-9_-]', '', str(msg_id or ''))[:128]
+        if not safe_msg_id:
+            safe_msg_id = f"msg_{int(time.time()*1000)}"
+        self.msg_id = safe_msg_id
+        self.path = (STREAM_DIR / f"{safe_msg_id}.json").resolve()
+        # 确保路径严格位于 STREAM_DIR 内部
+        try:
+            is_inside = os.path.commonpath((str(self.path), str(STREAM_DIR.resolve()))) == str(STREAM_DIR.resolve())
+        except (OSError, ValueError):
+            is_inside = False
+        if not is_inside:
+            self.path = (STREAM_DIR / f"msg_{uuid.uuid4().hex[:12]}.json").resolve()
         self.chunks: list = []
         self.content: str = ''
         self.reasoning: str = ''
@@ -2583,6 +3314,9 @@ class StreamBuffer:
         self.stream_id: str = ''
         self.chat_id: str = ''
         self.user_id: str = ''
+        self.chunk_base_offset: int = 0
+        self.total_events: int = 0
+        self.replay_bytes: int = 0
         self._last_save = 0.0
         self._lock = threading.RLock()
         self._load()
@@ -2591,7 +3325,10 @@ class StreamBuffer:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding='utf-8'))
-                self.chunks = data.get("chunks", [])
+                loaded_chunks = data.get("chunks", []) or []
+                self.chunk_base_offset = int(data.get("chunk_base_offset", 0) or 0)
+                self.chunks = loaded_chunks
+                self.total_events = max(int(data.get("event_count", 0) or 0), self.chunk_base_offset + len(self.chunks))
                 self.content = data.get("content", "")
                 self.reasoning = data.get("reasoning", data.get("reasoning_text", ""))
                 self.tool_calls = data.get("tool_calls", []) or []
@@ -2611,6 +3348,8 @@ class StreamBuffer:
                             "content", "reasoning", "tool_calls", "usage", "error", "stop_reason"
                         ))):
                     self._rebuild_snapshot_from_chunks()
+                self.chunks, dropped, self.replay_bytes = _trim_stream_replay(self.chunks)
+                self.chunk_base_offset += dropped
             except Exception:
                 pass
 
@@ -2663,6 +3402,9 @@ class StreamBuffer:
                 payload = {
                     "snapshot_version": 1,
                     "chunks": self.chunks,
+                    "chunk_base_offset": self.chunk_base_offset,
+                    "event_count": self.total_events,
+                    "replay_bytes": self.replay_bytes,
                     "content": self.content,
                     "reasoning": self.reasoning,
                     "tool_calls": self.tool_calls,
@@ -2682,7 +3424,7 @@ class StreamBuffer:
                 os.replace(tmp_path, self.path)
                 self._last_save = now
             except Exception as e:
-                print(f"[StreamBuffer] save error: {e}")
+                print(f"[StreamBuffer] save error={type(e).__name__}")
 
     def set_meta(self, stream_id: str = '', chat_id: str = '', user_id: str = ''):
         with self._lock:
@@ -2693,10 +3435,32 @@ class StreamBuffer:
             if user_id:
                 self.user_id = user_id
 
+    def _append_replay(self, sse_payload: str):
+        self.chunks.append(sse_payload)
+        self.total_events += 1
+        self.replay_bytes += len(sse_payload.encode('utf-8', errors='ignore'))
+        drop_count = max(0, len(self.chunks) - MAX_STREAM_REPLAY_CHUNKS)
+        dropped_bytes = 0
+        for index, payload in enumerate(self.chunks):
+            if index < drop_count or self.replay_bytes - dropped_bytes > MAX_STREAM_REPLAY_BYTES:
+                dropped_bytes += len(payload.encode('utf-8', errors='ignore')) if isinstance(payload, str) else len(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+                drop_count = max(drop_count, index + 1)
+            else:
+                break
+        if drop_count:
+            del self.chunks[:drop_count]
+            self.chunk_base_offset += drop_count
+            self.replay_bytes = max(0, self.replay_bytes - dropped_bytes)
+
     def record(self, event_type: str, data: dict, sse_payload: str):
         """追加原始事件并同步聚合快照；工具和终态事件立即落盘。"""
         with self._lock:
-            self.chunks.append(sse_payload)
+            if event_type == 'tool_call' and data.get('partial'):
+                # The aggregate tool_calls snapshot below is sufficient for reconnect; storing
+                # every growing partial argument snapshot causes quadratic disk amplification.
+                self.total_events += 1
+            else:
+                self._append_replay(sse_payload)
             if event_type == 'content':
                 self.content += str(data.get('delta', '') or '')
             elif event_type == 'reasoning':
@@ -2732,16 +3496,18 @@ class StreamBuffer:
     def append(self, sse_payload: str):
         # 兼容旧调用；新流应使用 record()，以同时维护聚合快照。
         with self._lock:
-            self.chunks.append(sse_payload)
-            should_save = len(self.chunks) % 5 == 0
+            self._append_replay(sse_payload)
+            should_save = self.total_events % 5 == 0
         if should_save:
             self._save()
 
     def since(self, offset: int):
         with self._lock:
-            if offset >= len(self.chunks):
+            absolute_offset = max(0, int(offset))
+            if absolute_offset >= self.chunk_base_offset + len(self.chunks):
                 return []
-            return list(self.chunks[offset:])
+            start = max(0, absolute_offset - self.chunk_base_offset)
+            return list(self.chunks[start:])
 
     def snapshot(self):
         """返回一致的首屏状态，客户端无需等待下一个 token 才能重绘。"""
@@ -2758,7 +3524,10 @@ class StreamBuffer:
                 'error': self.error,
                 'stop_reason': self.stop_reason,
                 'truncated': self.truncated,
-                'offset': len(self.chunks),
+                'offset': self.chunk_base_offset + len(self.chunks),
+                'event_count': self.total_events,
+                'replay_base_offset': self.chunk_base_offset,
+                'replay_bytes': self.replay_bytes,
                 'updated_at': self._last_save,
             }
 
@@ -2772,11 +3541,153 @@ _stream_buffers: dict = {}  # {msg_id: StreamBuffer}
 _stream_buffers_lock = threading.Lock()
 
 
+def _cleanup_stream_runtime_state(max_completed_age: int = 600):
+    cutoff = time.time() - max(60, int(max_completed_age))
+    with _stream_buffers_lock:
+        stale_buffers = [
+            key for key, value in _stream_buffers.items()
+            if value.finished and value._last_save and value._last_save < cutoff
+        ]
+        for key in stale_buffers:
+            _stream_buffers.pop(key, None)
+    with _resumable_lock:
+        stale_streams = [
+            key for key, value in _resumable.items()
+            if value.get('finished') and float(value.get('finished_at') or 0) < cutoff
+        ]
+        for key in stale_streams:
+            _resumable.pop(key, None)
+
+
 def _get_stream_buffer(msg_id: str) -> StreamBuffer:
+    if len(_stream_buffers) > 512 or len(_resumable) > 512:
+        _cleanup_stream_runtime_state()
     with _stream_buffers_lock:
         if msg_id not in _stream_buffers:
             _stream_buffers[msg_id] = StreamBuffer(msg_id)
         return _stream_buffers[msg_id]
+
+
+def _record_runtime_stream_event(stream_id: str, event_type: str, data: dict) -> dict:
+    """Mirror legacy SSE events into the durable DSH-style session log."""
+    with _resumable_lock:
+        entry = dict(_resumable.get(stream_id, {}))
+    session_id = entry.get('runtime_session_id', '')
+    if not session_id:
+        return data
+    try:
+        if event_type == 'content':
+            agent_runtime.append_stream_delta(session_id, content_delta=str(data.get('delta', '') or ''))
+        elif event_type == 'reasoning':
+            agent_runtime.append_stream_delta(session_id, reasoning_delta=str(data.get('delta', '') or ''))
+        elif event_type == 'done':
+            with _resumable_lock:
+                live = _resumable.get(stream_id, {})
+                if live.get('runtime_terminal'):
+                    return data
+                live['runtime_terminal'] = True
+                live['finished_at'] = time.time()
+            agent_runtime.flush_stream_delta(session_id)
+            provider = detect_provider(
+                entry.get('base_url', '') or entry.get('anthropic_url', ''),
+                entry.get('model', ''),
+                anthropic_format=bool(entry.get('anthropic_format')),
+            )
+            normalized_usage = normalize_usage(data.get('usage'), provider)
+            if normalized_usage:
+                data['usage_normalized'] = normalized_usage
+            for call in data.get('tool_calls') or []:
+                fn = call.get('function') or {} if isinstance(call, dict) else {}
+                agent_runtime.append_event(session_id, 'tool/call', {
+                    'call_id': call.get('id', '') if isinstance(call, dict) else '',
+                    'name': fn.get('name', ''),
+                    'arguments': fn.get('arguments', ''),
+                })
+            agent_runtime.append_event(session_id, 'assistant/message', {
+                'message_id': entry.get('msg_id', ''),
+                'content': data.get('full_text', ''),
+                'reasoning': data.get('reasoning_text', ''),
+                'tool_calls': data.get('tool_calls') or [],
+                'usage': normalized_usage or data.get('usage') or {},
+                'model': entry.get('model', ''),
+            })
+            reason_kind = 'max-tokens' if data.get('truncated') else 'completed'
+            agent_runtime.append_event(session_id, 'step/end', {'reason': {'kind': reason_kind}})
+            agent_runtime.append_event(session_id, 'turn/end', {'reason': {'kind': reason_kind}})
+            if entry.get('runtime_job_id'):
+                agent_runtime.update_job(entry['runtime_job_id'], 'completed', result={
+                    'message_id': entry.get('msg_id', ''),
+                    'stop_reason': data.get('stop_reason', ''),
+                    'usage': normalized_usage or data.get('usage') or {},
+                }, user_id=entry.get('user_id') or None)
+        elif event_type == 'error':
+            with _resumable_lock:
+                live = _resumable.get(stream_id, {})
+                if live.get('runtime_terminal'):
+                    return data
+                live['runtime_terminal'] = True
+                live['finished_at'] = time.time()
+            agent_runtime.flush_stream_delta(session_id)
+            provider = detect_provider(
+                entry.get('base_url', '') or entry.get('anthropic_url', ''),
+                entry.get('model', ''),
+                anthropic_format=bool(entry.get('anthropic_format')),
+            )
+            classified = classify_provider_error(Exception(str(data.get('error') or 'provider stream failed')), provider=provider.name)
+            data.update({
+                'code': classified.code.value,
+                'retryable': classified.retryable,
+                'details': classified.details,
+            })
+            agent_runtime.append_event(session_id, 'session/error', {'error': classified.to_dict()})
+            agent_runtime.append_event(session_id, 'step/end', {'reason': {'kind': 'error'}})
+            agent_runtime.append_event(session_id, 'turn/end', {'reason': {'kind': 'error'}})
+            if entry.get('runtime_job_id'):
+                agent_runtime.update_job(entry['runtime_job_id'], 'failed', error=classified.to_dict(), user_id=entry.get('user_id') or None)
+    except Exception as runtime_error:
+        print(f"[runtime] stream event mirror failed: {runtime_error}", flush=True)
+    return data
+
+
+def _finalize_cancelled_stream(stream_id: str, message: str = 'generation cancelled') -> bool:
+    """Persist and publish one terminal cancellation event for reconnecting clients.
+
+    A cancelled provider request can remain blocked inside an HTTP read for a while.  The
+    DELETE endpoint therefore closes the logical stream immediately, while the worker uses
+    the cancel flag to stop processing/retrying once control returns from the provider.
+    """
+    with _resumable_lock:
+        entry = _resumable.get(stream_id)
+        if not entry or entry.get('cancel_notified'):
+            return False
+        entry['cancel'] = True
+        entry['cancel_notified'] = True
+        entry['finished'] = True
+        msg_id = entry.get('msg_id', stream_id)
+        q = entry.get('queue')
+
+    error = AgentRuntimeError(ErrorCode.CANCELLED, message, status=499, retryable=False).to_dict()
+    data = _record_runtime_stream_event(stream_id, 'error', {'error': error})
+    sse = f"event: error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    with _resumable_lock:
+        live = _resumable.get(stream_id)
+        if live is not None:
+            chunks = live.get('chunks')
+            if isinstance(chunks, list):
+                chunks.append(sse)
+                if len(chunks) > MAX_STREAM_REPLAY_CHUNKS:
+                    del chunks[:len(chunks) - MAX_STREAM_REPLAY_CHUNKS]
+
+    _get_stream_buffer(msg_id).record('error', data, sse)
+    if q is not None:
+        try:
+            q.put(sse)
+            q.put(None)
+        except Exception:
+            pass
+    _complete_task_from_stream(stream_id, 'failed')
+    return True
 
 
 def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
@@ -2800,7 +3711,7 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     _proxies = None
     if request.get('proxy_enabled') and _req_proxy:
         _proxies = {'http': _req_proxy, 'https': _req_proxy}
-    elif _PROXY_URL:
+    elif _requires_auto_proxy(anthropic_url):
         _proxies = {'http': _PROXY_URL, 'https': _PROXY_URL}
 
     # ★ 提取 system 消息 (Anthropic 用顶级 system 字段)
@@ -2824,7 +3735,7 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     payload = {
         'model': model,
         'messages': anthropic_messages,
-        'max_tokens': request.get('max_tokens', 4096),
+        'max_tokens': request.get('max_tokens') or request.get('max_completion_tokens') or 4096,
         'stream': True,
     }
     if system_content:
@@ -2843,12 +3754,13 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
         headers = {
             'x-api-key': api_key,
             'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
             'content-type': 'application/json',
         }
     else:
         headers = {
             'Authorization': f'Bearer {api_key}',
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
             'content-type': 'application/json',
         }
 
@@ -2856,17 +3768,40 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
     _current_tool_idx = -1
 
     try:
-        print(f"[_generate_resumable_anthropic] Starting stream {stream_id} model={model} url={anthropic_url[:60]}", flush=True)
-        with _requests.post(anthropic_url, json=payload, headers=headers, proxies=_proxies,
-                            stream=True, timeout=(30, 600)) as resp:
-            if resp.status_code != 200:
-                _emit('error', {'error': f'Anthropic HTTP {resp.status_code}: {resp.text[:300]}'})
-                _resumable[stream_id]['finished'] = True
-                _complete_task_from_stream(stream_id, 'failed')
-                try: q.put(None)
-                except Exception: pass
-                return
+        from urllib.parse import urlparse as _urlparse
+        _anthropic_host = _urlparse(anthropic_url).hostname or 'unknown'
+        print(f"[_generate_resumable_anthropic] Starting stream {stream_id} model={model} host={_anthropic_host}", flush=True)
+        def _open_anthropic_stream():
+            _last_error = None
+            for _attempt in range(5):
+                try:
+                    _response = _requests.post(
+                        anthropic_url, json=payload, headers=headers, proxies=_proxies,
+                        stream=True, timeout=(30, 600),
+                    )
+                except Exception as _request_exc:
+                    _last_error = classify_provider_error(_request_exc, provider='anthropic')
+                else:
+                    if _response.status_code == 200:
+                        return _response
+                    _last_error = classify_provider_error(
+                        Exception(f'Anthropic HTTP {_response.status_code}'), status=_response.status_code,
+                        response_body=_response.text[:4000],
+                        request_id=_response.headers.get('x-request-id'), provider='anthropic',
+                    )
+                    _response.close()
+                if not _last_error.retryable or _attempt >= 4:
+                    raise _last_error
+                _retry_after = 0.0
+                if isinstance(_last_error.details, dict):
+                    try:
+                        _retry_after = float(_last_error.details.get('retry_after') or 0)
+                    except (TypeError, ValueError):
+                        _retry_after = 0.0
+                time.sleep(max(_retry_after, min(10.0, 1.5 * (2 ** _attempt))))
+            raise _last_error or AgentRuntimeError(ErrorCode.PROVIDER_UNAVAILABLE, 'Anthropic unavailable', status=503)
 
+        with _open_anthropic_stream() as resp:
             for line in resp.iter_lines():
                 if _is_cancelled(stream_id):
                     print(f"[_generate_resumable_anthropic] CANCELLED stream {stream_id}", flush=True)
@@ -2946,7 +3881,9 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
                                      'total_tokens': mu.get('output_tokens', 0)}
                 # message_stop / ping → 忽略
     except Exception as e:
-        _emit('error', {'error': f'Anthropic stream error: {str(e)}'})
+        _provider_error = e if isinstance(e, AgentRuntimeError) else classify_provider_error(e, provider='anthropic')
+        _resumable[stream_id]['error'] = _provider_error.to_dict()
+        _emit('error', {'error': _provider_error.to_dict()})
         _resumable[stream_id]['finished'] = True
         _complete_task_from_stream(stream_id, 'failed')
         try: q.put(None)
@@ -2954,18 +3891,7 @@ def _generate_resumable_anthropic(request: dict, stream_id: str, _emit):
         return
 
     if _is_cancelled(stream_id):
-        # 用户停止: 标记完成并清理, 不输出done(前端已中断)
-        cancelled_msg_id = ''
-        with _resumable_lock:
-            entry = _resumable.get(stream_id)
-            if entry:
-                entry['finished'] = True
-                cancelled_msg_id = entry.get('msg_id', '')
-        if cancelled_msg_id:
-            _get_stream_buffer(cancelled_msg_id).done()
-        _complete_task_from_stream(stream_id, 'failed')
-        try: q.put(None)
-        except Exception: pass
+        _finalize_cancelled_stream(stream_id)
         with _resumable_lock:
             _resumable.pop(stream_id, None)
         return
@@ -2996,8 +3922,13 @@ def _generate_resumable(request: dict, stream_id: str):
     buf = _get_stream_buffer(msg_id)
 
     def _emit(ev_type, data):
+        data = _record_runtime_stream_event(stream_id, ev_type, data)
         sse = f"event: {ev_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-        _resumable[stream_id]['chunks'].append(sse)
+        live_chunks = _resumable[stream_id]['chunks']
+        if ev_type != 'tool_call' or not data.get('partial'):
+            live_chunks.append(sse)
+            if len(live_chunks) > MAX_STREAM_REPLAY_CHUNKS:
+                del live_chunks[:len(live_chunks) - MAX_STREAM_REPLAY_CHUNKS]
         buf.record(ev_type, data, sse)
         q.put(sse)  # queue.Queue is thread-safe
 
@@ -3006,14 +3937,16 @@ def _generate_resumable(request: dict, stream_id: str):
         return _generate_resumable_anthropic(request, stream_id, _emit)
 
     try:
-        print(f"[_generate_resumable] Starting stream {stream_id} with model={request.get('model','?')} base_url={request.get('base_url','?')[:50]}", flush=True)
+        from urllib.parse import urlparse as _urlparse
+        _provider_host = _urlparse(request.get('base_url', '')).hostname or 'unknown'
+        print(f"[_generate_resumable] Starting stream {stream_id} with model={request.get('model','?')} host={_provider_host}", flush=True)
         # ★ 代理配置: 请求级优先 → 全局回退
         _http_client = None
         _req_proxy = request.get('proxy_url', '')
         if request.get('proxy_enabled') and _req_proxy:
             import httpx
             _http_client = httpx.Client(proxy=_req_proxy)
-        elif _PROXY_URL:
+        elif _requires_auto_proxy(request.get('base_url', '')):
             import httpx
             _http_client = httpx.Client(proxy=_PROXY_URL)
         is_longcat = _is_longcat_request(request)
@@ -3023,6 +3956,10 @@ def _generate_resumable(request: dict, stream_id: str):
             base_url=request.get('base_url', '').strip().rstrip('/') or None,
             http_client=_http_client,
             timeout=600.0 if is_longcat else 300.0,
+            # Retry ownership belongs to _iter_provider_chunks below. Keeping the SDK
+            # default (2 retries) multiplies one logical 5-attempt budget into as many
+            # as 15 upstream requests and continues work after a user cancellation.
+            max_retries=0,
         )
         messages = request.get('messages', [])
         if is_longcat:
@@ -3073,17 +4010,20 @@ def _generate_resumable(request: dict, stream_id: str):
             if _has_any_reasoning and isinstance(m, dict) and m.get('role') == 'assistant':
                 if 'reasoning_content' not in m:
                     m['reasoning_content'] = m.get('reasoning', '')
-        params = {
-            'model': model,
-            'messages': messages,
-            'stream': True,
-            'temperature': request.get('temperature', 0.7),
-            'max_tokens': request.get('max_tokens', 4096),
-        }
-        if request.get('tools'):
-            params['tools'] = request['tools']
+        _normalize_openai_tool_turns(messages, '_generate_resumable')
+        # Provider-neutral parameter adaptation keeps chat/subagent behavior aligned.
+        adapted_request = dict(request)
+        adapted_request.update({'model': model, 'messages': messages, 'stream': True})
+        _provider_info, params = prepare_openai_request(adapted_request)
+        params.setdefault('temperature', request.get('temperature', 0.7))
+        if 'max_tokens' not in params and 'max_completion_tokens' not in params:
+            params['max_tokens'] = request.get('max_tokens', 4096)
         if is_longcat:
             params['extra_body'] = {'thinking': _longcat_thinking(request)}
+        elif isinstance(request.get('extra_body'), dict) and request.get('extra_body'):
+            params['extra_body'] = request['extra_body']
+        # stream_options is forwarded only when explicitly requested; custom OpenAI-compatible
+        # gateways frequently reject unknown fields even when official providers accept them.
 
         print(f"[_generate_resumable] Calling API...", flush=True)
         # ★ 诊断: 打印消息摘要检测重复 tool_call_id
@@ -3101,11 +4041,8 @@ def _generate_resumable(request: dict, stream_id: str):
                     else:
                         _tc_diag[_tid] = _mi
             _role = _mm.get('role','?') if isinstance(_mm, dict) else '?'
-            _content_preview = ''
-            if isinstance(_mm, dict) and _mm.get('content'):
-                _c = _mm['content']
-                _content_preview = (str(_c)[:60] + '...') if len(str(_c)) > 60 else str(_c)[:60]
-            print(f"[_generate_resumable] msg[{_mi}] role={_role} tc_ids={_tc_ids} content={_content_preview}", flush=True)
+            _content_size = len(str(_mm.get('content') or '')) if isinstance(_mm, dict) else 0
+            print(f"[_generate_resumable] msg[{_mi}] role={_role} tool_call_count={len(_tc_ids)} content_size={_content_size}", flush=True)
         _tc_by_index = {}  # ★ 按index合并增量tool_call delta
         _tc_order = []     # 保持顺序
         # ★ MiniMax/DeepSeek 内联思考标签提取状态机（流式分块处理，含跨chunk边界保护）
@@ -3114,7 +4051,45 @@ def _generate_resumable(request: dict, stream_id: str):
         _chunk_carry = ''    # ★ 跨chunk边界保护: 上一chunk尾部可能是不完整标签前缀
         _TAG_MAX = 10        # max(len('(endthink)'), len('</think>'), len('(think)'), len('<think>'))
         _TAGS = ('(think)', '(endthink)', '<think>', '</think>')
-        for chunk in client.chat.completions.create(**params):
+
+        def _iter_provider_chunks():
+            _last_error = None
+            for _attempt in range(5):
+                if _is_cancelled(stream_id):
+                    return
+                try:
+                    for _chunk in client.chat.completions.create(**params):
+                        if _is_cancelled(stream_id):
+                            return
+                        yield _chunk
+                    return
+                except Exception as _stream_exc:
+                    if _is_cancelled(stream_id):
+                        return
+                    _last_error = classify_provider_error(_stream_exc, provider=_provider_info.name)
+                    # Never replay after user-visible output: doing so could duplicate text, tools, or billing.
+                    if full or reasoning or _tc_by_index or not _last_error.retryable or _attempt >= 4:
+                        raise _last_error
+                    print(f"[_generate_resumable] provider retry {_attempt + 2}/5 code={_last_error.code.value}", flush=True)
+                    _retry_after = 0.0
+                    if isinstance(_last_error.details, dict):
+                        try:
+                            _retry_after = float(_last_error.details.get('retry_after') or 0)
+                        except (TypeError, ValueError):
+                            _retry_after = 0.0
+                    _delay = max(_retry_after, min(10.0, 1.5 * (2 ** _attempt)))
+                    _deadline = time.monotonic() + _delay
+                    while time.monotonic() < _deadline:
+                        if _is_cancelled(stream_id):
+                            return
+                        time.sleep(min(0.2, _deadline - time.monotonic()))
+            if _last_error is not None:
+                raise _last_error
+
+        _saw_finish_reason = False
+        _trailing_drain_chunks = 0
+        _MAX_TRAILING_DRAIN = 50
+        for chunk in _iter_provider_chunks():
             if _is_cancelled(stream_id):
                 print(f"[_generate_resumable] CANCELLED stream {stream_id}", flush=True)
                 break
@@ -3127,9 +4102,24 @@ def _generate_resumable(request: dict, stream_id: str):
             choice = chunk.choices[0]
             if choice.finish_reason:
                 stop_reason = choice.finish_reason
+                _saw_finish_reason = True
             delta = choice.delta
             c = (delta.content or '')
-            r = getattr(delta, 'reasoning_content', '') or ''
+            r = (
+                getattr(delta, 'reasoning_content', None)
+                or getattr(delta, 'reasoning', None)
+                or getattr(delta, 'reasoning_text', None)
+                or getattr(delta, 'thinking', None)
+                or ''
+            )
+            if not r and hasattr(delta, 'model_extra') and delta.model_extra:
+                r = (
+                    delta.model_extra.get('reasoning_content')
+                    or delta.model_extra.get('reasoning')
+                    or delta.model_extra.get('reasoning_text')
+                    or delta.model_extra.get('thinking')
+                    or ''
+                )
             if c:
                 # ★ 拼接上一chunk的尾部缓冲以检测跨边界标签
                 c = _chunk_carry + c
@@ -3219,14 +4209,27 @@ def _generate_resumable(request: dict, stream_id: str):
             if hasattr(chunk, 'usage') and chunk.usage:
                 try: usage = chunk.usage.model_dump()
                 except Exception: pass
+            # finish_reason is normally terminal, but several OpenAI-compatible
+            # gateways emit it before the final tool-argument delta. Drain a small,
+            # bounded tail so web_search calls cannot be cut at ``{"query":`` and
+            # the independent usage chunk is not lost. Plain text still exits after
+            # one trailing read, preserving the old no-hang behavior.
+            if _saw_finish_reason:
+                if _tc_by_index and not _tool_calls_are_complete(_tc_by_index):
+                    _trailing_drain_chunks += 1
+                    if _trailing_drain_chunks >= _MAX_TRAILING_DRAIN:
+                        print(f"[_generate_resumable] tool-call tail exceeded {_MAX_TRAILING_DRAIN} chunks", flush=True)
+                        break
+                    continue
+                if usage is None and _trailing_drain_chunks < 1:
+                    _trailing_drain_chunks += 1
+                    continue
+                break
 
         if _is_cancelled(stream_id):
-            # 用户停止: 标记完成并清理, 不输出done(前端已中断)
-            _resumable[stream_id]['finished'] = True
-            buf.done()
-            _complete_task_from_stream(stream_id, 'failed')
-            try: q.put(None)
-            except Exception: pass
+            # Persist one explicit terminal cancellation. Reconnecting clients must not
+            # interpret a finished-but-empty snapshot as an endlessly generating bubble.
+            _finalize_cancelled_stream(stream_id)
             with _resumable_lock:
                 _resumable.pop(stream_id, None)
             return
@@ -3268,6 +4271,16 @@ def _generate_resumable(request: dict, stream_id: str):
         if _open_m and len(_open_m.group(1)) < 3000:
             reasoning += _open_m.group(1)
             full = _re_tmp.sub(r'', full)
+        if not full.strip() and not reasoning.strip() and not tool_calls:
+            # A provider connection may finish without yielding a parseable SSE event.
+            # Treat it as a terminal typed error: replaying the already-billable request
+            # through the browser HTTP fallback can duplicate both cost and side effects.
+            raise AgentRuntimeError(
+                ErrorCode.EMPTY_RESPONSE,
+                '模型流已结束，但未返回正文、思考或工具调用',
+                status=502,
+                retryable=False,
+            )
         truncated = stop_reason in ('max_tokens', 'length')
         done_data = {'full_text': full.strip(), 'reasoning_text': reasoning.strip(),
                      'tool_calls': tool_calls, 'usage': usage,
@@ -3280,12 +4293,27 @@ def _generate_resumable(request: dict, stream_id: str):
         except Exception: pass
 
     except Exception as e:
-        _emit('error', {'error': str(e)})
+        _stream_error = e if isinstance(e, AgentRuntimeError) else classify_provider_error(e, provider=locals().get('_provider_info').name if locals().get('_provider_info') else '')
+        _resumable[stream_id]['error'] = _stream_error.to_dict()
+        _emit('error', {'error': _stream_error.to_dict()})
         _resumable[stream_id]['finished'] = True
         buf.done()
         _complete_task_from_stream(stream_id, 'failed')
         try: q.put(None)
         except Exception: pass
+    finally:
+        _client_to_close = locals().get('client')
+        if _client_to_close is not None:
+            try:
+                _client_to_close.close()
+            except Exception:
+                pass
+        _http_to_close = locals().get('_http_client')
+        if _http_to_close is not None and _http_to_close is not getattr(_client_to_close, '_client', None):
+            try:
+                _http_to_close.close()
+            except Exception:
+                pass
 
 
 @app.post("/engine/chat/create")
@@ -3300,8 +4328,97 @@ async def chat_create(request: Request, user_id: str = Query("")):
     q = queue.Queue()
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     chat_id = body.get("chat_id", "")
-    msg_id = body.get("msg_id", f"msg_{int(time.time()*1000)}")
+    raw_msg_id = body.get("msg_id", f"msg_{int(time.time()*1000)}")
+    msg_id = re.sub(r'[^a-zA-Z0-9_-]', '', str(raw_msg_id or ''))[:128]
+    if not msg_id:
+        msg_id = f"msg_{int(time.time()*1000)}"
     model = body.get("model", "")
+    trace_id = str(body.get('trace_id', '') or request.headers.get('x-oneapichat-trace', ''))[:96]
+    _sync_trace('stream_create_received', {
+        'trace_id': trace_id, 'chat_id': chat_id, 'msg_id': msg_id,
+        'user_id': user_id, 'model': model, 'message_count': len(body.get('messages') or []),
+    })
+    if not user_id:
+        return JSONResponse({"error": {"code": "UNAUTHORIZED", "message": "user_id required"}}, status_code=401)
+    runtime_chat_id = chat_id or f"_stream_{msg_id}"
+
+    # ★ DSH-style authoritative single producer / idempotency barrier.
+    # A browser retry, a second tab, or a delayed observer must attach to the
+    # running server task instead of starting a second model/tool loop.
+    try:
+        _existing_store = get_chat_store(user_id)
+        _existing_task = _existing_store.find_running_task(user_id, chat_id=runtime_chat_id, msg_id=msg_id)
+        if not _existing_task and chat_id:
+            _existing_task = _existing_store.find_running_task(user_id, chat_id=chat_id)
+        if _existing_task:
+            _existing_sid = str(_existing_task.get('stream_id') or '')
+            _existing_msg = str(_existing_task.get('msg_id') or msg_id)
+            _existing_task_id = str(_existing_task.get('task_id') or '')
+            _sync_trace('stream_create_attached_existing', {
+                'trace_id': trace_id, 'chat_id': chat_id, 'msg_id': _existing_msg,
+                'stream_id': _existing_sid, 'task_id': _existing_task_id,
+                'user_id': user_id, 'model': _existing_task.get('model') or model,
+            })
+            if chat_id and _existing_sid:
+                _broadcast_to_user(user_id, 'chat:stream_started', {
+                    'chat_id': chat_id, 'stream_id': _existing_sid,
+                    'msg_id': _existing_msg, 'model': _existing_task.get('model') or model,
+                    'source': str(body.get('client_source') or ''),
+                    'ts': time.time(), 'trace_id': trace_id, 'attached': True,
+                })
+            return {
+                'stream_id': _existing_sid,
+                'task_id': _existing_task_id,
+                'msg_id': _existing_msg,
+                'attached': True,
+            }
+    except Exception as _dedupe_e:
+        print(f"[chat_create] single-producer lookup warning: {_dedupe_e}")
+
+    provider_info = detect_provider(
+        body.get('base_url', '') or body.get('anthropic_url', ''),
+        model,
+        anthropic_format=bool(body.get('anthropic_format')),
+    )
+    # ★ 对齐 DSH：流状态先落盘（磁盘权威，内存只是缓存）。
+    #   只要 create 通过参数校验，就在磁盘留下该 msg 记录；后续 ensure_session/create_job/
+    #   register_task 即使失败，引擎重启/刷新后按 msg 恢复也不会 "stream not found"，而是
+    #   返回磁盘快照（或 producer_lost 可恢复标记），实现 DSH 式"刷新不影响"。
+    try:
+        _persist_buf = _get_stream_buffer(msg_id)
+        _persist_buf.set_meta(sid, chat_id, user_id)
+        _persist_buf._save()
+    except Exception as _persist_e:
+        print(f"[chat_create] early persist warning: {_persist_e}")
+    runtime_session = agent_runtime.ensure_session(
+        user_id, runtime_chat_id, provider=provider_info.name, model=model, origin='chat'
+    )
+    runtime_session_id = runtime_session['session_id']
+    latest_user_message = next((
+        item for item in reversed(body.get('messages') or [])
+        if isinstance(item, dict) and item.get('role') == 'user'
+    ), None)
+    agent_runtime.append_event(runtime_session_id, 'request/header', {
+        'stream_id': sid, 'task_id': task_id, 'message_id': msg_id,
+        'provider': provider_info.name, 'model': model,
+    })
+    agent_runtime.append_event(runtime_session_id, 'turn/start', {
+        'turn_id': task_id, 'stream_id': sid, 'message_id': msg_id,
+    })
+    agent_runtime.append_event(runtime_session_id, 'step/start', {
+        'step_id': task_id, 'kind': 'llm', 'model': model,
+    })
+    if latest_user_message:
+        agent_runtime.append_event(runtime_session_id, 'user/message', {
+            'message': redact_secrets(latest_user_message), 'message_id': latest_user_message.get('id', ''),
+        })
+    runtime_job = agent_runtime.create_job(user_id, 'chat-stream', {
+        'stream_id': sid, 'task_id': task_id, 'message_id': msg_id,
+        'chat_id': runtime_chat_id, 'provider': provider_info.name, 'model': model,
+    }, session_id=runtime_session_id)
+    agent_runtime.update_job(runtime_job['job_id'], 'running', user_id=user_id)
+    body['runtime_session_id'] = runtime_session_id
+    body['runtime_job_id'] = runtime_job['job_id']
 
     with _resumable_lock:
         # 在启动后台线程前写全关联信息。旧逻辑先 start()，快速响应可能在
@@ -3315,6 +4432,22 @@ async def chat_create(request: Request, user_id: str = Query("")):
             'user_id': user_id,
             'msg_id': msg_id,
             'chat_id': chat_id,
+            'runtime_session_id': runtime_session_id,
+            'runtime_job_id': runtime_job['job_id'],
+            'runtime_terminal': False,
+            'trace_id': trace_id,
+            'created_at': time.time(),
+            'finished_at': 0.0,
+            'provider': provider_info.name,
+            'model': model,
+            'base_url': body.get('base_url', ''),
+            'anthropic_url': body.get('anthropic_url', ''),
+            'anthropic_format': bool(body.get('anthropic_format')),
+            # 完成态必须能在没有浏览器在线时提交到会话文件；仅驻留当前后台线程内存，
+            # active_tasks 仍只保存 safe_request_snapshot，不落敏感凭据。
+            'request_data': body,
+            'projection_committed': False,
+            'projection_result': {},
         }
         # 清理过期
         now = time.time()
@@ -3335,27 +4468,67 @@ async def chat_create(request: Request, user_id: str = Query("")):
     stream_buf._save()
 
     # 先注册恢复任务，再允许生成线程完成并调用 _complete_task_from_stream。
-    if user_id and chat_id:
+    # 即使调用方漏传 chat_id，也用稳定的内部 stream chat namespace 建立恢复索引，
+    # 不能因为缺少可选字段而产生无主任务。
+    persist_chat_id = chat_id or runtime_chat_id
+    if user_id:
         try:
             store = get_chat_store(user_id)
-            store.register_task(task_id, sid, chat_id, msg_id, user_id, model, body)
+            claim_res = store.claim_task(task_id, sid, persist_chat_id, msg_id, user_id, model, body)
+            if not claim_res.get("claimed"):
+                # 并发赢家已存在，附着到现有运行任务上
+                _attached_task = claim_res.get("task", {})
+                _existing_sid = str(_attached_task.get('stream_id') or sid)
+                _existing_task_id = str(_attached_task.get('task_id') or task_id)
+                _existing_msg = str(_attached_task.get('msg_id') or msg_id)
+                _sync_trace('stream_create_attached_concurrent_claim', {
+                    'trace_id': trace_id, 'chat_id': chat_id, 'msg_id': _existing_msg,
+                    'stream_id': _existing_sid, 'task_id': _existing_task_id,
+                })
+                with _resumable_lock:
+                    _resumable.pop(sid, None)
+                return {
+                    'stream_id': _existing_sid,
+                    'task_id': _existing_task_id,
+                    'msg_id': _existing_msg,
+                    'attached': True,
+                }
         except Exception as e:
-            print(f"[chat_create] task register error: {e}")
+            # Durable ACK is a safety barrier: never acknowledge a stream the recovery
+            # index cannot see, otherwise a browser refresh creates an undiscoverable job.
+            with _resumable_lock:
+                _resumable.pop(sid, None)
+            try:
+                agent_runtime.update_job(runtime_job['job_id'], 'failed', error={
+                    'code': 'PERSISTENCE_UNAVAILABLE', 'message': 'task registration failed'
+                }, user_id=user_id)
+            except Exception:
+                pass
+            return JSONResponse({"error": {"code": "PERSISTENCE_UNAVAILABLE", "message": "无法持久化可恢复任务，请稍后重试"}}, status_code=503)
 
     threading.Thread(target=_generate_resumable, args=(body, sid), daemon=True).start()
+    _sync_trace('stream_registered', {
+        'trace_id': trace_id, 'chat_id': chat_id, 'stream_id': sid,
+        'task_id': task_id, 'msg_id': msg_id, 'user_id': user_id, 'model': model,
+    })
 
     # ★ 多端同步: 广播流开始事件到其他浏览器/设备
     if user_id and chat_id:
         _broadcast_to_user(user_id, 'chat:stream_started', {
-            'chat_id': chat_id, 'stream_id': sid,
-            'model': model, 'ts': time.time()
+            'chat_id': chat_id, 'stream_id': sid, 'msg_id': msg_id,
+            'task_id': task_id, 'model': model, 'source': str(body.get('client_source') or ''),
+            'ts': time.time(), 'trace_id': trace_id
         })
 
-    return {"stream_id": sid, "task_id": task_id, "msg_id": msg_id}
+    return {
+        "stream_id": sid, "task_id": task_id, "msg_id": msg_id,
+        "runtime_session_id": runtime_session_id, "runtime_job_id": runtime_job['job_id'],
+    }
 
 
 @app.get("/engine/chat/stream")
 async def chat_stream_offset(
+    request: Request,
     msg_id: str = Query(""),
     since: int = Query(0),
     stream_id: str = Query(""),
@@ -3376,10 +4549,12 @@ async def chat_stream_offset(
     if stream_id:
         with _resumable_lock:
             s = _resumable.get(stream_id)
+        if s and s.get('user_id') != user_id:
+            return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
     if not s and msg_id:
         with _resumable_lock:
             for _sid, _entry in _resumable.items():
-                if _entry.get('msg_id') == msg_id:
+                if _entry.get('msg_id') == msg_id and _entry.get('user_id') == user_id:
                     s = _entry
                     stream_id = _sid
                     break
@@ -3391,6 +4566,11 @@ async def chat_stream_offset(
     if not s and not known_in_memory and not persisted_path.exists():
         return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
     buf = _get_stream_buffer(resolved_msg_id)
+    trusted_internal = bool(getattr(request.state, 'trusted_internal', False))
+    if buf.user_id and buf.user_id != user_id:
+        return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
+    if not buf.user_id and not s and not trusted_internal:
+        return JSONResponse({"error": "stream ownership unavailable", "finished": True}, status_code=404)
 
     async def gen():
         # snapshot=1：先发聚合首屏，正文/思考/工具状态无需等待新 token。
@@ -3400,9 +4580,13 @@ async def chat_stream_offset(
             if s:
                 snap['finished'] = bool(snap.get('finished') or s.get('finished'))
             elif not snap.get('finished'):
-                # 引擎重启后无法继续已丢失的上游连接，但仍把最后快照完整交给前端。
+                # 引擎重启后上游生产者已丢失，但快照仍是可见事实；不要伪造 provider error，
+                # 让客户端完成当前气泡并以 recoverable/producer_lost 标记提示下一步。
                 snap['finished'] = True
-                snap['error'] = snap.get('error') or 'stream interrupted before completion'
+                snap['recovery_state'] = 'producer_lost'
+                snap['recoverable'] = True
+                snap['stop_reason'] = snap.get('stop_reason') or 'producer_lost'
+                snap['error'] = ''
             yield f"event: snapshot\ndata: {json.dumps(snap, ensure_ascii=False)}\n\n"
             replay_offset = int(snap.get('offset', 0) or 0)
         else:
@@ -3444,10 +4628,10 @@ async def chat_stream_offset(
 
 
 @app.get("/engine/chat/stream/{stream_id}")
-async def chat_stream_get(stream_id: str):
+async def chat_stream_get(stream_id: str, user_id: str = Query("")):
     """消费 SSE 流 — 已完成流返回JSON，活跃流回放chunks+实时推送"""
     s = _resumable.get(stream_id)
-    if not s:
+    if not s or s.get('user_id') != user_id:
         return JSONResponse({"error": "stream not found", "finished": True}, status_code=404)
 
     # ★ 流已完成:直接返回JSON(避免SSE的TCP分片导致done事件丢失)
@@ -3496,18 +4680,23 @@ async def chat_stream_get(stream_id: str):
 
 
 @app.delete("/engine/chat/stream/{stream_id}")
-async def chat_stream_delete(stream_id: str, msg_id: str = Query("")):
+async def chat_stream_delete(stream_id: str, msg_id: str = Query(""), user_id: str = Query("")):
     """取消/清理指定流 — 标记 cancel, 通知后台生成线程停止
     (用户点停止键后调用, 避免"停止了还在等模型思考完"、继续消耗token)"""
     with _resumable_lock:
         entry = _resumable.get(stream_id)
+        if entry and entry.get('user_id') != user_id:
+            entry = None
         if not entry and msg_id:
             for candidate in _resumable.values():
-                if candidate.get('msg_id') == msg_id:
+                if candidate.get('msg_id') == msg_id and candidate.get('user_id') == user_id:
                     entry = candidate
                     break
         if entry:
             entry['cancel'] = True
+    if not entry:
+        return JSONResponse({"error": "stream not found"}, status_code=404)
+    _finalize_cancelled_stream(stream_id)
     return {"cleaned": True}
 
 
@@ -3519,16 +4708,84 @@ def _complete_task_from_stream(stream_id: str, status: str):
         task_id = entry.get('task_id', '')
         uid = entry.get('user_id', '')
         chat_id = entry.get('chat_id', '')
+        runtime_session_id = entry.get('runtime_session_id', '')
+        runtime_job_id = entry.get('runtime_job_id', '')
+        trace_id = entry.get('trace_id', '')
+        _sync_trace('stream_complete_begin', {
+            'trace_id': trace_id, 'stream_id': stream_id, 'task_id': task_id,
+            'chat_id': chat_id, 'user_id': uid, 'status': status,
+        })
+        if runtime_session_id and not entry.get('runtime_terminal'):
+            with _resumable_lock:
+                live = _resumable.get(stream_id, {})
+                live['runtime_terminal'] = True
+                was_cancelled = bool(live.get('cancel'))
+            kind = 'cancelled' if was_cancelled else ('interrupted' if status == 'interrupted' else ('completed' if status == 'completed' else 'error'))
+            try:
+                agent_runtime.flush_stream_delta(runtime_session_id)
+                if kind in ('error', 'interrupted'):
+                    agent_runtime.append_event(runtime_session_id, 'session/error', {
+                        'error': {'code': kind.upper(), 'message': f'stream {kind}', 'retryable': kind == 'interrupted'}
+                    })
+                agent_runtime.append_event(runtime_session_id, 'step/end', {'reason': {'kind': kind}})
+                agent_runtime.append_event(runtime_session_id, 'turn/end', {'reason': {'kind': kind}})
+                if runtime_job_id:
+                    job_status = 'cancelled' if kind == 'cancelled' else ('interrupted' if kind == 'interrupted' else status)
+                    agent_runtime.update_job(runtime_job_id, job_status, error=None if job_status == 'completed' else {
+                        'code': kind.upper(), 'message': f'stream {kind}'
+                    }, user_id=uid or None)
+            except Exception as runtime_error:
+                print(f"[_complete_task] runtime finalize error: {runtime_error}")
+        projection = {}
+        if uid and chat_id:
+            try:
+                msg_id = str(entry.get('msg_id') or '')
+                snapshot = _get_stream_buffer(msg_id).snapshot() if msg_id else {}
+                projection = chat_projection_store.commit_assistant(
+                    user_id=uid,
+                    chat_id=chat_id,
+                    msg_id=msg_id,
+                    request_data=entry.get('request_data') or {},
+                    content=snapshot.get('full_text') or '',
+                    reasoning=snapshot.get('reasoning_text') or '',
+                    tool_calls=snapshot.get('tool_calls') or [],
+                    usage=snapshot.get('usage') or {},
+                    error=snapshot.get('error') if status != 'completed' else None,
+                    stop_reason=snapshot.get('stop_reason') or '',
+                    truncated=bool(snapshot.get('truncated')),
+                    model=str(entry.get('model') or ''),
+                )
+                with _resumable_lock:
+                    live = _resumable.get(stream_id, {})
+                    live['projection_committed'] = bool(projection.get('ok'))
+                    live['projection_result'] = projection
+                _sync_trace('stream_projection_committed', {
+                    'trace_id': trace_id, 'stream_id': stream_id, 'chat_id': chat_id,
+                    'user_id': uid, 'msg_id': msg_id, 'ok': bool(projection.get('ok')),
+                    'revision': projection.get('revision', 0), 'msg_count': projection.get('msg_count', 0),
+                })
+            except Exception as projection_error:
+                projection = {'ok': False, 'error': type(projection_error).__name__}
+                print(f"[_complete_task] chat projection error={type(projection_error).__name__}")
         if task_id and uid:
             store = get_chat_store(uid)
-            store.complete_task(task_id, status)
-            # Broadcast to all user's browsers
+            # 完成态只有在会话投影提交成功后才退出 active_tasks；若磁盘暂时不可写，保留
+            # recoverable 入口，客户端可继续从 StreamBuffer 恢复，绝不出现“回复已完成但找不到”。
+            persisted_status = status if projection.get('ok') or not chat_id else 'recoverable'
+            store.complete_task(task_id, persisted_status)
+            # Commit-before-broadcast: 收到 done 的客户端回源时，权威文件已包含最终回复。
             _broadcast_to_user(uid, 'chat:stream_done', {
-                'task_id': task_id, 'chat_id': chat_id,
-                'status': status, 'ts': time.time()
+                'task_id': task_id, 'stream_id': stream_id, 'msg_id': entry.get('msg_id', ''),
+                'chat_id': chat_id, 'status': status, 'persisted': bool(projection.get('ok')),
+                'revision': projection.get('revision', 0), 'updated_at': projection.get('updated_at', 0),
+                'msg_count': projection.get('msg_count', 0), 'ts': time.time(), 'trace_id': trace_id
+            })
+            _sync_trace('stream_complete_broadcasted', {
+                'trace_id': trace_id, 'stream_id': stream_id, 'task_id': task_id,
+                'chat_id': chat_id, 'user_id': uid, 'status': status,
             })
     except Exception as e:
-        print(f"[_complete_task] error: {e}")
+        print(f"[_complete_task] error={type(e).__name__}")
 
 
 @app.get("/engine/tasks/active")
@@ -3537,36 +4794,126 @@ async def active_tasks(user_id: str = Query("")):
     if not user_id:
         return JSONResponse({"ok": True, "tasks": []})
     store = get_chat_store(user_id)
+    with _resumable_lock:
+        live_stream_ids = {
+            sid for sid, entry in _resumable.items()
+            if not entry.get('finished') and not entry.get('cancel')
+        }
+    reconciled = store.reconcile_active_tasks(user_id, live_stream_ids)
+    if reconciled:
+        with _resumable_lock:
+            for item in reconciled:
+                if item.get('status') != 'failed':
+                    continue
+                entry = _resumable.get(item.get('stream_id', ''))
+                if entry and not entry.get('finished'):
+                    entry['cancel'] = True
+                    try:
+                        entry['queue'].put_nowait(None)
+                    except Exception:
+                        pass
     tasks = store.get_active_tasks(user_id)
     return {"ok": True, "tasks": tasks}
+
+
+@app.post("/engine/tasks/{task_id}/abandon")
+async def abandon_active_task(task_id: str, user_id: str = Query("")):
+    """客户端确认无法恢复后终止任务，避免刷新时反复接续。"""
+    if not user_id:
+        return JSONResponse({"ok": False, "error": "user_id required"}, status_code=400)
+    store = get_chat_store(user_id)
+    changed = store.abandon_task(task_id, user_id)
+    with _resumable_lock:
+        for entry in _resumable.values():
+            if entry.get('task_id') == task_id and entry.get('user_id') == user_id:
+                entry['cancel'] = True
+                try:
+                    entry['queue'].put_nowait(None)
+                except Exception:
+                    pass
+                break
+    return {"ok": True, "changed": changed}
 
 
 # ═══════════════════════════════════════════════════════════════
 # SSE 事件总线 — 用户级实时推送通道（跨浏览器同步）
 # ═══════════════════════════════════════════════════════════════
 
-_user_event_queues: dict = {}  # {user_id: [asyncio.Queue, ...]}
+_user_event_queues: dict = {}  # {user_id: [(event_loop, asyncio.Queue), ...]}
 _user_event_queues_lock = threading.Lock()
 _user_agent_modes: dict = {}  # ★ 多端同步: 存储每个用户的 agent 模式状态
+# SSE 事件短期回放缓存：EventSource 重连会携带 Last-Event-ID，避免断线窗口丢失完成/错误事件。
+_user_event_history: dict[str, deque] = {}
+_user_event_seq: dict[str, int] = {}
+_USER_EVENT_HISTORY_LIMIT = 256
+
+
+def _resolve_sse_replay_cursor(raw_last_id, current_cursor: int) -> tuple[int, bool]:
+    """Resolve replay start without treating a fresh page load as cursor zero.
+
+    EventSource sends Last-Event-ID only when reconnecting the same stream. A new
+    page has no cursor and must start at the current tail; otherwise every refresh
+    replays the whole bounded history and re-fires old UI notifications.
+    """
+    if raw_last_id is None or str(raw_last_id).strip() == "":
+        return max(0, int(current_cursor or 0)), False
+    try:
+        return max(0, int(raw_last_id)), True
+    except (TypeError, ValueError):
+        return max(0, int(current_cursor or 0)), False
 
 
 def _broadcast_to_user(user_id: str, event_type: str, data: dict):
-    """向指定用户的所有活跃 SSE 连接推送事件"""
+    """向指定用户的所有活跃 SSE 连接推送事件，并保存短期游标回放。"""
     if not user_id:
         return
-    sse_payload = f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
     with _user_event_queues_lock:
+        seq = _user_event_seq.get(user_id, 0) + 1
+        _user_event_seq[user_id] = seq
+        sse_payload = (
+            f"id: {seq}\n"
+            f"event: {event_type}\n"
+            f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        )
+        history = _user_event_history.setdefault(
+            user_id, deque(maxlen=_USER_EVENT_HISTORY_LIMIT)
+        )
+        history.append((seq, sse_payload))
         queues = list(_user_event_queues.get(user_id, []))
-    for q in queues:
+    _sync_trace('sse_broadcast', {
+        'trace_id': data.get('trace_id', '') if isinstance(data, dict) else '',
+        'event_type': event_type,
+        'chat_id': data.get('chat_id', '') if isinstance(data, dict) else '',
+        'user_id': user_id,
+        'source': data.get('source', '') if isinstance(data, dict) else '',
+        'seq': seq,
+        'subscriber_count': len(queues),
+        'history_count': len(history),
+    })
+    delivered = 0
+    for loop, q in queues:
         try:
-            asyncio.run_coroutine_threadsafe(q.put(sse_payload), asyncio.get_event_loop())
-        except Exception:
+            # This helper is also called by model/background threads.  Capturing
+            # the loop when the SSE subscriber connects avoids creating an
+            # un-awaited coroutine against the caller's (or a missing) loop.
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(q.put_nowait, sse_payload)
+                delivered += 1
+        except RuntimeError:
             pass
+    _sync_trace('sse_queued', {
+        'trace_id': data.get('trace_id', '') if isinstance(data, dict) else '',
+        'event_type': event_type,
+        'chat_id': data.get('chat_id', '') if isinstance(data, dict) else '',
+        'user_id': user_id,
+        'seq': seq,
+        'delivered_count': delivered,
+    })
 
 
 @app.get("/engine/events")
-async def user_events_stream(user_id: str = Query(""), agent_mode: str = Query("")):
-    """用户级持久 SSE 通道。浏览器连接后接收实时事件推送"""
+async def user_events_stream(request: Request, user_id: str = Query(""), agent_mode: str = Query("")):
+    """用户级持久 SSE 通道，支持 Last-Event-ID 短期回放。"""
     if not user_id:
         return JSONResponse({"error": "user_id required"}, status_code=400)
 
@@ -3581,29 +4928,70 @@ async def user_events_stream(user_id: str = Query(""), agent_mode: str = Query("
             _user_agent_modes[user_id] = {'mode': agent_mode, 'ts': time.time()}
     current_mode = _user_agent_modes.get(user_id, {}).get('mode', '')
 
-    q = asyncio.Queue()
-    with _user_event_queues_lock:
-        _user_event_queues.setdefault(user_id, []).append(q)
+    # 浏览器自动重连会发送 Last-Event-ID；query 兼容手写客户端/测试客户端。
+    # 新页面没有游标，必须从当前队尾开始，不能把历史 256 条事件全部重放。
+    raw_last_id = request.headers.get('last-event-id')
+    if raw_last_id is None:
+        raw_last_id = request.query_params.get('since')
 
+    q = asyncio.Queue()
+    queue_entry = (asyncio.get_running_loop(), q)
+    connection_id = request.headers.get('x-oneapichat-source', '') or request.query_params.get('source', '')
+    with _user_event_queues_lock:
+        cursor = _user_event_seq.get(user_id, 0)
+        last_event_id, replay_requested = _resolve_sse_replay_cursor(raw_last_id, cursor)
+        replay = [payload for seq, payload in _user_event_history.get(user_id, ()) if seq > last_event_id]
+        # 在把连接暴露给实时广播前，先在同一锁内排入全部历史事件。这样 seq=N+1
+        # 不可能先于回放的 seq<=N 进入队列，客户端状态机始终单调前进。
+        for payload in replay:
+            q.put_nowait(payload)
+        _user_event_queues.setdefault(user_id, []).append(queue_entry)
+        subscriber_count = len(_user_event_queues.get(user_id, []))
+    _sync_trace('sse_subscribed', {
+        'trace_id': request.query_params.get('sync_trace', ''),
+        'user_id': user_id,
+        'source': connection_id,
+        'cursor': cursor,
+        'since': last_event_id,
+        'replay': replay_requested,
+        'replay_count': len(replay),
+        'subscriber_count': subscriber_count,
+    })
     async def event_gen():
         try:
-            yield f"event: connected\ndata: {json.dumps({'user_id': user_id, 'ts': time.time(), 'agent_mode': current_mode})}\n\n"
+            connected_data = {
+                'user_id': user_id,
+                'ts': time.time(),
+                'agent_mode': current_mode,
+                'cursor': cursor,
+                'replay': replay_requested,
+                'replay_count': len(replay),
+                'since': last_event_id,
+            }
+            yield f"event: connected\ndata: {json.dumps(connected_data)}\n\n"
             while True:
                 try:
-                    payload = await asyncio.wait_for(q.get(), timeout=30)
+                    payload = await asyncio.wait_for(q.get(), timeout=12)
                     yield payload
                 except asyncio.TimeoutError:
-                    yield f"event: heartbeat\ndata: {json.dumps({'hb': True})}\n\n"
+                    yield f"event: heartbeat\ndata: {json.dumps({'hb': True, 'cursor': _user_event_seq.get(user_id, 0)})}\n\n"
         except asyncio.CancelledError:
             pass
         finally:
             with _user_event_queues_lock:
                 queues = _user_event_queues.get(user_id, [])
-                if q in queues:
-                    queues.remove(q)
+                if queue_entry in queues:
+                    queues.remove(queue_entry)
+                subscriber_count = len(queues)
+            _sync_trace('sse_unsubscribed', {
+                'trace_id': request.query_params.get('sync_trace', ''),
+                'user_id': user_id,
+                'source': connection_id,
+                'subscriber_count': subscriber_count,
+            })
 
     return StreamingResponse(event_gen(), media_type="text/event-stream",
-                            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+                            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache", "Connection": "keep-alive"})
 
 
 @app.post("/engine/events/broadcast")
@@ -3617,11 +5005,18 @@ async def events_broadcast(request: Request, user_id: str = Query("")):
     data = body.get("data", {})
     if not event_type or not user_id:
         return JSONResponse({"ok": False, "error": "event_type and user_id required"}, status_code=400)
+    _sync_trace('broadcast_received', {
+        'trace_id': data.get('trace_id', '') if isinstance(data, dict) else '',
+        'event_type': event_type,
+        'chat_id': data.get('chat_id', '') if isinstance(data, dict) else '',
+        'user_id': user_id,
+        'source': data.get('source', '') if isinstance(data, dict) else '',
+    })
     # ★ 多端同步: 存储 agent 模式变更到服务端
     if event_type == 'agent:mode_changed' and data.get('mode'):
         _user_agent_modes[user_id] = {'mode': data['mode'], 'ts': data.get('ts', time.time())}
     _broadcast_to_user(user_id, event_type, data)
-    return {"ok": True}
+    return {"ok": True, "trace_id": data.get('trace_id', '') if isinstance(data, dict) else ''}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3675,6 +5070,7 @@ class ChatStream:
         self.chunks: list = []  # 已产生的 token chunks
         self.finished = False
         self.error = None
+        self._created_at = time.time()
 
     async def run(self):
         """调用 LLM API，逐 token 广播并缓存"""
@@ -3685,7 +5081,7 @@ class ChatStream:
             _rp = self.request.get('proxy_url', '')
             if self.request.get('proxy_enabled') and _rp:
                 import httpx; _httpc = httpx.Client(proxy=_rp)
-            elif _PROXY_URL:
+            elif _requires_auto_proxy(self.request.get('base_url', '')):
                 import httpx; _httpc = httpx.Client(proxy=_PROXY_URL)
             client = OpenAI(
                 api_key=self.request.get('api_key', ''),
@@ -3701,6 +5097,13 @@ class ChatStream:
             }
             if self.request.get('tools'):
                 params['tools'] = self.request['tools']
+            _eb = self.request.get('extra_body')
+            if isinstance(_eb, dict) and _eb and 'thinking' not in _eb:
+                params['extra_body'] = _eb
+            if self.request.get('reasoning_effort'):
+                params['reasoning_effort'] = self.request['reasoning_effort']
+            if self.request.get('thinking_level'):
+                params['thinking_level'] = self.request['thinking_level']
 
             for chunk in client.chat.completions.create(**params):
                 delta = chunk.choices[0].delta
@@ -3731,8 +5134,18 @@ class ChatStream:
                         pass
 
             self.finished = True
+            full_text = ''.join(str(item.get('delta') or '') for item in self.chunks if item.get('type') == 'content')
+            reasoning_text = ''.join(str(item.get('delta') or '') for item in self.chunks if item.get('type') == 'reasoning')
+            projection = chat_projection_store.commit_assistant(
+                user_id=self.user_id, chat_id=self.chat_id, msg_id=self.msg_id,
+                request_data=self.request, content=full_text, reasoning=reasoning_text,
+                model=str(self.request.get('model') or ''),
+            )
             await ws_mgr.broadcast(self.user_id, {
-                'event': 'done', 'data': {'stream_id': self.sid, 'finished': True}
+                'event': 'done', 'data': {
+                    'stream_id': self.sid, 'finished': True, 'persisted': bool(projection.get('ok')),
+                    'revision': projection.get('revision', 0), 'updated_at': projection.get('updated_at', 0),
+                }
             })
         except Exception as e:
             self.error = str(e)
@@ -3756,6 +5169,11 @@ _active_streams_lock = threading.Lock()
 @app.websocket("/engine/ws/{user_id}")
 async def ws_chat(ws: WebSocket, user_id: str):
     """WebSocket 聊天网关 — 持久连接，收发 AI 消息"""
+    try:
+        user_id = require_scope_owner(ws.scope, user_id)
+    except AgentRuntimeError:
+        await ws.close(code=1008, reason='owner mismatch')
+        return
     await ws.accept()
     ws_mgr.add(user_id, ws)
     try:
@@ -3783,7 +5201,7 @@ async def ws_chat(ws: WebSocket, user_id: str):
                 since = msg.get('since', 0)
                 with _active_streams_lock:
                     stream = _active_streams.get(sid)
-                if stream:
+                if stream and stream.user_id == user_id:
                     missed = stream.get_snapshot(since)
                     for chunk in missed:
                         await ws.send_json({'event': chunk['type'], 'data': chunk.get('data', chunk.get('delta', '')), 'stream_id': sid})
@@ -3800,7 +5218,7 @@ async def ws_chat(ws: WebSocket, user_id: str):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"[WS] Error for user {user_id}: {e}")
+        print(f"[WS] connection error={type(e).__name__}")
     finally:
         ws_mgr.remove(user_id, ws)
 
@@ -3822,6 +5240,8 @@ threading.Thread(target=_cleanup_old_streams, daemon=True).start()
 
 # ★ Agent 端点 + 浏览器工具 → engine/agent_endpoints.py
 register_agent_endpoints(app, ENGINE_DIR, tool_registry)
+from engine.self_api import register_self_endpoints
+register_self_endpoints(app, PROJECT_ROOT)
 
 # ★ 记忆系统 v2 → engine/memory_endpoints.py (Phase B: chromadb + FTS5 + 人格)
 register_memory_endpoints(app, ENGINE_DIR)
@@ -3872,18 +5292,28 @@ def _import_to_cloudreve(user_id, file_path, category="generated"):
         return
     try:
         import urllib.parse as _up
+        from engine.runtime_auth import get_internal_bridge_secret
+        _bridge_secret = get_internal_bridge_secret(PROJECT_ROOT)
+        if not _bridge_secret:
+            print("[cloudreve] import skipped: bridge credential unavailable", flush=True)
+            return
         _url = ("https://127.0.0.1:443/oneapichat/api/cloudreve_api.php"
-                "?action=import_file&auth_token=cr_shared"
+                "?action=import_file"
                 "&user_id=" + _up.quote(str(user_id))
                 + "&category=" + _up.quote(category)
                 + "&file_path=" + _up.quote(str(file_path)))
-        # ★ 必须禁用代理: 引擎全局 session 走 socks5h://127.0.0.1:1081 (Mihomo), 127.0.0.1 经代理会 SSL EOF
-        _r = _http_session.get(_url, headers={"Host": "naujtrats.xyz"}, timeout=120, verify=False,
-                               proxies={"http": None, "https": None})
+        # This is a local HTTPS virtual host whose certificate name is public-host based.
+        # The private bridge credential, loopback-only transport and no-proxy policy form
+        # the authentication boundary; never put a reusable credential in the URL.
+        _r = _http_session.get(
+            _url,
+            headers={"Host": "naujtrats.xyz", "X-OneAPIChat-Internal": _bridge_secret},
+            timeout=120, verify=False, proxies={"http": None, "https": None},
+        )
         if _r.status_code != 200:
-            print(f"[cloudreve] 导入失败 HTTP {_r.status_code}: {file_path}", flush=True)
+            print(f"[cloudreve] import failed status={_r.status_code}", flush=True)
     except Exception as _e:
-        print(f"[cloudreve] 生成文件导入失败: {_e} {file_path}", flush=True)
+        print(f"[cloudreve] generated-file import failed error={type(_e).__name__}", flush=True)
 
 
 def _doc_output(safe_name, ext, user_id=""):
@@ -4178,29 +5608,49 @@ async def video_edit_endpoint(request: Request):
         elif action == "style":
             return {"result": _apply_subtitle_style(input_path, output_path, params)}
         elif action == "frames":
-            # 提取关键帧并返回 base64 数组
-            count = int(params.get("count", 3))
-            duration = float(params.get("duration", 10))
-            scale = int(params.get("scale", 640))
-            interval = max(1, int(duration / count))
+            # 提取关键帧并返回 base64 数组。支持显式 timestamps，确保可精确读取视频结尾。
+            count = max(1, min(120, int(params.get("count", 3))))
+            duration = max(0.0, float(params.get("duration", 0) or 0))
+            scale = max(160, min(1920, int(params.get("scale", 640))))
+            requested = params.get("timestamps")
+            timestamps = []
+            if isinstance(requested, list):
+                for value in requested[:120]:
+                    try:
+                        ts = max(0.0, float(value))
+                        if duration > 0:
+                            ts = min(ts, max(0.0, duration - 0.04))
+                        if not timestamps or abs(ts - timestamps[-1]) >= 0.03:
+                            timestamps.append(round(ts, 3))
+                    except (TypeError, ValueError):
+                        continue
+            if not timestamps:
+                effective_duration = duration or 10.0
+                if count == 1:
+                    timestamps = [max(0.0, effective_duration - 0.08)]
+                else:
+                    end_ts = max(0.0, effective_duration - 0.08)
+                    timestamps = [round(end_ts * i / (count - 1), 3) for i in range(count)]
+
             import base64 as b64
-            cmd = ["ffmpeg", "-y", "-i", input_path, "-vframes", str(count),
-                   "-vf", f"fps=1/{interval},scale={scale}:-1",
-                   "-f", "image2pipe", "-q:v", "3", "-vcodec", "mjpeg", "-"]
-            r = subprocess.run(cmd, capture_output=True, timeout=120)
-            if r.returncode != 0 or len(r.stdout) < 100:
-                return JSONResponse({"error": f"截图失败: {r.stderr.decode()[:200]}"}, status_code=500)
             frames = []
-            pos = 0; buf = r.stdout
-            while pos < len(buf) - 4:
-                soi = buf.find(b'\xff\xd8', pos)
-                if soi < 0: break
-                eoi = buf.find(b'\xff\xd9', soi)
-                if eoi < 0: break
-                jpg = buf[soi:eoi+2]
-                frames.append("data:image/jpeg;base64," + b64.b64encode(jpg).decode())
-                pos = eoi + 2
-            return {"result": json.dumps({"frames": frames, "count": len(frames)})}
+            actual_timestamps = []
+            errors = []
+            for ts in timestamps:
+                cmd = ["ffmpeg", "-v", "error", "-ss", str(ts), "-i", input_path,
+                       "-frames:v", "1", "-vf", f"scale={scale}:-2", "-f", "image2pipe",
+                       "-q:v", "3", "-vcodec", "mjpeg", "-"]
+                r = subprocess.run(cmd, capture_output=True, timeout=45)
+                if r.returncode != 0 or len(r.stdout) < 100:
+                    errors.append({"timestamp": ts, "error": r.stderr.decode(errors="replace")[:160]})
+                    continue
+                frames.append("data:image/jpeg;base64," + b64.b64encode(r.stdout).decode())
+                actual_timestamps.append(ts)
+            if not frames:
+                detail = errors[0]["error"] if errors else "未生成画面帧"
+                return JSONResponse({"error": f"截图失败: {detail}"}, status_code=500)
+            return {"result": json.dumps({"frames": frames, "timestamps": actual_timestamps,
+                                          "count": len(frames), "errors": errors})}
         else:
             return JSONResponse({"error": f"未知操作: {action}"}, status_code=400)
     except ImportError as e:
@@ -4219,30 +5669,26 @@ async def rag_collections(user_id: str = Query("")):
 @app.post("/engine/rag/collections")
 async def rag_create_col(request: Request, user_id: str = Query("")):
     body = await request.json()
-    name = body.get("name", "")
-    if not name:
-        return {"error": "集合名称不能为空"}
+    name = _safe_rag_collection(body.get("name", ""))
     return rag_create_collection(name, user_id)
 
 @app.delete("/engine/rag/collections")
 async def rag_delete_col(request: Request, user_id: str = Query("")):
     body = await request.json()
-    name = body.get("name", "")
-    if not name:
-        return {"error": "集合名称不能为空"}
+    name = _safe_rag_collection(body.get("name", ""))
     return rag_delete_collection(name, user_id)
 
 @app.get("/engine/rag/knowledge")
 async def rag_knowledge(collection: str = Query("default"), user_id: str = Query("")):
-    return rag_list_documents(collection, user_id)
+    return rag_list_documents(_safe_rag_collection(collection), user_id)
 
 @app.post("/engine/rag/upload")
 async def rag_upload(request: Request, user_id: str = Query("")):
     try:
         import base64 as _b64
         body = await request.json()
-        collection = body.get("collection", "default")
-        filename = body.get("filename", "upload.txt")
+        collection = _safe_rag_collection(body.get("collection", "default"))
+        filename = str(body.get("filename", "upload.txt"))[:255]
         content = body.get("content", "")
         # 支持 base64 编码的二进制文件（PDF/DOCX/XLSX等）
         if not content and body.get("content_base64"):
@@ -4250,11 +5696,11 @@ async def rag_upload(request: Request, user_id: str = Query("")):
                 content = _b64.b64decode(body["content_base64"]).decode("utf-8", errors="replace")
             except Exception:
                 content = ""
-        chunk_size = int(body.get("chunk_size", 512))
-        chunk_overlap = int(body.get("chunk_overlap", 50))
+        chunk_size = max(128, min(int(body.get("chunk_size", 512)), 4096))
+        chunk_overlap = max(0, min(int(body.get("chunk_overlap", 50)), chunk_size // 2))
         api_key = body.get("api_key", "")
         base_url = body.get("base_url", "")
-        embed_model = body.get("embed_model", "")
+        embed_model = str(body.get("embed_model", "") or _rag_user_settings(user_id, collection).get("embed_model", ""))
 
         if not content:
             return {"error": "文档内容不能为空"}
@@ -4271,17 +5717,20 @@ async def rag_search_endpoint(q: str = Query(""), collection: str = Query("defau
                                embed_model: str = Query("")):
     if not q:
         return {"results": [], "error": "查询不能为空"}
+    collection = _safe_rag_collection(collection)
+    top_k = max(1, min(int(top_k), 50))
+    embed_model = embed_model or _rag_user_settings(user_id, collection).get("embed_model", "")
     return rag_search(q, collection, top_k, user_id, api_key, base_url, embed_model)
 
 @app.post("/engine/rag/search")
 async def rag_search_post(request: Request, user_id: str = Query("")):
     body = await request.json()
     q = body.get("q", body.get("query", ""))
-    collection = body.get("collection", "default")
-    top_k = int(body.get("top_k", 5))
+    collection = _safe_rag_collection(body.get("collection", "default"))
+    top_k = max(1, min(int(body.get("top_k", 5)), 50))
     api_key = body.get("api_key", "")
     base_url = body.get("base_url", "")
-    embed_model = body.get("embed_model", "")
+    embed_model = body.get("embed_model", "") or _rag_user_settings(user_id, collection).get("embed_model", "")
     if not q:
         return {"results": [], "error": "查询不能为空"}
     return rag_search(q, collection, top_k, user_id, api_key, base_url, embed_model)
@@ -4289,87 +5738,91 @@ async def rag_search_post(request: Request, user_id: str = Query("")):
 @app.delete("/engine/rag/knowledge")
 async def rag_delete_doc(request: Request, user_id: str = Query("")):
     doc_id = request.query_params.get("doc_id", "")
-    collection = request.query_params.get("collection", "default")
+    collection = _safe_rag_collection(request.query_params.get("collection", "default"))
     # 也支持 JSON body
     if not doc_id:
         try:
             body = await request.json()
             doc_id = body.get("doc_id", "")
-            collection = body.get("collection", collection)
+            collection = _safe_rag_collection(body.get("collection", collection))
         except Exception:
             pass
     if not doc_id:
         return {"error": "doc_id 不能为空"}
     return rag_delete_document(doc_id, collection, user_id)
 
+def _safe_rag_collection(value: str) -> str:
+    text = str(value or "default").strip()
+    if not re.fullmatch(r"[\w\- \u4e00-\u9fff]{1,80}", text, re.UNICODE):
+        raise HTTPException(400, "invalid collection")
+    return text
+
+
+def _rag_user_settings(user_id: str, collection: str) -> dict:
+    if not user_id:
+        raise AgentRuntimeError(ErrorCode.UNAUTHORIZED, "authenticated user required", status=401)
+    data = get_ns("rag_config", user_id).get()
+    collections = data.get("collections", {}) if isinstance(data, dict) else {}
+    selected = collections.get(collection, {}) if isinstance(collections, dict) else {}
+    return selected if isinstance(selected, dict) else {}
+
+
 @app.get("/engine/rag/embed_config")
 async def rag_embed_config(request: Request):
-    """返回嵌入模型配置（从 config 读取）"""
-    import json as _json
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
-    cfg = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path) as f:
-                cfg = _json.load(f)
-        except Exception:
-            pass
-    collection = request.query_params.get("collection", "default")
-    # 读取集合级 mode 配置
-    coll_mode = cfg.get("rag_modes", {}).get(collection, cfg.get("rag_mode", "hybrid"))
+    """Return the authenticated user's collection-scoped embedding settings."""
+    user_id = request.query_params.get("user_id", "")
+    collection = _safe_rag_collection(request.query_params.get("collection", "default"))
+    config_path = Path(PROJECT_ROOT) / "config" / ".mmx_config.json"
+    global_cfg = _load_json(config_path) if config_path.exists() else {}
+    selected = _rag_user_settings(user_id, collection)
+    configured = bool(global_cfg.get("api_key") or global_cfg.get("mmx_api_key"))
     return {
-        "embed_model": cfg.get("embed_model", "text-embedding-3-small"),
-        "embed_api_base": cfg.get("api_base", cfg.get("base_url", "")),
-        "embed_api_key": cfg.get("api_key", cfg.get("mmx_api_key", ""))[:8] + "***" if cfg.get("api_key") else "",
-        "mode": coll_mode,
+        "embed_model": selected.get("embed_model") or global_cfg.get("embed_model", "text-embedding-3-small"),
+        "embed_api_base": "",
+        "embed_api_key": "***" if configured else "",
+        "embed_api_configured": configured,
+        "mode": selected.get("mode", "hybrid"),
         "chunk_size": 512,
-        "chunk_overlap": 50
+        "chunk_overlap": 50,
     }
+
 
 @app.post("/engine/rag/embed_config")
 async def rag_embed_config_post(request: Request):
-    """保存嵌入配置并重新嵌入已有文档"""
-    import json as _json
-    from pathlib import Path as _Path
+    """Persist one user's settings and optionally re-embed only their documents."""
+    user_id = request.query_params.get("user_id", "")
+    collection = _safe_rag_collection(request.query_params.get("collection", "default"))
+    embed_model = str(request.query_params.get("embed_model", "")).strip()[:120]
+    mode = str(request.query_params.get("mode", "hybrid")).strip().lower()
+    if mode not in {"hybrid", "semantic", "keyword"}:
+        raise HTTPException(400, "invalid RAG mode")
 
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", ".mmx_config.json")
-    config_p = _Path(config_path)
+    store = get_ns("rag_config", user_id)
+    settings = store.get()
+    if not isinstance(settings, dict):
+        settings = {}
+    collections = settings.setdefault("collections", {})
+    collections[collection] = {"embed_model": embed_model, "mode": mode}
+    store.set(settings)
 
-    collection = request.query_params.get("collection", "default")
-    embed_model = request.query_params.get("embed_model", "")
-    mode = request.query_params.get("mode", "hybrid")
-
-    # 读取/更新配置
-    cfg = _load_json(config_p) if config_p.exists() else {}
-
-    if embed_model:
-        cfg["embed_model"] = embed_model
-    # 按集合保存 mode
-    if "rag_modes" not in cfg:
-        cfg["rag_modes"] = {}
-    cfg["rag_modes"][collection] = mode
-
-    with open(config_path, "w") as f:
-        _json.dump(cfg, f, indent=2, ensure_ascii=False)
-
-    # 重新嵌入已有文档
     embedded = 0
     if embed_model:
-        user_id = request.query_params.get("user_id", "")
-        docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+        config_path = Path(PROJECT_ROOT) / "config" / ".mmx_config.json"
+        global_cfg = _load_json(config_path) if config_path.exists() else {}
+        docs_file = _docs_path(user_id, collection)
         data = _load_json(docs_file)
-        api_key = cfg.get("api_key", "") or cfg.get("mmx_api_key", "")
-        api_base = cfg.get("api_base", "") or cfg.get("base_url", "")
+        api_key = global_cfg.get("api_key", "") or global_cfg.get("mmx_api_key", "")
+        api_base = global_cfg.get("api_base", "") or global_cfg.get("base_url", "")
         for doc in data.get("documents", []):
             for chunk in doc.get("chunks", []):
                 try:
-                    emb = _get_embedding(chunk["text"], api_key, api_base, embed_model)
-                    if emb:
-                        chunk["embedding"] = emb
+                    embedding = _get_embedding(chunk.get("text", ""), api_key, api_base, embed_model)
+                    if embedding:
+                        chunk["embedding"] = embedding
                         embedded += 1
                 except Exception:
                     pass
-        if embedded > 0:
+        if embedded:
             _save_json(docs_file, data)
 
     return {"success": True, "embedded": embedded, "embed_model": embed_model, "mode": mode}
@@ -4388,12 +5841,15 @@ async def platform_extract(url: str = Query(""), user_id: str = Query("")):
     """从支持的平台(B站等)提取结构化内容"""
     if not url:
         return {"ok": False, "error": "缺少 url 参数"}
+    from engine.browser import is_safe_browser_url
+    if not await is_safe_browser_url(url):
+        return {"ok": False, "error": "blocked private or invalid URL"}
     try:
         from engine.web_extract import web_extractor as _wex
         bm = None
         try:
             from engine.browser import ensure_browser_connected
-            bm = await ensure_browser_connected()
+            bm = await ensure_browser_connected(user_id)
         except Exception:
             pass
         result = await _wex.extract(url, _http_session, bm)
@@ -4492,6 +5948,15 @@ async def skills_run(request: Request, user_id: str = Query("")):
 SRC_DIR = "/home/naujtrats/StarRailCopilot"
 SRC_INSTALLED = os.path.isdir(SRC_DIR)
 
+def _safe_src_name(value: str, *, field: str = 'config_name') -> str:
+    text = str(value or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', text):
+        raise HTTPException(400, f'invalid {field}')
+    return text
+
+def _require_src_owner(user_id: str) -> None:
+    resource_owners.require('src', str(user_id or ''))
+
 if SRC_INSTALLED and SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
@@ -4501,6 +5966,8 @@ def _patch_src_path():
         from module.config import utils as _src_cfg_utils
         _orig_filepath = _src_cfg_utils.filepath_config
         def _patched_filepath(filename, mod_name='alas'):
+            filename = _safe_src_name(filename)
+            mod_name = _safe_src_name(mod_name, field='module_name')
             if mod_name == 'alas':
                 return os.path.join(SRC_DIR, 'config', f'{filename}.json')
             return os.path.join(SRC_DIR, 'config', f'{filename}.{mod_name}.json')
@@ -4629,7 +6096,9 @@ def _src_stored_value(config, path_key, default=0):
 # ── Endpoints ──
 
 @app.get("/engine/src/status")
-async def src_status(config_name: str = Query("src")):
+async def src_status(config_name: str = Query("src"), user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
     if not SRC_INSTALLED:
         return {"ok": True, "status": "not_installed", "alive": False, "state": 0,
                 "state_label": "not_installed", "config_name": config_name,
@@ -4653,12 +6122,15 @@ async def src_status(config_name: str = Query("src")):
 
 
 @app.get("/engine/src/ping")
-async def src_ping():
+async def src_ping(user_id: str = Query("")):
+    _require_src_owner(user_id)
     return {"ok": True, "installed": SRC_INSTALLED, "dir": SRC_DIR}
 
 
 @app.get("/engine/src/dashboard")
-async def src_dashboard(config_name: str = Query("src")):
+async def src_dashboard(config_name: str = Query("src"), user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
     if not SRC_INSTALLED:
         return {"ok": True, "resources": {}, "message": "SRC 未安装"}
     try:
@@ -4691,7 +6163,9 @@ async def src_dashboard(config_name: str = Query("src")):
 
 
 @app.get("/engine/src/tasks")
-async def src_tasks(config_name: str = Query("src")):
+async def src_tasks(config_name: str = Query("src"), user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
     if not SRC_INSTALLED:
         return {"ok": True, "groups": [], "tasks": [], "message": "SRC 未安装"}
     try:
@@ -4708,14 +6182,15 @@ async def src_tasks(config_name: str = Query("src")):
 
 
 @app.post("/engine/src/run")
-async def src_run(request: Request):
+async def src_run(request: Request, user_id: str = Query("")):
+    _require_src_owner(user_id)
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装，无法启动"}
     try:
         data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
     except Exception:
         data = {}
-    config_name = data.get('config_name', SRC_DEFAULT_CONFIG)
+    config_name = _safe_src_name(data.get('config_name', SRC_DEFAULT_CONFIG))
     task = data.get('task', 'Alas')
     valid_tasks = [t for g in SRC_TASK_GROUPS for t in g['tasks']]
     if task not in valid_tasks:
@@ -4735,14 +6210,15 @@ async def src_run(request: Request):
 
 
 @app.post("/engine/src/stop")
-async def src_stop(request: Request):
+async def src_stop(request: Request, user_id: str = Query("")):
+    _require_src_owner(user_id)
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装"}
     try:
         data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
     except Exception:
         data = {}
-    config_name = data.get('config_name', SRC_DEFAULT_CONFIG)
+    config_name = _safe_src_name(data.get('config_name', SRC_DEFAULT_CONFIG))
     try:
         if not _src_have_pm(config_name):
             return {"ok": False, "error": "没有运行中的任务"}
@@ -4756,7 +6232,9 @@ async def src_stop(request: Request):
 
 
 @app.get("/engine/src/config/{config_name}")
-async def src_get_config(config_name: str):
+async def src_get_config(config_name: str, user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
     if not SRC_INSTALLED:
         return {"ok": True, "data": {}, "config_name": config_name, "message": "SRC 未安装"}
     try:
@@ -4776,7 +6254,9 @@ async def src_get_config(config_name: str):
 
 
 @app.put("/engine/src/config/{config_name}")
-async def src_set_config(config_name: str, request: Request):
+async def src_set_config(config_name: str, request: Request, user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装"}
     try:
@@ -4807,7 +6287,10 @@ async def src_set_config(config_name: str, request: Request):
 
 
 @app.get("/engine/src/logs")
-async def src_logs(config_name: str = Query("src"), limit: int = Query(50)):
+async def src_logs(config_name: str = Query("src"), limit: int = Query(50), user_id: str = Query("")):
+    _require_src_owner(user_id)
+    config_name = _safe_src_name(config_name)
+    limit = max(1, min(int(limit), 500))
     if not SRC_INSTALLED:
         return {"ok": True, "lines": ["[SRC] StarRailCopilot 未安装"], "count": 1}
     try:
@@ -4831,8 +6314,9 @@ async def src_logs(config_name: str = Query("src"), limit: int = Query(50)):
 
 
 @app.get("/engine/src/configs")
-async def src_configs():
+async def src_configs(user_id: str = Query("")):
     """List available SRC config instances."""
+    _require_src_owner(user_id)
     if not SRC_INSTALLED:
         return {"ok": True, "instances": []}
     try:
@@ -4843,8 +6327,10 @@ async def src_configs():
 
 
 @app.get("/engine/src/args/{task_name}")
-async def src_args(task_name: str):
+async def src_args(task_name: str, user_id: str = Query("")):
     """Get argument schema for a task."""
+    _require_src_owner(user_id)
+    task_name = _safe_src_name(task_name, field='task_name')
     if not SRC_INSTALLED:
         return {"ok": False, "error": "SRC 未安装"}
     try:
@@ -4862,8 +6348,11 @@ async def src_args(task_name: str):
 
 
 if __name__ == "__main__":
+    host = os.getenv("ENGINE_HOST", "127.0.0.1")
     port = int(os.getenv("ENGINE_PORT", "8766"))
-    print(f"[引擎] 启动 http://0.0.0.0:{port}")
-    print(f"[引擎] Cron 任务: {list(cron_store.get().keys())}")
-    print(f"[引擎] 子代理: {list(agent_store.get().keys())}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"[引擎] 启动 http://{host}:{port}")
+    print(f"[引擎] Cron task count={len(cron_store.get())}")
+    print(f"[引擎] subagent count={len(agent_store.get())}")
+    # HTTP request targets can contain chat/user query values. Keep operational logs
+    # metadata-only and rely on the durable redacted event store for diagnostics.
+    uvicorn.run(app, host=host, port=port, access_log=False)

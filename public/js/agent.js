@@ -19,13 +19,42 @@ function getAgentMode() {
     return val;
 }
 
+// ★ 记住用户上一次主动选择的运行模式。off 只是退出，不应抹掉下次进入的模式。
+function getPreferredAgentMode() {
+    var preferred = localStorage.getItem('agentPreferredMode');
+    if (['plan','agent','yolo'].indexOf(preferred) !== -1) return preferred;
+    var current = getAgentMode();
+    if (['plan','agent','yolo'].indexOf(current) !== -1) {
+        localStorage.setItem('agentPreferredMode', current);
+        return current;
+    }
+    return 'agent';
+}
+
+function _markLocalAgentModeChange(mode) {
+    var ts = Date.now();
+    try {
+        localStorage.setItem('agentModeLocalTs', String(ts));
+        if (mode !== 'off') localStorage.setItem('agentPreferredMode', mode);
+    } catch (e) {}
+    window._agentModeLocalTs = ts;
+}
+
+// SSE/重连快照可能携带旧值；本机刚选择模式后短暂锁定，避免旧事件把 YOLO 降回 Agent。
+window._shouldApplyRemoteAgentMode = function(remoteTs) {
+    var localTs = parseInt(localStorage.getItem('agentModeLocalTs') || '0', 10) || 0;
+    var incomingTs = parseInt(remoteTs || '0', 10) || 0;
+    if (incomingTs && localTs && incomingTs < localTs) return false;
+    return !localTs || (Date.now() - localTs >= 4000);
+};
+
 /** 设置 Agent 模式并更新 UI */
-function setAgentMode(mode) {
+function setAgentMode(mode, fromToggle) {
     if (['off','plan','agent','yolo'].indexOf(mode) === -1) mode = 'off';
     var prevMode = getAgentMode();
 
-    // ★ 同模式再次点击 = 退出到 off
-    if (mode !== 'off' && mode === prevMode) {
+    // ★ 仅在通过双击主按钮或显式切换触发时，才允许 toggle 回 off；在菜单中选择已选模式时保持该模式不变
+    if (fromToggle && mode !== 'off' && mode === prevMode) {
         mode = 'off';
     }
 
@@ -54,14 +83,17 @@ function setAgentMode(mode) {
         clearTimeout(window._agentAnimLock);
     }
 
-    // ★ 消息队列隔离：模式切换时先保存旧队列
+    // ★ 消息队列隔离：模式切换时先保存旧队列（显式使用 prevMode）
     if (_newIsAgent !== _prevIsAgent) {
-        console.log('[Queue] mode switch: prev=' + prevMode + ' new=' + mode + ' chatId=' + currentChatId + ' items=' + window._messageQueue.length);
-        window._saveQueue();  // 保存到旧模式的 key
+        console.log('[Queue] mode switch: prev=' + prevMode + ' new=' + mode + ' chatId=' + currentChatId + ' items=' + (window._messageQueue ? window._messageQueue.length : 0));
+        if (typeof window._saveQueue === 'function') {
+            window._saveQueue(prevMode, currentChatId);
+        }
         window._agentModeSwitching = true;
     }
 
     localStorage.setItem('agentMode', mode);  // ★ 必须在后续 loadChat 之前设置
+    _markLocalAgentModeChange(mode);
     window._scheduleConfigSync();
 
     // ★ 重置队列状态（loadChat 会根据新 currentChatId 加载正确队列）
@@ -434,15 +466,23 @@ function _agentGetAuthToken() {
     try { return localStorage.getItem('authToken') || ''; } catch(e) { return ''; }
 }
 
+function _agentAuthHeaders(extra) {
+    var headers = Object.assign({}, extra || {});
+    var token = _agentGetAuthToken();
+    if (token && !headers.Authorization) headers.Authorization = 'Bearer ' + token;
+    return headers;
+}
+
 /** 向引擎发送 POST 请求 */
 async function _agentApiPost(action, data) {
     var token = _agentGetAuthToken();
     var url = _agentEngineUrl() + 'engine_api.php?action=' + action;
-    if (token) url += '&auth_token=' + encodeURIComponent(token);
+    var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
     try {
         var resp = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(data)
         });
         return await resp.json();
@@ -461,9 +501,10 @@ async function _agentApiGet(action, params) {
             url += '&' + k + '=' + encodeURIComponent(params[k]);
         }
     }
-    if (token) url += '&auth_token=' + encodeURIComponent(token);
+    var headers = { 'Accept': 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
     try {
-        var resp = await fetch(url);
+        var resp = await fetch(url, { headers: headers });
         return await resp.json();
     } catch(e) {
         console.warn('[AgentMemory] GET ' + action + ' failed:', e);
@@ -537,10 +578,12 @@ window.agentHeartbeatStatus = async function() {
 
 /** 从 memory_api.php 加载用户记忆缓存 */
 window._loadCloudMemories = async function() {
-    var token = localStorage.getItem('authToken');
+    var token = getAuthToken();
     if (!token) return null;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=smart_context&limit=15&token=' + encodeURIComponent(token));
+        var resp = await fetch('/oneapichat/api/memory_api.php?action=smart_context&limit=15', {
+            headers: getSessionAuthHeaders()
+        });
         var data = await resp.json();
         if (data && data.context) {
             window.__cloudMemories = data.context;
@@ -554,10 +597,12 @@ window._loadCloudMemories = async function() {
 
 /** 从 memory_api.php 加载身份信息 (与SOUL/USER/IDENTITY对应) */
 window._loadCloudIdentity = async function() {
-    var token = localStorage.getItem('authToken');
+    var token = getAuthToken();
     if (!token) return null;
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=search_memories&q=身份&token=' + encodeURIComponent(token));
+        var resp = await fetch('/oneapichat/api/memory_api.php?action=search_memories&q=' + encodeURIComponent('身份'), {
+            headers: getSessionAuthHeaders()
+        });
         var data = await resp.json();
         if (data && data.memories) {
             // 查找 identity_ 前缀的记忆
@@ -588,7 +633,7 @@ window.refreshMemoryList = async function() {
     if (!listEl || !token) return;
     try {
         // ★ v2: 使用新事实列表端点
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=50&auth_token=' + encodeURIComponent(token));
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=50', { headers: _agentAuthHeaders() });
         var data = await resp.json();
         var facts = (data.ok && data.facts) ? data.facts : [];
         if (facts.length === 0) {
@@ -622,9 +667,9 @@ window.addMemoryEntry = async function() {
     if (!token) return;
     try {
         // ★ v2: 使用新端点,将 key+content 映射为 fact 的 entity+relation+target
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save&auth_token=' + encodeURIComponent(token), {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: _agentAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ entity: 'user', relation: key, target: content, content: content, importance: 5, source: 'manual' })
         });
         var data = await resp.json();
@@ -643,9 +688,9 @@ window.deleteMemoryEntry = async function(factId) {
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete&auth_token=' + encodeURIComponent(token), {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: _agentAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ id: factId })
         });
         var data = await resp.json();
@@ -662,13 +707,13 @@ window.clearAllMemories = async function() {
     if (!token) return;
     try {
         // ★ v2: 获取所有事实并逐个删除
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=200&auth_token=' + encodeURIComponent(token));
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_fact_list&limit=200', { headers: _agentAuthHeaders() });
         var data = await resp.json();
         var facts = (data.ok && data.facts) ? data.facts : [];
         for (var i = 0; i < facts.length; i++) {
-            await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete&auth_token=' + encodeURIComponent(token), {
+            await fetch('/oneapichat/api/engine_api.php?action=memory_fact_delete', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _agentAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ id: facts[i].id })
             });
         }
@@ -771,15 +816,16 @@ window._autoSaveMemoriesFromChat = async function(chatId) {
             var fact = { entity: 'user', relation: items[i].key, target: items[i].content, content: items[i].content, importance: 6, source: 'auto_extract' };
             // 新系统 (SQLite + chromadb)
             try {
-                await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save&auth_token=' + encodeURIComponent(token), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                await fetch('/oneapichat/api/engine_api.php?action=memory_fact_save', {
+                    method: 'POST', headers: _agentAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(fact)
                 });
             } catch(e) {}
             // 旧系统 (PHP JSON, 兼容)
             try {
-                await fetch('/oneapichat/api/memory_api.php?action=save_memory&token=' + encodeURIComponent(token), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                await fetch('/oneapichat/api/memory_api.php?action=save_memory', {
+                    method: 'POST',
+                    headers: getSessionAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ key: items[i].key, content: items[i].content })
                 });
             } catch(e) {}
@@ -801,7 +847,9 @@ window._autoAskIdentity = async function() {
     if (!token) return;
     // 检查是否已有身份信息
     try {
-        var resp = await fetch('/oneapichat/api/memory_api.php?action=search_memories&q=identity_user_name&token=' + encodeURIComponent(token));
+        var resp = await fetch('/oneapichat/api/memory_api.php?action=search_memories&q=identity_user_name', {
+            headers: getSessionAuthHeaders()
+        });
         var data = await resp.json();
         var hasIdentity = data.memories && data.memories.some(function(m) { return m.key === 'identity_user_name'; });
         if (hasIdentity) return; // 已有身份,不需要问
@@ -871,41 +919,76 @@ window.__memoryContext = {
     lastUpdated: null,
 };
 
-/**
- * ★ 记忆v2: 刷新统一内存上下文 (带重试)
- */
-window.refreshMemoryContext = async function() {
-    var token = localStorage.getItem('authToken');
-    if (!token) { console.log('[MemoryCtx] no token, skip'); return; }
-
-    // 加载记忆上下文 (带1次重试)
-    for (var retry = 0; retry < 2; retry++) {
-        try {
-            var resp = await fetch('/oneapichat/api/engine_api.php?action=memory_context&auth_token=' + encodeURIComponent(token), { signal: AbortSignal.timeout(10000) });
-            var data = await resp.json();
-            if (data.ok && data.context) {
-                window.__memoryContext.contextBlock = data.context;
-                window.__memoryContext.lastUpdated = Date.now();
-                break;
-            } else if (data.error) {
-                console.warn('[MemoryCtx] server error:', data.error);
-            }
-        } catch(e) {
-            if (retry === 1) console.warn('[MemoryCtx] load failed after retry:', e.message);
-            else await new Promise(function(r) { setTimeout(r, 1000); }); // wait 1s before retry
+// ★ 安全 JSON 请求辅助函数（拦截 429、5xx 和非 JSON HTML 响应，防止 Unexpected token '<' 报错）
+async function _safeFetchEngineJson(url, options) {
+    try {
+        var resp = await fetch(url, options);
+        if (resp.status === 429) {
+            // 限流静默降级
+            return { ok: false, error: 'rate_limit', status: 429 };
         }
+        var contentType = resp.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            return { ok: false, error: 'invalid_content_type', status: resp.status };
+        }
+        return await resp.json();
+    } catch(e) {
+        return { ok: false, error: e.message || 'fetch_failed' };
+    }
+}
+
+// 内存上下文并发锁与 TTL 缓存
+var _inFlightMemoryPromise = null;
+var _lastMemoryFetchTime = 0;
+var MEMORY_CACHE_TTL_MS = 15000; // 15秒缓存，避免多端事件并发打爆 nginx
+
+/**
+ * ★ 记忆v2: 刷新统一内存上下文 (带防并发、TTL缓存与429静默降级)
+ */
+window.refreshMemoryContext = async function(force) {
+    var token = localStorage.getItem('authToken');
+    if (!token) return;
+
+    var now = Date.now();
+    if (!force && (now - _lastMemoryFetchTime < MEMORY_CACHE_TTL_MS) && window.__memoryContext.lastUpdated) {
+        return;
     }
 
-    // 加载人格预设信息
-    try {
-        var presp = await fetch('/oneapichat/api/engine_api.php?action=personality_load&auth_token=' + encodeURIComponent(token), { signal: AbortSignal.timeout(8000) });
-        var pdata = await presp.json();
-        if (pdata.ok && pdata.personality) {
-            window.__memoryContext.persona = pdata.personality.constitution || {};
-            window.__memoryContext.identity = pdata.personality.narrative || {};
-            window.__memoryContext.presetId = pdata.personality.preset_id;
+    if (_inFlightMemoryPromise) {
+        return _inFlightMemoryPromise;
+    }
+
+    _inFlightMemoryPromise = (async function() {
+        try {
+            // 1. 加载记忆上下文
+            var data = await _safeFetchEngineJson('/oneapichat/api/engine_api.php?action=memory_context', {
+                signal: AbortSignal.timeout(10000),
+                headers: _agentAuthHeaders()
+            });
+            if (data && data.ok && data.context) {
+                window.__memoryContext.contextBlock = data.context;
+                window.__memoryContext.lastUpdated = Date.now();
+                _lastMemoryFetchTime = Date.now();
+            }
+
+            // 2. 加载人格预设信息
+            var pdata = await _safeFetchEngineJson('/oneapichat/api/engine_api.php?action=personality_load', {
+                signal: AbortSignal.timeout(8000),
+                headers: _agentAuthHeaders()
+            });
+            if (pdata && pdata.ok && pdata.personality) {
+                window.__memoryContext.persona = pdata.personality.constitution || {};
+                window.__memoryContext.identity = pdata.personality.narrative || {};
+                window.__memoryContext.presetId = pdata.personality.preset_id;
+            }
+        } catch(e) {
+            // 优雅降级
+        } finally {
+            _inFlightMemoryPromise = null;
         }
-    } catch(e) { console.warn('[MemoryCtx] personality load failed:', e.message); }
+    })();
+
+    return _inFlightMemoryPromise;
 };
 
 /**
@@ -913,9 +996,10 @@ window.refreshMemoryContext = async function() {
  */
 window.loadPersonalityPresets = async function() {
     try {
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=personality_presets', { signal: AbortSignal.timeout(5000) });
-        var data = await resp.json();
-        return data.ok ? data.presets : [];
+        var data = await _safeFetchEngineJson('/oneapichat/api/engine_api.php?action=personality_presets', {
+            signal: AbortSignal.timeout(5000)
+        });
+        return (data && data.ok) ? data.presets : [];
     } catch(e) { return []; }
 };
 
@@ -929,9 +1013,9 @@ window.setPersonalityPreset = async function(presetId) {
     var token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-        var resp = await fetch('/oneapichat/api/engine_api.php?action=personality_set_preset&auth_token=' + encodeURIComponent(token), {
+        var resp = await fetch('/oneapichat/api/engine_api.php?action=personality_set_preset', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: _agentAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ preset: presetId })
         });
         var data = await resp.json();
@@ -1095,8 +1179,8 @@ function _startAgentHeartbeatIfNeeded() {
 // 在 setAgentMode 后启动心跳 + 关闭popup
 (function() {
     var origSetAgentMode = window.setAgentMode;
-    window.setAgentMode = function(mode) {
-        origSetAgentMode(mode);
+    window.setAgentMode = function(mode, fromToggle) {
+        origSetAgentMode(mode, fromToggle);
         // ★ 选完关闭 popup(桌面端hover也适用)
         var popup = getEl('agentModePopup');
         if (popup) popup.classList.remove('show');
@@ -1165,6 +1249,13 @@ window.openAgentPanel = function() {
 window.closeAgentPanel = function() {
     var ap = $.agentPanel || getEl('agentPanel');
     if (!ap) return;
+
+    // 先移走面板内焦点，再设置 aria-hidden/inert，避免浏览器无障碍警告。
+    if (typeof window._moveFocusOutOfPanel === 'function') {
+        window._moveFocusOutOfPanel(ap);
+    } else if (ap.contains(document.activeElement) && document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+    }
 
     if (isMobile()) {
         ap.classList.add('hidden-panel');
@@ -1260,6 +1351,12 @@ window.toggleAgentPanel = function() {
 };
 
 window._agentListCache = {};
+window._agentListFetchFailures = 0;
+window._agentListNextRetryAt = 0;
+
+function _isAgentListTimeoutError(e) {
+    return !!e && (e.name === 'TimeoutError' || e.name === 'AbortError' || /timed out|timeout/i.test(String(e.message || '')));
+}
 
 window._renderAgentList = function(agents, container) {
     if (!container) return;
@@ -1322,13 +1419,66 @@ window._renderAgentList = function(agents, container) {
     }).join('');
 };
 
+/**
+ * ★ 公共 agent_list 获取器 — 统一处理 429 退避 + content-type 校验 + JSON 解析 + 客户端去重
+ * 所有需要 agent_list 数据的调用方都应使用此函数,避免各自重复防护逻辑导致 429 崩溃
+ * @returns {Promise<object|null>} agents 对象,失败时返回缓存或 null
+ */
+window._fetchAgentListJSON = async function() {
+    var token = getAuthToken();
+    if (!token) return null;
+    // ★ 客户端最小请求间隔:防多调用方堆叠触发 nginx 429
+    var now = Date.now();
+    if (now < (window._agentListNextRetryAt || 0)) return window._agentListCache || null;
+    var minInterval = (window._agentListBackoff && window._agentListBackoff > 1000) ? window._agentListBackoff : 3000;
+    if (now - (window._agentListLastReq || 0) < minInterval) {
+        return window._agentListCache || null;
+    }
+    window._agentListLastReq = now;
+    try {
+        // agent_list 只是侧栏辅助信息，不能用一个30秒悬挂请求拖慢主聊天输出。
+        var r = await fetch(_apiBase + '?action=agent_list', { signal: AbortSignal.timeout(8000), headers: _agentAuthHeaders() });
+        // ★ 429 退避:nginx 限流时返回 HTML,不能直接 json()
+        if (r.status === 429) {
+            window._agentListBackoff = Math.min((window._agentListBackoff || 1000) * 2, 60000);
+            console.warn('[AgentPanel] 429 限流,退避 ' + window._agentListBackoff + 'ms');
+            return window._agentListCache || null;
+        }
+        window._agentListBackoff = 1000; // 成功后重置
+        window._agentListFetchFailures = 0;
+        window._agentListNextRetryAt = 0;
+        var ctype = r.headers.get('content-type') || '';
+        if (!ctype.includes('json')) {
+            throw new Error('引擎返回非 JSON 数据 (HTTP ' + r.status + ')');
+        }
+        var agents = await r.json();
+        if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
+            throw new Error('引擎返回无效数据');
+        }
+        window._agentListCache = agents;
+        window._agentListCacheTime = now;
+        return agents;
+    } catch(e) {
+        window._agentListFetchFailures = (window._agentListFetchFailures || 0) + 1;
+        var _retryMs = Math.min(60000, 3000 * Math.pow(2, Math.min(window._agentListFetchFailures - 1, 4)));
+        window._agentListNextRetryAt = Date.now() + _retryMs;
+        if (_isAgentListTimeoutError(e)) {
+            // 面板刷新超时是非关键辅助请求：保留缓存、退避重试，不向控制台制造持续 WARN，
+            // 更不能影响主聊天流的 typing/输出状态。
+            console.info('[AgentPanel] 列表刷新超时，保留缓存并在 ' + _retryMs + 'ms 后重试');
+        } else {
+            console.warn('[AgentPanel] 获取失败:', e.message);
+        }
+        return window._agentListCache || null;
+    }
+};
+
 window._refreshAllAgentLists = async function(_opts) {
     _opts = _opts || {};
     var token = getAuthToken();
     if (!token) return;
-    // ★ 防止并发重复请求:已有 in-flight 请求时静默跳过
+    // ★ 调用方已持有 agents 数据,直接渲染不发请求
     if (_opts._inheritedAgents) {
-        // 调用方已持有 agents 数据,直接渲染不发请求
         var inherited = _opts._inheritedAgents;
         window._agentListCache = inherited;
         window._agentListCacheTime = Date.now();
@@ -1338,41 +1488,32 @@ window._refreshAllAgentLists = async function(_opts) {
         if (dptuiInh && dptuiInh !== getEl('agentSubList')) window._renderAgentList(inherited, dptuiInh);
         return;
     }
+    // ★ 防止并发重复请求:已有 in-flight 请求时静默跳过
     if (window._agentListInFlight) return;
     window._agentListInFlight = true;
     try {
-        var r = await fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
-        // ★ 429 退避:nginx 限流时返回 HTML,不能直接 json()
-        if (r.status === 429) {
-            window._agentListBackoff = Math.min((window._agentListBackoff || 1000) * 2, 60000);
-            console.warn('[AgentPanel] 429 限流,退避 ' + window._agentListBackoff + 'ms');
+        var agents = await window._fetchAgentListJSON();
+        if (!agents) {
+            var msg = '加载失败: 无数据';
+            var lists = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
+            lists.forEach(function(id) {
+                var el = getEl(id);
+                if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
+            });
             return;
         }
-        window._agentListBackoff = 1000; // 成功后重置
-        var ctype = r.headers.get('content-type') || '';
-        if (!ctype.includes('json')) {
-            throw new Error('引擎返回非 JSON 数据 (HTTP ' + r.status + ')');
-        }
-        var agents = await r.json();
-        // 验证返回的数据是有效对象
-        if (typeof agents !== 'object' || agents === null || Array.isArray(agents)) {
-            throw new Error('引擎返回无效数据');
-        }
-        window._agentListCache = agents;
-        window._agentListCacheTime = Date.now();
         window._renderAgentList(agents, getEl('agentSubList'));
         window._renderAgentList(agents, getEl('engineAgentList'));
         var dptuiContainer = getEl('agentSubListDptui');
         if (dptuiContainer && dptuiContainer !== getEl('agentSubList')) window._renderAgentList(agents, dptuiContainer);
     } catch(e) {
         // 显示错误但不中断,保留上次缓存
-        var msg = '加载失败: ' + e.message;
-        var lists = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
-        lists.forEach(function(id) {
+        var msg2 = '加载失败: ' + e.message;
+        var lists2 = ['agentSubList', 'agentSubListDptui', 'engineAgentList'];
+        lists2.forEach(function(id) {
             var el = getEl(id);
-            if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg) + '</div>';
+            if (el) el.innerHTML = '<div class="text-xs text-gray-500 p-2" style="font-size:10px;">' + escapeHtml(msg2) + '</div>';
         });
-        // 如果缓存超过30秒,清除缓存避免展示过时数据
         if (window._agentListCacheTime && Date.now() - window._agentListCacheTime > 30000) {
             window._agentListCache = {};
         }
@@ -1411,27 +1552,38 @@ function resetSessionUsage() {
     updateAgentUsageDisplay();
 }
 
+function _agentDisplayText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+}
+
 window.selectAgentChat = function(agentName) {
     _selectedAgentName = agentName;
     getEl('agentChatTitle').innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg> ' + escapeHtml(agentName);
     var msgArea = getEl('agentChatMessages');
     // 从 localStorage 读取该代理的聊天记录
     var key = 'agent_chat_' + agentName;
-    var msgs = JSON.parse(localStorage.getItem(key) || '[]');
+    var msgs = [];
+    try {
+        var cachedMsgs = JSON.parse(localStorage.getItem(key) || '[]');
+        msgs = Array.isArray(cachedMsgs) ? cachedMsgs : [];
+    } catch (e) {
+        localStorage.removeItem(key);
+    }
     if (msgs.length === 0) {
         var token = getAuthToken();
         if (!token) { msgArea.innerHTML = '<div class="text-xs text-gray-400">请先登录</div>'; return; }
         msgArea.innerHTML = '<div class="text-xs text-gray-400">获取中...</div>';
-        fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
-            .then(function(r) { return r.json(); })
-            .then(function(agents) {
-                var a = agents[agentName];
-                if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在(可能已被删除)</div>'; return; }
+        window._fetchAgentListJSON().then(function(agents) {
+            if (!agents) { msgArea.innerHTML = '<div class="text-xs text-gray-400">加载失败(限流中)</div>'; return; }
+            var a = agents[agentName];
+            if (!a) { msgArea.innerHTML = '<div class="text-xs text-gray-400">代理不存在(可能已被删除)</div>'; return; }
                 if (a.status === 'running') {
                     var stepInfo = '';
                     if (typeof a._step !== 'undefined' && a._step > 0) stepInfo = ' · 步骤 ' + a._step + '/' + (a._maxSteps || '?');
                     var toolInfo = a._lastTool ? ' · 🔧' + a._lastTool : '';
-                    var partial = a.result || '';
+                    var partial = _agentDisplayText(a.result || '');
                     if (partial) {
                         msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant">' +
                             '<div class="text-xs text-green-500 font-medium mb-1">⏳ 运行中' + stepInfo + toolInfo + '</div>' +
@@ -1445,7 +1597,7 @@ window.selectAgentChat = function(agentName) {
                     return;
                 }
                 if (a.status === 'failed') {
-                    var errText = a.error || a.result || '未知错误';
+                    var errText = _agentDisplayText(a.error || a.result || '未知错误');
                     msgArea.innerHTML = '<div class="agent-chat-bubble role-assistant" style="border-left:3px solid #ef4444;">' +
                         '<div class="text-xs text-red-500 font-medium mb-1">❌ 执行失败</div>' +
                         '<div class="text-xs text-red-600 dark:text-red-400 mb-2" style="font-size:11px;">' + escapeHtml(errText.substring(0, 500)) + '</div>' +
@@ -1461,13 +1613,13 @@ window.selectAgentChat = function(agentName) {
                             var resultHtml = '<div class="agent-chat-bubble role-assistant">' +
                                 '<div class="text-xs text-gray-400 mb-1">' + escapeHtml(agentName) + ' · ✅完成</div>';
                             if (structured && structured.summary) {
-                                resultHtml += '<div class="text-xs font-medium text-gray-800 dark:text-gray-200 mb-2" style="font-size:11px;">📋 ' + escapeHtml(structured.summary) + '</div>';
+                                resultHtml += '<div class="text-xs font-medium text-gray-800 dark:text-gray-200 mb-2" style="font-size:11px;">📋 ' + escapeHtml(_agentDisplayText(structured.summary)) + '</div>';
                             }
-                            resultHtml += '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(a.result.substring(0, 3000)) + '</div>' +
+                            resultHtml += '<div class="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-300">' + escapeHtml(_agentDisplayText(a.result).substring(0, 3000)) + '</div>' +
                                 '</div>';
                             rEl.innerHTML = resultHtml;
                         }
-                        var ms2 = [{ role: 'assistant', content: a.result, time: Date.now() }];
+                        var ms2 = [{ role: 'assistant', content: _agentDisplayText(a.result), time: Date.now() }];
                         localStorage.setItem(key, JSON.stringify(ms2));
                     }
                 }).catch(function(err) {
@@ -1493,8 +1645,12 @@ window.mainAgentReply = function() {
     }
     var token = getAuthToken();
     if (!token) { if (statusEl) statusEl.textContent = '❌ 未登录'; return; }
-    fetch(_apiBase + '?action=agent_notifications&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
-        .then(function(r) { return r.json(); })
+    fetch(_apiBase + '?action=agent_notifications', { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() })
+        .then(function(r) {
+            var ct = r.headers.get('content-type') || '';
+            if (!r.ok || !ct.includes('json')) throw new Error('通知接口返回异常 (HTTP ' + r.status + ')');
+            return r.json();
+        })
         .then(function(data) {
             if (!data || data.count === 0) {
                 if (statusEl) statusEl.textContent = '没有新的子代理结果';
@@ -1655,14 +1811,404 @@ function updateAgentUI() {
     }
     document.body.classList.toggle('agent-active', isActive);
 
-    // ★ 普通模式: 改输入框提示文字,过滤Agent命令
+    // ★ 智能更新 DSH 风格 Agent Composer 卡片式输入框与胶囊
+    var inputWrap = document.getElementById('inputWrapper');
+    var agentTop = document.getElementById('agentComposerTop');
+    var agentBottom = document.getElementById('agentComposerBottom');
     var input = $.userInput || getEl('userInput');
-    if (input) {
-        input.placeholder = mode === 'off' ? '发送消息... / 开头用斜杠命令' : '发送消息给 Agent... / 开头用斜杠命令';
+
+    if (isActive) {
+        if (inputWrap) inputWrap.classList.add('agent-composer-active');
+        if (agentTop) agentTop.classList.remove('hidden');
+        if (agentBottom) agentBottom.classList.remove('hidden');
+        if (input) input.placeholder = '输入指令，或使用 / 查看命令，@ 引用文件...';
+
+        // ★ 运行模式胶囊 (经典 Plan / Agent / YOLO 三模式)
+        var modeCapName = document.getElementById('agentModeCapsuleName');
+        var modeCapIcon = document.getElementById('agentModeCapsuleIcon');
+        if (modeCapName) {
+            var modeNames = { 'plan': 'Plan 模式', 'agent': 'Agent 模式', 'yolo': 'YOLO 模式' };
+            modeCapName.textContent = modeNames[mode] || 'Agent 模式';
+        }
+        if (modeCapIcon) {
+            var modeIcons = {
+                'plan': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"></path><rect x="9" y="3" width="6" height="4" rx="1"></rect><path d="M9 14l2 2 4-4"></path></svg>',
+                'agent': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v4m0 2v6" stroke-linecap="round"></path><circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"></circle></svg>',
+                'yolo': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"></polygon></svg>'
+            };
+            modeCapIcon.innerHTML = modeIcons[mode] || modeIcons['agent'];
+        }
+
+        // ★ 工作区权限胶囊 (DSH: Read only / Workspace write / Full access 彻底独立)
+        window._updatePermissionUI && window._updatePermissionUI();
+
+        // 更新模型胶囊显示
+        var modelCapName = document.getElementById('agentModelCapsuleName');
+        var curModelSel = document.getElementById('modelSelect');
+        if (modelCapName && curModelSel) {
+            var opt = curModelSel.options[curModelSel.selectedIndex];
+            var mName = opt ? (opt.text || opt.value) : (curModelSel.value || 'AI 模型');
+            modelCapName.textContent = mName;
+        }
+
+        // 刷新工作区胶囊
+        if (window.WorkspaceManager && typeof window.WorkspaceManager.renderUI === 'function') {
+            window.WorkspaceManager.renderUI();
+        }
+    } else {
+        if (inputWrap) inputWrap.classList.remove('agent-composer-active');
+        if (agentTop) agentTop.classList.add('hidden');
+        if (agentBottom) agentBottom.classList.add('hidden');
+        if (input) input.placeholder = '输入消息，键入 / 使用命令';
     }
+
+    // 重绘左侧历史侧边栏（Agent模式下按工作区分组，普通模式下按时间分组）
+    if (typeof renderChatHistory === 'function') {
+        renderChatHistory();
+    }
+
     // 过滤命令列表
     _updateCommandFilter(mode);
 }
+
+// ==========================================================================
+//  DSH 工作区权限管理 (Read only / Workspace write / Full access)
+// ==========================================================================
+window.getWorkspacePermission = function() {
+    var perm = localStorage.getItem('workspacePermission');
+    if (['read-only', 'workspace-write', 'danger-full-access'].indexOf(perm) === -1) {
+        perm = 'danger-full-access';
+        try { localStorage.setItem('workspacePermission', perm); } catch (e) {}
+    }
+    return perm;
+};
+
+window.setWorkspacePermission = function(perm) {
+    if (['read-only', 'workspace-write', 'danger-full-access'].indexOf(perm) === -1) {
+        perm = 'danger-full-access';
+    }
+    localStorage.setItem('workspacePermission', perm);
+    window._updatePermissionUI(perm);
+    if (perm === 'danger-full-access') {
+        var _curChat = window.currentChatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+        if (_curChat && typeof window.grantFullFileAccess === 'function') {
+            window.grantFullFileAccess(_curChat, ['filesystem.read','filesystem.search','filesystem.write','filesystem.move','terminal.exec']).catch(function(){});
+        }
+    }
+    // 权限选择与模式选择一样：立即保存在本机，并进入账号配置同步队列。
+    if (typeof window._scheduleConfigSync === 'function') window._scheduleConfigSync();
+    if (window.showToast) {
+        var names = {
+            'read-only': '🛡️ 已设为 Read only (只读分析)',
+            'workspace-write': '✏️ 已设为 Workspace write (工作区写入)',
+            'danger-full-access': '⚡ 已设为 Full access (全盘完全访问)'
+        };
+        window.showToast(names[perm] || '已更新权限', 'success', 1500);
+    }
+};
+
+window._updatePermissionUI = function(perm) {
+    if (!perm) perm = window.getWorkspacePermission();
+    var capName = document.getElementById('agentPermCapsuleName');
+    var capIcon = document.getElementById('agentPermCapsuleIcon');
+    var names = {
+        'read-only': 'Read only',
+        'workspace-write': 'Workspace write',
+        'danger-full-access': 'Full access'
+    };
+    var icons = {
+        'read-only': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>',
+        'workspace-write': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>',
+        'danger-full-access': '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"></polygon></svg>'
+    };
+    if (capName) capName.textContent = names[perm] || 'Full access';
+    if (capIcon) capIcon.innerHTML = icons[perm] || icons['danger-full-access'];
+};
+
+// ★ 权限弹出菜单
+window._togglePermMenu = function(e) {
+    if (e) {
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+    }
+    var popup = document.getElementById('agentPermPopup');
+    var trigger = (e && e.currentTarget) ? e.currentTarget : document.getElementById('agentPermCapsule');
+    if (!popup || !trigger) return;
+
+    var isHidden = popup.style.display === 'none' || popup.classList.contains('hidden') || !popup.classList.contains('open');
+    window._closeAllDshPopups('perm');
+
+    if (isHidden) {
+        var rect = trigger.getBoundingClientRect();
+        popup.style.position = 'fixed';
+        popup.style.zIndex = '2147483647';
+        var bottomSpace = window.innerHeight - rect.top + 8;
+        popup.style.bottom = bottomSpace + 'px';
+        var leftPos = Math.max(12, Math.min(rect.left, window.innerWidth - 280));
+        popup.style.left = leftPos + 'px';
+        popup.style.top = 'auto';
+        popup.style.right = 'auto';
+        popup.style.display = 'flex';
+        popup.classList.remove('hidden');
+        popup.classList.add('open');
+    } else {
+        popup.style.display = 'none';
+        popup.classList.remove('open');
+        popup.classList.add('hidden');
+    }
+};
+
+// ★ DSH 风格全局浮层统一关闭器
+window._closeAllDshPopups = function(except) {
+    if (except !== 'workspace' && window.WorkspaceManager && typeof window.WorkspaceManager.closeDropdown === 'function') {
+        window.WorkspaceManager.closeDropdown();
+    }
+    if (except !== 'perm') {
+        var permPop = document.getElementById('agentPermPopup');
+        if (permPop) {
+            permPop.style.display = 'none';
+            permPop.classList.remove('open');
+            permPop.classList.add('hidden');
+        }
+    }
+    if (except !== 'mode') {
+        var modePop = document.getElementById('agentModePopup');
+        if (modePop) {
+            modePop.style.display = 'none';
+            modePop.classList.remove('open');
+            modePop.classList.add('hidden');
+        }
+    }
+    if (except !== 'model') {
+        var modelPop = document.getElementById('agentModelPopup');
+        if (modelPop) {
+            modelPop.classList.add('hidden');
+            modelPop.style.display = 'none';
+        }
+        var modelTrigger = document.getElementById('agentModelCapsule');
+        if (modelTrigger) modelTrigger.setAttribute('aria-expanded', 'false');
+    }
+};
+
+// 点击页面任意空白处自动收起浮层
+document.addEventListener('click', function(e) {
+    var modePop = document.getElementById('agentModePopup');
+    var permPop = document.getElementById('agentPermPopup');
+    var modelPop = document.getElementById('agentModelPopup');
+    var wsPop = document.getElementById('workspaceDropdown');
+
+    if (e.target && e.target.closest && (
+        e.target.closest('#agentPermCapsule') ||
+        e.target.closest('#agentModeCapsule') ||
+        e.target.closest('#agentModelCapsule') ||
+        e.target.closest('#workspaceCapsule') ||
+        e.target.closest('.dsh-hero-capsule') ||
+        e.target.closest('.agent-mode-popup') ||
+        e.target.closest('.agent-model-popup') ||
+        e.target.closest('.ws-dropdown-card')
+    )) {
+        return; // 点击在菜单内部或触发器上，不关闭
+    }
+    window._closeAllDshPopups();
+});
+
+// ★ 辅助事件处理: Agent 模式胶囊菜单 (智能向下或向上自适应弹出，防溢出屏幕)
+window._toggleAgentModeMenu = function(e) {
+    if (e) {
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+    }
+
+    var popup = getEl('agentModePopup') || document.getElementById('agentModePopup');
+    var trigger = (e && e.currentTarget) ? e.currentTarget : (getEl('agentModeCapsule') || getEl('agentMainBtn') || document.getElementById('agentModeCapsule'));
+    if (!popup || !trigger) return;
+
+    var isHidden = popup.style.display === 'none' || popup.classList.contains('hidden') || !popup.classList.contains('open');
+    window._closeAllDshPopups('mode');
+
+    if (isHidden) {
+        var rect = trigger.getBoundingClientRect();
+        popup.style.position = 'fixed';
+        popup.style.zIndex = '2147483647';
+
+        var POP_HEIGHT = 160;
+        var spaceBelow = window.innerHeight - rect.bottom;
+
+        // 如果在屏幕上半部分（比如顶部Header处），向下弹出；如果在屏幕下半部分（底部输入框），向上弹出
+        if (spaceBelow >= POP_HEIGHT + 10) {
+            popup.style.top = (rect.bottom + 6) + 'px';
+            popup.style.bottom = 'auto';
+        } else {
+            popup.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+            popup.style.top = 'auto';
+        }
+
+        var leftPos = Math.max(12, Math.min(rect.left, window.innerWidth - 280));
+        popup.style.left = leftPos + 'px';
+        popup.style.right = 'auto';
+        popup.style.display = 'flex';
+        popup.classList.remove('hidden');
+        popup.classList.add('open');
+    } else {
+        popup.style.display = 'none';
+        popup.classList.remove('open');
+        popup.classList.add('hidden');
+    }
+};
+
+// ★ DSH 风格模型席位：模型与推理等级分两级进入，等级依据当前模型能力动态生成。
+// 发送链路继续复用 unified thinkingIntensity，避免 UI 选择与请求参数分叉。
+(function() {
+    var _effortLabels = {
+        default: 'Default', off: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh', max: 'Max', ultra: 'Ultra'
+    };
+    var _effortDescriptions = {
+        default: 'Use the model provider default', off: 'Reasoning disabled', minimal: 'Minimal reasoning budget', low: 'Faster responses for simple tasks', medium: 'Balanced speed and depth',
+        high: 'More reasoning for complex tasks', xhigh: 'Extended reasoning budget', max: 'Maximum available reasoning', ultra: 'Highest level when supported'
+    };
+    function _currentAgentModel() {
+        var sel = document.getElementById('modelSelect');
+        return sel ? (sel.value || '') : '';
+    }
+    function _agentEfforts(model) {
+        var mc = window.MODEL_CONFIGS;
+        if (!model || !mc) return [];
+        if (typeof mc.getThinkingIntensityLevels === 'function') return mc.getThinkingIntensityLevels(model);
+        if (typeof mc.supportsThinkingIntensity !== 'function' || !mc.supportsThinkingIntensity(model)) return [];
+        return ['off', 'low', 'medium', 'high'];
+    }
+    function _effortName(level) { return _effortLabels[level] || level || '默认'; }
+    function _renderAgentModelMenu(popup, pane, query) {
+        var sel = document.getElementById('modelSelect');
+        if (!sel) return;
+        var model = _currentAgentModel();
+        var levels = _agentEfforts(model);
+        var selectedEffort = localStorage.getItem('thinkingIntensity') || 'default';
+        if (levels.length && selectedEffort !== 'default' && levels.indexOf(selectedEffort) < 0) selectedEffort = 'medium';
+        var options = Array.from(sel.options).filter(function(o) { return o.value; });
+        var modelLabel = (sel.options[sel.selectedIndex] || {}).text || model || '未选择';
+        var html = '';
+        if (pane === 'root') {
+            html = '<div class="agent-model-root-list agent-model-settings-list">' +
+                '<button type="button" class="agent-model-root-item" data-agent-model-pane="model"><span class="agent-model-setting-label">模型</span><span class="agent-model-setting-value">' + escapeHtml(modelLabel) + '</span><span class="agent-model-root-chevron">›</span></button>';
+            if (levels.length) html += '<button type="button" class="agent-model-root-item" data-agent-model-pane="effort"><span class="agent-model-setting-label">推理等级</span><span class="agent-model-setting-value">' + escapeHtml(_effortName(selectedEffort)) + '</span><span class="agent-model-root-chevron">›</span></button>';
+            html += '</div>';
+        } else if (pane === 'effort') {
+            html = '<div class="agent-model-pop-header"><button type="button" class="agent-model-back" data-agent-model-back="1" aria-label="返回模型设置"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><div class="agent-model-pane-heading"><strong>推理等级</strong><span>' + escapeHtml(modelLabel) + '</span></div></div><div class="agent-model-pop-list agent-effort-list">';
+            ['default'].concat(levels).forEach(function(level) {
+                html += '<button type="button" class="agent-model-pop-item agent-effort-item ' + (level === selectedEffort ? 'active' : '') + '" data-agent-effort="' + level + '"><span class="agent-model-item-title">' + _effortName(level) + '</span><span class="agent-model-item-val">' + _effortDescriptions[level] + '</span>' + (level === selectedEffort ? '<span class="agent-model-check-icon">✓</span>' : '') + '</button>';
+            });
+            html += '</div>';
+        } else {
+            var q = String(query || '').toLowerCase().trim();
+            html = '<div class="agent-model-pop-header agent-model-search-header"><button type="button" class="agent-model-back" data-agent-model-back="1" aria-label="返回模型设置"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><div class="agent-model-search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input type="text" id="agentModelSearchInp" class="agent-model-search-inp" placeholder="搜索模型" value="' + escapeHtml(q) + '"></div></div><div class="agent-model-pop-list custom-scrollbar">';
+            var matched = options.filter(function(o) { return !q || o.value.toLowerCase().indexOf(q) >= 0 || (o.text || '').toLowerCase().indexOf(q) >= 0; });
+            if (!matched.length) html += '<div class="agent-model-empty">无匹配模型</div>';
+            matched.forEach(function(opt) {
+                var active = opt.value === model;
+                html += '<button type="button" class="agent-model-pop-item ' + (active ? 'active' : '') + '" data-agent-model-value="' + escapeHtml(opt.value) + '"><span class="agent-model-item-title">' + escapeHtml(opt.text || opt.value) + '</span><span class="agent-model-item-val">' + escapeHtml(opt.value) + '</span>' + (active ? '<span class="agent-model-check-icon">✓</span>' : '') + '</button>';
+            });
+            html += '</div>';
+        }
+        popup.innerHTML = html;
+        var search = document.getElementById('agentModelSearchInp');
+        if (search) { search.oninput = function() { _renderAgentModelMenu(popup, 'model', this.value); }; search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+        popup.querySelectorAll('[data-agent-model-pane]').forEach(function(el) { el.onclick = function(event) { event.preventDefault(); event.stopPropagation(); _renderAgentModelMenu(popup, el.dataset.agentModelPane, ''); }; });
+        popup.querySelectorAll('[data-agent-model-back]').forEach(function(el) { el.onclick = function(event) { event.preventDefault(); event.stopPropagation(); _renderAgentModelMenu(popup, 'root', ''); }; });
+        popup.querySelectorAll('[data-agent-model-value]').forEach(function(el) { el.onclick = function(event) { event.preventDefault(); event.stopPropagation(); window._onSelectAgentModel(el.dataset.agentModelValue); }; });
+        popup.querySelectorAll('[data-agent-effort]').forEach(function(el) { el.onclick = function(event) { event.preventDefault(); event.stopPropagation(); window._onSelectAgentEffort(el.dataset.agentEffort); }; });
+    }
+    window._toggleModelSelectPopup = function(e) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        var popup = document.getElementById('agentModelPopup');
+        var trigger = (e && e.currentTarget) || document.getElementById('agentModelCapsule');
+        if (!popup || !trigger) return;
+        var open = !popup.classList.contains('hidden') && popup.style.display !== 'none';
+        window._closeAllDshPopups('model');
+        if (open) { popup.classList.add('hidden'); popup.style.display = 'none'; return; }
+        _renderAgentModelMenu(popup, 'root', '');
+        var rect = trigger.getBoundingClientRect();
+        popup.style.position = 'fixed'; popup.style.zIndex = '2147483647'; popup.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+        popup.style.top = 'auto'; popup.style.left = Math.max(12, Math.min(rect.left - 100, window.innerWidth - 320)) + 'px'; popup.style.right = 'auto'; popup.style.display = 'flex'; popup.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+    };
+    window._onSelectAgentEffort = function(level) {
+        var model = _currentAgentModel();
+        if (level !== 'default' && _agentEfforts(model).indexOf(level) < 0) return;
+        localStorage.setItem('thinkingIntensity', level);
+        var input = document.getElementById('thinkingIntensity');
+        if (input) input.value = level;
+        if (typeof window._scheduleConfigSync === 'function') window._scheduleConfigSync();
+        window._syncAgentModelCapsule();
+        window._closeAllDshPopups();
+        if (window.showToast) showToast('已切换思考强度: ' + _effortName(level), 'success', 1500);
+    };
+})();
+
+// ★ 模型变更自动双向同步
+window._syncAgentModelCapsule = function() {
+    var sel = document.getElementById('modelSelect');
+    var capName = document.getElementById('agentModelCapsuleName');
+    var effortName = document.getElementById('agentModelCapsuleEffort');
+    var trigger = document.getElementById('agentModelCapsule');
+    if (!sel || !capName) return;
+    var opt = sel.options[sel.selectedIndex];
+    var text = opt ? (opt.text || opt.value) : (sel.value || 'AI 模型');
+    capName.textContent = text;
+    var model = sel.value || '';
+    var supports = window.MODEL_CONFIGS && typeof window.MODEL_CONFIGS.supportsThinkingIntensity === 'function' && window.MODEL_CONFIGS.supportsThinkingIntensity(model);
+    var level = localStorage.getItem('thinkingIntensity') || 'medium';
+    var labels = {off:'关闭', minimal:'极简', low:'低', medium:'中', high:'高', xhigh:'极高', max:'最高', ultra:'极致'};
+    var supportedLevels = window.MODEL_CONFIGS && typeof window.MODEL_CONFIGS.getThinkingIntensityLevels === 'function'
+        ? window.MODEL_CONFIGS.getThinkingIntensityLevels(model) : [];
+    if (supports && supportedLevels.indexOf(level) < 0) level = supportedLevels.indexOf('medium') >= 0 ? 'medium' : (supportedLevels[0] || '');
+    if (effortName) { effortName.textContent = supports && level ? '· ' + (labels[level] || level) : ''; effortName.hidden = !supports; }
+    if (trigger) { trigger.title = supports ? '模型与思考强度 (点击切换)' : '当前模型 (点击切换)'; trigger.setAttribute('aria-expanded', 'false'); }
+};
+
+window._onSelectAgentModel = function(modelVal) {
+    if (!modelVal) return;
+    var sel = document.getElementById('modelSelect');
+    if (sel) {
+        var hasOpt = Array.from(sel.options).some(function(o){ return o.value === modelVal; });
+        if (!hasOpt) {
+            var opt = document.createElement('option');
+            opt.value = modelVal; opt.textContent = modelVal;
+            sel.appendChild(opt);
+        }
+        sel.value = modelVal;
+        sel.dispatchEvent(new Event('change'));
+    }
+    var curP = (typeof getEl === 'function' && getEl('baseUrlProvider')?.value) || localStorage.getItem('baseUrlProvider') || 'custom';
+    localStorage.setItem('model', modelVal);
+    localStorage.setItem('model_' + curP, modelVal);
+    localStorage.setItem('_modelSelectionSavedAt', String(Date.now()));
+    window._syncAgentModelCapsule();
+    window._closeAllDshPopups();
+    if (window.showToast) showToast('已切换模型: ' + modelVal, 'success', 1500);
+};
+
+// 页面就绪后绑定 modelSelect 监听器与胶囊点击
+document.addEventListener('DOMContentLoaded', function() {
+    var sel = document.getElementById('modelSelect');
+    if (sel) {
+        sel.addEventListener('change', window._syncAgentModelCapsule);
+        var obs = new MutationObserver(window._syncAgentModelCapsule);
+        obs.observe(sel, { childList: true, subtree: true });
+    }
+    window._syncAgentModelCapsule();
+});
+
+window._toggleAccessInfo = function(e) {
+    if (e) { e.stopPropagation(); e.preventDefault(); }
+    if (window.showToast) {
+        var curMode = getAgentMode();
+        var msg = curMode === 'yolo'
+            ? '🛡️ YOLO 模式：拥有全盘文件系统与终端执行自主权限'
+            : (curMode === 'plan' ? '🛡️ Plan 模式：只读分析与计划模式' : '🛡️ Agent 模式：支持全盘文件操作与命令执行，关键操作请求确认');
+        showToast(msg, 'info', 3000);
+    }
+};
 
 // ★ 根据模式过滤命令 (普通模式禁用 Agent 命令)
 function _updateCommandFilter(mode) {
@@ -1676,183 +2222,118 @@ function _updateCommandFilter(mode) {
 }
 
 /** 更新三模式选择器的 UI 状态 */
-// ★ 悬停模式菜单定位
-function _positionModePopup() {
-    var popup = getEl('agentModePopup');
-    var wrapper = document.querySelector('.agent-mode-wrapper');
-    if (!popup || !wrapper) return;
-
-    var rect = wrapper.getBoundingClientRect();
-
-    if (window.matchMedia('(max-width: 640px)').matches) {
-        // ★ 移动端: 紧贴按钮下方弹出
-        popup.style.top = (rect.bottom + 4) + 'px';
-        popup.style.left = rect.left + 'px';
-        popup.style.right = 'auto';
-        popup.style.bottom = 'auto';
-        return;
-    }
-    var popupRect = popup.getBoundingClientRect();
-    var POPUP_HEIGHT = popupRect.height || 40;
-    var spaceBelow = window.innerHeight - rect.bottom;
-
-    // 下方空间够就向下弹,否则向上
-    if (spaceBelow >= POPUP_HEIGHT + 8) {
-        popup.style.top = (rect.bottom + 4) + 'px';
-    } else {
-        popup.style.top = (rect.top - POPUP_HEIGHT - 4) + 'px';
-    }
-    popup.style.left = rect.left + 'px';
-    popup.style.right = 'auto';
-    popup.style.bottom = 'auto';
-}
-
-// 页面加载时预定位模式菜单
-setTimeout(_positionModePopup, 500);
-window.addEventListener('resize', _positionModePopup);
-// ★ Agent 模式弹出菜单(鼠标延迟隐藏 + 移动端点击切换)
-window._agentPopupTimer = null;
 window._setupAgentPopup = function() {
-    var wrapper = document.querySelector('.agent-mode-wrapper');
-    var popup = getEl('agentModePopup');
     var mainBtn = document.getElementById('agentMainBtn');
-    if (!wrapper || !popup || !mainBtn) return;
-
+    if (!mainBtn) return;
     function updateBtnLabel() {
         var el = mainBtn.querySelector('.agent-btn-label');
         if (!el) return;
         var mode = getAgentMode();
         var texts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
-        el.style.transition = 'opacity 0.15s';
-        el.style.opacity = '0';
-        setTimeout(function() {
-            el.textContent = texts[mode] || 'Agent';
-            el.style.opacity = '1';
-        }, 120);
+        el.textContent = texts[mode] || 'Agent';
     }
     updateBtnLabel();
     if (mainBtn._agentPopupBound) return;
     mainBtn._agentPopupBound = true;
 
-    var syncPopupAria = function() {
-        mainBtn.setAttribute('aria-expanded', popup.classList.contains('show') ? 'true' : 'false');
+    // ★ 恢复经典头部三模式横向小条与独立交互：单击切换选单，双击秒关退出
+    window._closeHeaderModePop = function() {
+        var miniPop = document.getElementById('headerModeMiniPop');
+        if (miniPop) miniPop.classList.add('hidden');
     };
-    syncPopupAria();
-    new MutationObserver(syncPopupAria).observe(popup, { attributes: true, attributeFilter: ['class'] });
 
-    var isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer:coarse)').matches;
-
-    if (isTouch) {
-        var tapTimer = null, lastTap = 0;
-        mainBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            var now = Date.now();
-            if (now - lastTap < 400) {
-                clearTimeout(tapTimer); lastTap = 0;
-                popup.classList.remove('show');
-                var curMode = getAgentMode();
-                setAgentMode(curMode !== 'off' ? 'off' : 'agent');
-                // ★ 双击后立即刷新按钮文字
-                var lbl = mainBtn.querySelector('.agent-btn-label');
-                if (lbl) {
-                    var m = getAgentMode();
-                    var ts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
-                    lbl.textContent = ts[m] || 'Agent';
-                    lbl.style.opacity = '1';
-                }
-                return;
-            }
-            lastTap = now;
-            if (popup.classList.contains('show')) {
-                popup.classList.remove('show');
-            } else {
-                _positionModePopup();
-                popup.classList.add('show');
-                if (getAgentMode() !== 'off') {
-                    var label = mainBtn.querySelector('.agent-btn-label');
-                    if (label) {
-                        label.style.opacity = '0';
-                        setTimeout(function() {
-                            label.textContent = '双击关闭';
-                            label.style.opacity = '1';
-                            setTimeout(function() {
-                                label.style.opacity = '0';
-                                setTimeout(function() {
-                                    var m = getAgentMode();
-                                    var ts = { 'off': 'Agent', 'plan': 'Plan', 'agent': 'Agent', 'yolo': 'YOLO' };
-                                    label.textContent = ts[m] || 'Agent';
-                                    label.style.opacity = '1';
-                                }, 100);
-                            }, 800);
-                        }, 120);
-                    }
-                }
-            }
-            tapTimer = setTimeout(function() { lastTap = 0; }, 450);
-        });
-    } else {
-        // ★ 桌面端: 单击切换模式, Agent 激活时双击关闭
-        var _desktopClickTimer = null;
-        mainBtn.addEventListener('click', function(e) {
+    window._toggleHeaderModePop = function(e) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        var miniPop = document.getElementById('headerModeMiniPop');
+        if (!miniPop) return;
+        var isHidden = miniPop.classList.contains('hidden');
+        window._closeAllDshPopups();
+        if (isHidden) {
             var curMode = getAgentMode();
-            if (_desktopClickTimer) {
-                // 第二次点击: 直接切换
-                clearTimeout(_desktopClickTimer);
-                _desktopClickTimer = null;
-                if (curMode !== 'off') {
-                    setAgentMode('off');
-                } else {
-                    setAgentMode('agent');
-                }
-                return;
+            var btns = miniPop.querySelectorAll('.header-mode-btn');
+            btns.forEach(function(b) {
+                b.classList.toggle('active', b.getAttribute('data-mode') === curMode);
+            });
+            miniPop.classList.remove('hidden');
+        } else {
+            miniPop.classList.add('hidden');
+        }
+    };
+
+    var _clickTimer = null;
+    var _clickGestureMode = 'off';
+    mainBtn.addEventListener('click', function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+
+        // 只把同一手势开始时的状态用于双击判定，不能读取第一击异步切换后的新状态。
+        // 这样从 off 双击进入 Agent 时，第二击不会把刚进入的模式误关掉。
+        if (_clickTimer) {
+            clearTimeout(_clickTimer);
+            _clickTimer = null;
+            window._closeHeaderModePop();
+            if (_clickGestureMode !== 'off') {
+                setAgentMode('off', true);
+                if (window.showToast) showToast('已退出 Agent 模式', 'info', 1500);
+            } else {
+                setAgentMode(getPreferredAgentMode());
             }
-            // 第一次点击: 延迟执行,等第二次点击
-            _desktopClickTimer = setTimeout(function() {
-                _desktopClickTimer = null;
-                var m = getAgentMode();
-                var newMode = (m === 'off' || !m) ? 'agent' : 'off';
-                setAgentMode(newMode);
-            }, 250);
-        });
-        wrapper.addEventListener('mouseenter', function() {
-            if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer);
-            _positionModePopup();
-            popup.classList.add('show');
-        });
-        wrapper.addEventListener('mouseleave', function() {
-            window._agentPopupTimer = setTimeout(function() { popup.classList.remove('show'); }, 200);
-        });
-        popup.addEventListener('mouseenter', function() { if (window._agentPopupTimer) clearTimeout(window._agentPopupTimer); });
-        popup.addEventListener('mouseleave', function() { popup.classList.remove('show'); });
-    }
+            _clickGestureMode = 'off';
+            return;
+        }
+
+        // 第一次点击：延迟等待判断是否为双击；模式偏好由 localStorage 持久保存。
+        _clickGestureMode = getAgentMode();
+        _clickTimer = setTimeout(function() {
+            _clickTimer = null;
+            var m = getAgentMode();
+            if (_clickGestureMode === 'off') {
+                setAgentMode(getPreferredAgentMode());
+            } else if (m !== 'off') {
+                // 激活状态下单击：展示头部专属三模式横向小按钮条 (与下方输入框菜单完全分离)
+                window._toggleHeaderModePop(e);
+            }
+            _clickGestureMode = 'off';
+        }, 220);
+    });
 
     document.addEventListener('click', function(e) {
-        if (!popup.classList.contains('show')) return;
-        if (!wrapper.contains(e.target) && !popup.contains(e.target)) popup.classList.remove('show');
+        if (e.target && !e.target.closest('#headerAgentModeWrapper')) {
+            window._closeHeaderModePop();
+        }
     });
-    document.addEventListener('touchmove', function() { popup.classList.remove('show'); }, { passive: true });
 };
 
-
-function updateModeSelector(mode) {
-    mode = mode || getAgentMode();
-    // 更新下拉菜单中的模式按钮
-    var dropdown = getEl('agentModeDropdown');
-    if (dropdown) {
-        var opts = dropdown.querySelectorAll('.agent-mode-opt');
-        opts.forEach(function(opt) {
-            var optMode = opt.getAttribute('data-mode');
-            opt.classList.toggle('active', optMode === mode);
-        });
+// ★ Full access 胶囊双击：直接进入 YOLO 全自动，不再需要二次手动选择
+window._activateYoloFromCapsule = function(e) {
+    if (e) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
     }
-    // 也更新旧模式选择器(兼容)
-    var selector = getEl('agentModeSelector');
+    var popup = document.getElementById('agentModePopup');
+    if (popup) {
+        popup.style.display = 'none';
+        popup.classList.remove('open');
+        popup.classList.add('hidden');
+    }
+    if (typeof window.setAgentMode === 'function') window.setAgentMode('yolo');
+    else if (typeof setAgentMode === 'function') setAgentMode('yolo');
+    if (window.showToast) window.showToast('已进入 YOLO 全自动模式', 'success', 1500);
+};
+
+/** 更新模式选择器按钮状态 (兼容旧选择器与全局调用) */
+window.updateModeSelector = function(mode) {
+    var selector = typeof getEl === 'function' ? getEl('agentModeSelector') : document.getElementById('agentModeSelector');
     if (selector) {
         var btns = selector.querySelectorAll('.mode-btn');
         btns.forEach(function(btn) {
             var btnMode = btn.getAttribute('data-mode');
             btn.classList.toggle('active', btnMode === mode);
         });
+    }
+};
+function updateModeSelector(mode) {
+    if (typeof window.updateModeSelector === 'function') {
+        window.updateModeSelector(mode);
     }
 }
 
@@ -1940,6 +2421,44 @@ function removeAlwaysAllowRule(toolName) {
   try { localStorage.setItem('approvalAlwaysAllowRules', JSON.stringify(rules)); } catch(e) {}
 }
 
+window.requestFilesystemGrant = function(chatId, capability, path) {
+    var targetChat = chatId || window.currentChatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    var perm = typeof window.getWorkspacePermission === 'function' ? window.getWorkspacePermission() : '';
+    // 如果当前已经是 Full access (全盘完全访问) 或 YOLO 模式，自动签发全盘授权凭证，不阻断、不卡死
+    if (perm === 'danger-full-access' || (typeof isYoloMode === 'function' && isYoloMode()) || (window._tempAgentGranted && window._tempAgentChatId === targetChat)) {
+        var autoCaps = ['filesystem.read','filesystem.search','filesystem.write','filesystem.move','terminal.exec'];
+        if (typeof window.grantFullFileAccess === 'function' && targetChat) {
+            return window.grantFullFileAccess(targetChat, autoCaps);
+        }
+        return Promise.resolve(true);
+    }
+    // 否则弹出可视化授权审批弹窗
+    return new Promise(function(resolve) {
+        var overlay = document.createElement('div');
+        overlay.className = 'approval-overlay';
+        overlay.style.zIndex = '2147483647';
+        var shield = typeof window.getVibeSvg === 'function' ? window.getVibeSvg('shield', {size:28,className:'text-amber-500'}) : '';
+        overlay.innerHTML = '<div class="approval-modal-v2">' +
+            '<div class="approval-modal-header"><div class="approval-modal-icon">' + shield + '</div>' +
+            '<div class="approval-modal-title">文件系统权限申请</div>' +
+            '<div class="approval-modal-subtitle">目标路径超出当前工作区沙箱</div></div>' +
+            '<div class="approval-modal-body"><div class="approval-tool-row"><span class="approval-tool-tag">' + escapeHtml(capability || 'filesystem.write') + '</span></div>' +
+            '<pre class="approval-args-pre">' + escapeHtml(path || '/') + '</pre>' +
+            '<div class="approval-tool-hint">批准后将在当前会话中开通全盘读写与终端权限（有效期30分钟）。</div></div>' +
+            '<div class="approval-modal-actions"><button class="approval-btn-deny" data-deny>拒绝</button><button class="approval-btn-allow" data-allow>批准全盘访问</button></div></div>';
+        document.body.appendChild(overlay);
+        var done = function(value) { if (overlay.parentNode) overlay.remove(); resolve(value); };
+        overlay.querySelector('[data-deny]').onclick = function(){ done(false); };
+        overlay.querySelector('[data-allow]').onclick = async function(){
+            try {
+                var caps = ['filesystem.read','filesystem.search','filesystem.write','filesystem.move','terminal.exec'];
+                done(await window.grantFullFileAccess(targetChat, caps));
+            } catch(e) { done(false); }
+        };
+        overlay.onclick = function(e){ if (e.target === overlay) done(false); };
+    });
+};
+
 /**
  * 请求用户批准高危操作 (增强版)
  * 参考 DeepSeek-TUI execpolicy 设计模式
@@ -1950,6 +2469,15 @@ function removeAlwaysAllowRule(toolName) {
 function requestToolApproval(toolName, args) {
     return new Promise(function(resolve) {
         var mode = getAgentMode();
+        var perm = typeof window.getWorkspacePermission === 'function' ? window.getWorkspacePermission() : 'danger-full-access';
+
+        // ★ DSH 权限维度检查: 若当前为只读权限 (Read only), 严格拒绝写盘与终端执行
+        if (perm === 'read-only' && !isReadOnlyTool(toolName)) {
+            sessionUsage.approvalsRejected++;
+            if (window.showToast) window.showToast('🛡️ 只读权限 (Read only) 限制：已阻止执行写入或终端操作', 'warn', 3000);
+            resolve(false);
+            return;
+        }
 
         // YOLO 模式: 自动批准所有操作
         if (mode === 'yolo') {
@@ -2246,7 +2774,7 @@ async function generateProactiveSuggestions(chatId, lastResponse) {
 window.deleteCron = async function(name) {
     if (!confirm('确定要删除 cron 任务 "' + name + '" 吗?')) return;
     try {
-        var r = await fetch(_apiBase + '?action=cron_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(900000) });
+        var r = await fetch(_apiBase + '?action=cron_delete&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() });
         var d = await r.json();
         if (d.ok) {
             window.refreshEngineStatus();
@@ -2284,7 +2812,7 @@ window.createTask = function(userMessage, chatId) {
         timeoutMinutes: 10
     };
     window._tasks[taskId] = task;
-    console.log('[Task] 创建任务 ' + taskId + ': ' + (userMessage || '').substring(0, 50));
+    console.log('[Task] 创建任务 ' + taskId + ', message_length=' + (userMessage || '').length);
     return taskId;
 };
 
@@ -2385,6 +2913,17 @@ window.pushAgentResultToTaskWithStructured = function(agentName, status, result,
                 return true;
             }
         }
+    }
+    // 若任务对象因刷新/多端同步丢失，先按创建时记录的归属聊天恢复，
+    // 避免完成结果被错误塞进 Agent 主会话后只显示“完成”却没有后续整合回复。
+    var _ownerChatId = window._subAgentOwnerChats && window._subAgentOwnerChats[agentName];
+    if (_ownerChatId && chats[_ownerChatId]) {
+        var _recoveredTaskId = window.createTask('[系统] 子代理 ' + agentName + ' 完成', _ownerChatId);
+        var _recoveredTask = window._tasks[_recoveredTaskId];
+        _recoveredTask.agents[agentName] = { status: status || 'completed', role: 'general', createdAt: Date.now() };
+        _recoveredTask.subResults[agentName] = { status: status || 'completed', result: result || '', error: error || '', _structured: structured || null };
+        window._triggerMainAgentForTask(_recoveredTaskId);
+        return true;
     }
     // 降级: 存入pending队列
     if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
@@ -2563,7 +3102,7 @@ window._triggerMainAgentForTask = function(taskId) {
     setTimeout(function() {
         var token = getAuthToken();
         if (token) {
-            fetch(_apiBase + '?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) }).catch(function() {});
+            fetch(_apiBase + '?action=agent_notifications_mark', { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() }).catch(function() {});
         }
         // 清理任务: mainResponded后30秒删除
         setTimeout(function() {
@@ -2685,11 +3224,10 @@ window.triggerAgentAutoReplyForSubAgent = function(agentName) {
     // ★ 从引擎获取最新结果(不依赖 localStorage 缓存)
     var token = getAuthToken();
     if (token) {
-        fetch(_apiBase + '?action=agent_list&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
-            .then(function(r) { return r.json(); })
-            .then(function(agents) {
-                var a = agents[agentName];
-                if (a) {
+        window._fetchAgentListJSON().then(function(agents) {
+            if (!agents) return;
+            var a = agents[agentName];
+            if (a) {
                     // 更新 pending 数据
                     if (!window._pendingSubAgentResultsData) window._pendingSubAgentResultsData = {};
                     window._pendingSubAgentResultsData[agentName] = {
@@ -2746,16 +3284,117 @@ function _doTrigger(agentName) {
 window._legacyTrigger = window.triggerAgentAutoReplyForSubAgent;
 window._agentNotifyQueue = [];
 window._pendingSubAgentResultsData = {};  // 保留兼容
+window._subAgentOwnerChats = window._subAgentOwnerChats || {};
+try { window._subAgentOwnerChats = Object.assign(window._subAgentOwnerChats, JSON.parse(sessionStorage.getItem('_subAgentOwnerChats') || '{}')); } catch(e) {}
 
-// ==================== Agent 任务计划流面板 ====================
+// ==================== Agent 任务计划流面板 (会话持久化与状态机) ====================
 
-/** 当前活跃的计划数据: null | { tasks: [{id,title,description,status,note}], createdAt, status, currentTaskId } */
+/** 当前活跃的计划数据: null | { tasks: [{id,title,description,status,note}], createdAt, status, currentTaskId, chatId } */
 window._agentPlan = null;
+window._flowPanelDismissTimer = null;
+
+/** 统一计划任务字段，修复旧快照中的空标题/非法状态/重复 id。 */
+window._normalizeAgentPlan = function(plan, chatId) {
+    if (!plan || !Array.isArray(plan.tasks)) return null;
+    var validStatus = { pending:1, running:1, completed:1, failed:1, skipped:1 };
+    var seen = {};
+    plan.tasks = plan.tasks.map(function(task, idx) {
+        task = task && typeof task === 'object' ? task : {};
+        var id = String(task.id || ('task_' + (idx + 1))).trim() || ('task_' + (idx + 1));
+        if (seen[id]) id = id + '_' + (idx + 1);
+        seen[id] = true;
+        var title = String(task.title || task.description || task.note || ('任务 ' + (idx + 1))).trim();
+        var status = validStatus[task.status] ? task.status : 'pending';
+        return {
+            id: id,
+            title: title,
+            description: String(task.description || '').trim(),
+            status: status,
+            note: String(task.note || '').trim()
+        };
+    });
+    plan.chatId = plan.chatId || chatId || null;
+    plan.status = plan.status || 'running';
+    return plan.tasks.length ? plan : null;
+};
+
+/** 同步保存计划状态到会话与持久化存储 */
+window.savePlanState = function(targetChatId) {
+    var cid = targetChatId || (window._agentPlan && window._agentPlan.chatId) || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    if (!cid || !window._agentPlan) return;
+    try {
+        window._agentPlan.chatId = cid;
+        if (typeof chats !== 'undefined' && chats && chats[cid]) {
+            chats[cid]._agentPlan = JSON.parse(JSON.stringify(window._agentPlan));
+            if (typeof slimSaveChats === 'function') slimSaveChats();
+        }
+        localStorage.setItem('_agentPlan_' + cid, JSON.stringify(window._agentPlan));
+    } catch(e) {
+        console.warn('[FlowPanel] 保存计划状态失败:', e);
+    }
+};
+
+/** 从会话或持久化存储恢复指定会话的计划面板 */
+window.restorePlanForChat = function(chatId) {
+    if (!chatId) return false;
+    var plan = null;
+    if (typeof chats !== 'undefined' && chats && chats[chatId] && chats[chatId]._agentPlan) {
+        plan = chats[chatId]._agentPlan;
+    }
+    if (!plan) {
+        try {
+            var localStr = localStorage.getItem('_agentPlan_' + chatId);
+            if (localStr) plan = JSON.parse(localStr);
+        } catch(e) {}
+    }
+    plan = window._normalizeAgentPlan(plan, chatId);
+    if (plan && plan.status !== 'dismissed') {
+        window._agentPlan = plan;
+        // 已完成计划不应在刷新/切换会话后永久复活；旧快照自动清理。
+        if (plan.status === 'completed' || plan.tasks.every(function(t) { return t.status === 'completed' || t.status === 'failed' || t.status === 'skipped'; })) {
+            window.clearPlanForChat(chatId);
+            window.dismissFlowPanel({ preserveData: true, silent: true });
+            return false;
+        }
+        window.createFlowPanel(plan, { isRestore: true });
+        console.log('[FlowPanel] 已成功恢复会话 ' + chatId + ' 的计划面板, 任务数=' + plan.tasks.length);
+        return true;
+    } else {
+        window._agentPlan = null;
+        window.dismissFlowPanel({ preserveData: true, silent: true });
+        return false;
+    }
+};
+
+/** 清除指定会话的计划数据 */
+window.clearPlanForChat = function(chatId) {
+    var cid = chatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    if (window._agentPlan && (!window._agentPlan.chatId || window._agentPlan.chatId === cid)) {
+        window._agentPlan = null;
+    }
+    if (typeof chats !== 'undefined' && chats && cid && chats[cid]) {
+        delete chats[cid]._agentPlan;
+        if (typeof slimSaveChats === 'function') slimSaveChats();
+    }
+    if (cid) {
+        try { localStorage.removeItem('_agentPlan_' + cid); } catch(e) {}
+    }
+};
 
 /** 创建并显示流程面板 */
-window.createFlowPanel = function(plan) {
-    if (!plan || !plan.tasks || plan.tasks.length === 0) return;
+window.createFlowPanel = function(plan, opts) {
+    opts = opts || {};
+    var cid = plan && plan.chatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    plan = window._normalizeAgentPlan(plan, cid);
+    if (!plan) return;
+    if (window._flowPanelDismissTimer) { clearTimeout(window._flowPanelDismissTimer); window._flowPanelDismissTimer = null; }
+    plan.chatId = cid;
     window._agentPlan = plan;
+
+    // 同步持久化
+    if (!opts.isRestore) {
+        window.savePlanState(cid);
+    }
 
     var panel = getEl('flowPanel');
     if (!panel) return;
@@ -2764,8 +3403,21 @@ window.createFlowPanel = function(plan) {
     var banner = getEl('agentBanner');
     if (banner) banner.classList.add('hidden');
 
-    // 重置折叠状态，确保面板完全展开
-    panel.classList.remove('collapsed', 'hidden');
+    // 重置动画和显隐样式
+    panel.style.opacity = '';
+    panel.style.transform = '';
+    panel.style.marginBottom = '';
+    panel.style.maxHeight = '';
+    panel.style.padding = '';
+    panel.classList.remove('hidden');
+
+    // 检查是否有折叠偏好
+    var isCollapsed = localStorage.getItem('_flowPanelCollapsed') === '1';
+    if (isCollapsed && opts.isRestore) {
+        panel.classList.add('collapsed');
+    } else {
+        panel.classList.remove('collapsed');
+    }
 
     // 强制回流后渲染（确保 CSS transition 触发）
     void panel.offsetWidth;
@@ -2774,17 +3426,19 @@ window.createFlowPanel = function(plan) {
     window.renderPlanTasks(plan.tasks);
 
     // 滚动聊天区域使面板可见
-    setTimeout(function() {
-        if ($.chatBox) {
-            var panelBottom = panel.getBoundingClientRect().bottom;
-            var chatBottom = $.chatBox.getBoundingClientRect().bottom;
-            if (panelBottom > chatBottom - 60) {
-                $.chatBox.scrollTop = $.chatBox.scrollHeight;
+    if (!opts.isRestore) {
+        setTimeout(function() {
+            if ($.chatBox) {
+                var panelBottom = panel.getBoundingClientRect().bottom;
+                var chatBottom = $.chatBox.getBoundingClientRect().bottom;
+                if (panelBottom > chatBottom - 60) {
+                    $.chatBox.scrollTop = $.chatBox.scrollHeight;
+                }
             }
-        }
-    }, 100);
+        }, 100);
+    }
 
-    console.log('[FlowPanel] 创建计划，共 ' + plan.tasks.length + ' 个任务');
+    console.log('[FlowPanel] ' + (opts.isRestore ? '恢复' : '创建') + '计划，共 ' + plan.tasks.length + ' 个任务');
 };
 
 /** 渲染所有任务项到流程列表 (时间线设计) */
@@ -2797,6 +3451,7 @@ window.renderPlanTasks = function(tasks) {
         return;
     }
 
+    tasks = tasks.filter(function(task) { return task && typeof task === 'object'; });
     let html = '';
     tasks.forEach(function(task, idx) {
         var status = task.status || 'pending';
@@ -2840,8 +3495,14 @@ window._flowTaskDotHtml = function(status) {
     }
 };
 
-/** 更新单个任务的状态（DOM 就地更新 + 数据同步 + 高亮动画） */
-window.updatePlanTaskStatus = function(taskId, newStatus) {
+/** 更新单个任务的状态（DOM 就地更新 + 数据同步 + 高亮动画 + 会话持久化） */
+window.updatePlanTaskStatus = function(taskId, newStatus, note, targetChatId) {
+    if (!window._agentPlan) {
+        var cid = targetChatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+        if (cid && typeof window.restorePlanForChat === 'function') {
+            window.restorePlanForChat(cid);
+        }
+    }
     if (!window._agentPlan || !window._agentPlan.tasks) return;
 
     // 更新数据
@@ -2849,11 +3510,21 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     window._agentPlan.tasks.forEach(function(t) {
         if (t.id === taskId) {
             t.status = newStatus;
+            if (note) t.note = note;
             if (newStatus === 'running') window._agentPlan.currentTaskId = taskId;
             found = true;
         }
     });
-    if (!found) return;
+
+    // 未命中计划任务时拒绝制造“幽灵任务”。旧逻辑会把截断/拼错的 task_id
+    // 直接追加到列表，造成中间空项、计数增加且永远无法自然完成。
+    if (!found && taskId) {
+        console.warn('[FlowPanel] 忽略未知 task_id:', taskId);
+        return false;
+    }
+
+    // 立即保存持久化状态
+    window.savePlanState(targetChatId);
 
     // 更新 DOM
     var list = getEl('flowTaskList');
@@ -2888,16 +3559,17 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     // 更新备注（如果有 note 字段更新）
     var taskData = null;
     window._agentPlan.tasks.forEach(function(t) { if (t.id === taskId) taskData = t; });
-    if (taskData && taskData.note) {
+    var taskNote = (taskData && taskData.note) || note;
+    if (taskNote) {
         var noteEl = item.querySelector('.flow-task-note');
         if (noteEl) {
-            noteEl.textContent = taskData.note;
+            noteEl.textContent = taskNote;
         } else {
             var contentEl = item.querySelector('.flow-task-content');
             if (contentEl) {
                 var newNote = document.createElement('div');
                 newNote.className = 'flow-task-note';
-                newNote.textContent = taskData.note;
+                newNote.textContent = taskNote;
                 contentEl.appendChild(newNote);
             }
         }
@@ -2922,6 +3594,7 @@ window.updatePlanTaskStatus = function(taskId, newStatus) {
     }, 800);
 
     console.log('[FlowPanel] 任务 "' + taskId + '" → ' + newStatus);
+    return true;
 };
 
 /** 更新进度计数器和进度条 */
@@ -2941,16 +3614,13 @@ window._updateFlowProgress = function(tasks) {
         var pct = total > 0 ? Math.round(done / total * 100) : 0;
         fillEl.style.width = pct + '%';
         // ★ 动态渐变色: 0%→50%→100% 从紫→蓝紫→绿，平滑过渡
-        // pct=0: indigo #6366f1, pct=50: violet #8b5cf6, pct=100: emerald #10b981
         var r, g, b;
         if (pct <= 50) {
-            // 0%→50%: indigo→violet
             var t = pct / 50;
             r = Math.round(99 + t * (139 - 99));
             g = Math.round(102 + t * (92 - 102));
             b = Math.round(241 + t * (246 - 241));
         } else {
-            // 50%→100%: violet→emerald
             var t2 = (pct - 50) / 50;
             r = Math.round(139 + t2 * (16 - 139));
             g = Math.round(92 + t2 * (185 - 92));
@@ -2963,15 +3633,26 @@ window._updateFlowProgress = function(tasks) {
 };
 
 /** 关闭流程面板 */
-window.dismissFlowPanel = function() {
+window.dismissFlowPanel = function(opts) {
+    opts = opts || {};
     var panel = getEl('flowPanel');
-    if (!panel) { window._agentPlan = null; return; }
+    if (!panel) {
+        if (!opts.preserveData) window._agentPlan = null;
+        return;
+    }
 
-    // 如果已完成/已关闭则直接清理不留痕迹
-    if (window._agentPlan && window._agentPlan.status !== 'running') {
-        // 已终态 — 直接隐藏不清除状态标记
-    } else if (window._agentPlan && window._agentPlan.status === 'running') {
-        window._agentPlan.status = 'dismissed';
+    if (!opts.preserveData) {
+        if (window._agentPlan) {
+            window._agentPlan.status = 'dismissed';
+            window.savePlanState();
+            window._agentPlan = null;
+        }
+    }
+
+    if (opts.silent) {
+        panel.classList.add('hidden');
+        panel.classList.remove('collapsed');
+        return;
     }
 
     // 添加关闭动画
@@ -2993,26 +3674,32 @@ window.dismissFlowPanel = function() {
         // ★ 恢复 Agent 横幅
         var banner = getEl('agentBanner');
         if (banner && getAgentMode() !== 'off') banner.classList.remove('hidden');
-        // 清空任务列表
-        var list = getEl('flowTaskList');
-        if (list) list.innerHTML = '';
-        // 重置进度
-        var progressEl = getEl('flowPanelProgress');
-        if (progressEl) progressEl.textContent = '0/0';
-        var fillEl = getEl('flowProgressFill');
-        if (fillEl) fillEl.style.width = '0%';
+        if (!opts.preserveData) {
+            // 清空任务列表
+            var list = getEl('flowTaskList');
+            if (list) list.innerHTML = '';
+            // 重置进度
+            var progressEl = getEl('flowPanelProgress');
+            if (progressEl) progressEl.textContent = '0/0';
+            var fillEl = getEl('flowProgressFill');
+            if (fillEl) fillEl.style.width = '0%';
+        }
     }, 300);
 
-    console.log('[FlowPanel] 面板已关闭');
+    console.log('[FlowPanel] 面板已关闭' + (opts.preserveData ? ' (保留数据)' : ''));
 };
 
-// ==================== Plan 模式审批控制 ====================
-
+// ==================== Plan 模式审批控制 ====================\n
 /** 用户同意计划 → 进入执行态 */
 window.approvePlan = function() {
     if (getAgentMode() !== 'plan') return;
     window._planApproved = true;
     window._planState = 'executing';
+    if (window._agentPlan) {
+        window._agentPlan.planState = 'executing';
+        window._agentPlan.approved = true;
+        window.savePlanState();
+    }
     console.log('[Plan] 用户已批准计划，进入执行态');
     // 移除审批横幅
     var banner = getEl('planApprovalBanner');
@@ -3027,9 +3714,9 @@ window.approvePlan = function() {
     if (agentBanner) {
         agentBanner.classList.remove('hidden');
         agentBanner.className = 'agent-banner banner-plan';
-        agentBanner.innerHTML = '<span class="agent-banner-icon">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>' +
-            '<span class="agent-banner-text">Plan 执行中 — 计划已批准，AI 正在执行</span>';
+        agentBanner.innerHTML = '<span class=\"agent-banner-icon\">' +
+            '<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M12 2L2 7l10 5 10-5-10-5z\"/><path d=\"M2 17l10 5 10-5\"/><path d=\"M2 12l10 5 10-5\"/></svg></span>' +
+            '<span class=\"agent-banner-text\">Plan 执行中 — 计划已批准，AI 正在执行</span>';
     }
     // 触发模型继续执行（通过 resolve 暂存的 tool call）
     if (window._pendingPlanActions && window._pendingPlanActions.length > 0) {
@@ -3043,6 +3730,11 @@ window.rejectPlan = function() {
     if (getAgentMode() !== 'plan') return;
     window._planApproved = false;
     window._planState = 'reviewing';
+    if (window._agentPlan) {
+        window._agentPlan.planState = 'reviewing';
+        window._agentPlan.approved = false;
+        window.savePlanState();
+    }
     console.log('[Plan] 用户要求修改计划');
     // 通知模型（通过注入系统消息触发重新规划）
     var chatId = currentChatId;
@@ -3080,39 +3772,50 @@ window.cancelPlan = function() {
     var banner = getEl('planApprovalBanner');
     if (banner) banner.remove();
     window._agentPlan = null;
+    window.clearPlanForChat(chatId);
 };
 
 /** 折叠/展开流程面板 */
 window._toggleFlowPanelCollapse = function() {
     var panel = getEl('flowPanel');
     if (!panel) return;
-    panel.classList.toggle('collapsed');
+    var collapsed = panel.classList.toggle('collapsed');
+    try { localStorage.setItem('_flowPanelCollapsed', collapsed ? '1' : '0'); } catch(e) {}
 };
 
-/** 所有任务终态后自动关闭面板 */
-window._autoDismissIfAllDone = function() {
-    if (!window._agentPlan || !window._agentPlan.tasks) return;
-    if (window._agentPlan.tasks.length === 0) return;
+/** 生成结束时智能收敛面板（非审批态时自动轻量折叠，避免大卡片死占屏幕遮挡气泡） */
+window._autoCollapsePlanOnFinish = function() {
+    var panel = getEl('flowPanel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (typeof getAgentMode === 'function' && getAgentMode() === 'plan' && window._planState === 'reviewing') return;
+    if (typeof window._autoDismissIfAllDone === 'function' && window._autoDismissIfAllDone()) return;
+    panel.classList.add('collapsed');
+};
+
+/** 所有任务终态后完成并自动关闭；短暂保留100%状态供用户确认。 */
+window._autoDismissIfAllDone = function(opts) {
+    opts = opts || {};
+    if (!window._agentPlan || !window._agentPlan.tasks || window._agentPlan.tasks.length === 0) return false;
 
     var allTerminal = window._agentPlan.tasks.every(function(t) {
         return t.status === 'completed' || t.status === 'failed' || t.status === 'skipped';
     });
+    if (!allTerminal) return false;
 
-    if (allTerminal && window._agentPlan.status === 'running') {
-        console.log('[FlowPanel] 所有任务已完成，2秒后自动关闭');
-        setTimeout(function() {
-            if (window._agentPlan && window._agentPlan.status === 'running') {
-                // 再次检查（可能已被手动关闭）
-                var stillAllDone = window._agentPlan.tasks.every(function(t) {
-                    return t.status === 'completed' || t.status === 'failed' || t.status === 'skipped';
-                });
-                if (stillAllDone) {
-                    window._agentPlan.status = 'completed';
-                    window.dismissFlowPanel();
-                }
-            }
-        }, 2000);
-    }
+    var cid = window._agentPlan.chatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    console.log('[FlowPanel] 所有任务已进入终态，准备关闭');
+    window._agentPlan.status = 'completed';
+    window._agentPlan.currentTaskId = null;
+    window.renderPlanTasks(window._agentPlan.tasks);
+    window.savePlanState(cid);
+
+    if (window._flowPanelDismissTimer) clearTimeout(window._flowPanelDismissTimer);
+    window._flowPanelDismissTimer = setTimeout(function() {
+        window._flowPanelDismissTimer = null;
+        window.dismissFlowPanel({ preserveData: true });
+        window.clearPlanForChat(cid);
+    }, opts.immediate ? 0 : 1200);
+    return true;
 };
 
 // 10秒冷却常量
@@ -3200,9 +3903,9 @@ window.deleteAgent = async function(name) {
     // 异步删除 (不阻塞 UI)
     var token = getAuthToken();
     if (!token) return;
-    fetch(_apiBase + '?action=agent_delete&name=' + encodeURIComponent(name) + '&auth_token=' + token, { signal: AbortSignal.timeout(900000) })
+    fetch(_apiBase + '?action=agent_delete&name=' + encodeURIComponent(name), { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() })
         .then(function() {
-            return fetch(_apiBase + '?action=agent_notifications_mark&auth_token=' + token, { signal: AbortSignal.timeout(900000) });
+            return fetch(_apiBase + '?action=agent_notifications_mark', { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() });
         })
         .then(function() { window._refreshAllAgentLists(); })
         .catch(function(e) { console.warn('[deleteAgent] 异步清理失败:', e.message); });
@@ -3211,17 +3914,99 @@ window.deleteAgent = async function(name) {
 /**
  * 清理所有子代理
  */
+/**
+ * 定期/自动/手动清理过期的子代理会话
+ * @param {number} maxAgeHours - 最大保留小时数 (0 表示全部清理，默认 24 小时)
+ * @param {number} maxKeep - 最大保留数量 (默认 10 个)
+ */
+window.cleanupSubAgentSessions = async function(maxAgeHours = 24, maxKeep = 10) {
+    if (!window.chats) return 0;
+    var now = Date.now();
+    var maxAgeMs = maxAgeHours * 3600 * 1000;
+    
+    var subKeys = Object.keys(chats).filter(function(k) {
+        if (typeof k !== 'string') return false;
+        return k.indexOf('_agent_sub_') === 0 ||
+            k.indexOf('_goal_') === 0 ||
+            k.indexOf('_continue_') === 0 ||
+            k.indexOf('_runtime_') === 0 ||
+            k.indexOf('_smoke_') === 0 ||
+            k.indexOf('_internal_') === 0;
+    });
+    if (subKeys.length === 0) return 0;
+    
+    // 按最后更新时间升序排列 (最旧的在前面)
+    subKeys.sort(function(a, b) {
+        var tA = (chats[a] && (chats[a].updated_at || chats[a].created_at)) || 0;
+        var tB = (chats[b] && (chats[b].updated_at || chats[b].created_at)) || 0;
+        return tA - tB;
+    });
+    
+    var toDelete = [];
+    if (maxAgeHours === 0) {
+        toDelete = subKeys.slice();
+    } else {
+        var keepKeys = subKeys.slice(-maxKeep);
+        subKeys.forEach(function(k) {
+            var chat = chats[k];
+            var t = (chat && (chat.updated_at || chat.created_at)) || 0;
+            if (now - t > maxAgeMs || !keepKeys.includes(k)) {
+                toDelete.push(k);
+            }
+        });
+    }
+    
+    if (toDelete.length === 0) return 0;
+    
+    // 先逐个删除服务器记录，再保存剩余聊天；避免并发请求触发 429，
+    // 也避免 saveChats 的全量 POST 在 DELETE 完成前把旧子代理重新写回去。
+    var deletedServer = 0;
+    for (var _di = 0; _di < toDelete.length; _di++) {
+        var k = toDelete[_di];
+        delete chats[k];
+        try {
+            localStorage.removeItem('agent_chat_' + k.replace('_agent_sub_', ''));
+            localStorage.removeItem('oc_queue_a_' + k);
+            localStorage.removeItem('oc_queue_n_' + k);
+        } catch(e) {}
+        var _deleteOk = false;
+        for (var _deleteAttempt = 0; _deleteAttempt < 4 && !_deleteOk; _deleteAttempt++) {
+            try {
+                var _deleteResp = await fetch('/oneapichat/api/chat.php?chat_id=' + encodeURIComponent(k), {
+                    method: 'DELETE',
+                    headers: getSessionAuthHeaders()
+                });
+                _deleteOk = _deleteResp.ok || _deleteResp.status === 404;
+                if (!_deleteOk && _deleteResp.status === 429) {
+                    await new Promise(function(resolve) { setTimeout(resolve, 1000 * (_deleteAttempt + 1)); });
+                }
+            } catch(e) {
+                if (_deleteAttempt < 3) await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+            }
+        }
+        if (_deleteOk) deletedServer++;
+        if (_di + 1 < toDelete.length) {
+            await new Promise(function(resolve) { setTimeout(resolve, 280); });
+        }
+    }
+
+    if (typeof saveChats === 'function') await saveChats();
+    if (typeof renderChatHistory === 'function') renderChatHistory();
+    console.log('[SubAgent] 已清理 ' + toDelete.length + ' 个过期子代理会话，本地/服务器删除确认 ' + deletedServer + ' 个');
+    return toDelete.length;
+};
+
 window.clearAllAgents = async function() {
     var confirmed = await showConfirmDialog('清理所有子代理', '确定要删除所有子代理吗?\n\n此操作不可撤销,同时会删除所有子代理的聊天记录。', '全部删除');
     if (!confirmed) return;
     try {
-        var r = await fetchWithRetry('/oneapichat/api/engine_api.php?action=agent_list&auth_token=' + getAuthToken());
-        var agents = await r.json();
+        var agents = await window._fetchAgentListJSON();
+        if (!agents) { alert('加载代理列表失败(限流中),请稍后重试'); return; }
         var names = Object.keys(agents);
         var deleted = 0;
         for (var i = 0; i < names.length; i++) {
             try {
-                await fetchWithRetry('/oneapichat/api/engine_api.php?action=agent_delete&auth_token=' + getAuthToken() + '&name=' + encodeURIComponent(names[i]));
+                await fetchWithRetry('/oneapichat/api/engine_api.php?action=agent_delete&name=' + encodeURIComponent(names[i]), { headers: _agentAuthHeaders() });
                 var key = 'agent_chat_' + names[i];
                 localStorage.removeItem(key);
                 deleted++;
@@ -3270,7 +4055,10 @@ window.refreshEngineStatus = async function() {
     text.textContent = '检查中...';
 
     try {
-        var resp = await fetch(_apiBase + '?action=health&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+        var resp = await fetch(_apiBase + '?action=health', { signal: AbortSignal.timeout(10000), headers: _agentAuthHeaders() });
+        var _healthType = resp.headers.get('content-type') || '';
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        if (_healthType.toLowerCase().indexOf('application/json') === -1) throw new Error('引擎返回非 JSON 响应');
         var data = await resp.json();
 
         if (data.ok || data.status === 'ok' || data.status === 'running') {
@@ -3291,7 +4079,10 @@ window.refreshEngineStatus = async function() {
     var cronList = getEl('engineCronList');
     if (cronList) {
         try {
-            var cronResp = await fetch(_apiBase + '?action=cron_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
+            var cronResp = await fetch(_apiBase + '?action=cron_list', { signal: AbortSignal.timeout(30000), headers: _agentAuthHeaders() });
+            var _cronType = cronResp.headers.get('content-type') || '';
+            if (!cronResp.ok) throw new Error('HTTP ' + cronResp.status);
+            if (_cronType.toLowerCase().indexOf('application/json') === -1) throw new Error('Cron 返回非 JSON 响应');
             var cronData = await cronResp.json();
             // 引擎返回 {job_name: {...}} 格式,转换为数组
             var cronJobs = Object.keys(cronData).map(function(k) { return cronData[k]; });
@@ -3316,13 +4107,11 @@ window.refreshEngineStatus = async function() {
     if (agentList && Object.keys(window._agentListCache || {}).length > 0) {
         window._renderAgentList(window._agentListCache, agentList);
     } else if (agentList) {
-        try {
-            var agentResp = await fetch(_apiBase + '?action=agent_list&auth_token=' + getAuthToken(), { signal: AbortSignal.timeout(900000) });
-            var agentData = await agentResp.json();
-            window._agentListCache = agentData;
-            window._renderAgentList(agentData, agentList);
-        } catch(e) {
-            agentList.innerHTML = '<div class="engine-empty-hint">加载失败: ' + escapeHtml(e.message) + '</div>';
+        var agentData2 = await window._fetchAgentListJSON();
+        if (agentData2) {
+            window._renderAgentList(agentData2, agentList);
+        } else {
+            agentList.innerHTML = '<div class="engine-empty-hint">加载失败(限流中)</div>';
         }
     }
 };
@@ -3372,4 +4161,130 @@ window.updateParam = (type, val) => {
         window._scheduleConfigSync();
     }
     // 不自动保存,滑动时只更新显示
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  OneAPIChat Vibe Coding — Live Todo 看板与 HUD 渲染系统 (纯 SVG, 禁用 Emoji)
+// ═══════════════════════════════════════════════════════════════
+window.clearTodoForChat = function(chatId) {
+    var cid = chatId || (typeof currentChatId !== 'undefined' ? currentChatId : null);
+    if (window._todoBooks && cid) {
+        delete window._todoBooks[cid];
+    }
+    if (typeof chats !== 'undefined' && chats && cid && chats[cid]) {
+        delete chats[cid]._vibeTodos;
+        if (typeof slimSaveChats === 'function') slimSaveChats();
+    }
+    var existingHud = document.getElementById('vibeTodoHud');
+    if (existingHud) {
+        existingHud.style.display = 'none';
+        if (existingHud._dismissTimer) {
+            clearTimeout(existingHud._dismissTimer);
+            existingHud._dismissTimer = null;
+        }
+    }
+};
+
+window._renderTodoHud = function(todos, percent, opts) {
+    opts = opts || {};
+    var existingHud = document.getElementById('vibeTodoHud');
+    if (!Array.isArray(todos) || todos.length === 0) {
+        if (existingHud) {
+            existingHud.style.display = 'none';
+            if (existingHud._dismissTimer) {
+                clearTimeout(existingHud._dismissTimer);
+                existingHud._dismissTimer = null;
+            }
+        }
+        return;
+    }
+
+    var inProgressItem = todos.find(function(t) { return t.status === 'in_progress'; });
+    var completedCount = todos.filter(function(t) { return t.status === 'completed'; }).length;
+    var totalCount = todos.length;
+    var isAllCompleted = totalCount > 0 && completedCount === totalCount;
+
+    // 历史恢复时如果任务已全部完成，直接不打扰用户
+    if (opts.isRestore && isAllCompleted) {
+        if (existingHud) existingHud.style.display = 'none';
+        return;
+    }
+
+    var hud = existingHud;
+    if (!hud) {
+        hud = document.createElement('div');
+        hud.id = 'vibeTodoHud';
+        hud.className = 'vibe-todo-hud';
+        var inputClip = document.querySelector('.input-clip') || document.getElementById('chatBox');
+        if (inputClip && inputClip.parentNode) {
+            inputClip.parentNode.insertBefore(hud, inputClip);
+        } else {
+            document.body.appendChild(hud);
+        }
+    }
+    hud.style.display = 'block';
+    hud.style.opacity = '1';
+
+    var todoIcon = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('todoList', { size: 15, className: 'text-indigo-400 inline-block mr-1.5' }) : '';
+    var spinIcon = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('spinner', { size: 14, className: 'text-blue-400 mr-1.5 inline-block' }) : '';
+    var checkIcon = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('checkCircle', { size: 14, className: 'text-emerald-400 mr-1.5 inline-block' }) : '';
+    var dotIcon = (typeof window.getVibeSvg === 'function') ? window.getVibeSvg('circleDotted', { size: 14, className: 'text-gray-400 mr-1.5 inline-block' }) : '';
+
+    var itemsHtml = todos.map(function(t) {
+        var statusIcon = t.status === 'completed' ? checkIcon : (t.status === 'in_progress' ? spinIcon : dotIcon);
+        var statusCls = 'vibe-todo-item-' + t.status;
+        return '<div class="vibe-todo-row ' + statusCls + '">' +
+            '<span class="vibe-todo-item-icon">' + statusIcon + '</span>' +
+            '<span class="vibe-todo-item-text">' + escapeHtml(t.content) + '</span>' +
+        '</div>';
+    }).join('');
+
+    hud.innerHTML =
+        '<div class="vibe-todo-hud-header">' +
+            '<div class="vibe-todo-hud-title">' +
+                todoIcon +
+                '<span class="vibe-todo-hud-label font-medium text-xs">Vibe 任务进度 (' + completedCount + '/' + totalCount + ')</span>' +
+            '</div>' +
+            '<div class="vibe-todo-hud-actions">' +
+                '<div class="vibe-todo-hud-badge font-mono text-xs font-semibold">' + percent + '%</div>' +
+                '<button type="button" class="vibe-todo-hud-close" aria-label="关闭任务面板" title="收起">&times;</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="vibe-todo-progress-track">' +
+            '<div class="vibe-todo-progress-bar" style="width: ' + percent + '%;"></div>' +
+        '</div>' +
+        (inProgressItem ? '<div class="vibe-todo-active-step">' + spinIcon + '<span class="text-xs font-medium">正在执行: ' + escapeHtml(inProgressItem.content) + '</span></div>' : '') +
+        '<div class="vibe-todo-items-list">' + itemsHtml + '</div>';
+
+    var closeBtn = hud.querySelector('.vibe-todo-hud-close');
+    if (closeBtn) {
+        closeBtn.onclick = function(e) {
+            e.stopPropagation();
+            if (hud._dismissTimer) {
+                clearTimeout(hud._dismissTimer);
+                hud._dismissTimer = null;
+            }
+            hud.style.opacity = '0';
+            setTimeout(function() {
+                hud.style.display = 'none';
+                hud.style.opacity = '';
+            }, 250);
+        };
+    }
+
+    // 如果任务 100% 达成，展示 1.5 秒后自动收起
+    if (percent === 100 && !hud._dismissTimer) {
+        hud._dismissTimer = setTimeout(function() {
+            hud.style.opacity = '0';
+            setTimeout(function() {
+                hud.style.display = 'none';
+                hud.style.opacity = '';
+                hud._dismissTimer = null;
+            }, 300);
+        }, 1500);
+    } else if (percent < 100 && hud._dismissTimer) {
+        clearTimeout(hud._dismissTimer);
+        hud._dismissTimer = null;
+        hud.style.opacity = '';
+    }
 };

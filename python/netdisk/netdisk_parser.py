@@ -11,6 +11,7 @@ import sys
 import re
 import json
 import time
+import random
 import gzip
 import zlib
 import urllib.request
@@ -61,7 +62,7 @@ def identify_type(url: str) -> str:
         'xunlei': r'(?:^|[^a-z0-9])pan\.xunlei\.com',
         'mobile': r'(?:^|[^a-z0-9])yun\.139\.com',
         'uc': r'(?:^|[^a-z0-9])drive\.uc\.cn',
-        '123': r'(?:^|[^a-z0-9])123pan\.com',
+        '123': r'(?:^|[^a-z0-9])123pan\.(?:com|cn)',
         # ilanzou 必须在 lanzou 之前匹配, 否则 "ilanzou.com" 会被 lanzou 模式误命中
         'ilanzou': r'(?:^|[^a-z0-9])ilanzou\.com',
         'lanzou': r'(?:^|[^a-z0-9])lanzou[a-z]*\.com|lanzous\.com',
@@ -170,6 +171,9 @@ def parse_lanzou(url: str, password: str = '') -> dict:
     status, html = http_get(url)
     if status != 200:
         return {'success': False, 'error': f'页面访问失败 (HTTP {status})'}
+    page_lower = re.sub(r'\s+', '', html or '').lower()
+    if any(marker in page_lower for marker in ('文件取消分享', '分享已取消', '分享不存在', '链接已失效', '文件不存在')):
+        return {'success': False, 'error': '蓝奏云分享已取消或已失效', 'reason': 'share_expired'}
 
     # 方法1: 查找 iframe src
     iframe_match = re.search(r'<iframe\s+[^>]*src="([^"]+)"', html)
@@ -253,7 +257,211 @@ def parse_lanzou(url: str, password: str = '') -> dict:
         except json.JSONDecodeError:
             pass
 
-    return {'success': False, 'error': '蓝奏云解析失败: 无法提取下载链接'}
+    # 方法4: 用真实 Chromium 执行页面脚本，处理 WAF/动态 iframe/签名变化。
+    browser_result = parse_lanzou_browser(url, password)
+    if browser_result and (browser_result.get('success') or browser_result.get('reason') == 'share_expired'):
+        return browser_result
+    return {'success': False, 'error': '蓝奏云解析失败: 页面被反爬或下载签名结构已变化',
+            'fallback': 'browser_render_failed'}
+
+
+def parse_lanzou_browser(url: str, password: str = '') -> dict:
+    """在不绕过验证码的前提下，用 Chromium 执行蓝奏云动态下载流程。"""
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    except Exception:
+        return {'success': False, 'error': 'Playwright 未安装'}
+
+    try:
+        with sync_playwright() as pw:
+            launch_kwargs = {
+                'headless': True,
+                'args': ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
+            }
+            try:
+                browser = pw.chromium.launch(executable_path='/usr/bin/chromium-browser', **launch_kwargs)
+            except Exception:
+                browser = pw.chromium.launch(**launch_kwargs)
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+                locale='zh-CN',
+                viewport={'width': 1365, 'height': 900},
+            )
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            page = context.new_page()
+            page.set_default_timeout(10000)
+            responses = []
+            page.on('response', lambda response: responses.append(response) if 'ajaxm.php' in response.url else None)
+            try:
+                page.goto(url, wait_until='domcontentloaded', timeout=15000)
+            except PlaywrightTimeoutError:
+                pass
+            try:
+                page.wait_for_load_state('networkidle', timeout=5000)
+            except Exception:
+                pass
+            try:
+                visible_text = re.sub(r'\s+', '', page.locator('body').inner_text(timeout=3000) or '').lower()
+            except Exception:
+                visible_text = ''
+            if any(marker in visible_text for marker in ('文件取消分享', '分享已取消', '分享不存在', '链接已失效', '文件不存在')):
+                browser.close()
+                return {'success': False, 'error': '蓝奏云分享已取消或已失效', 'reason': 'share_expired'}
+
+            # 优先从已渲染 iframe 中提取动态 sign；蓝奏云不同皮肤的变量名不固定。
+            for frame in page.frames:
+                try:
+                    html = frame.content()
+                except Exception:
+                    continue
+                sign_match = re.search(r"""(?:['"]?(?:sign|websign)['"]?|var\s+sign)\s*[:=]\s*['"]([^'"]+)""", html, re.I)
+                if not sign_match:
+                    continue
+                sign = sign_match.group(1)
+                endpoint = urllib.parse.urljoin(frame.url or page.url, '/ajaxm.php')
+                payload = {'sign': sign, 'action': 'downprocess', 'ves': '1'}
+                if password:
+                    payload['pwd'] = password
+                try:
+                    data = frame.evaluate("""async ({endpoint, payload}) => {
+                        const r = await fetch(endpoint, {method:'POST', credentials:'include', headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest','Referer':location.href}, body:new URLSearchParams(payload)});
+                        return await r.json();
+                    }""", {'endpoint': endpoint, 'payload': payload})
+                except Exception:
+                    continue
+                if str(data.get('zt')) not in ('1', 'True', 'true'):
+                    continue
+                dom = str(data.get('dom') or '').rstrip('/')
+                file_path = str(data.get('url') or '')
+                direct_url = file_path if file_path.startswith('http') else ((dom + '/file/' + file_path.lstrip('/')) if dom and file_path else dom)
+                if direct_url:
+                    browser.close()
+                    return {'success': True, 'direct_url': direct_url, 'netdisk_type': 'lanzou', 'source': 'playwright'}
+            browser.close()
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)[:180]}
+    return {'success': False, 'error': '浏览器未提取到蓝奏云下载签名'}
+
+
+# ==================== 123网盘解析 ====================
+
+def _first_url(value):
+    """递归取响应对象中最可能的公开下载 URL，不打印响应中的敏感字段。"""
+    preferred = ('downloadurl', 'download_url', 'downloadpath', 'url', 'link')
+    if isinstance(value, dict):
+        for key in preferred:
+            for actual, item in value.items():
+                if str(actual).lower() == key and isinstance(item, str) and item.startswith(('http://', 'https://')):
+                    return item
+        for item in value.values():
+            found = _first_url(item)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _first_url(item)
+            if found:
+                return found
+    return ''
+
+
+def parse_123pan(url: str, password: str = '') -> dict:
+    """解析 123 网盘公开分享，并调用官方分享下载信息接口。"""
+    key_match = re.search(r'/(?:s|ps|123pan)/([A-Za-z0-9]+-[A-Za-z0-9]+)(?:\.html)?(?:/|$)', url, re.I)
+    if not key_match:
+        key_match = re.search(r'[?&](?:shareKey|share_key)=([A-Za-z0-9]+-[A-Za-z0-9]+)', url, re.I)
+    if not key_match:
+        return {'success': False, 'error': '123网盘链接中缺少有效分享Key'}
+    share_key = key_match.group(1)
+
+    # 123Pan 会把分享 API 按分享者 UserID 分配到 <uid>.mshare.123pan.cn。
+    status, body = http_get(
+        'https://www.123pan.cn/gsb/s/share-key?' + urllib.parse.urlencode({'shareKey': share_key}),
+        headers={'Accept': 'application/json, text/plain, */*'},
+    )
+    try:
+        redirect_data = json.loads(body)
+        user_id = (redirect_data.get('info') or {}).get('data', {}).get('UserID')
+    except Exception:
+        user_id = None
+    if not user_id:
+        return {'success': False, 'error': '123网盘分享域名解析失败，请稍后重试'}
+
+    api_base = f'https://{user_id}.mshare.123pan.cn/b/api'
+    headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': f'https://{user_id}.mshare.123pan.cn/123pan/{share_key}',
+    }
+    list_params = {
+        'limit': 100,
+        'next': 0,
+        'orderBy': 'file_name',
+        'orderDirection': 'asc',
+        'shareKey': share_key,
+        'ParentFileId': 0,
+        'Page': 1,
+        'event': 'home_request',
+        'operateType': '',
+        'OrderId': '',
+        'SharePwd': password or '',
+    }
+    list_status, list_body = http_get(
+        api_base + '/share/get?' + urllib.parse.urlencode(list_params),
+        headers=headers,
+    )
+    try:
+        listing = json.loads(list_body)
+    except Exception:
+        listing = {}
+    if listing.get('code') != 0:
+        message = str(listing.get('message') or '分享列表获取失败')
+        if listing.get('code') == 5103:
+            message = '提取码错误'
+        return {'success': False, 'error': f'123网盘解析失败: {message}', 'code': listing.get('code')}
+
+    info_list = (listing.get('data') or {}).get('InfoList') or []
+    if not info_list:
+        return {'success': False, 'error': '123网盘解析失败: 分享文件列表为空'}
+    item = info_list[0]
+    file_id = item.get('FileId')
+    size = item.get('Size', item.get('BaseSize', 0))
+    s3_flag = item.get('S3KeyFlag') or item.get('S3keyFlag') or ''
+    if not file_id or not s3_flag:
+        return {'success': False, 'error': '123网盘解析失败: 分享文件元数据不完整'}
+
+    download_payload = {
+        'ShareKey': share_key,
+        'SharePwd': password or '',
+        'FileId': file_id,
+        'S3keyFlag': s3_flag,
+        'Size': size,
+    }
+    dl_status, dl_body = http_post_json(
+        api_base + '/v2/share/download/info',
+        download_payload,
+        headers={**headers, 'Content-Type': 'application/json'},
+    )
+    try:
+        download_data = json.loads(dl_body)
+    except Exception:
+        download_data = {}
+    if download_data.get('code') != 0:
+        message = str(download_data.get('message') or '官方接口未返回直链')
+        if download_data.get('code') == 5112:
+            message = '分享方提取流量包不足，123网盘拒绝生成免登录直链'
+        return {'success': False, 'error': f'123网盘解析失败: {message}', 'code': download_data.get('code'),
+                'filename': item.get('FileName', ''), 'file_size': size}
+
+    direct_url = _first_url(download_data.get('data'))
+    if not direct_url:
+        return {'success': False, 'error': '123网盘解析失败: 官方响应未包含下载直链'}
+    return {
+        'success': True,
+        'direct_url': direct_url,
+        'filename': item.get('FileName', ''),
+        'file_size': size,
+        'netdisk_type': '123',
+    }
 
 
 # ==================== 百度网盘解析 ====================
@@ -500,6 +708,8 @@ def _make_quark_session(cookie_str: str):
         h = {
             'User-Agent': QUARK_UA,
             'Referer': 'https://pan.quark.cn/',
+            'Origin': 'https://pan.quark.cn',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
             'Accept': 'application/json, text/plain, */*',
         }
         body = None
@@ -551,8 +761,16 @@ def parse_quark(url: str, password: str = '') -> dict:
     # ★ 会话内自动刷新 __puus (直链下载必须带最新值, 否则CDN回调403)
     qk_req, qk_cookie_str = _make_quark_session(cookie)
 
+    def _qk_url(url):
+        sep = '&' if '?' in url else '?'
+        return url + sep + urllib.parse.urlencode({
+            'uc_param_str': '',
+            '__dt': random.randint(600, 9999),
+            '__t': str(int(time.time() * 1000)),
+        })
+
     # 1. token
-    _, token_resp = qk_req(f'{QUARK_API}/share/sharepage/token?pr=ucpro&fr=pc',
+    _, token_resp = qk_req(_qk_url(f'{QUARK_API}/share/sharepage/token?pr=ucpro&fr=pc'),
                            {'pwd_id': pwd_id, 'passcode': password or ''})
     try:
         token_data = json.loads(token_resp)
@@ -570,7 +788,7 @@ def parse_quark(url: str, password: str = '') -> dict:
             f'&stoken={urllib.parse.quote(stoken)}&pdir_fid={pdir_fid}&force=0'
             f'&_page=1&_size=50&_sort=file_type%3Aasc%2Cupdated_at%3Adesc&_fetch_total=1&pr=ucpro&fr=pc'
         )
-        _, resp = qk_req(detail_url)
+        _, resp = qk_req(_qk_url(detail_url))
         try:
             data = json.loads(resp)
             return (data.get('data') or {}).get('list') or []
@@ -578,6 +796,7 @@ def parse_quark(url: str, password: str = '') -> dict:
             return []
 
     file_info = None
+    transfer_info = None
     folder_stack = []
     for _depth in range(4):
         items = _list_dir(folder_stack[-1] if folder_stack else '0')
@@ -588,10 +807,16 @@ def parse_quark(url: str, password: str = '') -> dict:
                 break
         if found:
             file_info = found
+            # 夸克转存接口要求使用分享根层项目的 share_fid_token；
+            # 对“根目录→文件夹→文件”不能直接拿嵌套文件 token 转存。
+            if transfer_info is None:
+                transfer_info = found
             break
-        # 全文件夹: 进入第一个文件夹
+        # 全文件夹: 记录根层文件夹用于转存，再进入其内部寻找真实文件名/大小
         for it in items:
             if it.get('file_type') == 0:
+                if transfer_info is None:
+                    transfer_info = it
                 folder_stack.append(it.get('fid', ''))
                 break
         else:
@@ -599,8 +824,9 @@ def parse_quark(url: str, password: str = '') -> dict:
 
     if not file_info:
         return {'success': False, 'error': '夸克网盘分享中没有找到文件'}
-    share_fid = file_info.get('fid', '')
-    share_fid_token = file_info.get('share_fid_token', '')
+    transfer_info = transfer_info or file_info
+    share_fid = transfer_info.get('fid', '')
+    share_fid_token = transfer_info.get('share_fid_token', '')
     if not share_fid or not share_fid_token:
         return {'success': False, 'error': '夸克网盘文件缺少转存参数(share_fid_token)'}
 
@@ -608,7 +834,7 @@ def parse_quark(url: str, password: str = '') -> dict:
         """创建唯一临时文件夹(避免夸克全盘按内容去重复用失效fid)"""
         folder_name = f'qp_{int(time.time()*1000)}_{share_fid[:6]}'
         _, mk_resp = qk_req(
-            f'{QUARK_API}/file?pr=ucpro&fr=pc',
+            _qk_url(f'{QUARK_API}/file?pr=ucpro&fr=pc'),
             {'file_name': folder_name, 'pdir_fid': '0', 'dir_init_lock': False, 'dir_path': ''},
         )
         try:
@@ -620,7 +846,7 @@ def parse_quark(url: str, password: str = '') -> dict:
     def _save_into(folder_fid):
         """转存分享文件到指定文件夹, 返回任务ID"""
         _, save_resp = qk_req(
-            f'{QUARK_API}/share/sharepage/save?pr=ucpro&fr=pc',
+            _qk_url(f'{QUARK_API}/share/sharepage/save?pr=ucpro&fr=pc'),
             {
                 'scene': 'link', 'pdir_fid': '0', 'pwd_id': pwd_id, 'stoken': stoken,
                 'fid_list': [share_fid], 'fid_token_list': [share_fid_token],
@@ -633,21 +859,32 @@ def parse_quark(url: str, password: str = '') -> dict:
         except json.JSONDecodeError:
             return ''
 
+    task_error_msg = ''
     def _wait_task(task_id):
-        """轮询转存任务, 返回保存后的文件fid"""
+        """轮询转存任务, 返回 (保存后的文件fid, 错误信息)"""
+        nonlocal task_error_msg
         for _ in range(30):
             _, task_resp = qk_req(
-                f'{QUARK_API}/task?task_id={task_id}&retry_index=0&pr=ucpro&fr=pc',
+                _qk_url(f'{QUARK_API}/task?task_id={task_id}&retry_index=0&pr=ucpro&fr=pc'),
             )
             try:
-                tdata = (json.loads(task_resp).get('data') or {})
+                tjson = json.loads(task_resp)
+                tdata = tjson.get('data') or {}
             except json.JSONDecodeError:
                 break
-            if tdata.get('status') == 2:
+            status = tdata.get('status')
+            if status == 2:
                 save_as = tdata.get('save_as') or {}
                 fids = save_as.get('save_as_select_top_fids') or save_as.get('save_as_top_fids') or []
                 if fids:
                     return fids[0]
+                break
+            elif status == 3 or tjson.get('code') != 0:
+                msg = tjson.get('message') or tdata.get('message') or '未知错误'
+                if 'capacity limit' in msg.lower():
+                    task_error_msg = '夸克网盘当前账号容量不足，无法转存并解析该大文件（该文件需要 ~3.52GB 可用空间）'
+                else:
+                    task_error_msg = f'夸克网盘转存失败: {msg}'
                 break
             time.sleep(1)
         return ''
@@ -681,17 +918,63 @@ def parse_quark(url: str, password: str = '') -> dict:
         except Exception:
             pass
 
+    def _find_first_saved_file(root_fid):
+        """广度优先搜索转存目录下的首个真实文件 FID"""
+        queue = [root_fid]
+        visited = set()
+        while queue and len(visited) < 30:
+            current_fid = queue.pop(0)
+            if not current_fid or current_fid in visited:
+                continue
+            visited.add(current_fid)
+            list_url = _qk_url(
+                f'{QUARK_API}/file/sort?pr=ucpro&fr=pc&pdir_fid={urllib.parse.quote(current_fid)}'
+                f'&_page=1&_size=100&_fetch_total=1&_fetch_sub_dirs=1'
+                f'&_sort=file_type%3Aasc%2Cupdated_at%3Adesc'
+            )
+            _, body = qk_req(list_url)
+            try:
+                data = json.loads(body)
+                items = (data.get('data') or {}).get('list') or []
+            except json.JSONDecodeError:
+                continue
+            for it in items:
+                fid = it.get('fid', '')
+                if not fid:
+                    continue
+                if it.get('file_type') != 0 and not it.get('dir'):
+                    # 找到非文件夹文件，尝试获取直链
+                    _, dl_resp = qk_req(
+                        _qk_url(f'{QUARK_API}/file/download?pr=ucpro&fr=pc'),
+                        {'fids': [fid]},
+                    )
+                    try:
+                        dl_data = json.loads(dl_resp)
+                    except json.JSONDecodeError:
+                        continue
+                    dl_list = dl_data.get('data') or []
+                    if isinstance(dl_list, list) and dl_list and dl_list[0].get('download_url'):
+                        return dl_list[0]
+                elif it.get('dir') or it.get('file_type') == 0:
+                    queue.append(fid)
+        return None
+
     def _download(fid):
-        """获取自己网盘文件的直链"""
+        """获取自己网盘文件或目录内文件的直链"""
+        # 1. 优先尝试把传入的 fid 直接作为文件直链解析
         _, dl_resp = qk_req(
-            f'{QUARK_API}/file/download?pr=ucpro&fr=pc',
+            _qk_url(f'{QUARK_API}/file/download?pr=ucpro&fr=pc'),
             {'fids': [fid]},
         )
-        dl_data = json.loads(dl_resp)
-        dl_list = dl_data.get('data') or []
-        if isinstance(dl_list, list) and dl_list and dl_list[0].get('download_url'):
-            return dl_list[0]
-        return None
+        try:
+            dl_data = json.loads(dl_resp)
+            dl_list = dl_data.get('data') or []
+            if isinstance(dl_list, list) and dl_list and dl_list[0].get('download_url'):
+                return dl_list[0]
+        except Exception:
+            pass
+        # 2. 如果是目录或顶层转存文件夹，递归向下搜索第一个可下载的文件
+        return _find_first_saved_file(fid)
 
     # 3. 建临时文件夹 → 转存 → 轮询 → 下载 (失败则重建文件夹重试一次)
     item = None
@@ -740,7 +1023,8 @@ def parse_quark(url: str, password: str = '') -> dict:
                 'User-Agent': QUARK_UA,
             },
         }
-    return {'success': False, 'error': '夸克网盘获取直链失败(可能空间不足或触发限流)'}
+    err_out = task_error_msg or '夸克网盘获取直链失败(可能空间不足或触发限流)'
+    return {'success': False, 'error': err_out}
 
 
 # ==================== 阿里云盘解析 ====================
@@ -1005,6 +1289,7 @@ def parse_netdisk(url: str, password: str = '') -> dict:
     netdisk_type = identify_type(url)
 
     parsers = {
+        '123': parse_123pan,
         'lanzou': parse_lanzou,
         'ilanzou': parse_lanzou,
         'baidu': parse_baidu,

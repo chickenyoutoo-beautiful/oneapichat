@@ -2,20 +2,54 @@
 header('Content-Type: application/json');
 require_once __DIR__ . '/init.php';
 require_once __DIR__ . '/auth_helpers.php';
+require_once __DIR__ . '/permission_grants.php';
 setCorsHeaders();
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 // ── 引擎请求辅助 (替代 @file_get_contents 抑制) ──
+function _engine_bridge_secret(): string {
+    static $secret = null;
+    if ($secret !== null) return $secret;
+    $path = dirname(__DIR__) . '/.engine/internal_bridge.key';
+    $raw = is_readable($path) ? file_get_contents($path) : false;
+    $secret = ($raw !== false) ? trim($raw) : '';
+    return strlen($secret) >= 32 ? $secret : '';
+}
+function _engine_headers(array $headers = []): array {
+    $secret = _engine_bridge_secret();
+    if ($secret !== '') $headers[] = 'X-OneAPIChat-Internal: ' . $secret;
+    return $headers;
+}
 function _engine_get(string $path, string $fallback = '{}', $customCtx = null): string {
-    if ($customCtx) {
-        $resp = file_get_contents($path, false, $customCtx);
-    } else {
-        $ctx = stream_context_create(['http' => ['timeout' => 120, 'ignore_errors' => true]]);
-        $resp = file_get_contents($path, false, $ctx);
-    }
+    $options = $customCtx ? stream_context_get_options($customCtx) : [];
+    $http = $options['http'] ?? [];
+    $http['timeout'] = $http['timeout'] ?? 120;
+    $http['ignore_errors'] = true;
+    $headers = $http['header'] ?? [];
+    if (is_string($headers)) $headers = preg_split('/\r?\n/', trim($headers));
+    $http['header'] = _engine_headers(is_array($headers) ? $headers : []);
+    $options['http'] = $http;
+    $ctx = stream_context_create($options);
+    $resp = file_get_contents($path, false, $ctx);
     return ($resp !== false) ? $resp : $fallback;
 }
+function _engine_post_json(string $path, array $payload, string $fallback = '{}'): string {
+    $ch = curl_init($path);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER => _engine_headers(['Content-Type: application/json', 'Accept: application/json']),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 120,
+    ]);
+    $resp = curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+    return (!$err && $resp !== false) ? $resp : $fallback;
+}
+
 function _engine_mmx_config_read(): array {
     $path = dirname(__DIR__) . '/config/.mmx_config.json';
     if (!file_exists($path)) return [];
@@ -47,7 +81,7 @@ if (str_ends_with($requestPath, '/engine/video_edit') && $_SERVER['REQUEST_METHO
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_HTTPHEADER => _engine_headers(['Content-Type: application/json']),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 600,
         CURLOPT_CONNECTTIMEOUT => 5,
@@ -85,6 +119,8 @@ if (!empty($authHeader) && preg_match('/^[a-f0-9]{32,}$/', $authHeader)) {
     $authToken = $authHeader;
 } elseif (isset($_GET['auth_token'])) {
     $authToken = preg_replace('/[^a-f0-9]/', '', $_GET['auth_token']);
+} elseif (!empty($_COOKIE['auth_token'])) {
+    $authToken = preg_replace('/[^a-f0-9]/', '', (string) $_COOKIE['auth_token']);
 }
 $userId = '';
 if (!empty($authToken)) {
@@ -94,18 +130,140 @@ if (!empty($authToken)) {
     }
 }
 $userParam = $userId ? '&user_id=' . urlencode($userId) : '';
+// 浏览器端点通过本地 PHP bridge 调用引擎，必须显式携带已验证的用户绑定；
+// 内部 bridge 不会把 PHP 会话自动映射到 FastAPI request.state。
+$engineUserQuery = $userId ? '?user_id=' . urlencode($userId) : '';
 
-// ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开接口）
-if (!$userId && $action !== 'health' && $action !== 'get_encryption_key' && $action !== 'mmx' && $action !== 'minimax_search' && $action !== 'tavily_search' && $action !== 'search_proxy' && $action !== 'mcp_proxy') {
+function _permission_grant_input(): array {
+    static $cached = null;
+    if (is_array($cached)) return $cached;
+    $raw = file_get_contents('php://input');
+    $body = $raw ? json_decode($raw, true) : [];
+    $cached = is_array($body) ? $body : [];
+    return $cached;
+}
+function _permission_grant_for(string $userId, string $capability): array {
+    $grantId = trim((string)($_SERVER['HTTP_X_ONEAPICHAT_GRANT'] ?? $_GET['grant_id'] ?? ''));
+    $chatId = trim((string)($_SERVER['HTTP_X_ONEAPICHAT_CHAT'] ?? $_GET['chat_id'] ?? ''));
+    if (!$grantId) {
+        $input = _permission_grant_input();
+        $grantId = trim((string)($input['grant_id'] ?? ''));
+        if (!$chatId) $chatId = trim((string)($input['chat_id'] ?? ''));
+    }
+    return [verifyPermissionGrant($grantId, $userId, $chatId, $capability), $grantId, $chatId];
+}
+function _require_permission_grant(string $userId, string $capability): array {
+    [$ok, $grantId, $chatId] = _permission_grant_for($userId, $capability);
+    if (!$ok) {
+        http_response_code(403);
+        echo json_encode([
+            'ok' => false,
+            'error' => '需要用户批准扩展文件系统权限',
+            'code' => 'PERMISSION_REQUIRED',
+            'capability' => $capability,
+            'chat_id' => $chatId,
+            'retryable' => true,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    return [$grantId, $chatId];
+}
+
+// ★ 强制认证: 部分 action 无需 session 登录（有自己的 API Key 或公开股票行情等只读接口）
+$publicActions = [
+    'health', 'get_encryption_key',
+    'stock_realtime', 'stock_market_overview', 'stock_kline',
+    'stock_sector_flow', 'stock_dragon_tiger', 'stock_north_flow',
+    'stock_diagnosis', 'stock_indicators', 'stock_chart',
+];
+if (!$userId && !in_array($action, $publicActions, true)) {
     http_response_code(401);
     echo json_encode(['error' => '未登录，请先登录', 'code' => 'UNAUTHORIZED']);
     exit;
 }
 
 switch ($action) {
+    case 'permission_grant_create':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'POST required']); break; }
+        $input = _permission_grant_input();
+        $chatId = normalizeGrantChatId((string)($input['chat_id'] ?? ''));
+        $caps = normalizeGrantCapabilities($input['capabilities'] ?? []);
+        try {
+            purgeExpiredPermissionGrants();
+            $grant = issuePermissionGrant($userId, $chatId, $caps, intval($input['ttl_seconds'] ?? 1800));
+            echo json_encode(['ok'=>true] + $grant, JSON_UNESCAPED_UNICODE);
+        } catch (Throwable $e) {
+            http_response_code(400); echo json_encode(['ok'=>false,'error'=>'invalid grant request']);
+        }
+        break;
+
+    case 'permission_grant_revoke':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'POST required']); break; }
+        $input = _permission_grant_input();
+        $grantId = (string)($input['grant_id'] ?? $_GET['grant_id'] ?? '');
+        $chatId = (string)($input['chat_id'] ?? $_GET['chat_id'] ?? '');
+        $ok = revokePermissionGrant($grantId, $userId, $chatId);
+        echo json_encode(['ok'=>$ok]);
+        break;
+
+    case 'permission_grant_status':
+        $capability = (string)($_GET['capability'] ?? 'filesystem.read');
+        [$ok, $_grantId, $chatId] = _permission_grant_for($userId, $capability);
+        echo json_encode(['ok'=>true,'granted'=>$ok,'chat_id'=>$chatId,'capability'=>$capability]);
+        break;
+
     case 'health':
         $resp = _engine_get($engine_url . '/engine/health');
         echo $resp ?: json_encode(['status' => 'error', 'message' => 'unreachable']);
+        break;
+
+    case 'workspace_browse':
+        // 仅列出目录名称，供 Agent 工作区选择器浏览；不返回文件内容。
+        $requested = trim((string)($_GET['path'] ?? '/var/www/html/oneapichat'));
+        $allowedRoots = ['/var/www', '/home', '/opt', '/tmp'];
+        $resolved = realpath($requested);
+        if ($resolved === false || !is_dir($resolved)) {
+            http_response_code(404);
+            echo json_encode(['ok' => false, 'error' => '目录不存在或不可访问'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        $allowed = false;
+        foreach ($allowedRoots as $root) {
+            $realRoot = realpath($root);
+            if ($realRoot !== false && ($resolved === $realRoot || str_starts_with($resolved, $realRoot . DIRECTORY_SEPARATOR))) {
+                $allowed = true;
+                break;
+            }
+        }
+        if (!$allowed) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => '该目录不在允许浏览范围内'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        $directories = [];
+        $entries = @scandir($resolved);
+        if ($entries === false) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => '目录不可读'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) continue;
+            $child = $resolved . DIRECTORY_SEPARATOR . $entry;
+            if (!is_dir($child) || is_link($child)) continue;
+            $directories[] = ['name' => $entry, 'path' => $child];
+            if (count($directories) >= 200) break;
+        }
+        usort($directories, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
+        $parent = dirname($resolved);
+        if ($parent === $resolved) $parent = null;
+        echo json_encode([
+            'ok' => true,
+            'path' => $resolved,
+            'parent' => $parent,
+            'directories' => $directories,
+            'roots' => $allowedRoots,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         break;
 
     case 'get_encryption_key':
@@ -143,6 +301,7 @@ switch ($action) {
         $ch = curl_init($stream_url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_HTTPHEADER => _engine_headers(),
             CURLOPT_WRITEFUNCTION => function($ch, $data) {
                 echo $data; ob_flush(); flush(); return strlen($data);
             },
@@ -159,15 +318,57 @@ switch ($action) {
         }
         if (!$userId) { http_response_code(401); echo json_encode(['error' => 'auth required']); exit; }
         $body = file_get_contents('php://input');
+        $createData = json_decode($body ?: '{}', true);
+        // DSH-style durable idempotency: derive one stable msg_id when a legacy client omits it.
+        // This lets the Python engine attach retries/other tabs to the same authoritative task.
+        if (is_array($createData) && empty($createData['msg_id'])) {
+            $chatKey = (string)($createData['chat_id'] ?? '');
+            $lastUser = '';
+            $messages = isset($createData['messages']) && is_array($createData['messages']) ? $createData['messages'] : [];
+            for ($i = count($messages) - 1; $i >= 0; $i--) {
+                if (is_array($messages[$i]) && (($messages[$i]['role'] ?? '') === 'user')) {
+                    $lastUser = json_encode($messages[$i], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    break;
+                }
+            }
+            $createData['msg_id'] = 'msg_req_' . substr(hash('sha256', $userId . '|' . $chatKey . '|' . $lastUser), 0, 24);
+            $body = json_encode($createData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        $traceId = is_array($createData) ? trim((string)($createData['trace_id'] ?? ($_SERVER['HTTP_X_ONEAPICHAT_TRACE'] ?? ''))) : '';
+        if ($traceId !== '') {
+            $traceEntry = [
+                'ts' => (int)(microtime(true) * 1000), 'component' => 'engine_api.php', 'stage' => 'stream_create_forward',
+                'trace_id' => substr(preg_replace('/[^a-zA-Z0-9_.:-]/', '', $traceId), 0, 96),
+                'chat_id' => (string)($createData['chat_id'] ?? ''), 'msg_id' => (string)($createData['msg_id'] ?? ''),
+                'user_id' => $userId, 'model' => (string)($createData['model'] ?? ''), 'bytes' => strlen((string)$body),
+            ];
+            @file_put_contents(ONECHAT_ROOT . '/logs/multidevice-sync.jsonl', json_encode($traceEntry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+        }
         $ch = curl_init($engine_url . '/engine/chat/create?user_id=' . urlencode($userId));
+        $createHeaders = ['Content-Type: application/json'];
+        if ($traceId !== '') $createHeaders[] = 'X-OneAPIChat-Trace: ' . $traceId;
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => _engine_headers($createHeaders),
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 5,
         ]);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
         curl_close($ch);
+        if ($traceId !== '') {
+            $resultData = json_decode($resp ?: '{}', true);
+            $traceEntry = [
+                'ts' => (int)(microtime(true) * 1000), 'component' => 'engine_api.php', 'stage' => 'stream_create_result',
+                'trace_id' => substr(preg_replace('/[^a-zA-Z0-9_.:-]/', '', $traceId), 0, 96),
+                'chat_id' => (string)($createData['chat_id'] ?? ''), 'user_id' => $userId,
+                'http_status' => $code, 'ok' => $curlErr === '' && $code >= 200 && $code < 300,
+                'stream_id' => is_array($resultData) ? (string)($resultData['stream_id'] ?? '') : '',
+                'task_id' => is_array($resultData) ? (string)($resultData['task_id'] ?? '') : '',
+                'error' => $curlErr !== '' ? substr($curlErr, 0, 160) : '',
+            ];
+            @file_put_contents(ONECHAT_ROOT . '/logs/multidevice-sync.jsonl', json_encode($traceEntry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+        }
         http_response_code($code ?: 200);
         header('Content-Type: application/json; charset=utf-8');
         echo $resp;
@@ -181,16 +382,54 @@ switch ($action) {
     case 'events_broadcast':
         // 转发前端广播到引擎 (SSE 事件总线)
         $body = file_get_contents('php://input');
+        $parsed = json_decode($body ?: '{}', true);
+        $eventType = is_array($parsed) ? (string)($parsed['event_type'] ?? '') : '';
+        $eventData = is_array($parsed) && isset($parsed['data']) && is_array($parsed['data']) ? $parsed['data'] : [];
+        $traceId = trim((string)($eventData['trace_id'] ?? ($_SERVER['HTTP_X_ONEAPICHAT_TRACE'] ?? '')));
+        if ($traceId !== '') {
+            $traceEntry = [
+                'ts' => (int)(microtime(true) * 1000),
+                'component' => 'engine_api.php',
+                'stage' => 'broadcast_forward',
+                'trace_id' => substr(preg_replace('/[^a-zA-Z0-9_.:-]/', '', $traceId), 0, 96),
+                'event_type' => $eventType,
+                'chat_id' => (string)($eventData['chat_id'] ?? ''),
+                'user_id' => $userId,
+                'source' => (string)($eventData['source'] ?? ''),
+                'bytes' => strlen((string)$body),
+            ];
+            @file_put_contents(ONECHAT_ROOT . '/logs/multidevice-sync.jsonl', json_encode($traceEntry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+        }
         $ch = curl_init($engine_url . '/engine/events/broadcast?' . $userParam);
+        $headers = ['Content-Type: application/json'];
+        if ($traceId !== '') $headers[] = 'X-OneAPIChat-Trace: ' . $traceId;
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => _engine_headers($headers),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 5,
         ]);
-        echo curl_exec($ch);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
         curl_close($ch);
+        if ($traceId !== '') {
+            $traceEntry = [
+                'ts' => (int)(microtime(true) * 1000),
+                'component' => 'engine_api.php',
+                'stage' => 'broadcast_result',
+                'trace_id' => substr(preg_replace('/[^a-zA-Z0-9_.:-]/', '', $traceId), 0, 96),
+                'event_type' => $eventType,
+                'chat_id' => (string)($eventData['chat_id'] ?? ''),
+                'user_id' => $userId,
+                'http_status' => $httpCode,
+                'ok' => $curlErr === '' && $httpCode >= 200 && $httpCode < 300,
+                'error' => $curlErr !== '' ? substr($curlErr, 0, 160) : '',
+            ];
+            @file_put_contents(ONECHAT_ROOT . '/logs/multidevice-sync.jsonl', json_encode($traceEntry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+        }
+        echo $resp !== false ? $resp : json_encode(['ok' => false, 'error' => $curlErr ?: 'engine unavailable']);
         break;
 
     case 'notifications':
@@ -219,32 +458,41 @@ switch ($action) {
         break;
 
     case 'agent_list':
-        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/list?" . $userParam . "'") ?: '{}';
+        echo _engine_get($engine_url . '/engine/agent/list?' . $userParam) ?: '{}';
         break;
 
     case 'agent_create':
-        $name = $_GET['name'] ?? '';
-        $prompt = $_GET['prompt'] ?? '';
-        $model = $_GET['model'] ?? 'deepseek-chat';
-        $api_key = $_GET['api_key'] ?? '';
-        $base_url = $_GET['base_url'] ?? '';
+        $body = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($body)) $body = [];
+        $name = $body['name'] ?? ($_GET['name'] ?? '');
+        $prompt = $body['prompt'] ?? ($_GET['prompt'] ?? '');
+        $model = $body['model'] ?? ($_GET['model'] ?? '');
+        $base_url = $body['base_url'] ?? ($_GET['base_url'] ?? '');
+        $provider = $body['provider'] ?? ($_GET['provider'] ?? '');
+        $role = $body['role'] ?? ($_GET['role'] ?? 'general');
+        $proxy_url = $body['proxy_url'] ?? ($_GET['proxy_url'] ?? '');
+        $proxy_enabled = $body['proxy_enabled'] ?? ($_GET['proxy_enabled'] ?? '');
         if (!$name || !$prompt) { echo json_encode(['error' => '缺少参数']); exit; }
-        $url = $engine_url . '/engine/agent/create?name=' . urlencode($name) . '&prompt=' . urlencode($prompt) . '&model=' . urlencode($model);
-        if ($api_key) $url .= '&api_key=' . urlencode($api_key);
-        if ($base_url) $url .= '&base_url=' . urlencode($base_url);
-        $url .= $userParam;
-        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        // Credentials are intentionally never forwarded; the engine loads encrypted per-user config.
+        $url = $engine_url . '/engine/agent/create?user_id=' . urlencode($userId);
+        echo _engine_post_json($url, [
+            'name' => $name, 'prompt' => $prompt, 'model' => $model,
+            'base_url' => $base_url, 'provider' => $provider, 'role' => $role,
+            'proxy_url' => $proxy_url, 'proxy_enabled' => $proxy_enabled,
+        ], json_encode(['ok' => false, 'error' => 'engine unreachable']));
         break;
 
     case 'agent_run':
-        $name = $_GET['name'] ?? '';
-        $message = $_GET['message'] ?? '';
-        $from_ask = $_GET['from_ask'] ?? '';
+        $body = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($body)) $body = [];
+        $name = $body['name'] ?? ($_GET['name'] ?? '');
+        $message = $body['message'] ?? ($_GET['message'] ?? '');
+        $from_ask = $body['from_ask'] ?? ($_GET['from_ask'] ?? '');
         if (!$name) { echo json_encode(['error' => '缺少name']); exit; }
-        $url = $engine_url . '/engine/agent/run?name=' . urlencode($name) . $userParam;
-        if ($message) $url .= '&message=' . urlencode($message);
-        if ($from_ask) $url .= '&from_ask=' . urlencode($from_ask);
-        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        $url = $engine_url . '/engine/agent/run?user_id=' . urlencode($userId);
+        echo _engine_post_json($url, [
+            'name' => $name, 'message' => $message, 'from_ask' => $from_ask,
+        ], json_encode(['ok' => false, 'error' => 'engine unreachable']));
         break;
 
     case 'agent_status':
@@ -266,7 +514,7 @@ switch ($action) {
         break;
 
     case 'agent_notifications':
-        $raw = shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications?" . $userParam . "'");
+        $raw = _engine_get($engine_url . '/engine/agent/notifications?' . $userParam, '');
         $data = $raw ? json_decode($raw, true) : null;
         if (!$data) {
             echo json_encode(['notifications' => [], 'count' => 0, 'allProcessed' => true]);
@@ -283,7 +531,7 @@ switch ($action) {
         break;
 
     case 'agent_notifications_mark':
-        echo shell_exec("curl -s '" . $engine_url . "/engine/agent/notifications/mark?" . $userParam . "'") ?: json_encode(['ok' => false]);
+        echo _engine_get($engine_url . '/engine/agent/notifications/mark?' . $userParam) ?: json_encode(['ok' => false]);
         break;
 
     case 'workflow_create':
@@ -327,6 +575,16 @@ switch ($action) {
         break;
 
 
+    case 'run_code':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'POST required']); break; }
+        $body = _permission_grant_input();
+        $full_access_requested = !empty($body['full_access']);
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.write');
+        $body['user_id'] = $userId;
+        $body['full_access'] = $full_access_requested;
+        echo _engine_post_json($engine_url . '/engine/run_code', $body, json_encode(['ok'=>false,'error'=>'engine unreachable']));
+        break;
+
     case 'exec':
         $cmd = '';
         $timeout = intval($_GET['timeout'] ?? 60);
@@ -351,7 +609,7 @@ switch ($action) {
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $cmd);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, _engine_headers(['Content-Type: text/plain']));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout + 10);
         $resp = curl_exec($ch);
@@ -370,7 +628,7 @@ switch ($action) {
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $script);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, _engine_headers(['Content-Type: text/plain']));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout + 5);
         echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
@@ -379,26 +637,33 @@ switch ($action) {
 
     case 'file_read':
         $path = $_GET['path'] ?? '';
+        $cwd = $_GET['cwd'] ?? '';
         $max_lines = intval($_GET['max_lines'] ?? 200);
         $start_line = intval($_GET['start_line'] ?? 0);
         $end_line = intval($_GET['end_line'] ?? 0);
         $offset = (isset($_GET['offset']) && $_GET['offset'] !== '') ? intval($_GET['offset']) : -1;
         $max_chars = intval($_GET['max_chars'] ?? 0);
         if (!$path) { echo json_encode(['error' => '缺少path']); exit; }
-        $url = $engine_url . '/engine/file/read?path=' . urlencode($path) . '&max_lines=' . $max_lines;
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.read');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
+        $url = $engine_url . '/engine/file/read?path=' . urlencode($path) . '&max_lines=' . $max_lines . ($cwd !== '' ? '&cwd=' . urlencode($cwd) : '') . $full_access;
         if ($start_line > 0) $url .= '&start_line=' . $start_line;
         if ($end_line > 0) $url .= '&end_line=' . $end_line;
         if ($offset >= 0) $url .= '&offset=' . $offset;
         if ($max_chars > 0) $url .= '&max_chars=' . $max_chars;
-        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($url . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'parse_document':
         $path = $_GET['path'] ?? '';
         $max_chars = intval($_GET['max_chars'] ?? 50000);
         if (!$path) { echo json_encode(['ok' => false, 'error' => '缺少path参数']); exit; }
-        $url = $engine_url . '/engine/parse_document?path=' . urlencode($path) . '&max_chars=' . $max_chars;
-        echo _engine_get($url) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.read');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
+        $url = $engine_url . '/engine/parse_document?path=' . urlencode($path) . '&max_chars=' . $max_chars . $full_access;
+        echo _engine_get($url . $userParam) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     // ═══════════════════════════════════════════════════
@@ -470,16 +735,20 @@ switch ($action) {
 
     case 'file_write':
         $path = $_GET['path'] ?? '';
+        $cwd = $_GET['cwd'] ?? '';
         $append = isset($_GET['append']) && $_GET['append'] === 'true';
         // ★ content 从 POST raw body 读(支持大文件)
         $content = file_get_contents('php://input');
         if (!$path || $content === false || $content === '') { echo json_encode(['error' => '缺少参数']); exit; }
         // ★ 大文件:参数放在 URL query,content 通过 CURLOPT_POSTFIELDS 的 raw body 传
-        $url = $engine_url . '/engine/file/write?path=' . urlencode($path) . '&append=' . ($append ? 'true' : 'false');
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.write');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
+        $url = $engine_url . '/engine/file/write?path=' . urlencode($path) . '&append=' . ($append ? 'true' : 'false') . ($cwd !== '' ? '&cwd=' . urlencode($cwd) : '') . $full_access . $userParam;
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $content);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/plain']);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, _engine_headers(['Content-Type: text/plain']));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
@@ -488,113 +757,6 @@ switch ($action) {
 
     case 'sys_info':
         echo _engine_get($engine_url . '/engine/sys/info?') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
-        break;
-
-    case 'mmx':
-        $resource = $_GET['resource'] ?? '';
-        $cmd = $_GET['cmd'] ?? '';
-        $prompt = $_GET['prompt'] ?? '';
-        $outFile = $_GET['out'] ?? '';
-        if (!$resource || !$cmd) { echo json_encode(['error' => '需要 resource 和 cmd 参数']); exit; }
-        // Key 优先级: 请求参数(前端传) > 服务器配置
-        $mmxKey = $_GET['api_key'] ?? '';
-        $mmxRegion = $_GET['region'] ?? 'cn';
-        if (!$mmxKey) {
-            $cfg = _engine_mmx_config_read();
-            if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
-        }
-        if (!$mmxKey || !preg_match('/^[a-zA-Z0-9_-]+$/', $mmxKey)) { echo json_encode(['error' => 'MiniMax API Key 未配置']); exit; }
-        $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
-
-        // ★ 进程隔离: 创建唯一临时 HOME 目录, 避免并发 mmx 进程竞争 ~/.mmx/config.json
-        // mmx CLI 即使通过 --api-key 传参, 仍可能在 ~/.mmx/ 下读写 auth/state 文件
-        // 两个并发进程共享同一 config.json 会导致 token 损坏和进程中断
-        $isolatedHome = sys_get_temp_dir() . '/mmx_' . getmypid() . '_' . bin2hex(random_bytes(8));
-        if (!@mkdir($isolatedHome, 0700, true)) { $isolatedHome = null; }
-
-        // 直接通过 --api-key 传参（key 已验证只有安全字符）
-        $apiKeyFlag = '--api-key ' . $mmxKey;
-        $regionFlag = '--region ' . $mmxRegion;
-        $extraFlags = '--non-interactive --output json ' . $apiKeyFlag . ' ' . $regionFlag;
-        if ($prompt) $extraFlags .= ' --prompt ' . escapeshellarg($prompt);
-        // 前缀: 设置隔离 HOME (如果创建成功)
-        $prefixCmd = $isolatedHome ? 'HOME=' . escapeshellarg($isolatedHome) . ' ' : '';
-
-        if ($cmd === 'chat') {
-            $system = $_GET['system'] ?? '';
-            $message = $_GET['message'] ?? $prompt;
-            if (!$message) { echo json_encode(['error' => 'chat 需要 message 或 prompt 参数']); exit; }
-            $fullCmd = "{$prefixCmd}{$mmxBin} text chat --message " . escapeshellarg($message) . " --max-tokens 4096 {$extraFlags} 2>&1";
-            if ($system) $fullCmd = "{$prefixCmd}{$mmxBin} text chat --message " . escapeshellarg($message) . " --system " . escapeshellarg($system) . " --max-tokens 4096 {$extraFlags} 2>&1";
-        } elseif ($cmd === 'image') {
-            $aspect = $_GET['aspect_ratio'] ?? '1:1';
-            $n = intval($_GET['n'] ?? 1);
-            $fullCmd = "{$prefixCmd}{$mmxBin} image generate --aspect-ratio {$aspect} --n {$n} {$extraFlags} 2>&1";
-        } elseif ($cmd === 'video') {
-            $fullCmd = "{$prefixCmd}{$mmxBin} video generate --no-wait --quiet {$extraFlags} 2>&1";
-        } elseif ($cmd === 'speech') {
-            $voice = $_GET['voice'] ?? 'female-yujie';
-            $text = $_GET['text'] ?? $prompt;
-            if (!$text) { echo json_encode(['error' => 'speech 需要 text 或 prompt 参数']); exit; }
-            $sharedDir = dirname(__DIR__) . '/uploads/shared/';
-            if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
-            // ★ 唯一文件名: uniqid('', true) → 微秒级唯一 + 额外熵
-            $outPath = $sharedDir . 'speech_' . substr(md5($text . uniqid('', true) . bin2hex(random_bytes(4))), 0, 16) . '.mp3';
-            $fullCmd = "{$prefixCmd}{$mmxBin} speech synthesize --text " . escapeshellarg($text) . " --voice " . escapeshellarg($voice) . " --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
-        } elseif ($cmd === 'voices') {
-            $fullCmd = "{$prefixCmd}{$mmxBin} speech voices {$extraFlags} 2>&1";
-        } elseif ($cmd === 'music') {
-            $lyrics = $_GET['lyrics'] ?? '';
-            $instrumental = $_GET['instrumental'] ?? '';
-            $extra = '';
-            // ★ 自动歌词优化: 如果没有传歌词,又不是纯音乐模式,则自动生成歌词
-            if ($lyrics) {
-                $extra .= ' --lyrics ' . escapeshellarg($lyrics);
-            } elseif ($instrumental !== 'true') {
-                $extra .= ' --lyrics-optimizer';
-            }
-            if ($instrumental === 'true') $extra .= ' --instrumental';
-            $sharedDir = dirname(__DIR__) . '/uploads/shared/';
-            if (!is_dir($sharedDir)) mkdir($sharedDir, 0755, true);
-            // ★ 唯一文件名: uniqid + random_bytes 确保并发不碰撞
-            $outPath = $sharedDir . 'music_' . substr(md5(uniqid('', true) . bin2hex(random_bytes(4))), 0, 16) . '.mp3';
-            $fullCmd = "{$prefixCmd}{$mmxBin} music generate {$extra} --out " . escapeshellarg($outPath) . " {$extraFlags} 2>&1";
-        } elseif ($cmd === 'vision') {
-            $image = $_GET['image'] ?? '';
-            if (!$image) { echo json_encode(['error' => 'vision 需要 image 参数']); exit; }
-            $fullCmd = "{$prefixCmd}{$mmxBin} vision describe --image " . escapeshellarg($image) . " {$extraFlags} 2>&1";
-        } elseif ($cmd === 'quota') {
-            $fullCmd = "{$prefixCmd}{$mmxBin} quota show {$extraFlags} 2>&1";
-        } elseif ($cmd === 'search') {
-            $q = $_GET['q'] ?? $prompt;
-            if (!$q) { echo json_encode(['error' => 'search 需要 q 或 prompt 参数']); exit; }
-            $limit = intval($_GET['limit'] ?? 5);
-            $fullCmd = "{$prefixCmd}{$mmxBin} search query " . escapeshellarg($q) . " --limit {$limit} {$extraFlags} 2>&1";
-        } else {
-            if ($isolatedHome) _rmdir($isolatedHome);
-            echo json_encode(['error' => "未知命令: {$cmd}, 支持: chat/image/video/speech/voices/music/vision/search/quota"]); exit;
-        }
-        $output = shell_exec($fullCmd);
-
-        // 清理隔离 HOME 目录
-        if ($isolatedHome) _rmdir($isolatedHome);
-
-        if ($output === null || trim($output) === '') {
-            echo json_encode(['error' => 'mmx CLI 未响应']);
-        } else {
-            $parsed = json_decode($output, true);
-            // speech/music: 检查文件是否生成成功，优先返回 URL
-            if (($cmd === 'speech' || $cmd === 'music') && file_exists($outPath) && filesize($outPath) > 100) {
-                $fn = basename($outPath);
-                $url = '/oneapichat/uploads/shared/' . rawurlencode($fn);
-                $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . 'naujtrats.xyz' . $url;
-                echo json_encode(['result' => ['url' => $fullUrl, 'path' => $url, 'size' => filesize($outPath)], 'raw' => $output]);
-            } elseif ($parsed !== null) {
-                echo json_encode(['result' => $parsed, 'raw' => $output]);
-            } else {
-                echo json_encode(['result' => $output]);
-            }
-        }
         break;
 
     default:
@@ -614,7 +776,7 @@ switch ($action) {
             'personality_presets', 'personality_set_preset', 'personality_load', 'personality_save',
             'personality_validate', 'personality_narrative', 'personality_cache', 'personality_state',
             'workflow_create', 'workflow_run', 'workflow_list', 'workflow_status', 'workflow_delete', 'workflow_roles',
-            'push', 'exec', 'python', 'sys_info', 'mmx', 'push_file', 'minimax_search',
+            'push', 'exec', 'python', 'sys_info', 'push_file', 'minimax_search',
             'file_read', 'file_write', 'file_search', 'file_grep', 'file_edit', 'file_op',
             'browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_get_content', 'browser_get_snapshot', 'browser_js',
             'ps', 'disk', 'docker', 'db_query', 'network'
@@ -628,8 +790,18 @@ switch ($action) {
         echo _engine_get($engine_url . '/engine/disk?' . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'docker':
-        $docker_action = $_GET['docker_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ps';
-        echo _engine_get($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        // Deployment settings are forwarded as JSON POST; read-only legacy GET remains supported.
+        $body = file_get_contents('php://input');
+        $payload = $body ? json_decode($body, true) : [];
+        if (!is_array($payload)) $payload = [];
+        $docker_action = $payload['action'] ?? ($_GET['docker_action'] ?? $_GET['cmd'] ?? $_GET['command'] ?? 'ps');
+        $payload['action'] = $docker_action;
+        $payload['user_id'] = $userId;
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            echo _engine_post_json($engine_url . '/engine/docker', $payload, json_encode(['ok' => false, 'error' => 'engine unreachable']));
+        } else {
+            echo _engine_get($engine_url . '/engine/docker?action=' . urlencode($docker_action) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        }
         break;
     case 'db_query':
         $sql = $_GET['sql'] ?? '';
@@ -646,35 +818,48 @@ switch ($action) {
     case 'file_search':
         $pattern = $_GET['pattern'] ?? '';
         $path_fs = $_GET['path'] ?? (defined('PROJECT_ROOT') ? PROJECT_ROOT : '/var/www');
+        $cwd = $_GET['cwd'] ?? '';
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.search');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
         if (!$pattern) { echo json_encode(['error' => '缺少pattern']); exit; }
-        echo _engine_get($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&max_results=' . intval($_GET['max_results'] ?? 30) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        echo _engine_get($engine_url . '/engine/file_search?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . ($cwd !== '' ? '&cwd=' . urlencode($cwd) : '') . '&max_results=' . intval($_GET['max_results'] ?? 30) . $full_access . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_grep':
         $pattern = $_GET['pattern'] ?? '';
         $path_fs = $_GET['path'] ?? (defined('PROJECT_ROOT') ? PROJECT_ROOT : '/var/www');
+        $cwd = $_GET['cwd'] ?? '';
         $context_lines = intval($_GET['context_lines'] ?? 2);
         $file_pattern = $_GET['file_pattern'] ?? '';
         $max_results = intval($_GET['max_results'] ?? 20);
         $ignore_case = ($_GET['ignore_case'] ?? 'true') === 'true';
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.search');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
         if (!$pattern) { echo json_encode(['error' => '缺少pattern']); exit; }
-        $url = $engine_url . '/engine/file_grep?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . '&context_lines=' . $context_lines . '&max_results=' . $max_results . '&ignore_case=' . ($ignore_case ? '1' : '0');
+        $url = $engine_url . '/engine/file_grep?pattern=' . urlencode($pattern) . '&path=' . urlencode($path_fs) . ($cwd !== '' ? '&cwd=' . urlencode($cwd) : '') . '&context_lines=' . $context_lines . '&max_results=' . $max_results . '&ignore_case=' . ($ignore_case ? '1' : '0') . $full_access;
         if ($file_pattern) $url .= '&file_pattern=' . urlencode($file_pattern);
         echo _engine_get($url . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
     case 'file_edit':
         $path = $_GET['path'] ?? '';
+        $cwd = $_GET['cwd'] ?? '';
         $replace_all = ($_GET['replace_all'] ?? 'false') === 'true';
         // ★ old_string/new_string 从 POST body 读取，不在 URL 参数中
         $postBody = json_decode(file_get_contents('php://input'), true) ?: [];
         $old_string = $postBody['old_string'] ?? '';
         $new_string = $postBody['new_string'] ?? '';
+        if (!$cwd && !empty($postBody['cwd'])) $cwd = $postBody['cwd'];
         if (!$path || !$old_string) { echo json_encode(['error' => '缺少参数(path/old_string/new_string)']); exit; }
-        $url = $engine_url . '/engine/file_edit?path=' . urlencode($path) . '&replace_all=' . ($replace_all ? '1' : '0');
-        $body = json_encode(['old_string' => $old_string, 'new_string' => $new_string]);
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.write');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
+        $url = $engine_url . '/engine/file_edit?path=' . urlencode($path) . ($cwd !== '' ? '&cwd=' . urlencode($cwd) : '') . '&replace_all=' . ($replace_all ? '1' : '0') . $full_access . $userParam;
+        $body = json_encode(['old_string' => $old_string, 'new_string' => $new_string, 'cwd' => $cwd, 'full_access' => $full_access !== '']);
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, _engine_headers(['Content-Type: application/json']));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 15);
         echo curl_exec($ch) ?: json_encode(['ok' => false, 'error' => 'engine unreachable: ' . curl_error($ch)]);
@@ -685,7 +870,10 @@ switch ($action) {
         $src = $_GET['src'] ?? $_GET['source'] ?? $_GET['path'] ?? '';
         $dst = $_GET['dst'] ?? $_GET['dest'] ?? $_GET['destination'] ?? '';
         if (!$action_f || !$src) { echo json_encode(['error' => '缺少参数']); exit; }
-        echo _engine_get($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $userParam) ?: json_encode(['error' => 'unreachable']);
+        $full_access_requested = (($_GET['full_access'] ?? '') === 'true' || ($_GET['full_access'] ?? '') === '1');
+        if ($full_access_requested) _require_permission_grant($userId, 'filesystem.move');
+        $full_access = $full_access_requested ? '&full_access=true' : '';
+        echo _engine_get($engine_url . '/engine/file_op?action=' . urlencode($action_f) . '&src=' . urlencode($src) . '&dst=' . urlencode($dst) . $full_access . $userParam) ?: json_encode(['error' => 'unreachable']);
         break;
 
     // ==================== Agent 记忆/人格/身份/心跳 系统 ====================
@@ -874,11 +1062,11 @@ switch ($action) {
         $postData = json_encode(['url' => $browserUrl]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo _engine_get($engine_url . '/engine/browser/navigate', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/navigate' . $engineUserQuery, false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_screenshot':
-        echo _engine_get($engine_url . '/engine/browser/screenshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/screenshot' . $engineUserQuery) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_click':
@@ -889,7 +1077,7 @@ switch ($action) {
         $postData = json_encode(['selector' => $browserSel]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo _engine_get($engine_url . '/engine/browser/click', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/click' . $engineUserQuery, false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_type':
@@ -901,15 +1089,15 @@ switch ($action) {
         $postData = json_encode(['selector' => $browserSel, 'text' => $browserText]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo _engine_get($engine_url . '/engine/browser/type', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/type' . $engineUserQuery, false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_get_content':
-        echo _engine_get($engine_url . '/engine/browser/content') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/content' . $engineUserQuery) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_get_snapshot':
-        echo _engine_get($engine_url . '/engine/browser/snapshot') ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/snapshot' . $engineUserQuery) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     case 'browser_js':
@@ -920,21 +1108,23 @@ switch ($action) {
         $postData = json_encode(['code' => $code]);
         $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => $postData]];
         $ctx = stream_context_create($opts);
-        echo _engine_get($engine_url . '/engine/browser/js', false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
+        echo _engine_get($engine_url . '/engine/browser/js' . $engineUserQuery, false, $ctx) ?: json_encode(['ok' => false, 'error' => 'engine unreachable']);
         break;
 
     // ★ engine_push 文件复制到 uploads
     case 'minimax_search':
-        $query = $_GET['q'] ?? '';
-        $limit = intval($_GET['limit'] ?? 5);
+        $msInput = $_SERVER['REQUEST_METHOD'] === 'POST'
+            ? (json_decode((string) file_get_contents('php://input'), true) ?: []) : [];
+        $query = (string) ($msInput['q'] ?? $_GET['q'] ?? '');
+        $limit = intval($msInput['limit'] ?? $_GET['limit'] ?? 5);
         if ($limit < 1) $limit = 1;
         if ($limit > 20) $limit = 20;
         if (!$query) { echo json_encode(['error' => '缺少查询词 q']); exit; }
         $escapedQuery = escapeshellarg($query);
         $mmxBin = '/home/naujtrats/.npm-global/bin/mmx';
         // Key 优先级: 请求参数(前端传) > 服务器配置
-        $mmxKey = $_GET['api_key'] ?? '';
-        $mmxRegion = $_GET['region'] ?? 'cn';
+        $mmxKey = (string) ($msInput['api_key'] ?? $_GET['api_key'] ?? '');
+        $mmxRegion = (string) ($msInput['region'] ?? $_GET['region'] ?? 'cn');
         if (!$mmxKey) {
             $cfg = _engine_mmx_config_read();
             if ($cfg && !empty($cfg['api_key'])) { $mmxKey = $cfg['api_key']; $mmxRegion = $cfg['region'] ?? 'cn'; }
@@ -964,32 +1154,178 @@ switch ($action) {
         break;
 
     case 'search_proxy':
-        // ★ 通用搜索引擎代理 — 所有外部搜索API走服务器端，避免浏览器CORS
-        $spUrl = $_GET['url'] ?? '';
+        // ★ 通用搜索引擎代理 — 经由项目代理转发外部搜索 API，消除 CORS 与 GFW 封锁
+        $spInput = $_SERVER['REQUEST_METHOD'] === 'POST'
+            ? (json_decode((string) file_get_contents('php://input'), true) ?: []) : [];
+        $spProvider = strtolower(trim((string)($spInput['provider'] ?? '')));
+        $spUrl = (string) ($spInput['url'] ?? $_GET['url'] ?? '');
+        $spMethod = strtoupper((string) ($spInput['method'] ?? $_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        $spHeaders = [];
+        if ($spProvider === 'duckduckgo') {
+            http_response_code(410);
+            echo json_encode(['error' => 'DuckDuckGo 搜索已移除，请改用 Brave、Tavily、DeepSeek 或 MiniMax。'], JSON_UNESCAPED_UNICODE); exit;
+        } elseif ($spProvider === 'deepseek') {
+            $dsQuery = trim((string)($spInput['query'] ?? ''));
+            $dsKey = trim((string)($spInput['api_key'] ?? ''));
+            $dsModel = trim((string)($spInput['model'] ?? 'deepseek-v4-flash')) ?: 'deepseek-v4-flash';
+            if ($dsQuery === '' || $dsKey === '') {
+                http_response_code(400);
+                echo json_encode(['error' => 'DeepSeek 联网搜索缺少 query 或 API Key'], JSON_UNESCAPED_UNICODE); exit;
+            }
+            $spUrl = 'https://api.deepseek.com/responses';
+            $spMethod = 'POST';
+            $spHeaders = ['Authorization: Bearer ' . $dsKey, 'Content-Type: application/json', 'Accept: application/json'];
+            $spBody = json_encode([
+                'model' => $dsModel,
+                'input' => $dsQuery,
+                'tools' => [['type' => 'web_search']],
+            ], JSON_UNESCAPED_UNICODE);
+        } elseif ($spProvider === 'brave') {
+            $spQuery = trim((string)($spInput['query'] ?? ''));
+            $spType = strtolower((string)($spInput['type'] ?? 'web'));
+            $spLimit = min(max((int)($spInput['limit'] ?? 5), 1), 20);
+            $spCountry = strtolower(trim((string)($spInput['country'] ?? '')));
+            $spApiKey = trim((string)($spInput['api_key'] ?? ''));
+            if ($spQuery === '' || $spApiKey === '') {
+                http_response_code(400);
+                echo json_encode(['error' => 'Brave 搜索缺少 query 或 API Key'], JSON_UNESCAPED_UNICODE); exit;
+            }
+            $spEndpoint = $spType === 'news' ? 'news/search' : ($spType === 'images' ? 'images/search' : 'web/search');
+            $spParams = [
+                'q' => $spQuery,
+                'count' => $spLimit,
+                'safesearch' => 'off',
+                'text_decorations' => '0',
+            ];
+            if (preg_match('/^[a-z]{2}$/', $spCountry)) $spParams['country'] = $spCountry;
+            $spUrl = 'https://api.search.brave.com/res/v1/' . $spEndpoint . '?' . http_build_query($spParams);
+            $spMethod = 'GET';
+            $spHeaders = [
+                'Accept: application/json',
+                'Accept-Encoding: gzip',
+                'X-Subscription-Token: ' . $spApiKey,
+            ];
+        }
         if (!$spUrl || !preg_match('#^https?://#', $spUrl)) { echo json_encode(['error' => '缺少合法 url 参数']); exit; }
-        $spCtx = stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true,
-            'header' => ($_GET['header_key'] ?? '') ? ($_GET['header_key'] . ': ' . ($_GET['header_val'] ?? '')) . "\r\n" : ''
-        ]]);
-        $spResp = file_get_contents($spUrl, false, $spCtx);
-        if ($spResp === false) { echo json_encode(['error' => '搜索请求失败']); exit; }
+        if (!empty($spInput['headers']) && is_array($spInput['headers'])) {
+            foreach ($spInput['headers'] as $hk => $hv) {
+                $spHeaders[] = is_numeric($hk) ? (string)$hv : ($hk . ': ' . $hv);
+            }
+        }
+        $spHeaderKey = (string) ($spInput['header_key'] ?? $_GET['header_key'] ?? '');
+        $spHeaderVal = (string) ($spInput['header_val'] ?? $_GET['header_val'] ?? '');
+        if ($spHeaderKey && $spHeaderVal) {
+            $spHeaders[] = $spHeaderKey . ': ' . $spHeaderVal;
+        }
+        if (!preg_grep('#^Accept:#i', $spHeaders)) {
+            $spHeaders[] = 'Accept: application/json';
+        }
+        if (!isset($spBody)) {
+            $spBody = isset($spInput['body']) ? (is_array($spInput['body']) ? json_encode($spInput['body'], JSON_UNESCAPED_UNICODE) : (string)$spInput['body']) : null;
+        }
+        
+        $spProxies = ['http://127.0.0.1:1080', 'http://192.168.195.226:8890', ''];
+        $spResp = false;
+        $spHttpCode = 0;
+        $spErr = '';
+        foreach ($spProxies as $spProxy) {
+            $ch = curl_init($spUrl);
+            $curlOpts = [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS => 4,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_CONNECTTIMEOUT => 6,
+                CURLOPT_ENCODING => '', // 自动支持 gzip/deflate
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER => $spHeaders,
+            ];
+            if ($spMethod === 'POST') {
+                $curlOpts[CURLOPT_POST] = true;
+                if ($spBody !== null) $curlOpts[CURLOPT_POSTFIELDS] = $spBody;
+            }
+            if ($spProxy) {
+                $curlOpts[CURLOPT_PROXY] = $spProxy;
+            }
+            curl_setopt_array($ch, $curlOpts);
+            $spResp = curl_exec($ch);
+            $spHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $spErr = curl_error($ch);
+            curl_close($ch);
+            // 2xx/3xx 成功；4xx 是确定的业务错误，不应再切换代理重复请求。
+            if ($spResp !== false && $spHttpCode >= 200 && $spHttpCode < 500) {
+                break;
+            }
+        }
+        if ($spResp === false || ($spHttpCode >= 500 && !$spResp)) {
+            echo json_encode(['error' => '搜索请求失败: ' . ($spErr ?: "HTTP $spHttpCode")]); exit;
+        }
+        if ($spHttpCode >= 400) {
+            http_response_code($spHttpCode);
+            $upstreamError = json_decode((string)$spResp, true);
+            if (is_array($upstreamError)) {
+                $upstreamError['provider'] = $spProvider ?: 'proxy';
+                $upstreamError['http_status'] = $spHttpCode;
+                echo json_encode($upstreamError, JSON_UNESCAPED_UNICODE);
+                break;
+            }
+        }
+        if ($spProvider === 'deepseek') {
+            $dsResponse = json_decode((string)$spResp, true);
+            $dsResults = [];
+            foreach ((array)($dsResponse['output'] ?? []) as $output) {
+                foreach ((array)($output['content'] ?? []) as $content) {
+                    $text = (string)($content['text'] ?? $content['value'] ?? '');
+                    $annotations = (array)($content['annotations'] ?? []);
+                    foreach ($annotations as $annotation) {
+                        $url = (string)($annotation['url'] ?? $annotation['url_citation']['url'] ?? '');
+                        $title = (string)($annotation['title'] ?? $annotation['url_citation']['title'] ?? 'DeepSeek 联网搜索结果');
+                        if ($url) $dsResults[] = ['title' => $title, 'url' => $url, 'snippet' => $text];
+                    }
+                    if (!$annotations && $text !== '') $dsResults[] = ['title' => 'DeepSeek 联网搜索摘要', 'url' => '', 'snippet' => $text];
+                }
+            }
+            if (!$dsResults && !empty($dsResponse['output_text'])) {
+                $dsResults[] = ['title' => 'DeepSeek 联网搜索摘要', 'url' => '', 'snippet' => (string)$dsResponse['output_text']];
+            }
+            echo json_encode(['results' => $dsResults, 'provider' => 'deepseek', 'response_id' => $dsResponse['id'] ?? null], JSON_UNESCAPED_UNICODE);
+            break;
+        }
         echo $spResp;
         break;
 
     case 'tavily_search':
-        $tsQuery = $_GET['q'] ?? '';
-        $tsKey = $_GET['api_key'] ?? '';
-        $tsLimit = intval($_GET['limit'] ?? 5);
+        $tsInput = $_SERVER['REQUEST_METHOD'] === 'POST'
+            ? (json_decode((string) file_get_contents('php://input'), true) ?: []) : [];
+        $tsQuery = (string) ($tsInput['q'] ?? $_GET['q'] ?? '');
+        $tsKey = (string) ($tsInput['api_key'] ?? $_GET['api_key'] ?? '');
+        $tsLimit = intval($tsInput['limit'] ?? $_GET['limit'] ?? 5);
         if (!$tsQuery) { echo json_encode(['error' => '缺少 q 参数']); exit; }
         if (!$tsKey) { echo json_encode(['error' => '缺少 Tavily API Key']); exit; }
         $tsBody = json_encode(['api_key' => $tsKey, 'query' => $tsQuery, 'search_depth' => 'basic', 'max_results' => min($tsLimit, 10)]);
-        $tsCtx = stream_context_create(['http' => [
-            'method' => 'POST',
-            'header' => "Content-Type: application/json\r\n",
-            'content' => $tsBody,
-            'timeout' => 15,
-            'ignore_errors' => true
-        ]]);
-        $tsResp = file_get_contents('https://api.tavily.com/search', false, $tsCtx);
+        $tsProxies = ['http://127.0.0.1:1080', 'http://192.168.195.226:8890', ''];
+        $tsResp = false;
+        foreach ($tsProxies as $tsProxy) {
+            $ch = curl_init('https://api.tavily.com/search');
+            $curlOpts = [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $tsBody,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_CONNECTTIMEOUT => 6,
+                CURLOPT_ENCODING => '',
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+            ];
+            if ($tsProxy) $curlOpts[CURLOPT_PROXY] = $tsProxy;
+            curl_setopt_array($ch, $curlOpts);
+            $tsResp = curl_exec($ch);
+            $tsCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($tsResp !== false && $tsCode >= 200 && $tsCode < 500) break;
+        }
         if ($tsResp === false) { echo json_encode(['error' => 'Tavily API 请求失败']); exit; }
         echo $tsResp;
         break;
@@ -1001,11 +1337,16 @@ switch ($action) {
         $mp_name = $mp_input['name'] ?? '';
         $mp_args = $mp_input['arguments'] ?? (object)[];
         if (!$mp_name) { echo json_encode(['error' => '缺少 tool name']); exit; }
+        if (!is_array($mp_args)) $mp_args = [];
+        // 身份只由已验证的主站会话注入，忽略浏览器伪造的 user_id/auth_token。
+        $mp_args['user_id'] = $userId;
+        $mp_args['_auth_token'] = $authToken;
         // 按前缀路由到 MCP 子端点
         $mp_endpoint = str_starts_with($mp_name, 'bilibili_') ? '/mcp/bilibili/tools/call' : '/mcp/api/tools/call';
         // ★ poll 类工具需要更长超时(长轮询等待扫码), 其他工具用默认超时
-        $mp_is_poll = (str_contains($mp_name, 'poll') || (is_array($mp_args) && ($mp_args['action'] ?? '') === 'poll'));
-        $mp_timeout = $mp_is_poll ? 300 : 120;
+        $mp_action = (string)($mp_args['action'] ?? '');
+        $mp_is_poll = str_contains($mp_name, 'poll') || in_array($mp_action, ['poll', 'login'], true);
+        $mp_timeout = $mp_is_poll ? 330 : 120;
         $mp_ctx = stream_context_create(['http' => [
             'method' => 'POST',
             'header' => "Content-Type: application/json\r\n",
@@ -1021,6 +1362,7 @@ switch ($action) {
 
     case 'push_file':
         $srcPath = $_GET['path'] ?? '';
+        $requestedFilename = trim((string)($_GET['filename'] ?? ''));
         if (!$srcPath) { echo json_encode(['ok'=>false,'error'=>'缺少path']); exit; }
         // ★ 路径转换
         if (str_starts_with($srcPath, '/oneapichat/uploads/')) {
@@ -1032,14 +1374,26 @@ switch ($action) {
         if (!file_exists($srcPath)) { echo json_encode(['ok'=>false,'error'=>'源文件不存在: '.$srcPath]); exit; }
         if (!is_readable($srcPath)) { echo json_encode(['ok'=>false,'error'=>'无法读取源文件']); exit; }
         $ext = strtolower(pathinfo($srcPath, PATHINFO_EXTENSION));
-        $fn = 'push_' . substr(md5($srcPath . time()), 0, 8) . '.' . $ext;
+        // 保留用户要求的下载文件名；只清理路径分隔符与控制字符。
+        $displayName = $requestedFilename !== '' ? basename(str_replace('\\', '/', $requestedFilename)) : basename($srcPath);
+        $displayName = preg_replace('/[\x00-\x1F\x7F\/\\\\]+/u', '_', $displayName);
+        if ($displayName === '' || $displayName === '.' || $displayName === '..') $displayName = 'download' . ($ext ? '.' . $ext : '');
+        if ($ext && strtolower(pathinfo($displayName, PATHINFO_EXTENSION)) !== $ext) $displayName .= '.' . $ext;
+        $fn = $displayName;
         $destDir = dirname(__DIR__) . '/uploads/shared/';
         if (!is_dir($destDir)) mkdir($destDir, 0755, true);
         $destPath = $destDir . $fn;
+        // 同名但内容不同才追加短哈希；同一产物重复推送保持稳定 URL。
+        if (file_exists($destPath) && hash_file('sha256', $destPath) !== hash_file('sha256', $srcPath)) {
+            $stem = pathinfo($displayName, PATHINFO_FILENAME);
+            $suffix = pathinfo($displayName, PATHINFO_EXTENSION);
+            $fn = $stem . '_' . substr(hash_file('sha256', $srcPath), 0, 8) . ($suffix ? '.' . $suffix : '');
+            $destPath = $destDir . $fn;
+        }
         if (copy($srcPath, $destPath) || rename($srcPath, $destPath)) {
             $url = '/oneapichat/uploads/shared/' . rawurlencode($fn);
             $fullUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . 'naujtrats.xyz' . $url;
-            echo json_encode(['ok'=>true,'url'=>$fullUrl,'path'=>$url,'size'=>filesize($destPath)]);
+            echo json_encode(['ok'=>true,'url'=>$fullUrl,'path'=>$url,'filename'=>$fn,'display_name'=>$displayName,'size'=>filesize($destPath)], JSON_UNESCAPED_UNICODE);
         } else {
             echo json_encode(['ok'=>false,'error'=>'复制失败']);
         }
@@ -1049,8 +1403,7 @@ switch ($action) {
         $platUrl = $_GET['url'] ?? '';
         if (!$platUrl) { echo json_encode(['ok'=>false,'error'=>'缺少url参数']); exit; }
         $engineUrl = 'http://127.0.0.1:8766/engine/platform_extract?url=' . urlencode($platUrl);
-        $ctx = stream_context_create(['http' => ['timeout' => 30, 'ignore_errors' => true]]);
-        $resp = file_get_contents($engineUrl, false, $ctx);
+        $resp = _engine_get($engineUrl, '');
         if ($resp !== false) {
             echo $resp;
         } else {
@@ -1065,7 +1418,7 @@ switch ($action) {
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($input),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => _engine_headers(['Content-Type: application/json']),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 30,
         ]);

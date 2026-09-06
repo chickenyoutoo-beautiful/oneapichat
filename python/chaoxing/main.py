@@ -12,6 +12,7 @@ from chaoxing.tracker import LearningTracker
 from urllib3 import disable_warnings,exceptions
 import os
 import json
+import time
 
 # # 定义全局变量，用于存储配置文件路径
 # textPath = './resource/BookID.txt'
@@ -105,14 +106,15 @@ if __name__ == '__main__':
         # 获取所有的课程列表
         all_course = chaoxing.get_course_list()
         course_task = []
-        # 手动输入要学习的课程ID列表（考试模式跳过交互）
-        if not course_list:
-            if cli_args.exam:
-                # 考试模式：直接使用全部课程，不阻塞等待输入
+        if cli_args.exam:
+            # 考试模式：优先按课程列表过滤，若未配置或无匹配则自动使用全部课程
+            if course_list:
+                course_task = [c for c in all_course if str(c.get("courseId")) in [str(x) for x in course_list]]
+            if not course_task:
                 course_task = all_course
-                _study_mode = False
-                # 直接跳到考试部分
-            elif sys.stdin.isatty():
+            _study_mode = False
+        elif not course_list:
+            if sys.stdin.isatty():
                 print("*" * 10 + "课程列表" + "*" * 10)
                 for course in all_course:
                     print(f"ID: {course['courseId']} 课程名: {course['title']}")
@@ -123,26 +125,20 @@ if __name__ == '__main__':
                     raise FormatError("输入格式错误") from e
             else:
                 raise FormatError("配置中未设置课程列表(course_list)，请在刷课页面选择课程后点开始")
-        # 筛选需要学习的课程（考试模式下 course_task 已直接设为 all_course）
-        if not cli_args.exam:
+        else:
             for course in all_course:
-                if course["courseId"] in course_list:
+                if str(course.get("courseId")) in [str(x) for x in course_list]:
                     course_task.append(course)
             if not course_task:
                 course_task = all_course
         # 开始遍历要学习的课程列表
         logger.info(f"课程列表过滤完毕，当前课程任务数量: {len(course_task)}")
+        blocked_course_summaries = []
         # 纯考试模式跳过学习循环
         _study_mode = not cli_args.exam
         for course in course_task:
-            # 检查课程是否已完成，完成则跳过避免卡死
-            existing_status = tracker.conn.execute(
-                "SELECT status FROM courses WHERE id=? AND user_id=?",
-                (course['courseId'], user_id)
-            ).fetchone()
-            if existing_status and existing_status[0] == 'completed':
-                logger.info(f"课程 {course['title']} 已完成，跳过")
-                continue
+            # ★ 不再跳过"已完成"课程：课程可能新增内容，需重新检测
+            # 章节级别的计数器保护（MIN）和完成条件（AND）已能正确处理
             # 纯考试模式：跳过学习内容
             if not _study_mode:
                 continue
@@ -153,6 +149,17 @@ if __name__ == '__main__':
 
             # 为了支持课程任务回滚，采用下标方式遍历任务点
             __point_index = 0
+            # 服务端可能需要几秒才把最后一次上报写回任务卡。复核未通过时必须
+            # 留在当前章节重试，不能只打印“保持进行中”却递增索引跳到下一章。
+            chapter_retry_counts = {}
+            max_chapter_retries = 8
+
+            def chapter_retry_delay(retry_count):
+                return min(30, 5 * retry_count)
+
+            course_blocked = False
+            course_block_reason = ""
+            course_blocked_points = []
             while __point_index < len(point_list["points"]):
                 point = point_list["points"][__point_index]
                 logger.info(f'当前章节: {point["title"]}')
@@ -160,10 +167,14 @@ if __name__ == '__main__':
                 jobs = []
                 job_info = None
                 jobs, job_info = chaoxing.get_job_list(course["clazzId"], course["courseId"], course["cpi"], point["id"])
-                
+
                 chapter_id = f"{course['courseId']}_{job_info.get('knowledgeid', point['id'])}"
+
+                # ★ 不跳过已完成章节：课程可能新增内容，需重新检测
+                # 计数器保护见 tracker.py（video_done/work_done 不超 count）
+                # ★ video_count 包含 video + audio（音频任务也走 study_video）
                 tracker.update_chapter(chapter_id, course['courseId'], point['title'], status='running',
-                    video_count=sum(1 for j in jobs if j.get('type')=='video'),
+                    video_count=sum(1 for j in jobs if j.get('type') in ('video', 'audio')),
                     work_count=sum(1 for j in jobs if j.get('type')=='workid'))
                 
                 # bookID = job_info["knowledgeid"] # 获取视频ID
@@ -185,11 +196,38 @@ if __name__ == '__main__':
                     break
 
 
-                # 可能存在章节无任何内容的情况
+                # 空列表只有在任务卡成功解析时才表示该章节已无未完成任务。
                 if not jobs:
-                    __point_index += 1
+                    if job_info.get('fetch_ok'):
+                        tracker.update_chapter(chapter_id, course['courseId'], point['title'], status='completed')
+                        chapter_retry_counts.pop(chapter_id, None)
+                        __point_index += 1
+                    else:
+                        tracker.update_chapter(chapter_id, course['courseId'], point['title'], status='running')
+                        retry_count = chapter_retry_counts.get(chapter_id, 0) + 1
+                        chapter_retry_counts[chapter_id] = retry_count
+                        if retry_count <= max_chapter_retries:
+                            retry_delay = chapter_retry_delay(retry_count)
+                            logger.warning(
+                                f"任务卡解析失败，{retry_delay}秒后重试当前章节 "
+                                f"({retry_count}/{max_chapter_retries}): {point['title']}"
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            course_block_reason = f"{point['title']} — 任务卡连续解析失败 {max_chapter_retries} 次"
+                            tracker.update_chapter(
+                                chapter_id, course['courseId'], point['title'], status='blocked',
+                                blocked_reason=course_block_reason,
+                            )
+                            course_blocked_points.append(course_block_reason)
+                            logger.error(
+                                f"任务卡连续解析失败，已标记阻塞并继续下一章节: {point['title']}"
+                            )
+                            chapter_retry_counts.pop(chapter_id, None)
+                            __point_index += 1
                     continue
                 # 遍历所有任务点
+                non_retryable_failures = []
                 for job in jobs:
                     # 视频任务
                     if job["type"] == "video":
@@ -204,13 +242,25 @@ if __name__ == '__main__':
                         # 超星的接口没有返回当前任务是否为Audio音频任务
                         isAudio = False
                         try:
-                            chaoxing.study_video(course, job, job_info, _speed=speed, _type="Video")
+                            video_ok = chaoxing.study_video(
+                                course, job, job_info, _speed=speed, _type="Video",
+                                _resume=chapter_retry_counts.get(chapter_id, 0) == 0,
+                            )
+                            failure = getattr(chaoxing, 'last_task_failure', None)
+                            if not video_ok and failure and not failure.get('retryable', True):
+                                non_retryable_failures.append(failure)
                         except JSONDecodeError as e:
                             logger.warning("当前任务非视频任务，正在尝试音频任务解码")
                             isAudio = True
                         if isAudio:
                             try:
-                                chaoxing.study_video(course, job, job_info, _speed=speed, _type="Audio")
+                                audio_ok = chaoxing.study_video(
+                                    course, job, job_info, _speed=speed, _type="Audio",
+                                    _resume=chapter_retry_counts.get(chapter_id, 0) == 0,
+                                )
+                                failure = getattr(chaoxing, 'last_task_failure', None)
+                                if not audio_ok and failure and not failure.get('retryable', True):
+                                    non_retryable_failures.append(failure)
                             except JSONDecodeError as e:
                                 logger.warning(f"出现异常任务 -> 任务章节: {course['title']} 任务ID: {job['jobid']}, 已跳过")
                     # 文档任务
@@ -220,12 +270,95 @@ if __name__ == '__main__':
                     # 测验任务
                     elif job["type"] == "workid":
                         logger.trace(f"识别到章节检测任务, 任务章节: {course['title']}")
-                        chaoxing.study_work(course, job,job_info)
+                        work_ok = chaoxing.study_work(course, job,job_info)
+                        failure = getattr(chaoxing, 'last_task_failure', None)
+                        if not work_ok and failure and not failure.get('retryable', True):
+                            non_retryable_failures.append(failure)
                     # 阅读任务
                     elif job["type"] == "read":
                         logger.trace(f"识别到阅读任务, 任务章节: {course['title']}")
                         chaoxing.strdy_read(course, job,job_info)
-                __point_index += 1
+                    else:
+                        logger.warning(f"暂不支持的任务类型，保留为未完成: {job.get('type')} {job.get('name', '')}")
+                # 最终以超星服务端复查为准，不能把“本地遍历结束”当成完成。
+                remaining_jobs = jobs
+                verify_info = {}
+                for _verify_round in range(3):
+                    time.sleep(2)
+                    remaining_jobs, verify_info = chaoxing.get_job_list(
+                        course["clazzId"], course["courseId"], course["cpi"], point["id"])
+                    if verify_info.get('fetch_ok') and not remaining_jobs:
+                        break
+                if verify_info.get('fetch_ok') and not remaining_jobs:
+                    tracker.update_chapter(
+                        chapter_id, course['courseId'], point['title'], status='completed',
+                        video_done=sum(1 for j in jobs if j.get('type') in ('video', 'audio')),
+                        work_done=sum(1 for j in jobs if j.get('type') == 'workid'),
+                    )
+                    logger.info(f"服务器复核通过，章节完成: {point['title']}")
+                    chapter_retry_counts.pop(chapter_id, None)
+                    __point_index += 1
+                else:
+                    tracker.update_chapter(chapter_id, course['courseId'], point['title'], status='running')
+                    remaining_types = ','.join(j.get('type', '?') for j in remaining_jobs) or '任务卡解析失败'
+                    if non_retryable_failures:
+                        unique_reasons = []
+                        for failure in non_retryable_failures:
+                            detail = f"{failure.get('task', '?')}: {failure.get('reason', '不可重试')}"
+                            if detail not in unique_reasons:
+                                unique_reasons.append(detail)
+                        course_block_reason = f"{point['title']} — " + "；".join(unique_reasons)
+                        tracker.update_chapter(
+                            chapter_id, course['courseId'], point['title'], status='blocked',
+                            blocked_reason=course_block_reason,
+                        )
+                        course_blocked_points.append(course_block_reason)
+                        logger.warning(
+                            f"当前章节需要人工处理，已标记为阻塞并继续后续章节（不会标记完成）: "
+                            f"{course_block_reason}"
+                        )
+                        chapter_retry_counts.pop(chapter_id, None)
+                        __point_index += 1
+                        continue
+                    retry_count = chapter_retry_counts.get(chapter_id, 0) + 1
+                    chapter_retry_counts[chapter_id] = retry_count
+                    if retry_count <= max_chapter_retries:
+                        retry_delay = chapter_retry_delay(retry_count)
+                        logger.warning(
+                            f"服务器仍有未完成任务，{retry_delay}秒后重试当前章节，"
+                            f"不会跳过 ({retry_count}/{max_chapter_retries}): "
+                            f"{point['title']} [{remaining_types}]"
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    course_block_reason = f"{point['title']} [{remaining_types}] 重试{max_chapter_retries}次后仍未通过"
+                    tracker.update_chapter(
+                        chapter_id, course['courseId'], point['title'], status='blocked',
+                        blocked_reason=course_block_reason,
+                    )
+                    course_blocked_points.append(course_block_reason)
+                    logger.error(
+                        f"当前章节重试{max_chapter_retries}次后仍未通过，已标记阻塞并继续下一章节: "
+                        f"{point['title']} [{remaining_types}]"
+                    )
+                    chapter_retry_counts.pop(chapter_id, None)
+                    __point_index += 1
+                    continue
+            if course_blocked:
+                logger.error(f"课程因未完成章节暂停，请稍后重新开始以从该章节继续复核: {course['title']}")
+            if course_blocked_points or course_blocked:
+                reasons = list(course_blocked_points)
+                if course_blocked and course_block_reason and course_block_reason not in reasons:
+                    reasons.append(course_block_reason)
+                blocked_course_summaries.append({
+                    "course": course['title'],
+                    "reason": "；".join(reasons) or "存在未完成章节",
+                })
+                if course_blocked_points and not course_blocked:
+                    logger.warning(
+                        f"课程其余章节扫描完成，但保留 {len(course_blocked_points)} 个阻塞任务点: "
+                        f"{course['title']}"
+                    )
         # ── 考试模式 ──────────────────────────────────
         if cli_args.exam:
             try:
@@ -331,7 +464,12 @@ if __name__ == '__main__':
                         continue
             except Exception as e:
                 logger.warning(f"考试模式初始化失败: {e}")
-        logger.info("所有课程学习任务已完成")
+        if blocked_course_summaries:
+            logger.warning(f"课程扫描结束：{len(blocked_course_summaries)}门课程仍有阻塞任务，不会标记为全部完成")
+            for blocked in blocked_course_summaries:
+                logger.warning(f"未完成课程: {blocked['course']} — {blocked['reason']}")
+        else:
+            logger.info("所有课程学习任务已完成")
     except BaseException as e:
         import traceback
         logger.error(f"错误: {type(e).__name__}: {e}")

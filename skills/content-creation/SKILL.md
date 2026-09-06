@@ -4,7 +4,7 @@ description: 内容创作一站式。图片生成/文档/PPT制作/视频剪辑/
 version: 2.0.0
 metadata:
   oneapichat:
-    tools: [get_current_time, generate_image, generate_image_i2i, analyze_image, generate_ppt, generate_docx, generate_xlsx, generate_pdf, video_edit, video_understanding, mmx_image, mmx_video, mmx_speech, mmx_music, mmx_chat, mmx_vision, bilibili_search, web_search]
+    tools: [get_current_time, generate_image, generate_image_i2i, analyze_image, generate_ppt, generate_docx, generate_xlsx, generate_pdf, video_edit, video_understanding, bilibili_search, web_search]
     priority: medium
     emoji: "🎨"
     triggers: [生成图片, 画图, 做PPT, 做文档, 做Word, 做Excel, 生成PDF, 视频剪辑, 语音合成, TTS, 配乐, 音乐, AI绘画, AI视频, 幻灯片, 文生图, 图生图, 海报, 插画, 创作, 生成视频, 做视频, 配音, 字幕, 图转图, 设计, 风格参考]
@@ -39,22 +39,19 @@ AI驱动的多媒体内容创作: 图片/文档/PPT/视频/音频全链路。
 |------|------|------|
 | 文生图 | `generate_image` | 从文字生成图片 |
 | 图生图 | `generate_image_i2i` | 基于参考图生成变体 |
-| 图片分析 | `analyze_image` 或 `mmx_vision` | 理解图片内容 |
+| 图片分析 | `analyze_image` | 理解图片内容 |
 | 视频分析 | `video_understanding` | 理解视频内容 |
 | 视频剪辑 | `video_edit` | 裁剪/加字幕/转格式 |
 | PPT制作 | `generate_ppt` | 生成演示文稿 |
 | Word文档 | `generate_docx` | 生成Word文档(.docx) |
 | Excel表格 | `generate_xlsx` | 生成电子表格(.xlsx) |
 | PDF文档 | `generate_pdf` | 生成PDF文档 |
-| 语音合成 | `mmx_speech` | 文字→语音 |
-| 音乐生成 | `mmx_music` | 生成背景音乐 |
-| 对话生图 | `mmx_image` | MiniMax直出图片 |
 
 ## 工作流
 
 ### 图片生成
 1. 确认需求: 风格/尺寸/数量
-2. `generate_image` 或 `mmx_image` — 传入详细prompt
+2. `generate_image` — 传入详细 prompt
 3. 如需变体: `generate_image_i2i` 基于结果再生成
 
 ### 文档生成

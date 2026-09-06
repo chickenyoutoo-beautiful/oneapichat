@@ -19,61 +19,62 @@ function _guardFeed(chatId, fullText, reasoningText, cancelReader) {
     }
 }
 
-// ★ 容错修复工具参数JSON(与 main.js/tools-exec.js 一致): 未转义引号/换行/截断
+// ★ 容错修复工具参数JSON(与 main.js/tools-exec.js 一致): 健壮保留长代码/HTML/CSS/JS中的引号与花括号，安全处理换行与截断
 if (!window.repairToolArguments) {
     window.repairToolArguments = function(raw) {
         if (typeof raw !== 'string') return '{}';
-        var out = '';
-        var inStr = false;
-        var hadInner = false;
-        for (var i = 0; i < raw.length; i++) {
-            var ch = raw.charAt(i);
-            if (!inStr) {
-                out += ch;
-                if (ch === '"') { inStr = true; hadInner = false; }
+        var trimmed = raw.trim();
+        if (!trimmed) return '{}';
+        try { JSON.parse(trimmed); return trimmed; } catch (e) {}
+
+        var work = trimmed.replace(/^\{\s*,/, '{').replace(/,\s*\}$/, '}').replace(/,\s*,/g, ',');
+        try { JSON.parse(work); return work; } catch (e) {}
+
+        var out = '', inString = false;
+        for (var i = 0; i < work.length; i++) {
+            var c = work[i];
+            if (c === '\\' && inString) {
+                out += c;
+                if (i + 1 < work.length) { out += work[i + 1]; i++; }
                 continue;
             }
-            if (ch === '\\') {
-                out += ch;
-                if (i + 1 < raw.length) { out += raw.charAt(i + 1); i++; }
+            if (c === '"') {
+                inString = !inString;
+                out += c;
                 continue;
             }
-            if (ch === '\n') { out += '\\n'; continue; }
-            if (ch === '\r') { out += '\\r'; continue; }
-            if (ch === '\t') { out += '\\t'; continue; }
-            if (ch.charCodeAt(0) < 32) { out += ' '; continue; }
-            if (ch === '"') {
-                var j = i + 1;
-                while (j < raw.length && (raw.charAt(j) === ' ' || raw.charAt(j) === '\t')) j++;
-                var nxt = j < raw.length ? raw.charAt(j) : '';
-                if (nxt === ',') {
-                    var k = j + 1;
-                    while (k < raw.length && (raw.charAt(k) === ' ' || raw.charAt(k) === '\t')) k++;
-                    var afterComma = k < raw.length ? raw.charAt(k) : '';
-                    if (afterComma === '"' || afterComma === '}' || afterComma === ']' || afterComma === '') {
-                        if (hadInner) {
-                            out += '\\"'; out += '"'; inStr = false;
-                        } else {
-                            out += '"'; inStr = false;
-                        }
-                    } else {
-                        out += '\\"'; hadInner = true;
-                    }
-                } else if (nxt === '}' || nxt === ']' || nxt === ':' || nxt === '') {
-                    out += '"';
-                    inStr = false;
-                } else {
-                    out += '\\"'; hadInner = true;
-                }
-                continue;
+            if (inString) {
+                if (c === '\n') { out += '\\n'; continue; }
+                if (c === '\r') { out += '\\r'; continue; }
+                if (c === '\t') { out += '\\t'; continue; }
+                if (c.charCodeAt(0) < 32) { out += ' '; continue; }
             }
-            out += ch;
+            out += c;
         }
-        if (inStr) out += '"';
-        var ob = (out.match(/\{/g) || []).length;
-        var cb = (out.match(/\}/g) || []).length;
-        while (cb < ob) { out += '}'; cb++; }
-        return out;
+        try { JSON.parse(out); return out; } catch (e) {}
+
+        var text = out;
+        if (inString) text += '"';
+        text = text.replace(/,\s*$/, '').replace(/:\s*$/, ': null');
+
+        var stack = [], inStr2 = false;
+        for (var j = 0; j < text.length; j++) {
+            var ch = text[j];
+            if (ch === '\\' && inStr2) { j++; continue; }
+            if (ch === '"') { inStr2 = !inStr2; continue; }
+            if (!inStr2) {
+                if (ch === '{' || ch === '[') stack.push(ch);
+                else if (ch === '}' && stack.length && stack[stack.length - 1] === '{') stack.pop();
+                else if (ch === ']' && stack.length && stack[stack.length - 1] === '[') stack.pop();
+            }
+        }
+        if (inStr2) text += '"';
+        while (stack.length > 0) {
+            var open = stack.pop();
+            text += (open === '{' ? '}' : ']');
+        }
+        try { JSON.parse(text); return text; } catch (e) {}
+        return text;
     };
 }
 
@@ -117,16 +118,10 @@ function _ensureReasoningChip(bubble) {
     bubble.appendChild(_chip);
 }
 
-// ★ 无正文空气泡美化: 渲染灰色 (empty) 占位 (推理-only / 工具-only 消息)
+// ★ 无正文气泡处理: 不再渲染生硬的 (empty) 占位符
 window._ensureEmptyBubbleHint = function(bubble, pendingMsg) {
-    if (!bubble) return;
-    var _md = bubble.querySelector('.markdown-body');
-    if (!_md) return;
-    if (_md.textContent.trim() || bubble.querySelector('.empty-response-hint')) return;
-    var _hint = document.createElement('div');
-    _hint.className = 'empty-response-hint';
-    _hint.textContent = '(empty)';
-    _md.appendChild(_hint);
+    // 纯工具调用或推理消息无需展示任何 (empty) 文字
+    return;
 };
 
 // ★ 从文本中解析 MiniMax/模型输出的文本格式工具调用
@@ -349,12 +344,12 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
                 } else if (currentEventType === 'start') {
                     console.log('[SSE] stream started, msg_id:', event.msg_id);
                 }
-            } catch(e) { console.warn('[SSE] parse error:', e.message, 'line:', line.slice(0, 80)); }
+            } catch(e) { console.warn('[SSE] parse error:', { errorType: e && e.name, lineLength: line.length, eventType: currentEventType || 'message' }); }
         }
         if (done) {
             // 处理 buffer 中剩余的不完整数据(理论上应该为空)
             if (buffer.trim()) {
-                console.log('[SSE] done, buffer remains:', buffer.slice(0, 100));
+                console.log('[SSE] done, buffer remains:', { bufferLength: buffer.length });
             }
             break;
         }
@@ -455,11 +450,30 @@ window._backendSSEHandler = async function(sseResponse, chatId, pendingMsg, msgI
 
 async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDelay) {
     var reader = res.body.getReader();
+    // A provider may emit a visible preamble and then request web_search. The
+    // follow-up model turn is a continuation of the same assistant message, not
+    // a replacement. Keep the pre-tool text as an immutable round base so a
+    // fast tool result cannot make the bubble jump backwards/truncate.
+    var _roundBaseContent = pendingMsg && typeof pendingMsg._toolRoundBaseContent === 'string'
+        ? pendingMsg._toolRoundBaseContent : '';
+    var _roundBaseReasoning = pendingMsg && typeof pendingMsg._toolRoundBaseReasoning === 'string'
+        ? pendingMsg._toolRoundBaseReasoning : '';
+    var _mergeRoundContent = function(value) {
+        return typeof window.mergeAssistantStreamText === 'function'
+            ? window.mergeAssistantStreamText(_roundBaseContent, value)
+            : (_roundBaseContent + (value || ''));
+    };
+    var _mergeRoundReasoning = function(value) {
+        return typeof window.mergeAssistantStreamText === 'function'
+            ? window.mergeAssistantStreamText(_roundBaseReasoning, value)
+            : (_roundBaseReasoning + (value || ''));
+    };
     // ★ 本流专属气泡: 禁止中途重读共享 activeBubbleMap — 新消息会替换 map 条目,
     //   旧流结束时若读 map 会误清新气泡的 typing/漏清自己的 (呼吸线滞留旧气泡的根因)
     var _ownedBubble = activeBubbleMap[chatId] || null;
     var decoder = new TextDecoder();
     let buffer = '';
+    let _jsonCarry = ''; // 兼容 relay/代理拆分的多行 JSON 对象
     let fullText = '';
     let reasoningText = '';
     let hasContent = false;
@@ -503,6 +517,10 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
         if (done) {
             // 流结束:处理 buffer 中剩余的数据
             if (value) { buffer += decoder.decode(value, { stream: true }); }
+            if (_jsonCarry && buffer.trim()) {
+                _jsonCarry += '\n' + buffer.trim();
+                try { JSON.parse(_jsonCarry); buffer = _jsonCarry; _jsonCarry = ''; } catch (_endJson) {}
+            }
             if (buffer.trim()) {
                 var lastLines = buffer.split('\n');
                 for (var li = 0; li < lastLines.length; li++) {
@@ -574,11 +592,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                 }
             }
             // console.log('[STREAM] Done, final fullText:', fullText?.length, 'bytes');  // 调试用,正常运行时静默
-            // 残留buffer原始内容(前200字节)
+            // 残留 buffer 只记录结构元数据，不输出模型正文或工具参数。
             if (buffer && buffer.trim()) {
-                var bufPreview = buffer.substring(0, 200);
-                console.log('[BUF-HEX] buffer start:', bufPreview);
-                console.log('[BUF-HEX] starts with {?', buffer.trim().startsWith('{'), '| data:?', buffer.trim().startsWith('data:'), '| first char:', buffer.trim().charCodeAt(0));
+                console.log('[BUF-HEX] residual buffer:', { bufferLength: buffer.length, startsWithObject: buffer.trim().startsWith('{'), startsWithData: buffer.trim().startsWith('data:'), firstCharCode: buffer.trim().charCodeAt(0) });
             }
             break;
         }
@@ -599,6 +615,17 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
             } else if (_trimmed.startsWith('{')) {
                 jsonStr = _trimmed;
             }
+            // 代理可能把裸 JSON 拆成多行，先等待闭合对象再解析。
+            if (_jsonCarry) {
+                var _piece = _trimmed;
+                if (_piece.startsWith('data:')) _piece = _piece.substring(5).trim();
+                if (_piece) _jsonCarry += '\n' + _piece;
+                jsonStr = _jsonCarry;
+                try { JSON.parse(jsonStr); _jsonCarry = ''; } catch (_partialJson) { continue; }
+            } else if (jsonStr && jsonStr.trim() === '{') {
+                _jsonCarry = jsonStr.trim();
+                continue;
+            }
             if (jsonStr) {
                 try {
                     // 跳过空行或无效JSON
@@ -616,12 +643,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 data = JSON.parse(match[0]);
                             } catch {
                                 parseErrors++;
-                                console.warn('[JSON解析错误]', parseErr.message, '原文:', jsonStr.slice(0, 100));
+                                console.warn('[JSON解析错误]', { errorType: parseErr && parseErr.name, payloadLength: jsonStr.length, firstCharCode: jsonStr.trim() ? jsonStr.trim().charCodeAt(0) : null });
                                 continue;
                             }
                         } else {
                             parseErrors++;
-                            console.warn('[JSON解析错误]', parseErr.message, '原文:', jsonStr.slice(0, 100));
+                            console.warn('[JSON解析错误]', { errorType: parseErr && parseErr.name, payloadLength: jsonStr.length, firstCharCode: jsonStr.trim() ? jsonStr.trim().charCodeAt(0) : null });
                             continue;
                         }
                     }
@@ -715,57 +742,15 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                                            (newArg.trim().startsWith('[') && newArg.trim().endsWith(']'));
 
                                     if (typeof currentToolCall.function.arguments === 'string') {
-                                        // 检查是否完全相同(避免Grok重复发送完整JSON)
+                                        // 检查是否完全相同(避免个别模型重复发送完整JSON)
                                         if (newArg === currentToolCall.function.arguments) {
-                                        } else if (isCompleteJSON && currentToolCall.function.arguments.trim() !== '') {
-                                            // 当前有内容且新来的是完整JSON,应该是替换而非拼接
-                                            // ★ 修复: 如果已有完成的tool call,忽略这个完整JSON替换
-                                            if (toolCallCompleted) {
-                                            } else {
-                                                currentToolCall.function.arguments = newArg;
-                                            }
+                                            // 重复的整包，忽略
+                                        } else if (isCompleteJSON && currentToolCall.function.arguments.trim() === '') {
+                                            // 当前为空且新来的是完整JSON，直接设置
+                                            currentToolCall.function.arguments = newArg;
                                         } else {
-                                            // ★ 修复: DeepSeek V4 Pro/Flash 在增量拼接完完整JSON后,
-                                            // 会再发一遍同样的字符作为单独delta,导致无效累积
-                                            // 检查 current 是否已经是闭合的有效JSON,如果是则跳过所有后续追加
-                                            var curTrimmed = currentToolCall.function.arguments.trim();
-                                            var looksComplete = (curTrimmed.startsWith('{') && curTrimmed.endsWith('}')) ||
-                                                                  (curTrimmed.startsWith('[') && curTrimmed.endsWith(']'));
-                                            if (looksComplete) {
-                                                // 已闭合成完整JSON,验证有效性
-                                                let isValid = false;
-                                                try { JSON.parse(curTrimmed); isValid = true; } catch(e) {}
-                                                if (isValid) {
-                                                    // ★ 修复: 立即保存到toolCalls并标记完成,防止后续重放覆盖
-                                                    if (!toolCallCompleted) {
-                                                        var savedCall = JSON.parse(JSON.stringify(currentToolCall));
-                                                        savedCall.function.arguments = JSON.parse(curTrimmed);
-                                                        toolCalls.push(savedCall);
-                                                        toolCallCompleted = true;
-                                                        currentToolCall = null;
-                                                    }
-                                                } else {
-                                                    currentToolCall.function.arguments += newArg;
-                                                }
-                                            } else {
-                                                // 否则是增量片段,累加
-                                                currentToolCall.function.arguments += newArg;
-                                                // ★ 事后检查: 累加后如果变成完整有效JSON,立即保存
-                                                if (!toolCallCompleted) {
-                                                    var afterTrim = currentToolCall.function.arguments.trim();
-                                                    if ((afterTrim.startsWith('{') && afterTrim.endsWith('}')) ||
-                                                        (afterTrim.startsWith('[') && afterTrim.endsWith(']'))) {
-                                                        try {
-                                                            var parsed = JSON.parse(afterTrim);
-                                                            var savedCall = JSON.parse(JSON.stringify(currentToolCall));
-                                                            savedCall.function.arguments = parsed;
-                                                            toolCalls.push(savedCall);
-                                                            toolCallCompleted = true;
-                                                            currentToolCall = null;
-                                                        } catch(e) {}
-                                                    }
-                                                }
-                                            }
+                                            // ★ 绝不提前提前终止 currentToolCall！持续累加流式增量片段
+                                            currentToolCall.function.arguments += newArg;
                                         }
                                     } else {
                                         // 原来是对象(初始化时的 {}),新来的是字符串片段
@@ -799,8 +784,9 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
 
                     // MiniMax reasoning_split 模式下,思考内容在 reasoning_details 数组中
                     var hasReasoningDetails = delta.reasoning_details && Array.isArray(delta.reasoning_details);
-                    // 普通 reasoning_content (排除空字符串MiniMax空chunk)
-                    var hasReasoningContent = delta.reasoning_content !== undefined && delta.reasoning_content !== null && delta.reasoning_content !== '';
+                    // 普通 reasoning_content / reasoning / thinking (兼容 OpenAI-compatible 多家方言)
+                    var _rawReasoning = delta.reasoning_content || delta.reasoning || delta.reasoning_text || delta.thinking || (delta.model_extra && (delta.model_extra.reasoning_content || delta.model_extra.reasoning || delta.model_extra.thinking));
+                    var hasReasoningContent = _rawReasoning !== undefined && _rawReasoning !== null && _rawReasoning !== '';
 
                     if (!placeholderCleared && (hasReasoningContent || hasReasoningDetails || delta.content !== undefined)) {
                         var currentBubble = _ownedBubble;
@@ -840,8 +826,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                         }
                         // 无延迟: 立即渲染
                     } else if (hasReasoningContent) {
-                        // 普通字符串格式 reasoning_content
-                        reasoningText += String(delta.reasoning_content);
+                        // 普通字符串格式 reasoning_content / reasoning / thinking
+                        reasoningText += String(_rawReasoning);
                         // ★ 死循环检测: 推理死循环(正文为空 + 推理复读)
                         _guardFeed(chatId, null, reasoningText, function() { try { reader.cancel(); } catch(_ce) {} });
                         pendingMsg.reasoning = reasoningText;
@@ -928,7 +914,15 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                             reasoningText = _allThink.trim();
                             pendingMsg.reasoning = reasoningText;
                         }
-                        pendingMsg.content = _t.trim() || (_allThink.trim() ? '' : fullText);
+                        var _currentTurnText = _t.trim() || (_allThink.trim() ? '' : fullText);
+                        var _visibleTurnText = _mergeRoundContent(_currentTurnText);
+                        // Keep the persisted/UI message monotonic as well as the
+                        // DOM projection. The next tool request is built from a
+                        // snapshot of body.messages, so this cannot contaminate
+                        // the already-sent provider turn.
+                        pendingMsg.content = _visibleTurnText;
+                        pendingMsg._toolVisibleContent = _visibleTurnText;
+                        pendingMsg._toolVisibleReasoning = _mergeRoundReasoning(reasoningText);
                         var _displayText = _t.trim();
                         // ★ MiniMax去重: 推理内容泄漏到正文中
                         var _rt = (reasoningText || '').trim();
@@ -979,7 +973,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                                 }
                                 // 流式渲染正文: 统一走节流管道
                                 var _renderText = typeof _t !== 'undefined' ? _t : fullText;
-                                applyStreamRender(chatId, _renderText);
+                                // Render the continuation together with the immutable
+                                // pre-tool preamble. pendingMsg.content remains the
+                                // current provider turn for correct API history.
+                                var _visibleRenderText = _mergeRoundContent(_renderText);
+                                pendingMsg._toolVisibleContent = _visibleRenderText;
+                                applyStreamRender(chatId, _visibleRenderText);
                                 // AI流式回复时,如果用户没有主动滚动上查,则跟随滚动
                                 // ★ v3: 滚动跟随由 markdown.js RAF 渲染循环统一执行(followToBottom),
                                 //   这里移除每 chunk 直写 scrollTop(未节流且与渲染循环重复触发)
@@ -995,7 +994,7 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
                     if (data.usage) usage = data.usage;
                 } catch (e) {
                     parseErrors++;
-                    console.warn('[流式解析错误]', line?.slice(0, 100), e.message);
+                    console.warn('[流式解析错误]', { errorType: e && e.name, payloadLength: line ? line.length : 0, firstCharCode: line && line.trim() ? line.trim().charCodeAt(0) : null });
                 }
             }
         }
@@ -1107,26 +1106,8 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     if (currentChatId === chatId) {
         var _streamBubble = _ownedBubble;
         if (_streamBubble && pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
-            if (!_streamBubble.querySelector('.generated-images-container')) {
-                var _imgContStream = document.createElement('div');
-                _imgContStream.className = 'generated-images-container';
-                _imgContStream.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-                _streamBubble.appendChild(_imgContStream);
-                // ★ 异步渲染每张图片,避免大批 base64 阻塞主线程
-                pendingMsg.generatedImages.forEach(function(_imgData, _idx) {
-                    setTimeout(function() {
-                        var _wrapStream = document.createElement('div');
-                        _wrapStream.style.cssText = 'position:relative;cursor:pointer;';
-                        var _imgElStream = document.createElement('img');
-                        _imgElStream.src = _imgData;
-                        _imgElStream.decoding = 'async';
-                        _imgElStream.style.cssText = 'max-width:' + (pendingMsg.generatedImages.length > 1 ? '160px' : '320px') + ';width:100%;border-radius:8px;display:block;';
-                        _imgElStream.setAttribute('loading', 'lazy');
-                        _imgElStream.addEventListener('click', function() { showImageLightbox(pendingMsg.generatedImages, _idx); });
-                        _wrapStream.appendChild(_imgElStream);
-                        _imgContStream.appendChild(_wrapStream);
-                    }, _idx * 50); // 每张间隔50ms,给主线程喘息
-                });
+            if (typeof window.renderGeneratedImagesIntoBubble === 'function') {
+                window.renderGeneratedImagesIntoBubble(_streamBubble, pendingMsg.generatedImages);
             }
         }
     }
@@ -1197,6 +1178,12 @@ async function streamResponse(res, chatId, pendingMsg, reasoningDelay, contentDe
     // ★ 死循环检测: 流结束前补检一次(尾部内容可能未达节流阈值)
     _guardFeed(chatId, fullText, reasoningText, null);
 
+    // Return the provider-turn text to the tool loop, while retaining the
+    // merged visible projection on pendingMsg for the next continuation.
+    if (pendingMsg && typeof pendingMsg._toolRoundBaseContent === 'string') {
+        pendingMsg._toolVisibleContent = _mergeRoundContent(fullText);
+        pendingMsg._toolVisibleReasoning = _mergeRoundReasoning(reasoningText);
+    }
     return { fullText, reasoningText, usage, toolCalls, streamAborted };
 }
 
@@ -1334,7 +1321,16 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                 // ★ 上传到服务器,确保刷新后图片不消失 (直接生成路径,同步等待)
                 if (_imgUrl && !_imgUrl.startsWith(window.location.origin) && !_imgUrl.startsWith('/oneapichat')) {
                     try {
-                        var _srvUrlHns = await uploadImageToServer(_imgUrl);
+                        var _srvUrlHns = await uploadImageToServer(_imgUrl, {
+                            name: _metaHns.prompt || '',
+                            persistGenerated: true,
+                            chatId: chatId,
+                            messageIndex: chats[chatId] && chats[chatId].messages
+                                ? chats[chatId].messages.findIndex(function(m) { return m === pendingMsg; }) : -1,
+                            prompt: _metaHns.prompt || '',
+                            model: _metaHns.model || '',
+                            aspect_ratio: _metaHns.aspect_ratio || '1:1'
+                        });
                         if (_srvUrlHns) {
                             console.log('[ImageModel] 图片已上传到服务器:', _srvUrlHns);
                             _metaHns.url = _srvUrlHns;
@@ -1455,30 +1451,10 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
                 if (!userScrolled) followToBottom($.chatBox);
             }, 200);
             // ★ 非流式响应完成:如果有生成的图片,渲染到气泡
-            if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0 && !currentBubble.querySelector('.generated-images-container')) {
-                // ★ 清除工具执行时留下的占位符
-                var _oldPh = currentBubble.querySelector('#image-placeholder');
-                if (_oldPh) _oldPh.remove();
-                var _imgContNs = document.createElement('div');
-                _imgContNs.className = 'generated-images-container';
-                _imgContNs.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-                currentBubble.appendChild(_imgContNs);
-                // ★ 异步渲染每张图片
-                pendingMsg.generatedImages.forEach(function(_imgData, _idx) {
-                    setTimeout(function() {
-                        var _wrapNs = document.createElement('div');
-                        _wrapNs.style.cssText = 'position:relative;cursor:pointer;';
-                        var _imgElNs = document.createElement('img');
-                        _imgElNs.src = _imgData;
-                        _imgElNs.decoding = 'async';
-                        _imgElNs.style.cssText = 'max-width:' + (pendingMsg.generatedImages.length > 1 ? '160px' : '320px') + ';width:100%;border-radius:8px;display:block;';
-                        _imgElNs.setAttribute('loading', 'lazy');
-                        _imgElNs.addEventListener('click', function() { showImageLightbox(pendingMsg.generatedImages, _idx); });
-                        _imgElNs.onerror = function() { this.style.display = 'none'; };
-                        _wrapNs.appendChild(_imgElNs);
-                        _imgContNs.appendChild(_wrapNs);
-                    }, _idx * 50);
-                });
+            if (pendingMsg.generatedImages && pendingMsg.generatedImages.length > 0) {
+                if (typeof window.renderGeneratedImagesIntoBubble === 'function') {
+                    window.renderGeneratedImagesIntoBubble(currentBubble, pendingMsg.generatedImages);
+                }
             }
         }
         } catch(_bubbleErr) {
@@ -1497,6 +1473,12 @@ async function handleNonStream(res, chatId, pendingMsg, currentBubble) {
 }
 
 function handleError(e, chatId, pendingMsg, currentBubble) {
+    // 错误收尾必须同时解除所有生成态，避免429/网络异常只留控制台报错而界面永远显示等待。
+    if (window.abortControllerMap && window.abortControllerMap[chatId]) {
+        try { window.abortControllerMap[chatId].abort(); } catch(_abortErr) {}
+        try { delete window.abortControllerMap[chatId]; } catch(_deleteErr) {}
+    }
+    if (typeof isTypingMap !== 'undefined') delete isTypingMap[chatId];
     // ★ 清除流式保存定时器 + RAF渲染循环
     if (pendingMsg && pendingMsg._streamSaveTimer) { clearInterval(pendingMsg._streamSaveTimer); pendingMsg._streamSaveTimer = null; }
     cleanupStreamState(chatId);

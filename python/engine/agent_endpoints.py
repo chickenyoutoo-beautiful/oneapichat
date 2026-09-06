@@ -12,6 +12,12 @@ def register_agent_endpoints(app, engine_dir, tool_registry):
     MEMORY_DIR = engine_dir / "memory"
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _bound_owner(request: Request, user_id: str = "") -> str:
+        owner = str(getattr(request.state, "user_id", "") or user_id or "")
+        if not owner:
+            raise HTTPException(401, "authenticated user required")
+        return owner
+
     def _read_memory_json(filename: str, user_id: str = "") -> dict:
         return read_memory_json(MEMORY_DIR, filename, user_id)
 
@@ -204,10 +210,10 @@ def register_agent_endpoints(app, engine_dir, tool_registry):
     
     
     @app.get("/engine/browser/status")
-    async def browser_status():
+    async def browser_status(request: Request, user_id: str = Query("")):
         """浏览器连接状态"""
         from engine.browser import get_browser_manager
-        bm = get_browser_manager()
+        bm = get_browser_manager(_bound_owner(request, user_id))
         try:
             if not bm._connected:
                 await bm.connect()
@@ -217,89 +223,92 @@ def register_agent_endpoints(app, engine_dir, tool_registry):
     
     
     @app.post("/engine/browser/navigate")
-    async def browser_navigate(request: Request):
+    async def browser_navigate(request: Request, user_id: str = Query("")):
         body = await request.json()
         url = body.get("url", "")
         if not url:
             return {"ok": False, "error": "缺少 url 参数"}
-        from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        from engine.browser import ensure_browser_connected, is_safe_browser_url
+        owner = _bound_owner(request, user_id)
+        if not await is_safe_browser_url(url):
+            raise HTTPException(403, "blocked private or invalid browser URL")
+        bm = await ensure_browser_connected(owner)
         result = await bm.navigate(url)
         return result
     
     
     @app.get("/engine/browser/screenshot")
-    async def browser_screenshot():
+    async def browser_screenshot(request: Request, user_id: str = Query("")):
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.screenshot()
         return result
     
     
     @app.post("/engine/browser/click")
-    async def browser_click(request: Request):
+    async def browser_click(request: Request, user_id: str = Query("")):
         body = await request.json()
         selector = body.get("selector", "")
         if not selector:
             return {"ok": False, "error": "缺少 selector 参数"}
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.click(selector)
         return result
     
     
     @app.post("/engine/browser/type")
-    async def browser_type(request: Request):
+    async def browser_type(request: Request, user_id: str = Query("")):
         body = await request.json()
         selector = body.get("selector", "")
         text = body.get("text", "")
         if not selector:
             return {"ok": False, "error": "缺少 selector 参数"}
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.type_text(selector, text)
         return result
     
     
     @app.get("/engine/browser/content")
-    async def browser_content():
+    async def browser_content(request: Request, user_id: str = Query("")):
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.get_content()
         return result
     
     
     @app.get("/engine/browser/snapshot")
-    async def browser_snapshot():
+    async def browser_snapshot(request: Request, user_id: str = Query("")):
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.get_snapshot()
         return result
     
     
     @app.post("/engine/browser/js")
-    async def browser_js(request: Request):
+    async def browser_js(request: Request, user_id: str = Query("")):
         body = await request.json()
         code = body.get("code", "")
         if not code:
             return {"ok": False, "error": "缺少 code 参数"}
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.execute_js(code)
         return result
     
     
     @app.post("/engine/browser/page/new")
-    async def browser_page_new():
+    async def browser_page_new(request: Request, user_id: str = Query("")):
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.new_page()
         return result
     
     
     @app.post("/engine/browser/page/close")
-    async def browser_page_close():
+    async def browser_page_close(request: Request, user_id: str = Query("")):
         from engine.browser import ensure_browser_connected
-        bm = await ensure_browser_connected()
+        bm = await ensure_browser_connected(_bound_owner(request, user_id))
         result = await bm.close_page()
         return result

@@ -6,6 +6,7 @@ from chaoxing.logger import logger
 import random
 from urllib3 import disable_warnings,exceptions
 import os, sys
+import re
 
 def resource_path(relative_path: str) -> str:
     if hasattr(sys, '_MEIPASS'):
@@ -23,23 +24,45 @@ class CacheDAO:
     @Reference: https://github.com/SocialSisterYi/xuexiaoyi-to-xuexitong-tampermonkey-proxy
     """
     def __init__(self, file: str = "cache.json"):
-        self.cacheFile = Path(resource_path(file))
+        # 题库缓存属于运行时数据，不能跟随当前工作目录写到项目根目录。
+        # Web 任务固定落在 /tmp/AutomaticCB，并按主账号隔离，避免 www-data
+        # 因源码目录权限不足而让整门课程异常退出。
+        runtime_dir = Path(os.environ.get("CHAOXING_RUNTIME_DIR", "/tmp/AutomaticCB"))
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        user_id = re.sub(r"[^A-Za-z0-9_.-]", "_", os.environ.get("CHAOXING_USER_ID", "default"))
+        cache_name = f"cache_{user_id}.json" if file == "cache.json" else Path(file).name
+        self.cacheFile = runtime_dir / cache_name
         if not self.cacheFile.is_file():
-            self.cacheFile.open("w", encoding="utf8").write("{}")
+            self.cacheFile.write_text("{}", encoding="utf8")
         self.fp = self.cacheFile.open("r+", encoding="utf8")
+
+    def close(self):
+        if getattr(self, "fp", None) and not self.fp.closed:
+            self.fp.close()
+
+    def __del__(self):
+        self.close()
 
     def getCache(self, question: str):
         self.fp.seek(0)
-        data = json.load(self.fp)
+        try:
+            data = json.load(self.fp)
+        except (json.JSONDecodeError, ValueError):
+            data = {}
         if isinstance(data, dict):
             return data.get(question)
 
     def addCache(self, question: str, answer: str):
         self.fp.seek(0)
-        data: dict = json.load(self.fp)
+        try:
+            data: dict = json.load(self.fp)
+        except (json.JSONDecodeError, ValueError):
+            data = {}
         data[question] = answer
         self.fp.seek(0)
         json.dump(data, self.fp, ensure_ascii=False, indent=4)
+        self.fp.truncate()
+        self.fp.flush()
 
 
 class Tiku:
@@ -120,8 +143,13 @@ class Tiku:
         # Prefix removed upstream, no crop needed here
 
         # 先过缓存
-        cache_dao = CacheDAO()
-        answer = cache_dao.getCache(q_info['title'])
+        cache_dao = None
+        try:
+            cache_dao = CacheDAO()
+            answer = cache_dao.getCache(q_info['title'])
+        except OSError as e:
+            logger.warning(f"题库缓存不可用，继续联网查题: {e}")
+            answer = None
         if answer:
             logger.info(f"从缓存中获取答案：{q_info['title']} -> {answer}")
             return answer.strip()
@@ -129,7 +157,11 @@ class Tiku:
             answer = self._query(q_info)
             if answer:
                 answer = answer.strip()
-                cache_dao.addCache(q_info['title'], answer)
+                if cache_dao:
+                    try:
+                        cache_dao.addCache(q_info['title'], answer)
+                    except OSError as e:
+                        logger.warning(f"题库答案缓存失败，不影响本次答题: {e}")
                 logger.info(f"从{self.name}获取答案：{q_info['title']} -> {answer}")
                 return answer
             # ★ 自身查询失败 → 沿 fallback 链继续（如言溪失败自动降级 AI 答题），
@@ -273,8 +305,25 @@ class AI(Tiku):
     def _query(self, q_info: dict):
         import requests as _req
         base_url = self._conf.get('ai_base_url', 'https://api.deepseek.com')
-        model = self._conf.get('ai_model', 'deepseek-chat')
+        model = self._conf.get('ai_model', '')
         api_key = self._conf.get('ai_key', '')
+        # ★ 按提供商智能选择默认模型（不再硬编码已失效的 deepseek-chat）
+        if not model:
+            _u = base_url.lower()
+            if 'deepseek' in _u:
+                model = 'deepseek-v4-flash'
+            elif 'openai' in _u or 'chatgpt' in _u:
+                model = 'gpt-5'
+            elif 'anthropic' in _u or 'claude' in _u:
+                model = 'claude-sonnet-4-20250514'
+            elif 'gemini' in _u or 'googleapis' in _u:
+                model = 'gemini-2.5-flash'
+            elif 'longcat' in _u:
+                model = 'LongCat-2.0'
+            elif 'x.ai' in _u or 'grok' in _u:
+                model = 'grok-4.20-0309'
+            else:
+                model = 'deepseek-v4-flash'
         # ★ 空 key 或配置占位符（「你的…」）视为未配置：不发起无效请求，明确提示
         if not api_key or '你的' in api_key:
             logger.error('AI答题未配置有效 api_key（请在刷课设置填写 AI Key，如 DeepSeek），本次跳过 AI 答题')

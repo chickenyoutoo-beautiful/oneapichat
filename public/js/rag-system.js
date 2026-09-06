@@ -3,6 +3,32 @@
 
 // ==================== RAG 知识库系统 ====================
 
+function _ragAuthHeaders() {
+    var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+    return token ? { Authorization: 'Bearer ' + token } : {};
+}
+
+function _ragHasAuth() {
+    try { return !!(typeof getAuthToken === 'function' && getAuthToken()); }
+    catch(e) { return false; }
+}
+
+async function _ragJsonResponse(response) {
+    var text = '';
+    try { text = await response.text(); } catch(e) {}
+    var data = null;
+    if (text) {
+        try { data = JSON.parse(text); } catch(e) {}
+    }
+    if (!response.ok) {
+        var detail = data && (data.error || data.detail || data.message);
+        if (detail && typeof detail === 'object') detail = detail.message || detail.code;
+        throw new Error(String(detail || ('RAG HTTP ' + response.status)));
+    }
+    if (!data) throw new Error('RAG returned an empty or invalid response');
+    return data;
+}
+
 function initRAGPanel() {
     if (getEl('ragPanel')) return;
     var inputArea = getEl('inputWrapper') || document.querySelector('.input-wrapper');
@@ -43,26 +69,50 @@ function initRAGPanel() {
     });
 
     var ua = getEl('ragUploadArea');
+    var collSel = getEl('ragCollectionSelect');
+    if (!_ragHasAuth()) {
+        if (collSel) {
+            collSel.innerHTML = '<option value="default">登录后加载知识库</option>';
+            collSel.disabled = true;
+        }
+        if (ua) {
+            ua.setAttribute('aria-disabled', 'true');
+            ua.title = '登录后可上传知识库文档';
+            ua.style.cursor = 'not-allowed';
+            ua.style.opacity = '0.65';
+        }
+        ['ragAddColl', 'ragDelColl', 'ragQueryBtn', 'ragQueryInput', 'ragEmbedModel', 'ragSearchMode', 'ragApplyEmbed'].forEach(function(id) {
+            var el = getEl(id);
+            if (el) el.disabled = true;
+        });
+        var guestList = getEl('ragDocList');
+        if (guestList) guestList.innerHTML = '<div class="rag-empty">登录后可使用知识库</div>';
+        var guestDocCount = getEl('ragDocCount'), guestChunkCount = getEl('ragChunkCount');
+        if (guestDocCount) guestDocCount.textContent = '0';
+        if (guestChunkCount) guestChunkCount.textContent = '0';
+        var guestStatus = getEl('ragEmbedStatus');
+        if (guestStatus) guestStatus.textContent = '嵌入: 登录后加载';
+        return;
+    }
+
     ua.addEventListener('click', function() { var f = document.createElement('input'); f.type = 'file'; f.multiple = true; f.accept = '.pdf,.txt,.md,.docx,.xlsx,.json,.html'; f.onchange = function() { enqueueUploads(f.files); }; f.click(); });
     ua.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('dragover'); });
     ua.addEventListener('dragleave', function() { this.classList.remove('dragover'); });
     ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('dragover'); enqueueUploads(e.dataTransfer.files); });
 
     // 集合选择器
-    var collSel = getEl('ragCollectionSelect');
     loadCollections();
     collSel.onchange = function() {
         localStorage.setItem('ragCurrentCollection', this.value);
         loadKnowledgeList();
     };
-    getEl('ragAddColl').addEventListener('click', function() {
-        var name = prompt('请输入新知识库名称:');
+    getEl('ragAddColl').addEventListener('click', async function() {
+        var name = await window.requestTextInput('新建知识库', '请输入知识库名称', '');
         if (!name) return;
         var uid = localStorage.getItem('authUserId') || '';
         var nsName = encodeURIComponent(uid ? uid + '_' + name : name);
-        var _token = getAuthToken();
-        fetch(RAG_API + '?action=create_collection&name=' + nsName + '&auth_token=' + encodeURIComponent(_token))
-            .then(function(r) { return r.json(); })
+        fetch(RAG_API + '?action=create_collection&name=' + nsName, { headers: _ragAuthHeaders() })
+            .then(_ragJsonResponse)
             .then(function(d) { if (d && d.success) { loadCollections(); showToast('创建成功', 'success'); } });
     });
     getEl('ragDelColl').addEventListener('click', function() {
@@ -71,9 +121,8 @@ function initRAGPanel() {
         if (!confirm('删除知识库「' + cur + '」?')) return;
         var uid = localStorage.getItem('authUserId') || '';
         var nsName = encodeURIComponent(uid ? uid + '_' + cur : cur);
-        var _token = getAuthToken();
-        fetch(RAG_API + '?action=delete_collection&name=' + nsName + '&auth_token=' + encodeURIComponent(_token))
-            .then(function(r) { return r.json(); })
+        fetch(RAG_API + '?action=delete_collection&name=' + nsName, { headers: _ragAuthHeaders() })
+            .then(_ragJsonResponse)
             .then(function(d) { if (d && d.success) { localStorage.setItem('ragCurrentCollection', 'default'); loadCollections(); showToast('已删除', 'success'); } });
     });
     getEl('ragQueryBtn').addEventListener('click', queryRAG);
@@ -92,9 +141,8 @@ function initRAGPanel() {
             var uid = localStorage.getItem('authUserId') || '';
             var ns = uid ? encodeURIComponent(uid + '_' + coll) : encodeURIComponent(coll);
             var btn = this; btn.disabled = true; btn.textContent = '生成中...';
-            var _token = getAuthToken();
-            fetch(RAG_API + '?action=embed_config&collection=' + ns + '&embed_model=' + encodeURIComponent(model) + '&mode=' + encodeURIComponent(mode) + '&auth_token=' + encodeURIComponent(_token), {method: 'POST'})
-                .then(function(r) { return r.json(); })
+            fetch(RAG_API + '?action=embed_config&collection=' + ns + '&embed_model=' + encodeURIComponent(model) + '&mode=' + encodeURIComponent(mode), { method: 'POST', headers: _ragAuthHeaders() })
+                .then(_ragJsonResponse)
                 .then(function(d) {
                     if (d && d.success) { showToast('嵌入配置已更新 (' + (d.embedded || 0) + ' 个向量)', d.embedded ? 'success' : 'warning'); loadEmbedConfig(); }
                     else showToast('配置失败', 'error');
@@ -109,10 +157,9 @@ function loadCollections() {
     if (!sel) return;
     var prev = localStorage.getItem('ragCurrentCollection') || 'default';
     var uid = localStorage.getItem('authUserId') || '';
-    var _token = getAuthToken();
     var ns = encodeURIComponent(uid);
-    fetch(RAG_API + '?action=collections&collection=' + ns + '&auth_token=' + encodeURIComponent(_token))
-        .then(function(r) { return r.json(); })
+    fetch(RAG_API + '?action=collections&collection=' + ns, { headers: _ragAuthHeaders() })
+        .then(_ragJsonResponse)
         .then(function(d) {
             var cols = d && d.collections ? d.collections : ['default'];
             if (cols.indexOf('default') === -1) cols.unshift('default');
@@ -122,6 +169,11 @@ function loadCollections() {
             sel.value = cols.indexOf(prev) !== -1 ? prev : 'default';
             localStorage.setItem('ragCurrentCollection', sel.value);
             loadKnowledgeList();
+        })
+        .catch(function(e) {
+            if (sel) sel.innerHTML = '<option value="default">默认知识库</option>';
+            // RAG 是可选能力；后端暂不可达时保持默认空状态，不污染控制台。
+            if (!(e && /HTTP 5(0[234])/.test(e.message || ''))) console.warn('[RAG] 集合加载失败:', e && e.message ? e.message : 'unknown error');
         });
 }
 
@@ -133,9 +185,8 @@ function loadKnowledgeList() {
     var uid = localStorage.getItem('authUserId') || '';
     var coll = localStorage.getItem('ragCurrentCollection') || 'default';
     var ns = uid ? uid + '_' + coll : coll;
-    var _token = getAuthToken();
-    fetch(RAG_API + '?action=knowledge&collection=' + encodeURIComponent(ns) + '&auth_token=' + encodeURIComponent(_token))
-        .then(function(r) { return r.json(); })
+    fetch(RAG_API + '?action=knowledge&collection=' + encodeURIComponent(ns), { headers: _ragAuthHeaders() })
+        .then(_ragJsonResponse)
         .then(function(data) {
             if (!list) return;
             if (data && data.documents && data.documents.length > 0) {
@@ -214,9 +265,10 @@ function uploadToRAG(file, onDone) {
     if (pf) pf.style.width = '0%';
     if (pt) pt.textContent = '上传中: ' + file.name;
 
-    var _token = getAuthToken();
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', RAG_API + '?action=upload&collection=' + encodeURIComponent(ns) + '&mode=tfidf&auth_token=' + encodeURIComponent(_token), true);
+    xhr.open('POST', RAG_API + '?action=upload&collection=' + encodeURIComponent(ns) + '&mode=tfidf', true);
+    var _ragToken = typeof getAuthToken === 'function' ? getAuthToken() : '';
+    if (_ragToken) xhr.setRequestHeader('Authorization', 'Bearer ' + _ragToken);
     xhr.upload.onprogress = function(e) {
         if (e.lengthComputable && pf) { var pct = Math.round(e.loaded/e.total*60); pf.style.width = pct + '%'; if (pt) pt.textContent = '上传中 ' + pct + '% - ' + file.name; }
     };
@@ -238,7 +290,7 @@ function uploadToRAG(file, onDone) {
             }
         } catch(e) {
             showToast('导入失败: 服务器无响应,请重试', 'error');
-            console.error('[RAG] upload error:', e.message, 'response:', xhr.responseText);
+            console.error('[RAG] upload parse error:', { status: xhr.status, responseLength: (xhr.responseText || '').length, errorType: e && e.name });
         }
         doneFn();
     };

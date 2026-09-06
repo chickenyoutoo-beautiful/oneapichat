@@ -179,6 +179,12 @@ class ChaoxingExam:
         if self.session is None:
             from chaoxing.base import init_session as _init
             self.session = _init()
+        # 补齐超星学习通移动端专属安全校验标头（对齐 Yatori 协议规范）
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Linux; Android 12; M2012K11AC Build/SKQ1.211006.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/96.0.4664.104 Mobile Safari/537.36 (chaoxing-mobile-android/ChaoXingStudy_3_5.3.4_android_phone_614_74) com.chaoxing.mobile/ChaoXingStudy_3_5.3.4_android_phone_614_74",
+            "X-Requested-With": "com.chaoxing.mobile",
+            "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        })
         return self.session
 
     def _get_uid(self):
@@ -383,9 +389,12 @@ class ChaoxingExam:
 
         if resp.status_code == 302:
             loc = resp.headers.get("Location", "")
-            if "/exam-ans/exam/phone/look" in loc:
+            if "/exam-ans/exam/phone/look" in loc or "look" in loc or "result" in loc or "score" in loc or "complete" in loc:
                 raise ExamIsCommitted("考试已完成")
-            raise ExamError("重定向异常")
+            if "start" in loc or "reVersionTestStartNew" in loc or "mtaskmsgspecial" in loc:
+                logger.info(f"考试封面重定向到开考页: {loc}")
+                return
+            raise ExamIsCommitted(f"考试已完成或重定向到成绩页: {loc}")
 
         html = BeautifulSoup(resp.text, "lxml")
 
@@ -396,8 +405,16 @@ class ChaoxingExam:
             if "章节任务点未完成" in msg: raise ChaptersNotComplete(msg)
             raise ExamError(msg)
 
-        self.exam_answer_id = int(html.select_one("input#testUserRelationId")["value"])
-        self.title = html.select_one("span.overHidden2").text
+        body_t = html.get_text()
+        if "已完成" in body_t or "已交卷" in body_t or "本次成绩" in body_t or "交卷成功" in body_t:
+            raise ExamIsCommitted("考试已完成")
+
+        ans_input = html.select_one("input#testUserRelationId") or html.select_one("input[name='testUserRelationId']")
+        if not ans_input:
+            raise ExamError(f"未找到答题标识 testUserRelationId，考试可能已交卷或不可答: {body_t[:80]}")
+        self.exam_answer_id = int(ans_input["value"])
+        title_node = html.select_one("span.overHidden2") or html.select_one("h1") or html.select_one(".tit")
+        self.title = title_node.text.strip() if title_node else f"考试_{exam_id}"
         logger.info(f"考试封面: [{self.title}] 答题ID={self.exam_answer_id}")
 
     # ── 开始考试 ──────────────────────────────────

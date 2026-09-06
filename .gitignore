@@ -60,6 +60,8 @@ __pycache__/
 test_*
 !python/tests/
 !python/tests/**
+python/tests/**/__pycache__/
+python/tests/**/*.pyc
 debug_*
 *_backup_*
 .fix_backup_*
@@ -114,3 +116,17 @@ deploy/android/app/build/outputs/
 *.keystore
 *.jks
 deploy/local.properties
+# 运行时数据库（git 不跟踪，防止 checkout 重置权限）
+python/chaoxing/learning_records.db
+python/chaoxing/learning_records.db-wal
+python/chaoxing/learning_records.db-shm
+users/chaoxing/
+users/*.pkl
+users.db
+users/.cloudreve_cache/
+python/u_*/
+public/temp_frames/
+api/*.bak_*
+deploy/dist/
+deploy/data/
+*.bak-*

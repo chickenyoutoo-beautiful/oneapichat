@@ -115,11 +115,18 @@ window.showToolStatus = function(toolName, argPreview, status, chatId, toolCallI
     }
 
     if (status === null) {
-        // ★ 清除所有工具状态: 延迟移除容器, 动画收尾
+        // 流结束后保留执行摘要与详细步骤，避免生成期间的信息在收尾时消失。
         if (tcContainer) {
-            tcContainer.style.transition = 'opacity 0.2s ease';
-            tcContainer.style.opacity = '0';
-            setTimeout(function() { if (tcContainer.parentNode) tcContainer.remove(); }, 250);
+            tcContainer.classList.add('tool-call-settled');
+            // 极简主题默认收起已完成轨迹，只保留 DSH 风格摘要；用户可随时展开。
+            if (!tcContainer.classList.contains('tool-call-user-expanded')) tcContainer.classList.remove('tool-call-expanded');
+            var settledSummary = tcContainer.querySelector('.tool-call-live-summary');
+            if (settledSummary) {
+                settledSummary.setAttribute('data-settled', 'true');
+                settledSummary.setAttribute('aria-expanded', String(tcContainer.classList.contains('tool-call-expanded')));
+                var settledTitle = settledSummary.querySelector('strong');
+                if (settledTitle) settledTitle.textContent = 'Agent 执行记录';
+            }
         }
         return;
     }
@@ -138,24 +145,20 @@ window.showToolStatus = function(toolName, argPreview, status, chatId, toolCallI
         var existingName = existingSame.querySelector('.tool-call-name');
         var existingArg = existingSame.querySelector('.tool-call-arg');
         if (existingName) existingName.textContent = toolName;
-        if (existingArg) existingArg.textContent = (argPreview || '').substring(0, 40);
+        if (existingArg) {
+            existingArg.textContent = status === 'error' ? (argPreview || '') : (argPreview || '').substring(0, 40);
+            existingArg.title = argPreview || '';
+        }
         return existingSame;
     }
 
-    // ★ 新工具启动: 灵动挤掉所有旧行(running + 已完成), 同名 running→success 替换
-    if (status === 'running') {
-        // ★ 所有旧行(含已完成) 灵动滑出
-        tcContainer.querySelectorAll('.tool-call-line').forEach(function(old) {
-            if (old.classList.contains('tc-exit')) return;  // 已在退出动画中
-            old.classList.add('tc-exit');
-            setTimeout(function() { if (old.parentNode) old.remove(); }, 280);
-        });
-    } else {
-        // ★ 成功/失败: 先移出同名的 running 行(running→success 转换)
+    // 实时保留同一轮所有工具步骤，避免生成过程中只剩一个空白占位。
+    // 同名调用仅把 running 行更新为 success/error，不再把旧步骤全部挤掉。
+    if (status !== 'running') {
         tcContainer.querySelectorAll('.tool-call-line.tool-call-running').forEach(function(old) {
             if (old.dataset.tcName === toolName && !old.classList.contains('tc-exit')) {
                 old.classList.add('tc-exit');
-                setTimeout(function() { if (old.parentNode) old.remove(); }, 280);
+                setTimeout(function() { if (old.parentNode) old.remove(); }, 180);
             }
         });
     }
@@ -171,20 +174,38 @@ window.showToolStatus = function(toolName, argPreview, status, chatId, toolCallI
         iconHtml = '<svg class=tool-call-x width=16 height=16 viewBox="0 0 24 24" fill=none stroke=#dc2626 stroke-width=3 stroke-linecap=round><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>';
     }
 
+    var visiblePreview = status === 'error' ? (argPreview || '') : (argPreview || '').substring(0, 40);
     line.innerHTML = '<span class=tool-c...wrap>' + iconHtml + '</span>' +
         '<span class="tool-call-name">' + escapeHtml(toolName) + '</span>' +
-        (argPreview ? '<span class="tool-call-arg">' + escapeHtml((argPreview||'').substring(0, 40)) + '</span>' : '');
+        (visiblePreview ? '<span class="tool-call-arg" title="' + escapeHtml(argPreview || '') + '">' + escapeHtml(visiblePreview) + '</span>' : '');
 
     var cls = 'tool-call-line';
+    var _canVibrate = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function' &&
+        (!navigator.userActivation || navigator.userActivation.hasBeenActive);
     if (status === 'running') cls += ' tool-call-running';
-    else if (status === 'success') { cls += ' tool-call-success'; try { navigator.vibrate && navigator.vibrate([15]); } catch(e){} }
-    else if (status === 'error') { cls += ' tool-call-error'; try { navigator.vibrate && navigator.vibrate([30,50,30]); } catch(e){} }
+    else if (status === 'success') { cls += ' tool-call-success'; if (_canVibrate) { try { navigator.vibrate([15]); } catch(e){} } }
+    else if (status === 'error') { cls += ' tool-call-error'; if (_canVibrate) { try { navigator.vibrate([30,50,30]); } catch(e){} } }
     line.className = cls;
     line.dataset.tcStatus = status;
     line.dataset.tcName = toolName;
     if (toolCallId) line.dataset.tcId = String(toolCallId);
     line.setAttribute('role', 'status');
     line.setAttribute('aria-live', status === 'running' ? 'polite' : 'off');
+    if (status === 'error' && argPreview) {
+        line.classList.add('tool-call-error-detail');
+        line.tabIndex = 0;
+        line.setAttribute('role', 'button');
+        line.setAttribute('aria-expanded', 'false');
+        line.title = '点击展开或收起完整错误信息';
+        var toggleError = function() {
+            var expanded = line.classList.toggle('tool-call-error-expanded');
+            line.setAttribute('aria-expanded', String(expanded));
+        };
+        line.addEventListener('click', toggleError);
+        line.addEventListener('keydown', function(ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleError(); }
+        });
+    }
     tcContainer.appendChild(line);
 
     // ★ 自动关联计划: 工具开始运行时，尝试匹配计划中的任务
@@ -208,18 +229,31 @@ window.showToolStatus = function(toolName, argPreview, status, chatId, toolCallI
         });
     }
 
-    // 完成后 3 秒灵动淡出(可被新工具调用提前挤掉)
-    if (status === 'success' || status === 'error') {
-        var self = line;
-        setTimeout(function() {
-            if (!self.parentNode || self.classList.contains('tc-exit')) return;
-            self.classList.add('tc-exit');
-            setTimeout(function() { if (self.parentNode) self.remove(); }, 300);
-        }, 3000);
+    // 生成过程中与流结束后均保留步骤，供用户查看本轮执行轨迹。
+    var liveSummary = tcContainer.querySelector('.tool-call-live-summary');
+    if (!liveSummary) {
+        liveSummary = document.createElement('button');
+        liveSummary.type = 'button';
+        liveSummary.className = 'tool-call-live-summary';
+        liveSummary.setAttribute('aria-expanded', 'false');
+        liveSummary.setAttribute('aria-label', '展开或收起 Agent 执行步骤');
+        liveSummary.addEventListener('click', function() {
+            var expanded = tcContainer.classList.toggle('tool-call-expanded');
+            tcContainer.classList.add('tool-call-user-expanded');
+            liveSummary.setAttribute('aria-expanded', String(expanded));
+        });
+        tcContainer.insertBefore(liveSummary, tcContainer.firstChild);
     }
+    var liveSteps = tcContainer.querySelectorAll('.tool-call-line').length;
+    var liveDone = tcContainer.querySelectorAll('.tool-call-success').length;
+    var liveErrors = tcContainer.querySelectorAll('.tool-call-error').length;
+    var isSettled = tcContainer.classList.contains('tool-call-settled');
+    var summaryTitle = isSettled ? 'Agent 执行记录' : 'Agent 执行中';
+    liveSummary.innerHTML = '<span class="tool-call-live-icon" aria-hidden="true"></span><strong>' + summaryTitle + '</strong><span class="tool-call-live-count">' + liveSteps + ' 步</span>' + (liveDone || liveErrors ? '<span class="tool-call-live-result">' + liveDone + ' 完成' + (liveErrors ? ' · ' + liveErrors + ' 失败' : '') + '</span>' : '') + '<span class="tool-call-live-chevron" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="m6 8 4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+    liveSummary.setAttribute('aria-expanded', String(tcContainer.classList.contains('tool-call-expanded')));
 };
 
-function showToast(msg, type = 'info', dur = 3000) {
+function showToast(msg, type = 'info', dur = 8000) {
     var container = getEl('toast-container');
     if (!container) {
         container = document.createElement('div');
@@ -229,8 +263,22 @@ function showToast(msg, type = 'info', dur = 3000) {
         container.setAttribute('aria-atomic', 'false');
         document.body.appendChild(container);
     }
+    // 相同通知在可见期间只保留一条，并限制侧栏最多 6 条，防止 SSE/重试风暴堆满页面。
+    var toastKey = JSON.stringify([String(type), String(msg)]);
+    var visibleToasts = container.querySelectorAll('.toast');
+    for (var _ti = 0; _ti < visibleToasts.length; _ti++) {
+        if (visibleToasts[_ti].getAttribute('data-toast-key') === toastKey) {
+            return visibleToasts[_ti];
+        }
+    }
+    while (visibleToasts.length >= 6) {
+        visibleToasts[0].remove();
+        visibleToasts = container.querySelectorAll('.toast');
+    }
+
     var toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
+    toast.setAttribute('data-toast-key', toastKey);
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     // SVG 图标(白描边渲染在类型色渐变圆内), 与 .toast-icon 的 CSS 变量色联动
     var ICONS = {
@@ -244,6 +292,24 @@ function showToast(msg, type = 'info', dur = 3000) {
         <div class="toast-message">${escapeHtml(msg)}</div>
         <button type="button" class="toast-close" aria-label="关闭通知">&times;</button>
     `;
+    // ★ 点击消息区复制全文到方便器,方便用户捕获一闪而过的错误信息
+    var msgEl = toast.querySelector('.toast-message');
+    if (msgEl) {
+        msgEl.style.cursor = 'pointer';
+        msgEl.title = '点击复制';
+        msgEl.onclick = function() {
+            var text = msgEl.textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(function() {
+                    // 降级:临时 textarea 选中复制
+                    var ta = document.createElement('textarea');
+                    ta.value = text; document.body.appendChild(ta);
+                    ta.select(); try { document.execCommand('copy'); } catch(_e) {}
+                    ta.remove();
+                });
+            }
+        };
+    }
     var dismissed = false;
     var dismiss = function() {
         if (dismissed) return;
@@ -263,37 +329,43 @@ function showToast(msg, type = 'info', dur = 3000) {
 const SLASH_COMMANDS = [
     // ── 搜索 ──
     { cmd: 'search', hint: '强制联网搜索', args: '[query]', icon: 'search', group: '搜索' },
-    { cmd: 'news', hint: '搜索新闻', args: '[query]', icon: 'news', group: '搜索' },
-    { cmd: 'image', hint: '搜索图片', args: '[query]', icon: 'image', group: '搜索' },
+    { cmd: 'news', hint: '搜索新闻资讯', args: '[query]', icon: 'news', group: '搜索' },
+    { cmd: 'image', hint: '搜索网络图片', args: '[query]', icon: 'image', group: '搜索' },
     // ── Agent ──
-    { cmd: 'mode', hint: '切换工作模式', args: '[plan|agent|yolo|off]', icon: 'mode', group: 'Agent' },
-    { cmd: 'model', hint: '切换 AI 模型', args: '[name]', icon: 'model', group: 'Agent' },
+    { cmd: 'mode', hint: '查看/切换工作模式', args: '[plan|agent|yolo|off]', icon: 'mode', group: 'Agent' },
+    { cmd: 'model', hint: '查看/切换 AI 模型', args: '[name]', icon: 'model', group: 'Agent' },
     { cmd: 'agents', hint: '列出活跃子代理', icon: 'agent', group: 'Agent' },
+    { cmd: 'agent', hint: '切换到子代理会话', args: '<name>', icon: 'agent', group: 'Agent' },
+    { cmd: 'clearsub', hint: '清理历史子代理会话', icon: 'clear', group: 'Agent' },
     { cmd: 'mcp', hint: '查看 MCP 工具状态', icon: 'mcp', group: 'Agent' },
-    { cmd: 'effort', hint: '设置推理力度', args: '[low|medium|high|max]', icon: 'effort', group: 'Agent' },
+    { cmd: 'effort', hint: '设置推理思考力度', args: '[off|low|medium|high|max|ultra]', icon: 'effort', group: 'Agent' },
     { cmd: 'think', hint: '切换深度思考', args: '[on|off|auto]', icon: 'think', group: 'Agent' },
     // ── 对话 ──
     { cmd: 'new', hint: '新建对话', icon: 'new', group: '对话' },
-    { cmd: 'clear', hint: '清空当前对话', icon: 'clear', group: '对话' },
+    { cmd: 'clear', hint: '彻底清空当前对话与队列', icon: 'clear', group: '对话' },
     { cmd: 'compact', hint: '压缩对话上下文', icon: 'compact', group: '对话' },
     { cmd: 'retry', hint: '重新生成上一条回复', icon: 'retry', group: '对话' },
     { cmd: 'copy', hint: '复制最后 AI 回复', icon: 'copy', group: '对话' },
-    { cmd: 'export', hint: '导出聊天记录', icon: 'export', group: '对话' },
-    { cmd: 'stop', hint: '停止当前生成', icon: 'stop', group: '对话' },
-    { cmd: 'queue', hint: '查看消息队列', icon: 'queue', group: '对话' },
-    { cmd: 'remember', hint: '保存/查看记忆', args: '[key: content]', icon: 'config', group: '对话' },
+    { cmd: 'export', hint: '导出 Markdown 聊天记录', icon: 'export', group: '对话' },
+    { cmd: 'stop', hint: '全链路停止当前生成', icon: 'stop', group: '对话' },
+    { cmd: 'queue', hint: '查看消息队列排队状态', icon: 'queue', group: '对话' },
+    { cmd: 'remember', hint: '保存/查看跨会话记忆', args: '[key: content]', icon: 'config', group: '对话' },
+    // ── 工作区 ──
+    { cmd: 'workspace', hint: '查看/切换 DSH 工作区', args: '[list|add <路径>|<名称>]', icon: 'folder', group: '工作区' },
+    { cmd: 'cd', hint: '快速切换工作区路径', args: '<路径>', icon: 'folder', group: '工作区' },
+    { cmd: 'cwd', hint: '查看当前工作区路径', icon: 'folder', group: '工作区' },
     // ── 上传 ──
-    { cmd: 'attach', hint: '上传文件 / 图片', icon: 'attach', group: '上传' },
-    { cmd: 'folder', hint: '上传整个文件夹', icon: 'folder', group: '上传' },
+    { cmd: 'attach', hint: '上传文件 / 图片附件', icon: 'attach', group: '上传' },
+    { cmd: 'folder', hint: '上传整个文件夹目录', icon: 'folder', group: '上传' },
     // ── 系统 ──
-    { cmd: 'config', hint: '打开配置面板', icon: 'config', group: '系统' },
-    { cmd: 'context', hint: '查看上下文用量', icon: 'context', group: '系统' },
-    { cmd: 'cost', hint: '查看会话费用统计', icon: 'cost', group: '系统' },
-    { cmd: 'doctor', hint: '系统诊断检查', icon: 'doctor', group: '系统' },
-    { cmd: 'diff', hint: '查看 Git/文件差异', icon: 'diff', group: '系统' },
-    { cmd: 'theme', hint: '切换主题颜色', args: '[dark|light|auto]', icon: 'theme', group: '系统' },
-    { cmd: 'logout', hint: '退出登录', icon: 'logout', group: '系统' },
-    { cmd: 'help', hint: '显示所有命令', icon: 'help', group: '帮助' }
+    { cmd: 'config', hint: '打开/关闭配置面板', icon: 'config', group: '系统' },
+    { cmd: 'context', hint: '查看上下文用量分析', icon: 'context', group: '系统' },
+    { cmd: 'cost', hint: '查看会话费用与 Token 统计', icon: 'cost', group: '系统' },
+    { cmd: 'doctor', hint: '系统诊断与服务检查', icon: 'doctor', group: '系统' },
+    { cmd: 'diff', hint: '查看 Git 代码差异', args: '[args]', icon: 'diff', group: '系统' },
+    { cmd: 'theme', hint: '切换主题外观颜色', args: '[dark|light|auto]', icon: 'theme', group: '系统' },
+    { cmd: 'logout', hint: '退出登录当前账户', icon: 'logout', group: '系统' },
+    { cmd: 'help', hint: '显示所有可用命令帮助', icon: 'help', group: '帮助' }
 ];
 
 window._slashIdx = -1;
@@ -306,15 +378,17 @@ function _positionSlashPopup() {
     var rect = inp.getBoundingClientRect();
     popup.style.position = 'fixed';
     popup.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
-    popup.style.left = rect.left + 'px';
-    popup.style.width = rect.width + 'px';
+    var width = Math.min(760, Math.max(320, rect.width), window.innerWidth - 24);
+    var left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    popup.style.left = left + 'px';
+    popup.style.width = width + 'px';
 }
 
 function handleSlashInput(el) {
     var val = el.value;
     if (!val || !val.startsWith('/')) { hideSlashPopup(); return; }
     var query = val.slice(1);
-    console.log('[Slash] input="/' + query + '" len=' + query.length);
+    console.log('[Slash] input_changed, query_length=' + query.length);
     if (query.includes(' ')) { hideSlashPopup(); return; }
     updateSlashPopup(query.toLowerCase());
 }
@@ -338,7 +412,7 @@ function updateSlashPopup(query) {
         window.addEventListener('scroll', function() { if (window._slashVisible) _positionSlashPopup(); }, true);
     }
     var matches = SLASH_COMMANDS.filter(function(c) { return !query || c.cmd.indexOf(query) >= 0 || c.hint.indexOf(query) >= 0; });
-    console.log('[Slash] matches:', matches.length, 'query:', query);
+    console.log('[Slash] matches=' + matches.length + ', query_length=' + query.length);
     if (matches.length === 0) { hideSlashPopup(); return; }
     var groups = {};
     matches.forEach(function(m) { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
@@ -663,6 +737,13 @@ window.toggleDarkMode = function (init = false) {
     if (theme) theme.href = dark ? 'lib/atom-one-dark.min.css' : 'lib/atom-one-light.min.css';
     // 同步下拉菜单暗色适配
     if (typeof applyDropdownTheme === 'function') applyDropdownTheme();
+    // 同步侧边栏主题按钮图标与提示文字
+    var sidebarMoon = getEl('sidebarMoonPath');
+    var sidebarSun = getEl('sidebarSunPath');
+    var sidebarThemeText = getEl('sidebarThemeText');
+    sidebarMoon?.classList.toggle('hidden', dark);
+    sidebarSun?.classList.toggle('hidden', !dark);
+    if (sidebarThemeText) sidebarThemeText.textContent = dark ? '浅色模式' : '深色模式';
 };
 
 function isMobile() {
@@ -671,9 +752,15 @@ function isMobile() {
 
 window.closeMobileSidebars = () => {
     if (!isMobile()) return;
-    $.sidebar?.classList.remove('mobile-open');
+    $.sidebar?.classList.remove('mobile-open', 'collapsed');
     $.configPanel?.classList.remove('mobile-open');
+    $.agentPanel?.classList.add('hidden-panel');
     $.sidebarMask?.classList.remove('active');
+    _setPanelAccessibility($.sidebar, false);
+    _setPanelAccessibility($.configPanel, false);
+    _setPanelAccessibility($.agentPanel, false);
+    _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', false);
+    lockBodyScroll(false);
 };
 
 function lockBodyScroll(lock) {
@@ -686,8 +773,30 @@ function lockBodyScroll(lock) {
     }
 }
 
+function _moveFocusOutOfPanel(panel) {
+    if (!panel || !panel.contains(document.activeElement)) return;
+    // aria-hidden/inert 之前先把焦点交还给面板触发按钮，避免浏览器把“聚焦元素的祖先被隐藏”报成无障碍错误。
+    var candidates = document.querySelectorAll('[data-panel-toggle="config"], button[onclick*="toggleConfigPanel"], [data-panel-toggle="agent"], button[onclick*="toggleAgentPanel"]');
+    var target = null;
+    for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i];
+        if (panel.contains(candidate) || candidate.disabled) continue;
+        if (candidate.getClientRects && candidate.getClientRects().length === 0) continue;
+        var hiddenAncestor = candidate.closest('[aria-hidden="true"], [inert]');
+        if (hiddenAncestor) continue;
+        target = candidate;
+        break;
+    }
+    if (target && typeof target.focus === 'function') {
+        try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+    } else if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+}
+
 function _setPanelAccessibility(panel, isOpen) {
     if (!panel) return;
+    if (!isOpen) _moveFocusOutOfPanel(panel);
     panel.inert = !isOpen;
     panel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
 }
@@ -705,6 +814,7 @@ function _syncConfigShellState(isOpen) {
     _setToggleExpanded('[data-panel-toggle="config"], button[onclick*="toggleConfigPanel"]', !!isOpen);
 }
 window._syncConfigShellState = _syncConfigShellState;
+window._moveFocusOutOfPanel = _moveFocusOutOfPanel;
 
 window.closeConfigPanel = function() {
     if (!$.configPanel) return;
@@ -739,6 +849,7 @@ window._syncChatTitlePlacement = function(mobile) {
 
 window.closeAllSidebars = function () {
     $.sidebar?.classList.remove('mobile-open');
+    $.sidebar?.classList.remove('collapsed');
     $.configPanel?.classList.remove('mobile-open');
     $.configPanel?.classList.add('hidden-panel');
     if ($.agentPanel && !$.agentPanel.classList.contains('hidden-panel') && typeof window.closeAgentPanel === 'function') {
@@ -756,24 +867,33 @@ window.closeAllSidebars = function () {
 };
 
 window.toggleSidebar = () => {
-    // ★ Agent 模式允许手动展开(侧边栏显示 Agent 会话历史, 与普通聊天严格分隔)
+    // 移动端抽屉只由 mobile-open 控制；不要让桌面端的 collapsed/hidden-panel
+    // 继续携带 width:0、opacity:0 或 inert 状态，否则只会看到遮罩而看不到侧栏。
     if (isMobile()) {
-        if ($.sidebar?.classList.contains('mobile-open')) {
-            $.sidebar.classList.remove('mobile-open');
+        var sidebar = $.sidebar;
+        if (!sidebar) return;
+        var open = sidebar.classList.contains('mobile-open');
+        if (open) {
+            sidebar.classList.remove('mobile-open', 'collapsed');
             $.sidebarMask?.classList.remove('active');
-            _setPanelAccessibility($.sidebar, false);
+            _setPanelAccessibility(sidebar, false);
             _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', false);
             lockBodyScroll(false);
         } else {
-            $.sidebar?.classList.add('mobile-open');
             $.configPanel?.classList.remove('mobile-open');
             $.configPanel?.classList.add('hidden-panel');
+            sidebar.classList.remove('hidden-panel');
+            sidebar.classList.add('mobile-open');
+            // Agent 模式切入时可能残留 collapsed；CSS 最终覆盖会保留抽屉宽度。
             $.sidebarMask?.classList.add('active');
-            _setPanelAccessibility($.sidebar, true);
+            _setPanelAccessibility(sidebar, true);
             _setPanelAccessibility($.configPanel, false);
             _setToggleExpanded('[data-panel-toggle="sidebar"], #sidebarToggle', true);
             _syncConfigShellState(false);
             lockBodyScroll(true);
+            if (typeof renderChatHistory === 'function') {
+                try { renderChatHistory(); } catch (e) {}
+            }
         }
     } else {
         $.sidebar?.classList.toggle('collapsed');
@@ -1028,7 +1148,7 @@ function snapshotConfig() {
         'requestTimeout', 'customParams', 'customEnabled',
         'lineHeight', 'paragraphMargin', 'markdownGFM', 'markdownBreaks',
         'compress', 'threshold', 'compressModel', 'enableSearch', 'searchModel', 'searchProvider',
-        'searchApiKey', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
+        'searchApiKey', 'searchApiKeyBrave', 'searchApiKeyTavily', 'searchApiKeyDeepSeek', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
         'aiSearchJudgeModel', 'aiSearchJudgePrompt', 'enableSearchOptimize', 'fontSize',
         'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem',
         'thinkingIntensity'];
@@ -1055,7 +1175,7 @@ function restoreConfigSnapshot(snapshot) {
         'requestTimeout', 'customParams', 'customEnabled',
         'lineHeight', 'paragraphMargin', 'markdownGFM', 'markdownBreaks',
         'compress', 'threshold', 'compressModel', 'enableSearch', 'searchModel', 'searchProvider',
-        'searchApiKey', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
+        'searchApiKey', 'searchApiKeyBrave', 'searchApiKeyTavily', 'searchApiKeyDeepSeek', 'searchRegion', 'searchTimeout', 'maxSearchResults', 'aiSearchJudge',
         'aiSearchJudgeModel', 'aiSearchJudgePrompt', 'enableSearchOptimize', 'fontSize',
         'searchType', 'aiSearchTypeToggle', 'searchShowPrompt', 'searchAppendToSystem',
         'thinkingIntensity'];

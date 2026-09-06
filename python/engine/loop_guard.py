@@ -14,6 +14,14 @@ _VOLATILE_KEY = re.compile(r'^(time|now|timestamp|ts|nonce|random|seed|req_?id|r
 _TS_VALUE = re.compile(r'^\d{10,13}$')
 _ISO_VALUE = re.compile(r'^20\d{2}-\d{2}-\d{2}T')
 
+# ★ 可安全重复的幂等/只读工具集合。
+# exec/server_python/server_file_op 可能写文件、启动任务或修改状态，不得按名称宽泛豁免。
+_IDEMPOTENT_TOOLS = {
+    'server_file_read', 'server_file_grep', 'server_file_search',
+    'db_query', 'web_search', 'web_fetch', 'analyze_image',
+    'memory_search', 'memory_get', 'memory_list', 'get_current_time', 'get_weather',
+}
+
 
 def _clean(v):
     """递归剥离 volatile 字段(时间戳/随机数/请求ID), 键排序。"""
@@ -63,7 +71,7 @@ def normalize_tool_args(args):
 
 
 class LoopGuard:
-    def __init__(self, max_repeat=3, osc_window=6, max_tool_only=6,
+    def __init__(self, max_repeat=3, osc_window=6, max_tool_only=12,
                  min_text=400, repeat_window=200, repeat_overlap=0.97,
                  min_total=2000, unique_ratio=0.30):
         self.cfg = {
@@ -97,6 +105,10 @@ class LoopGuard:
         self.tool_seq.append({'name': name, 'content_len': self.content_len})
         if len(self.tool_seq) > 12:
             self.tool_seq = self.tool_seq[-12:]
+        # ★ 幂等 server 工具不计入重复/振荡软触发(正常迭代会反复调用),仍由其他检测器保护
+        if name in _IDEMPOTENT_TOOLS:
+            # 仍记录到 tool_seq(供振荡检测结构使用),但不触发 soft
+            return 'execute'
         # 检测器 a: 工具重复
         if self.tool_keys[key] >= self.cfg['max_repeat']:
             self.soft_triggers += 1
@@ -115,6 +127,7 @@ class LoopGuard:
             self.consecutive_tool_rounds = 0
         elif tool_count > 0:
             self.consecutive_tool_rounds += 1
+        # tool_count==0 时(总结轮)不递增,但更新基线
         self._content_len_at_last_round = self.content_len
         if self.consecutive_tool_rounds >= self.cfg['max_tool_only']:
             self.last_reason = '连续 %d 轮只调用工具未输出正文' % self.consecutive_tool_rounds
@@ -123,8 +136,10 @@ class LoopGuard:
 
     def feed_text(self, text):
         """累积正文 + 复读/无进展检测。返回 '' 或中止原因文案。"""
-        self.content_text = text or ''
-        self.content_len = len(self.content_text)
+        # ★ 修复:空文本不重置 content_len,避免续接或纯工具轮时误判
+        if text:
+            self.content_text = text
+            self.content_len = len(self.content_text)
         if self.content_len >= self.cfg['min_text'] and self._has_repetition(self.cfg['repeat_window']):
             self.last_reason = '输出复读同一文本块(连续输出相同内容)'
             return self.last_reason

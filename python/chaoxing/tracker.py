@@ -74,7 +74,8 @@ class LearningTracker:
                 id TEXT NOT NULL, user_id TEXT NOT NULL, course_id TEXT NOT NULL,
                 title TEXT, status TEXT DEFAULT 'not_started', video_count INTEGER DEFAULT 0,
                 video_done INTEGER DEFAULT 0, work_count INTEGER DEFAULT 0,
-                work_done INTEGER DEFAULT 0, last_update TEXT, PRIMARY KEY (id, user_id));
+                work_done INTEGER DEFAULT 0, blocked_reason TEXT, last_update TEXT,
+                PRIMARY KEY (id, user_id));
             CREATE TABLE IF NOT EXISTS video_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, chapter_id TEXT,
                 video_name TEXT, duration INTEGER, watched_at TEXT);
@@ -90,6 +91,7 @@ class LearningTracker:
             ("chapters", "video_done", "INTEGER DEFAULT 0"),
             ("chapters", "work_count", "INTEGER DEFAULT 0"),
             ("chapters", "work_done", "INTEGER DEFAULT 0"),
+            ("chapters", "blocked_reason", "TEXT"),
             ("chapters", "last_update", "TEXT"),
             ("video_logs", "video_name", "TEXT"),
             ("video_logs", "watched_at", "TEXT"),
@@ -101,12 +103,10 @@ class LearningTracker:
 
     def start_course(self, course_id, title, teacher=''):
         if not self.user_id: return
-        # 不重新启动已完成的课
-        existing = self.conn.execute("SELECT status FROM courses WHERE id=? AND user_id=?", (course_id, self.user_id)).fetchone()
-        if existing and existing[0] in ('completed', 'in_progress', 'running'):
-            return
+        # ★ 不再跳过已开始/已完成的课：课程可能新增内容，需重新检测
+        # 只跳过 not_started 的课程（首次创建）
         self.conn.execute(
-            "INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO NOTHING",
+            "INSERT INTO courses (id,user_id,title,teacher,status,last_study_time) VALUES (?,?,?,?,'in_progress',?) ON CONFLICT(id,user_id) DO UPDATE SET last_study_time=excluded.last_study_time",
             (course_id, self.user_id, title, teacher, datetime.now().isoformat()))
         self.conn.commit()
 
@@ -116,11 +116,30 @@ class LearningTracker:
             (self.user_id, chapter_id, video_name, duration, datetime.now().isoformat()))
         self.conn.commit()
 
-    def update_chapter(self, chapter_id, course_id, title='', status=None, video_count=None, work_count=None, video_done=None, work_done=None):
+    def update_chapter(self, chapter_id, course_id, title='', status=None, video_count=None,
+                       work_count=None, video_done=None, work_done=None, blocked_reason=None):
         if not self.user_id: return
+        # 服务端再次返回未完成任务时，即使本地旧记录是 completed 也必须降级。
         if status:
-            self.conn.execute("INSERT INTO chapters (id,user_id,course_id,title,status,last_update) VALUES (?,?,?,?,?,?) ON CONFLICT(id,user_id) DO UPDATE SET status=excluded.status,last_update=excluded.last_update",
-                (chapter_id, self.user_id, course_id, title, status, datetime.now().isoformat()))
+            ex = self.conn.execute("SELECT video_count, work_count, status FROM chapters WHERE id=? AND user_id=?",(chapter_id,self.user_id)).fetchone()
+            new_vc = video_count if video_count is not None else (ex[0] if ex else 0)
+            new_wc = work_count if work_count is not None else (ex[1] if ex else 0)
+            if ex and ex[2] == 'completed' and status == 'running':
+                self.conn.execute("UPDATE chapters SET video_count=?, work_count=?, video_done=0, work_done=0, status='running', last_update=? WHERE id=? AND user_id=?",
+                    (new_vc, new_wc, datetime.now().isoformat(), chapter_id, self.user_id))
+                video_count = None
+                work_count = None
+                status = None
+            if status:
+                self.conn.execute("INSERT INTO chapters (id,user_id,course_id,title,status,last_update) VALUES (?,?,?,?,?,?) ON CONFLICT(id,user_id) DO UPDATE SET status=excluded.status,last_update=excluded.last_update",
+                    (chapter_id, self.user_id, course_id, title, status, datetime.now().isoformat()))
+            # 重新扫描或完成章节时清除旧阻塞原因；blocked 状态保留明确的人工作业原因。
+            if status in ('running', 'completed'):
+                self.conn.execute("UPDATE chapters SET blocked_reason=NULL WHERE id=? AND user_id=?",
+                    (chapter_id, self.user_id))
+            elif status == 'blocked':
+                self.conn.execute("UPDATE chapters SET blocked_reason=? WHERE id=? AND user_id=?",
+                    (blocked_reason or '需要人工处理', chapter_id, self.user_id))
         if video_count is not None:
             ex = self.conn.execute("SELECT video_count FROM chapters WHERE id=? AND user_id=?",(chapter_id,self.user_id)).fetchone()
             if ex: self.conn.execute("UPDATE chapters SET video_count=? WHERE id=? AND user_id=?",(video_count,chapter_id,self.user_id))
@@ -129,16 +148,17 @@ class LearningTracker:
             ex = self.conn.execute("SELECT work_count FROM chapters WHERE id=? AND user_id=?",(chapter_id,self.user_id)).fetchone()
             if ex: self.conn.execute("UPDATE chapters SET work_count=? WHERE id=? AND user_id=?",(work_count,chapter_id,self.user_id))
             else: self.conn.execute("INSERT INTO chapters (id,user_id,course_id,title,work_count,last_update) VALUES (?,?,?,?,?,?)",(chapter_id,self.user_id,course_id,title,work_count,datetime.now().isoformat()))
-        # video_done=True: 增量+1，检查是否全部完成并更新 status
-        # 修复：video_count > 0 时才检查完成（video_count=0 的纯答题章节保持 running，等待答题）
+        # video_done=True: 增量+1（上限 video_count，防重复累加），检查是否全部完成
+        # 修复：只有 video 章节（work_count=0）视频达标才标记 completed；混合章节需等 work 也完成
         if video_done is True:
-            self.conn.execute("UPDATE chapters SET video_done = video_done + 1, last_update = ?, status = CASE WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count = 0 THEN 'completed' WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count > 0 THEN 'completed' WHEN video_count = 0 AND work_count > 0 THEN 'running' ELSE status END WHERE id=? AND user_id=?",
+            self.conn.execute("UPDATE chapters SET video_done = MIN(video_done + 1, video_count), last_update = ?, status = CASE WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count = 0 THEN 'completed' WHEN video_count > 0 AND video_done + 1 >= video_count AND work_count > 0 AND work_done >= work_count THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
                 (datetime.now().isoformat(), chapter_id, self.user_id))
         elif video_done is not None:
             self.conn.execute("UPDATE chapters SET video_done=? WHERE id=? AND user_id=?",(video_done,chapter_id,self.user_id))
-        # work_done=True: 增量+1，检查是否全部完成
+        # work_done=True: 增量+1（上限 work_count，防重复累加），检查是否全部完成
+        # 修复：只有 work 章节（video_count=0）答题达标才标记 completed；混合章节需等 video 也完成
         if work_done is True:
-            self.conn.execute("UPDATE chapters SET work_done = work_done + 1, last_update = ?, status = CASE WHEN work_count > 0 AND work_done + 1 >= work_count THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
+            self.conn.execute("UPDATE chapters SET work_done = MIN(work_done + 1, work_count), last_update = ?, status = CASE WHEN work_count > 0 AND work_done + 1 >= work_count AND video_count = 0 THEN 'completed' WHEN work_count > 0 AND work_done + 1 >= work_count AND video_count > 0 AND video_done >= video_count THEN 'completed' ELSE status END WHERE id=? AND user_id=?",
                 (datetime.now().isoformat(), chapter_id, self.user_id))
         elif work_done is not None:
             self.conn.execute("UPDATE chapters SET work_done=? WHERE id=? AND user_id=?",(work_done,chapter_id,self.user_id))
@@ -151,29 +171,21 @@ class LearningTracker:
         if not chapters or not chapters[0]: return
         total_videos = sum(c[2] for c in chapters if c[2])
         total_works = sum(c[3] for c in chapters if c[3])
-        # 修复：completed_videos 只统计【纯视频章节】（video_count>0, work_count=0）
-        # 这样视频完成后就计入课程完成进度，与 update_chapter 的完成条件一致
+        # 修复：completed_videos 统计所有章节（含混合章节）的 video 完成量
         completed_videos = sum(
             c[0] for c in chapters
-            if c[4]=='completed' and c[2]>0 and c[3]==0 and c[0] is not None and c[0]>=c[2]
+            if c[4]=='completed' and c[2]>0 and c[0] is not None and c[0]>=c[2]
         )
-        # 答题完成：work_done 达标后章节标记 completed；work_count=0 的章节不受影响
+        # 答题完成：所有章节（含混合章节）的 work 完成量
         completed_works = sum(
             c[1] for c in chapters
             if c[4]=='completed' and c[3]>0 and c[1] is not None and c[1]>=c[3]
         )
-        # 修复：video_count=0 且 work_count=0 的章节（纯阅读/图片章节）视为自动完成
-        def is_chapter_completed(c):
-            if c[4] == 'completed': return True
-            if c[4] == 'running' and (c[2] or 0) == 0 and (c[3] or 0) == 0: return True
-            return False
-        all_chapters_completed = all(is_chapter_completed(c) for c in chapters)
-        # 课程完成：全部章节完成 且 计数达标（或章节数为0且全部完成）
-        course_completed = all_chapters_completed and (
-            (total_videos > 0 and completed_videos >= total_videos) or
-            (total_works > 0 and completed_works >= total_works) or
-            (total_videos == 0 and total_works == 0 and all_chapters_completed)
-        )
+        # 修复：只有 status='completed' 才算章节完成
+        # 旧逻辑误判 running+0计数 章节为完成，导致未刷课程被标记 completed
+        all_chapters_completed = all(c[4] == 'completed' for c in chapters)
+        # 章节状态来自处理后的服务端任务卡复核；计数仅用于展示，不再参与完成判定。
+        course_completed = bool(chapters) and all_chapters_completed
         new_status = 'completed' if course_completed else 'in_progress'
         self.conn.execute("UPDATE courses SET total_videos=?,completed_videos=?,total_works=?,completed_works=?,status=?,last_study_time=? WHERE id=? AND user_id=?",
             (total_videos,completed_videos,total_works,completed_works,new_status,datetime.now().isoformat(),course_id,self.user_id))

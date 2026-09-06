@@ -6,12 +6,40 @@ import json
 import os
 import time
 import hashlib
+import re
+import tempfile
 from pathlib import Path
 from typing import Optional
 
 RAG_DIR = Path(__file__).resolve().parent.parent.parent / ".engine" / "rag"
 RAG_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    os.chmod(RAG_DIR, 0o700)
+except OSError:
+    pass
 
+_SAFE_COMPONENT = re.compile(r'^[\w\- \u4e00-\u9fff]{1,80}$', re.UNICODE)
+
+def _safe_component(value: str, field: str) -> str:
+    text = str(value or '').strip()
+    if not _SAFE_COMPONENT.fullmatch(text):
+        raise ValueError(f'invalid {field}')
+    return text
+
+def _safe_user(user_id: str) -> str:
+    text = str(user_id or '').strip()
+    if text and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', text):
+        raise ValueError('invalid user_id')
+    return text
+
+def _collections_path(user_id: str) -> Path:
+    user = _safe_user(user_id)
+    return RAG_DIR / (f'collections_{user}.json' if user else 'collections.json')
+
+def _docs_path(user_id: str, collection: str) -> Path:
+    user = _safe_user(user_id)
+    name = _safe_component(collection, 'collection')
+    return RAG_DIR / (f'docs_{user}_{name}.json' if user else f'docs_{name}.json')
 
 def _load_json(path: Path) -> dict:
     if path.exists():
@@ -23,7 +51,32 @@ def _load_json(path: Path) -> dict:
 
 
 def _save_json(path: Path, data: dict):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix='.rag.tmp')
+    try:
+        os.fchmod(fd, 0o600)
+        payload = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+        os.write(fd, payload)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def _get_embedding(text: str, api_key: str = "", base_url: str = "",
@@ -93,14 +146,15 @@ def _chunk_text(text: str, chunk_size: int = 512, overlap: int = 50) -> list:
 
 def rag_list_collections(user_id: str = "") -> dict:
     """列出用户的知识库集合"""
-    collections_file = RAG_DIR / (f"collections_{user_id}.json" if user_id else "collections.json")
+    collections_file = _collections_path(user_id)
     data = _load_json(collections_file)
     return {"collections": list(data.get("collections", {}).keys())}
 
 
 def rag_create_collection(name: str, user_id: str = "") -> dict:
     """创建知识库集合"""
-    collections_file = RAG_DIR / (f"collections_{user_id}.json" if user_id else "collections.json")
+    name = _safe_component(name, 'collection')
+    collections_file = _collections_path(user_id)
     data = _load_json(collections_file)
     if "collections" not in data:
         data["collections"] = {}
@@ -113,14 +167,14 @@ def rag_create_collection(name: str, user_id: str = "") -> dict:
 
 def rag_delete_collection(name: str, user_id: str = "") -> dict:
     """删除知识库集合"""
-    collections_file = RAG_DIR / (f"collections_{user_id}.json" if user_id else "collections.json")
+    collections_file = _collections_path(user_id)
     data = _load_json(collections_file)
     if name not in data.get("collections", {}):
         return {"error": f"集合 '{name}' 不存在"}
     del data["collections"][name]
     _save_json(collections_file, data)
     # 删除对应文档
-    docs_file = RAG_DIR / (f"docs_{user_id}_{name}.json")
+    docs_file = _docs_path(user_id, name)
     if docs_file.exists():
         docs_file.unlink()
     return {"ok": True, "collection": name}
@@ -139,7 +193,7 @@ def rag_upload_document(collection: str, filename: str, content: str,
         return {"error": "无法从文档中提取文本块"}
 
     # 存储文档
-    docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+    docs_file = _docs_path(user_id, collection)
     data = _load_json(docs_file)
     if "documents" not in data:
         data["documents"] = []
@@ -166,7 +220,7 @@ def rag_upload_document(collection: str, filename: str, content: str,
     })
 
     # 更新集合计数
-    collections_file = RAG_DIR / (f"collections_{user_id}.json" if user_id else "collections.json")
+    collections_file = _collections_path(user_id)
     col_data = _load_json(collections_file)
     if "collections" in col_data and collection in col_data["collections"]:
         col_data["collections"][collection]["doc_count"] = len(data["documents"])
@@ -182,7 +236,7 @@ def rag_search(query: str, collection: str = "default", top_k: int = 5,
                user_id: str = "", api_key: str = "", base_url: str = "",
                embed_model: str = "") -> dict:
     """语义搜索知识库"""
-    docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+    docs_file = _docs_path(user_id, collection)
     data = _load_json(docs_file)
 
     if not data.get("documents"):
@@ -233,7 +287,7 @@ def _keyword_search(query: str, data: dict, top_k: int = 5) -> dict:
 
 def rag_list_documents(collection: str = "default", user_id: str = "") -> dict:
     """列出知识库中的文档"""
-    docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+    docs_file = _docs_path(user_id, collection)
     data = _load_json(docs_file)
     items = []
     for doc in data.get("documents", []):
@@ -250,7 +304,7 @@ def rag_list_documents(collection: str = "default", user_id: str = "") -> dict:
 
 def rag_delete_document(doc_id: str, collection: str = "default", user_id: str = "") -> dict:
     """删除文档"""
-    docs_file = RAG_DIR / (f"docs_{user_id}_{collection}.json" if user_id else f"docs_{collection}.json")
+    docs_file = _docs_path(user_id, collection)
     data = _load_json(docs_file)
     original_len = len(data.get("documents", []))
     data["documents"] = [d for d in data.get("documents", []) if d.get("doc_id") != doc_id]

@@ -67,12 +67,22 @@
         return s;
     }
 
+    // ★ 可安全重复的幂等/只读工具集合。
+    // 这里只豁免真正不会产生外部副作用的读取/查询；exec/server_python/server_file_op
+    // 可能写文件、启动任务或修改状态，不能因为名称宽泛就跳过重复保护。
+    var IDEMPOTENT_TOOLS = {
+        server_file_read: true, server_file_grep: true, server_file_search: true,
+        db_query: true, web_search: true, web_fetch: true, analyze_image: true,
+        memory_search: true, memory_get: true, memory_list: true,
+        get_current_time: true, get_weather: true
+    };
+
     var DEFAULT_CFG = {
         enabled: true,
-        maxRepeat: 3,             // 相同(名称+规范化参数)计数阈值 → soft
+        maxRepeat: 3,             // 非幂等工具:相同(名称+规范化参数)计数阈值 → soft
         maxOscillationWindow: 6,  // 振荡窗口
-        maxToolOnlyRounds: 6,     // 连续纯工具轮阈值 → hard
-        maxSoftTriggers: 3,       // 软触发升级阈值 → hard
+        maxToolOnlyRounds: 12,    // 连续纯工具轮阈值 → hard(Agent 模式需要多轮工具调用,从 6 提高到 12)
+        maxSoftTriggers: 2,       // 软触发升级阈值 → hard(模型无视提示时更快止损)
         minTextLen: 400,          // 正文复读起检长度
         repeatWindow: 200,        // 复读滑动窗口
         repeatOverlap: 0.97,      // 复读重叠率阈值(真复读≈100%; 模板文本≈95% 不误报)
@@ -110,9 +120,12 @@
     };
 
     // ===== 正文/推理喂入(流式路径每 chunk 调用, 内部节流检测) =====
+    // ★ 修复:空文本不重置 contentLen,避免 RS 续接或纯工具轮时误判为"无正文增长"
     LoopGuard.prototype.feedText = function (text) {
-        this.contentText = text || '';
-        this.contentLen = this.contentText.length;
+        if (text) {
+            this.contentText = text;
+            this.contentLen = this.contentText.length;
+        }
     };
 
     LoopGuard.prototype.feedReasoning = function (text) {
@@ -131,6 +144,8 @@
         this.toolKeys[key] = (this.toolKeys[key] || 0) + 1;
         this.toolSeq.push({ name: name, contentLen: this.contentLen });
         if (this.toolSeq.length > 12) this.toolSeq.shift();
+        // ★ 幂等 server 工具不计入重复/振荡软触发(正常迭代会反复调用),仍由其他检测器保护
+        if (IDEMPOTENT_TOOLS[name]) return;
         // 检测器 a: 工具重复(≥阈值后每次再犯都计数, 模型无视提示会快速升级)
         if (this.toolKeys[key] >= this.cfg.maxRepeat) {
             this.softTriggers++;
@@ -144,18 +159,22 @@
     };
 
     // 每轮收尾: 有正文(本次 recordRound 期间 feedText 有增长)则清零纯工具轮计数
+    // ★ 修复:contentLen 未变化但 toolCount==0(模型未要求工具调用)时不递增,避免 RS 续接误判
     LoopGuard.prototype.recordRound = function (toolCount) {
         if (this.contentLen > this._contentLenAtLastRound) {
             this.consecutiveToolRounds = 0;
         } else if (toolCount > 0) {
             this.consecutiveToolRounds++;
         }
+        // toolCount==0 时(模型未要求工具调用,本轮是总结轮)不递增,但更新基线
         this._contentLenAtLastRound = this.contentLen;
     };
 
     // ===== 软跳过查询(工具执行循环内逐调用查询) =====
     // 本次调用前计数 ≥ maxRepeat-1 → 即第 maxRepeat 次调用 → 应跳过
+    // ★ 幂等 server 工具永不因"重复"被软跳过(正常迭代会反复调用)
     LoopGuard.prototype.isDuplicateTool = function (name, args) {
+        if (IDEMPOTENT_TOOLS[name]) return false;
         var key = this._toolKey(name, args);
         return (this.toolKeys[key] || 0) >= this.cfg.maxRepeat - 1;
     };
@@ -199,7 +218,7 @@
                 hard = { level: 'hard', type: 'no-progress', reason: '输出超过 ' + this.cfg.minTotal + ' 字符但有效内容不足 ' + Math.round(this.cfg.uniqueRatio * 100) + '%' };
             }
         }
-        // 检测器 c: 连续纯工具轮
+        // 检测器 c: 连续纯工具轮(阈值已从 6 提高到 12,给 Agent 模式更多空间)
         if (!hard && this.consecutiveToolRounds >= this.cfg.maxToolOnlyRounds) {
             hard = { level: 'hard', type: 'tool-only', reason: '连续 ' + this.consecutiveToolRounds + ' 轮只调用工具未输出正文' };
         }

@@ -55,15 +55,33 @@ if (empty($toolName)) {
 
 // PHP 7.x polyfill
 if (!function_exists('str_starts_with')) { function str_starts_with($h, $n) { return strncmp($h, $n, strlen($n)) === 0; } }
+if (str_starts_with($toolName, 'mmx_')) {
+    http_response_code(404);
+    echo json_encode(['error' => ['message' => 'MMX tools have been removed', 'type' => 'invalid_request_error', 'code' => 'TOOL_REMOVED']]);
+    exit;
+}
 
 $userIdSafe = preg_replace('/[^a-zA-Z0-9_-]/', '', $userId);
 
 // Load user config for search/image API keys
+// ★ DB 优先 (与 chat.php get_config 一致), JSON 文件作为备份
 $userConfig = [];
-$configPath = ONECHAT_ROOT . '/chat_data/config_user_' . $userIdSafe . '.json';
-if (file_exists($configPath)) {
-    $raw = @file_get_contents($configPath);
-    if ($raw !== false) { $cfg = @json_decode($raw, true); if (is_array($cfg)) $userConfig = $cfg; }
+$dbPath = ONECHAT_ROOT . '/users/oneapichat.db';
+try {
+    $pdo = new PDO("sqlite:$dbPath");
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $stmt = $pdo->prepare("SELECT config_json FROM user_config WHERE user_id = ?");
+    $stmt->execute([$userIdSafe]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) { $cfg = @json_decode($row['config_json'], true); if (is_array($cfg)) $userConfig = $cfg; }
+} catch (Exception $e) {}
+// DB 无配置时回退到 JSON 文件
+if (empty($userConfig)) {
+    $configPath = ONECHAT_ROOT . '/chat_data/config_user_' . $userIdSafe . '.json';
+    if (file_exists($configPath)) {
+        $raw = @file_get_contents($configPath);
+        if ($raw !== false) { $cfg = @json_decode($raw, true); if (is_array($cfg)) $userConfig = $cfg; }
+    }
 }
 if (empty($userConfig)) {
     $altPath = ONECHAT_ROOT . '/users/' . $userIdSafe . '_config.json';
@@ -168,7 +186,7 @@ exit;
 
 
 // ═══════════════════════════════════════════════════════
-//  web_search — 三级降级: Tavily → Brave → DuckDuckGo
+//  web_search — 配置优先：Tavily / Brave（无可用凭证时明确失败）
 // ═══════════════════════════════════════════════════════
 function exec_web_search(array $args, array $config): void {
     $query = trim($args['query'] ?? '');
@@ -181,21 +199,40 @@ function exec_web_search(array $args, array $config): void {
     }
 
     $searchProvider = $config['searchProvider'] ?? 'tavily';
+    // 历史配置中的 DuckDuckGo 已下线，避免旧会话继续走失效网络路径。
+    if ($searchProvider === 'duckduckgo' || $searchProvider === 'google') $searchProvider = 'tavily';
+
+    $proxies = ['http://127.0.0.1:1080', 'http://192.168.195.226:8890', ''];
 
     // Tavily
     if ($searchProvider === 'tavily' || $searchProvider === 'auto') {
         $searchKey = _decrypt_config_key($config['searchApiKeyTavily'] ?? $config['searchApiKey'] ?? '');
         if (!empty($searchKey)) {
-            $resp = @file_get_contents('https://api.tavily.com/search', false, stream_context_create(['http' => [
-                'method' => 'POST', 'timeout' => 10, 'ignore_errors' => true,
-                'header' => "Content-Type: application/json\r\n",
-                'content' => json_encode(['api_key' => $searchKey, 'query' => $query, 'search_depth' => 'basic', 'max_results' => $maxResults]),
-            ]]));
-            if ($resp) {
-                $data = json_decode($resp, true);
-                if ($data && isset($data['results'])) {
-                    echo json_encode(['results' => $data['results'], 'status' => 'ok', 'provider' => 'tavily']);
-                    return;
+            $body = json_encode(['api_key' => $searchKey, 'query' => $query, 'search_depth' => 'basic', 'max_results' => $maxResults]);
+            foreach ($proxies as $proxy) {
+                $ch = curl_init('https://api.tavily.com/search');
+                $opts = [
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $body,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 12,
+                    CURLOPT_CONNECTTIMEOUT => 5,
+                    CURLOPT_ENCODING => '',
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                ];
+                if ($proxy) $opts[CURLOPT_PROXY] = $proxy;
+                curl_setopt_array($ch, $opts);
+                $resp = curl_exec($ch);
+                $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($resp !== false && $code >= 200 && $code < 400) {
+                    $data = json_decode($resp, true);
+                    if ($data && isset($data['results'])) {
+                        echo json_encode(['results' => $data['results'], 'status' => 'ok', 'provider' => 'tavily']);
+                        return;
+                    }
                 }
             }
         }
@@ -203,50 +240,54 @@ function exec_web_search(array $args, array $config): void {
 
     // Brave
     if ($searchProvider === 'brave') {
-        $searchKey = _decrypt_config_key($config['searchApiKeyBrave'] ?? '');
+        $searchKey = _decrypt_config_key($config['searchApiKeyBrave'] ?? $config['searchApiKey'] ?? '');
         if (!empty($searchKey)) {
-            $resp = @file_get_contents('https://api.search.brave.com/res/v1/web/search?q=' . urlencode($query) . '&count=' . $maxResults, false, stream_context_create(['http' => [
-                'timeout' => 10, 'ignore_errors' => true,
-                'header' => "Accept: application/json\r\nX-Subscription-Token: $searchKey\r\n",
-            ]]));
-            if ($resp) {
-                $data = json_decode($resp, true);
-                if ($data && isset($data['web']['results'])) {
-                    echo json_encode(['results' => $data['web']['results'], 'status' => 'ok', 'provider' => 'brave']);
-                    return;
+            $braveUrl = 'https://api.search.brave.com/res/v1/web/search?q=' . urlencode($query) . '&count=' . min(max($maxResults, 1), 20) . '&safesearch=off&text_decorations=0';
+            foreach ($proxies as $proxy) {
+                $ch = curl_init($braveUrl);
+                $opts = [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_TIMEOUT => 12,
+                    CURLOPT_CONNECTTIMEOUT => 5,
+                    CURLOPT_ENCODING => '',
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                    CURLOPT_HTTPHEADER => [
+                        'Accept: application/json',
+                        'Accept-Encoding: gzip',
+                        'X-Subscription-Token: ' . $searchKey
+                    ],
+                ];
+                if ($proxy) $opts[CURLOPT_PROXY] = $proxy;
+                curl_setopt_array($ch, $opts);
+                $resp = curl_exec($ch);
+                $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($resp !== false && $code >= 200 && $code < 400) {
+                    $data = json_decode($resp, true);
+                    if ($data && isset($data['web']['results'])) {
+                        $formattedResults = array_map(function($r) {
+                            $snippet = $r['description'] ?? '';
+                            if (!empty($r['extra_snippets']) && is_array($r['extra_snippets'])) {
+                                $snippet .= "\n" . implode("\n", $r['extra_snippets']);
+                            }
+                            return [
+                                'title' => $r['title'] ?? '',
+                                'url' => $r['url'] ?? '',
+                                'content' => $snippet,
+                                'description' => $snippet
+                            ];
+                        }, $data['web']['results']);
+                        echo json_encode(['results' => $formattedResults, 'status' => 'ok', 'provider' => 'brave']);
+                        return;
+                    }
                 }
             }
         }
     }
 
-    // DuckDuckGo fallback (force IPv4)
-    $ddgUrl = 'https://api.duckduckgo.com/?q=' . urlencode($query) . '&format=json&no_html=1';
-    $ch = curl_init($ddgUrl);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 8,
-        CURLOPT_CONNECTTIMEOUT => 4,
-        CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
-    ]);
-    $resp = curl_exec($ch);
-    $err = curl_error($ch);
-    curl_close($ch);
-
-    if ($resp !== false && !$err) {
-        $data = json_decode($resp, true);
-        $results = [];
-        if (!empty($data['RelatedTopics'])) {
-            foreach (array_slice($data['RelatedTopics'], 0, $maxResults) as $r) {
-                if (!empty($r['Text'])) {
-                    $results[] = ['title' => $r['FirstURL'] ?? '', 'url' => $r['FirstURL'] ?? '', 'content' => strip_tags($r['Text'])];
-                }
-            }
-        }
-        echo json_encode(['results' => $results, 'status' => 'ok', 'provider' => 'duckduckgo']);
-        return;
-    }
-
-    echo json_encode(['results' => [], 'status' => 'error', 'error' => 'All search providers failed']);
+    echo json_encode(['results' => [], 'status' => 'error', 'error' => '当前搜索服务不可用，请检查 Tavily 或 Brave API Key。']);
 }
 
 
@@ -294,7 +335,7 @@ function exec_web_fetch(array $args): void {
 
 
 // ═══════════════════════════════════════════════════════
-//  generate_image — MiniMax API / CLI 回退
+//  generate_image — 多提供商分发 (MiniMax / OpenAI / xAI / Custom)
 // ═══════════════════════════════════════════════════════
 function exec_generate_image(array $args, array $config): void {
     $prompt = trim($args['prompt'] ?? '');
@@ -304,6 +345,23 @@ function exec_generate_image(array $args, array $config): void {
         exit;
     }
 
+    // ★ 读取用户配置的图像提供商 (默认 MiniMax 兼容旧行为)
+    $provider = strtolower($config['imageProvider'] ?? 'minimax');
+
+    if ($provider === 'openrouter') {
+        _exec_generate_image_openai_compat('openrouter', $prompt, $config, $args);
+        return;
+    }
+    if ($provider === 'openai') {
+        _exec_generate_image_openai_compat('openai', $prompt, $config, $args);
+        return;
+    }
+    if ($provider === 'custom') {
+        _exec_generate_image_openai_compat('custom', $prompt, $config, $args);
+        return;
+    }
+
+    // ===== 默认: MiniMax (保留原有行为 + CLI 回退) =====
     $imageKey = _decrypt_config_key($config['imageApiKey'] ?? '');
     $mmxConfig = @json_decode(@file_get_contents(ONECHAT_ROOT . '/config/.mmx_config.json'), true);
     $mmxKey = $imageKey ?: ($mmxConfig['api_key'] ?? '');
@@ -339,6 +397,105 @@ function exec_generate_image(array $args, array $config): void {
 
     // CLI 回退
     exec_generate_image_cli($prompt, $mmxKey);
+}
+
+/**
+ * OpenAI 兼容生图 (OpenRouter / OpenAI / Custom)
+ * xAI (Grok) 也走此路径, 自动省略 size/quality 参数
+ */
+function _exec_generate_image_openai_compat(string $provider, string $prompt, array $config, array $args): void {
+    // 提供商 → 配置键映射
+    $keyMap = [
+        'openrouter' => ['key' => 'imageApiKeyOpenrouter', 'url' => 'imageBaseUrlOpenrouter', 'model' => 'imageModel_openrouter', 'defaultUrl' => 'https://openrouter.ai/api/v1', 'defaultModel' => 'openai/gpt-5.4-image-2'],
+        'openai'     => ['key' => 'imageApiKeyOpenai',     'url' => 'imageBaseUrlOpenai',     'model' => 'imageModel_openai',     'defaultUrl' => 'https://api.openai.com/v1',        'defaultModel' => 'gpt-image-1'],
+        'custom'     => ['key' => 'imageApiKeyCustom',     'url' => 'imageBaseUrlCustom',     'model' => 'imageModel_custom',     'defaultUrl' => '',                              'defaultModel' => ''],
+    ];
+
+    if (!isset($keyMap[$provider])) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Unknown image provider: ' . $provider]);
+        return;
+    }
+    $km = $keyMap[$provider];
+
+    $apiKey = _decrypt_config_key($config[$km['key']] ?? '');
+    $baseUrl = rtrim($config[$km['url']] ?? $km['defaultUrl'], '/');
+    $model = trim($config[$km['model']] ?? '') ?: $km['defaultModel'];
+
+    if (empty($apiKey)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'API key not configured for provider: ' . $provider . '. Please set it in Settings → Image Generation.']);
+        return;
+    }
+    if (empty($baseUrl)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'API base URL not configured for provider: ' . $provider]);
+        return;
+    }
+    if (!str_ends_with($baseUrl, '/v1')) $baseUrl .= '/v1';
+
+    // ★ xAI (Grok) 不支持 size / quality 参数, 需自动省略避免 400 错误
+    $isXai = (strpos($baseUrl, 'x.ai') !== false) || (stripos($model, 'grok') !== false);
+
+    $n = min($args['n'] ?? 1, 10);
+    $body = ['model' => $model, 'prompt' => $prompt, 'n' => $n, 'response_format' => 'b64_json'];
+    if (!$isXai) {
+        // size 参数: 从 args 或 aspect_ratio 推导
+        $size = $args['size'] ?? _aspect_ratio_to_size($args['aspect_ratio'] ?? '1:1');
+        $body['size'] = $size;
+    }
+
+    $apiUrl = $baseUrl . '/images/generations';
+    $ch = curl_init($apiUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($body),
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $apiKey, 'Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_CONNECTTIMEOUT => 15,
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($err) {
+        http_response_code(502);
+        echo json_encode(['error' => 'Image generation request failed: ' . $err, 'provider' => $provider]);
+        return;
+    }
+
+    $data = @json_decode($resp, true);
+    if ($httpCode !== 200) {
+        $errMsg = $data['error']['message'] ?? $data['error'] ?? substr($resp ?: '', 0, 300);
+        http_response_code($httpCode);
+        echo json_encode(['error' => 'Image generation failed (' . $httpCode . '): ' . $errMsg, 'provider' => $provider]);
+        return;
+    }
+
+    // 提取图片 (支持 url 和 b64_json 两种格式)
+    $images = [];
+    if (!empty($data['data']) && is_array($data['data'])) {
+        foreach ($data['data'] as $item) {
+            if (!empty($item['url'])) $images[] = $item['url'];
+            elseif (!empty($item['b64_json'])) $images[] = 'data:image/png;base64,' . $item['b64_json'];
+        }
+    }
+
+    if (empty($images)) {
+        http_response_code(502);
+        echo json_encode(['error' => 'No images returned', 'raw' => mb_substr($resp ?: '', 0, 300), 'provider' => $provider]);
+        return;
+    }
+
+    echo json_encode(['images' => $images, 'status' => 'ok', 'provider' => $provider, 'model' => $model]);
+}
+
+/** aspect_ratio → OpenAI size 映射 */
+function _aspect_ratio_to_size(string $ratio): string {
+    $map = ['1:1' => '1024x1024', '16:9' => '1792x1024', '9:16' => '1024x1792', '4:3' => '1024x1024', '3:4' => '1024x1024', '21:9' => '1792x1024'];
+    return $map[$ratio] ?? '1024x1024';
 }
 
 

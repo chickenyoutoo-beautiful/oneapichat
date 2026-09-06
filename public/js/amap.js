@@ -4,37 +4,31 @@
 
 // ==================== 高德地图 API 处理器 ====================
 async function amapApiHandler(action, args) {
-    var token = localStorage.getItem('authToken') || '';
-    var authSuffix = token ? '&auth_token=' + encodeURIComponent(token) : '';
-
-    // 从 localStorage 读取用户保存的 Amap Key
+    args = args || {};
     var amapKey = localStorage.getItem('amapKey') || '';
-    var keySuffix = amapKey ? '&amap_key=' + encodeURIComponent(amapKey) : '';
-
-    let base = '/oneapichat/api/amap_api.php?action=' + action + authSuffix + keySuffix;
-
-    // 拼接额外参数
-    if (args) {
-        for (var k in args) {
-            if (args.hasOwnProperty(k) && args[k] !== undefined && args[k] !== '') {
-                // lineList 是数组，需要 JSON 编码
-                var val = typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k];
-                base += '&' + k + '=' + encodeURIComponent(val);
-            }
-        }
-    }
+    var headers = getSessionAuthHeaders();
+    if (amapKey) headers['X-Amap-Key'] = amapKey;
+    var base = '/oneapichat/api/amap_api.php?action=' + encodeURIComponent(action);
 
     try {
-        var opts = { signal: AbortSignal.timeout(30000) };
-        // schema_personal_map 用 POST
+        var opts = { method: 'POST', headers: headers, signal: AbortSignal.timeout(30000) };
         if (action === 'schema_personal_map') {
-            opts.method = 'POST';
-            opts.headers = { 'Content-Type': 'application/json' };
+            opts.headers['Content-Type'] = 'application/json';
             opts.body = JSON.stringify({
                 orgName: args.orgName || '',
                 lineList: args.lineList || [],
-                sceneType: args.sceneType || 1,
+                sceneType: args.sceneType || 1
             });
+        } else {
+            var form = new URLSearchParams();
+            for (var k in args) {
+                if (args.hasOwnProperty(k) && args[k] !== undefined && args[k] !== '') {
+                    var val = typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k];
+                    form.set(k, val);
+                }
+            }
+            opts.headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+            opts.body = form.toString();
         }
         var r = await fetch(base, opts);
         var d = await r.json();

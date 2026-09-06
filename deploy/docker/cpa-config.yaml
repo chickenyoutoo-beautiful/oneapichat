@@ -1,0 +1,27 @@
+# CLIProxyAPI (CPA) Configuration for OneAPIChat
+host: "0.0.0.0"
+port: 8317
+tls:
+  enable: false
+  cert: ""
+  key: ""
+remote-management:
+  allow-remote: true
+  secret-key: "$2a$10$rz/OXWveFyPJyI7THvLqTORHCjRH.q1uu3W0cNA6JTDNjtv/wnR4W"
+  disable-auto-update-panel: true
+api-keys:
+  - cpa-oneapichat-default-key
+auth-dir: "/var/www/cpa/auths"
+request-retry: 5
+max-retry-credentials: 3
+max-retry-interval: 60
+transient-error-cooldown-seconds: 0
+save-cooldown-status: false
+claude-code:
+  disable-cloaking-model-list: false
+logs-max-total-size-mb: 100
+error-logs-max-files: 5
+debug: false
+streaming:
+  bootstrap-retries: 5
+logging-to-file: true

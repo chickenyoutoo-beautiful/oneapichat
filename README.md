@@ -64,6 +64,17 @@ node mcp-server/server.js &               # MCP (18788)
 open https://your-domain/oneapichat/
 ```
 
+### Docker 全栈一键部署 (推荐)
+
+完整打包 Web、Python 引擎、超星刷课、Cloudreve 云盘、CPA 代理网关：
+```bash
+cd deploy
+docker compose up -d
+# 或构建离线移植包
+./export.sh
+```
+详情参阅 [Docker 移植部署指南](deploy/README_DOCKER.md)。
+
 ---
 
 ## 架构
@@ -74,7 +85,6 @@ open https://your-domain/oneapichat/
                 │              ├── tools/call → MCP Server (:18788)
                 │              │                  ├── Node.js handlers
                 │              │                  ├── Python bridge
-                │              │                  └── MiniMax CLI
                 │              └── engine_api → Python FastAPI (:8766)
                 │                                 ├── Agent/Workflow/Cron
                 │                                 ├── 文档生成 (PPT/Word/Excel/PDF)
@@ -98,7 +108,6 @@ open https://your-domain/oneapichat/
 | ☁️ Cloudreve | 14 | cr_list_files, cr_search_files, cr_create_share 等 |
 | 💻 服务器 | 15 | server_exec, server_file_read, server_docker 等 |
 | 🌐 浏览器 | 6 | browser_navigate, browser_screenshot 等 |
-| 🎵 MiniMax | 8 | mmx_chat, mmx_image, mmx_speech, mmx_music 等 |
 | 🤖 Agent | 5 | delegate_task, plan_update, ask_agent 等 |
 
 ---

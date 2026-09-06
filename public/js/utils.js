@@ -6,14 +6,23 @@
 window.onProviderChange = async function() {
     var provider = getEl('baseUrlProvider')?.value || 'custom';
     var cfg = API_PROVIDERS[provider] || API_PROVIDERS.custom;
+    // 立即使所有旧 /models 请求失效并取消传输；不能等新 fetchModels 启动后才取消。
+    window.__fetchModelsSeq = (window.__fetchModelsSeq || 0) + 1;
+    if (window.__fetchModelsController) {
+        try { window.__fetchModelsController.abort(); } catch(e) {}
+    }
 
-    // 1. 保存当前 Key 到旧厂商(永远存到独立 key,不碰 apiKey)
+    // 1. 保存当前 Key 和 Model 到旧厂商(离开旧厂商前牢固持久化)
     var curKey = getVal('apiKey') || '';
+    var curModel = getVal('modelSelect') || '';
     var oldP = localStorage.getItem('baseUrlProvider') || '';
-    if (oldP && oldP !== provider && curKey) {
+    if (oldP && oldP !== provider) {
         var oldCfg = API_PROVIDERS[oldP] || {};
-        // ★ 存到旧厂商的独立 key,不覆盖 apiKey
-        if (oldCfg.keyLS) localStorage.setItem(oldCfg.keyLS, await encrypt(curKey));
+        if (curKey && oldCfg.keyLS) localStorage.setItem(oldCfg.keyLS, await encrypt(curKey));
+        // ★ 核心修复：离开旧提供商时，立即将其当前选中的模型存入 model_{oldP}，确保切回来时 100% 记住
+        if (curModel && !/^(加载中|请输入|获取失败|loading)/i.test(curModel)) {
+            localStorage.setItem('model_' + oldP, curModel);
+        }
     }
 
     // 2. Base URL
@@ -44,23 +53,63 @@ window.onProviderChange = async function() {
     // 5. 模型
     // ★ 每个 Provider 的默认模型(切换 Provider 时立即生效,避免发送旧 Provider 的模型名)
     var PROVIDER_DEFAULT_MODELS = {
-        deepseek: 'deepseek-chat', openai: 'gpt-4o', xai: 'grok-4-latest',
-        antthropic: 'claude-sonnet-4-20250514', minimax: 'MiniMax-M3',
-        gemini: 'gemini-2.0-flash', zhipu: 'glm-4-flash', qwen: 'qwen-turbo',
-        moonshot: 'moonshot-v1-8k', doubao: 'doubao-lite-32k', mimo: 'mimo-v2-flash',
-        openrouter: 'openai/gpt-4o', longcat: 'LongCat-2.0', llamacpp: ''
+        deepseek: 'deepseek-chat', openai: 'gpt-5.6-terra', xai: 'grok-4.6',
+        antthropic: 'claude-sonnet-4-6', minimax: 'MiniMax-Text-01',
+        gemini: 'gemini-3.8-flash-high', zhipu: 'glm-4-plus', qwen: 'qwen-plus-latest',
+        moonshot: 'moonshot-v1-128k', doubao: 'doubao-pro-128k', mimo: 'mimo-v2-flash',
+        nvidia: 'meta/llama-3.3-70b-instruct', custom: 'gpt-4o',
+        openrouter: 'google/gemini-2.0-flash-001', longcat: 'LongCat-2.0', llamacpp: 'gpt-5.6-terra'
     };
     // ★ 有活动流式请求时, 仅更新 localStorage (下次发送生效), 不改 DOM 的 modelSelect.value
     //   — 防止 .value 变化触发 select 的 change 事件 → saveConfig → fetchModels → 替换 innerHTML → 中断正在输出的模型
     var _activeStreamChatId = window._activeStreamChatId;
     var sm = localStorage.getItem('model_' + provider) || '';
-    if (sm) { if (!_activeStreamChatId) setVal('modelSelect', sm); localStorage.setItem('model', sm); }
-    else {
-        var _defModel = PROVIDER_DEFAULT_MODELS[provider] || '';
-        if (!_activeStreamChatId) setVal('modelSelect', _defModel);
-        localStorage.setItem('model', _defModel);
-        // ★ 同时持久化默认模型到 model_{provider},确保切换回来时能记住 (即使未显式选择模型)
-        if (_defModel) localStorage.setItem('model_' + provider, _defModel);
+    var activeModel = sm || PROVIDER_DEFAULT_MODELS[provider] || '';
+    if (sm) {
+        if (!_activeStreamChatId) setVal('modelSelect', sm);
+        localStorage.setItem('model', sm);
+    } else {
+        if (!_activeStreamChatId) setVal('modelSelect', activeModel);
+        localStorage.setItem('model', activeModel);
+        if (activeModel) localStorage.setItem('model_' + provider, activeModel);
+    }
+
+    // ★ 智能秒开与状态锁定：使用 ModelsCatalog 为下拉选择器立即预加载该提供商的结构化模型库
+    if (!_activeStreamChatId && window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+        var mainSelect = getEl('modelSelect');
+        if (mainSelect) {
+            var catalogHtml = window.ModelsCatalog.renderModelOptionsHtml([], provider, activeModel);
+            if (catalogHtml) {
+                mainSelect.innerHTML = catalogHtml;
+                // ★ 100% 精准锁定：大小写不敏感匹配；若不存在则自动追加 option 保持用户选定
+                if (activeModel && !/^(加载中|请输入|获取失败|loading)/i.test(activeModel)) {
+                    var _matchedOpt = false;
+                    for (var _oi = 0; _oi < mainSelect.options.length; _oi++) {
+                        if (mainSelect.options[_oi].value.toLowerCase() === activeModel.toLowerCase()) {
+                            mainSelect.selectedIndex = _oi;
+                            _matchedOpt = true;
+                            break;
+                        }
+                    }
+                    // 只有自定义/本地模型才允许盲目动态 append；预设厂商不匹配时说明该模型不属于当前厂商，回退选中当前厂商的第 1 项
+                    if (!_matchedOpt) {
+                        if (provider === 'custom' || provider === 'llamacpp') {
+                            var _opt = document.createElement('option');
+                            _opt.value = activeModel;
+                            _opt.textContent = activeModel;
+                            _opt.selected = true;
+                            mainSelect.appendChild(_opt);
+                        } else if (mainSelect.options.length > 0) {
+                            mainSelect.selectedIndex = 0;
+                        }
+                    }
+                }
+                if (mainSelect.value && !/^(加载中|请输入|获取失败|loading)/i.test(mainSelect.value)) {
+                    localStorage.setItem('model', mainSelect.value);
+                    localStorage.setItem('model_' + provider, mainSelect.value);
+                }
+            }
+        }
     }
 
     _currentProvider = provider;
@@ -71,8 +120,10 @@ window.onProviderChange = async function() {
 
     // ★ 切换厂商后立即同步到服务器
     window._scheduleConfigSync();
-    // ★ 注意: 不再在此处调用 fetchModels — 模型列表刷新统一在 saveConfig 时执行,
-    //   避免切换提供商时替换 modelSelect.innerHTML 中断正在生成的模型
+    // 立即加载新提供商模型；请求代次隔离保证旧响应不会污染新列表。
+    if (!_activeStreamChatId && typeof window.fetchModels === 'function') {
+        window.fetchModels(true).catch(function(){});
+    }
 };
 function getCurrentApiKeyLSKey() {
     var p = getEl('baseUrlProvider')?.value || 'custom';
@@ -119,9 +170,13 @@ window.sanitizeForLongCat = function(apiMessages, options) {
                 return '';
             }).filter(Boolean).join('\n');
         }
-        // 空内容替换为占位符
+        // 空内容安全处理 (带 tool_calls 的 assistant 允许 null，避免生成字面 '(empty)' 污染数据)
         if (m.content === '' || m.content === null || m.content === undefined) {
-            m.content = '(empty)';
+            if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+                m.content = null;
+            } else {
+                m.content = '';
+            }
             _fixed++;
         }
         delete m.reasoning_content;
@@ -207,7 +262,7 @@ window._analyzeImagesWithVisionProvider = async function(files) {
         var apiEndpoint = apiUrl.replace(/\/$/, '') + '/chat/completions';
         var requestBody = JSON.stringify({ model: model, messages: [{ role: 'user', content: content }], max_tokens: 4096, stream: false });
 
-        console.log('[VisionPreAnalysis] 请求 ' + apiEndpoint + ', 图片数: ' + content.length + ', 请求体大小: ' + (requestBody.length / 1024 / 1024).toFixed(1) + 'MB');
+        console.log('[VisionPreAnalysis] 请求准备完成, 图片数: ' + content.length + ', 请求体大小: ' + (requestBody.length / 1024 / 1024).toFixed(1) + 'MB');
 
         // ★ proxyFetch 内置代理逻辑: 代理ON走proxy.php中继, 代理OFF直连+回退
         var resp = await window.proxyFetch(apiEndpoint, {
@@ -218,7 +273,7 @@ window._analyzeImagesWithVisionProvider = async function(files) {
 
         if (!resp.ok) {
             var errText = await resp.text().catch(function() { return ''; });
-            console.warn('[VisionPreAnalysis] API 错误: HTTP ' + resp.status, errText.substring(0, 300));
+            console.warn('[VisionPreAnalysis] API 错误:', { status: resp.status, responseLength: errText.length, contentType: resp.headers.get('content-type') || '' });
             return null;
         }
         var data = await resp.json();
@@ -259,6 +314,7 @@ function shouldUseVisionFormat() {
         'vl-',           // 视觉语言模型前缀
         '-vl',           // 视觉语言模型后缀
         'vision',        // 明确包含 vision
+        'deepseek-v4-flash-vision-exp', // DeepSeek 官方原生视觉模型
         'minimax-vl',    // MiniMax 视觉模型
         'minimax-m3',    // MiniMax M3 原生多模态
         'qwen-vl',       // Qwen 视觉模型
@@ -306,7 +362,9 @@ function buildUserContent(text, files) {
     // 检查是否包含图片
     var hasImages = files.some(f => f.isImage || f.type?.startsWith('image/'));
 
-    if (hasImages && shouldUseVisionFormat()) {
+    // ★ 识图快通道：慢视觉模型(deepseek-v4-flash-vision-exp)已由 main.js 预分析注入描述，
+    //   此处跳过 image_url 直传（避免大图慢模型 60s+ 等待）。
+    if (hasImages && shouldUseVisionFormat() && !window.__skipVisionPayload) {
         var _allImageFiles = files.filter(f => f.isImage || f.type?.startsWith('image/'));
         console.log('[Vision] shouldUseVisionFormat=true, 图片数:', _allImageFiles.length);
         // OpenAI 视觉模型格式:数组
@@ -324,32 +382,55 @@ function buildUserContent(text, files) {
             showToast('⚠️ 单次最多发送 ' + _maxImages + ' 张图片（当前 ' + _allImageFiles.length + ' 张），已截取前 ' + _maxImages + ' 张', 'warning', 5000);
             _imageFiles = _allImageFiles.slice(0, _maxImages);
         }
+        // ★ 先把本轮图片注册到当前会话图片表，便于后续兜底找回（content/serverUrl）
+        try {
+            if (!window._currentMessageImagesByChat) window._currentMessageImagesByChat = {};
+            window._currentMessageImagesByChat[currentChatId] = _allImageFiles.map(function(x) {
+                return { name: x.name, content: x.content, type: x.type, serverUrl: x.serverUrl || '' };
+            });
+        } catch(e) {}
         for (var _fi = 0; _fi < _imageFiles.length; _fi++) {
             var f = _imageFiles[_fi];
             if (f.isImage || f.type?.startsWith('image/')) {
-                // ★ xAI: 强制用 base64 data URL (xAI 无法下载外部 URL)
-                // 其他模型: 优先用服务器 URL (节省请求体大小)
+                // ★ 直连优化：优先使用客户端已压缩的高性能 base64 data URL（直接随请求送达模型端，零延迟且无需上游跨网回源下载）；
+                //   仅当没有本地 base64 且存在服务器 URL 时才使用 URL。
                 var _imgUrl;
                 if (f.content && f.content.startsWith('data:')) {
-                    // 有 base64 数据, 直接用
                     _imgUrl = f.content;
-                } else if (_isXai && f.serverUrl) {
-                    // xAI 但没有 base64: 尝试从服务器获取并转为 base64
-                    console.warn('[Vision] ⚠️ xAI 图片无 base64, 尝试从服务器获取:', f.name);
-                    // 同步无法 fetch, 只能先用 URL (可能失败) 或跳过
-                    _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 } else if (f.serverUrl) {
                     _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
                 } else if (f.content) {
                     _imgUrl = f.content;
                 } else {
-                    console.warn('[Vision] ⚠️ 跳过无数据图片:', f.name);
-                    continue;
+                    // ★ 兜底: content/serverUrl 均缺失时，先按文件名从注册表找回，再从聊天历史找回；
+                    //   仍拿不到就用文本占位，避免模型完全看不到这张图（只认文件名）。
+                    if (window._currentMessageImagesByChat && window._currentMessageImagesByChat[currentChatId]) {
+                        var _regHit = window._currentMessageImagesByChat[currentChatId].find(function(x) { return x && x.name === f.name && (x.content || x.serverUrl); });
+                        if (_regHit) f = Object.assign({}, f, { content: _regHit.content || f.content, serverUrl: _regHit.serverUrl || f.serverUrl });
+                    }
+                    if ((!f.content || !String(f.content).startsWith('data:')) && !f.serverUrl && chats && chats[currentChatId]) {
+                        var _mHist = chats[currentChatId].messages;
+                        for (var _miH = _mHist.length - 1; _miH >= 0; _miH--) {
+                            var _mHit = (_mHist[_miH].files || []).find(function(x) { return x && x.name === f.name && (x.serverUrl || (x.content && String(x.content).startsWith('data:'))); });
+                            if (_mHit) { f = Object.assign({}, f, { content: _mHit.content || f.content, serverUrl: _mHit.serverUrl || f.serverUrl }); break; }
+                        }
+                    }
+                    if (f.content && f.content.startsWith('data:')) {
+                        _imgUrl = f.content;
+                    } else if (f.serverUrl) {
+                        _imgUrl = f.serverUrl.startsWith('http') ? f.serverUrl : window.location.origin + f.serverUrl;
+                    } else if (f.content) {
+                        _imgUrl = f.content;
+                    } else {
+                        console.warn('[Vision] ⚠️ 图片无可用数据, 以文本占位:', f.name);
+                        content.push({ type: 'text', text: '[用户上传了图片: ' + f.name + ']（图片数据暂不可用，请结合历史图片分析缓存引用其内容）' });
+                        continue;
+                    }
                 }
                 console.log('[Vision] 📷[' + (_fi+1) + '/' + _imageFiles.length + '] name:', f.name, 'mode:', (_imgUrl.startsWith('data:') ? 'BASE64' : 'URL'), 'len:', _imgUrl.length);
                 content.push({
                     type: 'image_url',
-                    image_url: { url: _imgUrl, detail: 'auto' }
+                    image_url: { url: _imgUrl, detail: 'low' }
                 });
             } else if (f.isVideo || f.type?.startsWith('video/')) {
                 // M3 原生视频理解
@@ -548,7 +629,7 @@ function cleanupOldChats(keep = 10) {
 
 // ★ fetchWithRetry — 带重试的 fetch (HTTP 529 指数退避)
 window.fetchWithRetry = async function(url, options, maxRetries, retryDelay) {
-    maxRetries = maxRetries || 3;
+    maxRetries = maxRetries || 5;
     retryDelay = retryDelay || 1000;
     var lastError;
     // ★ 同步网络代理: 代理开启时使用 proxyFetch 路由
@@ -682,7 +763,8 @@ window.showDiffView = function(filename, oldCode, newCode, targetEl) {
     // Header
     var header = document.createElement('div');
     header.style.cssText = 'background:var(--bg-secondary,#f9fafb);padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-color,#e5e7eb);';
-    header.innerHTML = '<span style="font-weight:600;color:var(--text-primary,#111);">📝 ' + (filename || '代码编辑') + '</span>' +
+    var _diffIcon = typeof window.getVibeSvg === 'function' ? window.getVibeSvg('diff',{size:15,className:'text-indigo-500'}) : '';
+    header.innerHTML = '<span style="font-weight:600;color:var(--text-primary,#111);display:flex;align-items:center;gap:6px;">' + _diffIcon + (filename || '代码编辑') + '</span>' +
         '<span style="font-size:12px;">' +
         '<span style="color:#16a34a;margin-right:8px;">+' + addCount + '</span>' +
         '<span style="color:#dc2626;">-' + delCount + '</span></span>';
@@ -710,13 +792,13 @@ window.showDiffView = function(filename, oldCode, newCode, targetEl) {
     var actions = document.createElement('div');
     actions.style.cssText = 'padding:6px 12px;border-top:1px solid var(--border-color,#e5e7eb);display:flex;gap:8px;background:var(--bg-secondary,#f9fafb);';
     var applyBtn = document.createElement('button');
-    applyBtn.textContent = '✅ Apply';
+    applyBtn.innerHTML = (typeof window.getVibeSvg === 'function' ? window.getVibeSvg('check',{size:13}) : '') + '<span>应用</span>';
     applyBtn.style.cssText = 'padding:4px 12px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:4px;cursor:pointer;font-size:12px;';
     applyBtn.onclick = function() {
         window.applyCodeEdit(filename, oldCode, newCode, applyBtn);
     };
     var revertBtn = document.createElement('button');
-    revertBtn.textContent = '↩ Revert';
+    revertBtn.innerHTML = (typeof window.getVibeSvg === 'function' ? window.getVibeSvg('xCircle',{size:13}) : '') + '<span>关闭</span>';
     revertBtn.style.cssText = 'padding:4px 12px;border:1px solid #dc2626;background:transparent;color:#dc2626;border-radius:4px;cursor:pointer;font-size:12px;';
     revertBtn.onclick = function() {
         wrapper.remove();
@@ -732,26 +814,48 @@ window.showDiffView = function(filename, oldCode, newCode, targetEl) {
 /**
  * 应用代码编辑 — 调用引擎 file_edit 端点
  */
+window.requestTextInput = function(title, placeholder, initialValue) {
+    return new Promise(function(resolve) {
+        var old = document.getElementById('oneapiTextInputOverlay');
+        if (old) old.remove();
+        var overlay = document.createElement('div');
+        overlay.id = 'oneapiTextInputOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);';
+        var card = document.createElement('div');
+        card.style.cssText = 'width:min(520px,calc(100vw - 32px));padding:18px;border-radius:16px;background:var(--bg-primary,#fff);color:var(--text-primary,#111827);border:1px solid var(--border-color,#d1d5db);box-shadow:0 24px 64px rgba(0,0,0,.28);';
+        var label = document.createElement('div'); label.textContent = title || '请输入'; label.style.cssText = 'font-weight:600;margin-bottom:12px;';
+        var input = document.createElement('input'); input.type = 'text'; input.value = initialValue || ''; input.placeholder = placeholder || ''; input.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border-color,#d1d5db);background:var(--bg-secondary,#f8fafc);color:inherit;outline:none;';
+        var actions = document.createElement('div'); actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px;';
+        var cancel = document.createElement('button'); cancel.type='button'; cancel.textContent='取消'; cancel.style.cssText='padding:8px 14px;border-radius:9px;border:1px solid var(--border-color,#d1d5db);background:transparent;color:inherit;cursor:pointer;';
+        var ok = document.createElement('button'); ok.type='button'; ok.textContent='确定'; ok.style.cssText='padding:8px 14px;border-radius:9px;border:0;background:#3b82f6;color:white;cursor:pointer;';
+        function finish(value) { overlay.remove(); resolve(value); }
+        cancel.onclick=function(){finish(null)}; ok.onclick=function(){finish(input.value)}; overlay.onclick=function(e){if(e.target===overlay)finish(null)};
+        input.onkeydown=function(e){if(e.key==='Enter')finish(input.value);else if(e.key==='Escape')finish(null)};
+        actions.appendChild(cancel); actions.appendChild(ok); card.appendChild(label); card.appendChild(input); card.appendChild(actions); overlay.appendChild(card); document.body.appendChild(overlay); setTimeout(function(){input.focus();input.select();},0);
+    });
+};
+
 window.applyCodeEdit = async function(filename, oldStr, newStr, btnEl) {
     if (!filename) {
-        window.showToast?.('❌ 缺少文件路径', 'error');
+        window.showToast?.('缺少文件路径', 'error');
         return;
     }
-    if (btnEl) { btnEl.textContent = '⏳ 应用...'; btnEl.disabled = true; }
+    if (btnEl) { btnEl.innerHTML = (typeof window.getVibeSvg === 'function' ? window.getVibeSvg('spinner',{size:13}) : '') + '<span>应用中</span>'; btnEl.disabled = true; }
     try {
-        var resp = await fetch('/engine/file_edit?path=' + encodeURIComponent(filename), {
+        var token = (typeof getAuthToken === 'function' ? getAuthToken() : null) || localStorage.getItem('authToken') || '';
+        var resp = await fetch('/engine/file_edit?path=' + encodeURIComponent(filename) + (token ? '&auth_token=' + encodeURIComponent(token) : ''), {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: typeof getSessionAuthHeaders === 'function' ? getSessionAuthHeaders({'Content-Type': 'application/json'}) : {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
             body: JSON.stringify({old_string: oldStr, new_string: newStr})
         });
         var result = await resp.json();
         if (result.ok) {
-            window.showToast?.('✅ 已应用编辑到 ' + filename + ' (备份: ' + (result.backup || filename + '.bak') + ')', 'success', 4000);
+            window.showToast?.('已应用编辑到 ' + filename + ' (备份: ' + (result.backup || filename + '.bak') + ')', 'success', 4000);
         } else {
-            window.showToast?.('❌ 编辑失败: ' + (result.error || '未知错误'), 'error', 5000);
+            window.showToast?.('编辑失败: ' + (result.error || '未知错误'), 'error', 5000);
         }
     } catch(e) {
-        window.showToast?.('❌ 请求失败: ' + e.message, 'error');
+        window.showToast?.('请求失败: ' + e.message, 'error');
     }
     if (btnEl) { btnEl.textContent = '✅ Apply'; btnEl.disabled = false; }
 };
@@ -763,6 +867,12 @@ window.addCodeBlockButtons = function(container) {
     if (!container) return;
     var _pres = container.querySelectorAll('pre');
     if (_pres.length > 100) return;  // 安全防护，超大页面跳过
+
+    // 1) 先执行标准代码块操作条注入 (复制按钮、HTML 运行/预览等)
+    if (typeof attachCodeCopyButtons === 'function') {
+        attachCodeCopyButtons(container);
+    }
+
     _pres.forEach(function(pre) {
         if (pre.querySelector('.code-apply-btn')) return; // 已添加
         var code = pre.querySelector('code');
@@ -774,24 +884,25 @@ window.addCodeBlockButtons = function(container) {
         var editableLangs = ['python','js','javascript','ts','typescript','html','css','json','php','sh','bash','yaml','yml','toml','xml','sql','go','rust','java','c','cpp','rb','lua','swift','kt','md','markdown'];
         if (!lang || editableLangs.indexOf(lang) === -1) return;
 
-        // ★ 修复: 不再绝对定位盖住复制按钮 — 整合进 .code-actions 容器
-        //   (attachCodeCopyButtons 已注入复制/运行按钮, top:4px right:4px z-index:5;
-        //    原 Apply 按钮同位置 z-index:10 会完全遮挡复制按钮)
+        // ★ 整合进 .code-actions 容器，与复制/运行按钮并排呈现，不遮挡
         var actions = pre.querySelector('.code-actions');
         var btn = document.createElement('div');
-        btn.className = 'code-copy-btn code-apply-btn'; // 复用图标按钮样式, 跟随容器悬停显隐
+        btn.className = 'code-copy-btn code-apply-btn';
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
-        btn.title = '预览并应用代码编辑';
+        btn.title = '对比/应用到本地文件';
+        btn.setAttribute('aria-label', '对比/应用到本地文件');
         if (actions) {
+            // 放在最后（复制/运行之后）
             actions.appendChild(btn);
         } else {
-            // 兜底: 老页面无容器时挂到 pre, 位置避开右上角(复制按钮下方)
-            btn.style.cssText = 'position:absolute;top:36px;right:8px;z-index:10;';
+            // 兜底: 老页面无容器时挂到 pre 右上角
+            btn.style.cssText = 'position:absolute;top:6px;right:6px;z-index:5;';
             pre.style.position = pre.style.position || 'relative';
             pre.appendChild(btn);
         }
 
-        btn.onclick = function() {
+        btn.onclick = async function(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
             var codeText = code.textContent || '';
             // 尝试从代码块前的注释中提取文件路径
             var filename = '';
@@ -801,11 +912,14 @@ window.addCodeBlockButtons = function(container) {
                 if (fm) filename = fm[1];
             }
             if (!filename) {
-                filename = prompt('输入文件路径（相对于 /var/www/html/oneapichat/）:', filename || '');
+                filename = await window.requestTextInput('输入文件路径', '相对于当前工作区或项目根目录', '');
                 if (!filename) return;
             }
             // 获取原始文件内容→生成 diff
-            fetch('/engine/file_read?path=' + encodeURIComponent(filename))
+            var token = (typeof getAuthToken === 'function' ? getAuthToken() : null) || localStorage.getItem('authToken') || '';
+            fetch('/engine/file_read?path=' + encodeURIComponent(filename) + (token ? '&auth_token=' + encodeURIComponent(token) : ''), {
+                headers: typeof getSessionAuthHeaders === 'function' ? getSessionAuthHeaders() : (token ? {'Authorization': 'Bearer ' + token} : {})
+            })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var oldContent = data.content || '';

@@ -300,7 +300,7 @@ if (_dd) document.documentElement.classList.add('dark');
                     <div class="flex items-center gap-2">
                         <label class="text-xs text-gray-500 shrink-0">AI模型</label>
                         <select id="tikuAIModel" class="flex-1 mt-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 outline-none">
-                            <option value="deepseek-chat">deepseek-chat</option>
+                            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
                         </select>
                         <button id="syncModelsBtn" onclick="syncModels()" class="shrink-0 mt-1 px-2 py-1 text-xs text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition">↻</button>
                     </div>
@@ -1346,7 +1346,7 @@ if (_dd) document.documentElement.classList.add('dark');
                     startLogSync();
                 })
                 .catch(e => {
-                    console.error('stopTask error:', e);
+                    console.error('[Chaoxing] 停止任务异常:', { errorType: e && e.name, messageLength: String(e && e.message || '').length });
                     showToast('停止失败: '+e, 'error');
                     setStatus('已停止', 'text-red-500 bg-red-100 dark:bg-red-900/30');
                     $('startBtn').disabled = false;
@@ -1601,14 +1601,49 @@ function setStatus(text, cls) {
 
         $('tikuProvider').addEventListener('change', toggleTikuProvider);
 
+        // ★ 提供商默认模型映射 — 刷新失败或缓存空时按 baseUrl 智能回退，不再硬编码 deepseek-chat
+        var _defaultModelsForProvider = {
+            'deepseek': ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner'],
+            'openai': ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],
+            'anthropic': ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250514'],
+            'gemini': ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+            'longcat': ['LongCat-2.0'],
+            'xai': ['grok-4.20-0309', 'grok-3', 'grok-2'],
+            'openrouter': ['auto', 'google/gemini-2.5-flash', 'anthropic/claude-sonnet-4'],
+            'minimax': ['MiniMax-M2.7', 'MiniMax-M2.6'],
+            'custom': ['deepseek-v4-flash', 'gpt-5', 'claude-sonnet-4-20250514']
+        };
+        function _guessProviderFromUrl(baseUrl) {
+            var u = (baseUrl || '').toLowerCase();
+            if (u.includes('deepseek')) return 'deepseek';
+            if (u.includes('openai') || u.includes('chatgpt')) return 'openai';
+            if (u.includes('anthropic') || u.includes('claude')) return 'anthropic';
+            if (u.includes('gemini') || u.includes('googleapis') || u.includes('generativelanguage')) return 'gemini';
+            if (u.includes('longcat')) return 'longcat';
+            if (u.includes('x.ai') || u.includes('grok') || u.includes('xai')) return 'xai';
+            if (u.includes('openrouter')) return 'openrouter';
+            if (u.includes('minimax')) return 'minimax';
+            return 'custom';
+        }
+        function _applyModelFallback(sel, baseUrl, cached) {
+            var provider = _guessProviderFromUrl(baseUrl);
+            var defaults = _defaultModelsForProvider[provider] || _defaultModelsForProvider['custom'];
+            // 缓存里有就用缓存（但过滤掉已确认失效的模型），否则用智能默认
+            var validCache = (cached || []).filter(function(m) {
+                return m && m !== 'deepseek-chat' && m !== 'deepseek-v3';
+            });
+            var modelList = validCache.length > 0 ? validCache : defaults;
+            sel.innerHTML = modelList.map(function(m) {
+                return '<option value="' + m + '">' + m + '</option>';
+            }).join('');
+            return modelList;
+        }
+
         async function syncModels(baseUrlArg, keyArg) {
             var sel = $('tikuAIModel');
             var cached = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
-            if (cached.length > 0) {
-                sel.innerHTML = cached.map(function(m) {
-                    return '<option value="' + m + '">' + m + '</option>';
-                }).join('');
-            }
+            // ★ 先按提供商智能填充默认列表（不再只显示一个失效的 deepseek-chat）
+            _applyModelFallback(sel, baseUrlArg || '', cached);
             // ★ 优先使用传入的服务器同步配置；未传时回退服务器 ai_sync，最后才用 localStorage
             var key = keyArg || '';
             var baseUrl = baseUrlArg || '';
@@ -1623,7 +1658,11 @@ function setStatus(text, cls) {
             }
             key = key || await _getApiKey();
             baseUrl = baseUrl || _getBaseUrl();
-            if (!key || !baseUrl) { showToast('已加载缓存列表（共' + (cached.length || 0) + '个）', 'info'); return; }
+            if (!key || !baseUrl) {
+                _applyModelFallback(sel, baseUrl || 'https://api.deepseek.com', cached);
+                showToast('已加载本地列表（共' + sel.options.length + '个）', 'info');
+                return;
+            }
             // ★ 按钮 loading 反馈 — 让用户知道点击生效了
             var btn = $('syncModelsBtn');
             if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; btn.style.opacity = '0.6'; }
@@ -1651,8 +1690,10 @@ function setStatus(text, cls) {
                     throw new Error('empty');
                 }
             } catch(e) {
+                // ★ 刷新失败时按提供商智能回退（不再只显示一个深 seek-chat）
+                _applyModelFallback(sel, baseUrl, cached);
                 if (cached.length > 0) showToast('刷新失败，已使用缓存列表（' + e.message + '）', 'info');
-                else sel.innerHTML = '<option value="deepseek-chat">deepseek-chat</option>';
+                else showToast('刷新失败，已使用 ' + _guessProviderFromUrl(baseUrl) + ' 默认列表', 'info');
             } finally {
                 // ★ 恢复按钮状态
                 if (btn) { btn.disabled = false; btn.innerHTML = '↻'; btn.style.opacity = '1'; }
@@ -1688,7 +1729,7 @@ function setStatus(text, cls) {
 
         async function loadTiku() {
             try {
-                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=tiku_config&auth_token=' + encodeURIComponent(_getAuthToken()));
+                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=tiku_config&auth_token=' + encodeURIComponent(_getAuthToken()), { cache: 'no-store' });
                 const d = await r.json();
                 $('tikuProvider').value = d.provider || 'TikuYanxi';
                 $('tikuTokens').value = d.tokens || '';
@@ -1717,17 +1758,13 @@ function setStatus(text, cls) {
                 }
                 $('tikuAIUrl').value = aiUrl || _getBaseUrl();
                 $('tikuAIKey').value = aiKey || '';
-                // 从聊天系统拉取模型列表
-                try {
-                    var models = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
-                    var sel = $('tikuAIModel');
-                    if (models.length > 0) {
-                        sel.innerHTML = models.map(function(m) {
-                            return '<option value="' + m + '">' + m + '</option>';
-                        }).join('');
-                    }
-                } catch(e) {}
-                $('tikuAIModel').value = aiModel || localStorage.getItem('model') || 'deepseek-chat';
+                // ★ 从聊天系统拉取模型列表，按提供商智能填充（不再只显示 deepseek-chat）
+                var _selModels = $('tikuAIModel');
+                var _cachedModels = JSON.parse(localStorage.getItem('autoDetectedTextModels') || '[]');
+                _applyModelFallback(_selModels, $('tikuAIUrl').value || 'https://api.deepseek.com', _cachedModels);
+                // ★ 选中当前模型：优先服务器 ai_model，其次缓存，最后 fallback 第一个
+                if (aiModel) $('tikuAIModel').value = aiModel;
+                else if (localStorage.getItem('model')) $('tikuAIModel').value = localStorage.getItem('model');
                 toggleTikuProvider();
             } catch(e) {}
         }
@@ -1750,9 +1787,9 @@ function setStatus(text, cls) {
                 params.append('ai_search_key', $('tikuAISearchKey').value);
             }
             try {
-                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=save_tiku&' + params + '&auth_token=' + encodeURIComponent(_getAuthToken()));
+                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=save_tiku&' + params + '&auth_token=' + encodeURIComponent(_getAuthToken()), { cache: 'no-store' });
                 const d = await r.json();
-                if (d.success) showToast('题库设置已保存', 'success');
+                if (d.success) showToast(d.synced ? '题库设置已同步' : '题库设置已保存', 'success');
                 else showToast('保存失败', 'error');
             } catch(e) { showToast('保存失败', 'error'); }
         }
@@ -1761,7 +1798,7 @@ function setStatus(text, cls) {
         // 刷课设置
         async function loadBrushConfig() {
             try {
-                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=config&auth_token=' + encodeURIComponent(_getAuthToken()));
+                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=config&auth_token=' + encodeURIComponent(_getAuthToken()), { cache: 'no-store' });
                 const d = await r.json();
                 $('brushSpeed').value = d.speed || '2';
                 $('brushAutoNext').checked = d.auto_next !== false;
@@ -1770,9 +1807,9 @@ function setStatus(text, cls) {
                 var key = await _getApiKey();
                 var syncStatus = $('syncStatus');
                 if (key) {
-                    if (syncStatus) { syncStatus.textContent = 'API已同步'; syncStatus.style.color = '#22c55e'; }
+                    if (syncStatus) { syncStatus.textContent = d.synced ? '配置/API已同步' : 'API已同步'; syncStatus.style.color = '#22c55e'; }
                 } else {
-                    if (syncStatus) { syncStatus.textContent = '未同步'; syncStatus.style.color = ''; }
+                    if (syncStatus) { syncStatus.textContent = d.synced ? '配置已同步' : '未同步'; syncStatus.style.color = d.synced ? '#22c55e' : ''; }
                 }
             } catch(e) {}
         }
@@ -1786,7 +1823,7 @@ function setStatus(text, cls) {
                 brush_mode: $('brushMode').value,
                 chapter_order: $('chapterOrder').value
             });
-            const r = await fetch('/oneapichat/api/chaoxing_api.php?action=save_config&' + params + '&auth_token=' + encodeURIComponent(_getAuthToken()));
+            const r = await fetch('/oneapichat/api/chaoxing_api.php?action=save_config&' + params + '&auth_token=' + encodeURIComponent(_getAuthToken()), { cache: 'no-store' });
             return r.json();
         }
 
@@ -1796,7 +1833,7 @@ function setStatus(text, cls) {
             var ok = true;
             try { const d = await saveBrushConfig(); if (!d.success) ok = false; } catch(e) { ok = false; }
             try { await saveTiku(); } catch(e) { ok = false; }
-            if (ok) showToast('全部设置已保存', 'success');
+            if (ok) showToast('全部设置已同步到服务器', 'success');
             else showToast('部分保存失败', 'error');
         }
 

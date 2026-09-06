@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>节点管理 · NAUJTRATS</title>
+<style>
+:root{--bg:#0b1120;--bg2:linear-gradient(135deg,#0b1120 0%,#1a1f35 30%,#2d2a5a 70%,#1e1a40 100%);--card:rgba(255,255,255,0.03);--text:#f1f5f9;--dim:#94a3b8;--accent:#38bdf8;--warn:#f87171;--border:rgba(255,255,255,0.08);--input:rgba(255,255,255,0.05);--purple:#818cf8;--green:#4ade80;--log-bg:rgba(0,0,0,0.32)}
+html.light, body.light-mode{--bg:#f0f4ff;--bg2:linear-gradient(135deg,#e6f0ff 0%,#a8c6ff 20%,#d4e4ff 60%,#f0e0ff 100%);--card:rgba(255,255,255,0.85);--text:#1e293b;--dim:#475569;--border:rgba(0,0,0,0.08);--input:rgba(0,0,0,0.04);--log-bg:rgba(99,102,241,0.07)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg2);background-attachment:fixed;color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+.container{width:100%;max-width:780px}
+.topbar{display:flex;align-items:center;justify-content:space-between;width:100%;max-width:780px;margin-bottom:32px}
+.back-btn{display:inline-flex;align-items:center;gap:6px;color:var(--dim);text-decoration:none;font-size:14px;padding:8px 0}
+.back-btn:hover{color:var(--text)}.back-btn svg{width:18px;height:18px;stroke:currentColor}
+.logo{font-weight:bold;font-size:1.2rem;letter-spacing:2px;background:linear-gradient(90deg,var(--accent),var(--purple));-webkit-background-clip:text;background-clip:text;color:transparent}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:24px;margin-bottom:20px;backdrop-filter:blur(20px)}
+.card-title{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.card-title::before{content:"";width:3px;height:14px;background:var(--accent);border-radius:3px;box-shadow:0 0 10px var(--accent)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--input);border:1px solid var(--border);border-radius:12px;padding:14px}
+.stat .k{font-size:11px;color:var(--dim);margin-bottom:6px}
+.stat .v{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;word-break:break-all}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green)}.dot.bad{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.tab{padding:8px 18px;border:1px solid var(--border);border-radius:10px;background:var(--input);color:var(--dim);cursor:pointer;font-size:13px;transition:all .2s}
+.tab.active{background:var(--accent);color:#0b1120;border-color:var(--accent);font-weight:700}
+.tab:hover{color:var(--text)}
+.ginfo{font-size:13px;color:var(--dim);margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap}
+.node-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--input)}
+.node-row .name{flex:1;font-size:13px;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+.node-row .cur{font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(56,189,248,0.15);color:var(--accent);display:none}
+.node-row .res{font-size:11px;padding:2px 8px;border-radius:10px;display:none}
+.node-row .res.ok{background:rgba(74,222,128,0.15);color:var(--green);display:inline-block}
+.node-row .res.bad{background:rgba(248,113,113,0.15);color:var(--warn);display:inline-block}
+.node-row .res.run{background:rgba(129,140,248,0.15);color:var(--purple);display:inline-block}
+.mini-btn{padding:5px 12px;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;transition:all .2s;white-space:nowrap}
+.mini-btn.test{background:var(--purple);color:#fff}.mini-btn.test:hover{opacity:.85}
+.mini-btn.sw{background:var(--accent);color:#0b1120}.mini-btn.sw:hover{opacity:.85}
+.mini-btn:disabled{opacity:.4;cursor:not-allowed}
+.n-main{flex:1;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden}
+.node-row .name{flex:0 1 auto;font-size:13px;font-family:ui-monospace,Consolas,monospace}
+.node-row .n-type{font-size:10px;color:var(--dim);opacity:.7;border:1px solid var(--border);padding:1px 6px;border-radius:6px;white-space:nowrap}
+.node-row .delay{font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;white-space:nowrap}
+.node-row .delay.fast{color:var(--green);background:rgba(74,222,128,0.14)}
+.node-row .delay.mid{color:var(--warn);background:rgba(251,191,36,0.14)}
+.node-row .delay.slow{color:var(--warn);background:rgba(248,113,113,0.14)}
+.node-row .delay.na{color:var(--dim);background:rgba(148,163,184,0.12)}
+.node-row .alive{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.node-row .alive.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+.node-row .alive.off{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.node-row .res{font-size:11px;padding:2px 8px;border-radius:10px;display:none;white-space:nowrap}
+.nodata{color:var(--dim);font-size:13px;padding:20px;text-align:center}
+.actions{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
+.big-btn{padding:10px 22px;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;background:var(--accent);color:#0b1120;transition:all .2s}
+.big-btn:hover{opacity:.85}.big-btn:disabled{opacity:.4;cursor:not-allowed}
+.big-btn.danger{background:rgba(248,113,113,0.15);color:var(--warn);border:1px solid rgba(248,113,113,0.3)}
+pre.log{background:var(--log-bg);border:1px solid var(--border);border-radius:12px;padding:14px;font-size:12px;line-height:1.6;max-height:280px;overflow:auto;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.msg{padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none}
+.msg-error{display:block;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:var(--warn)}
+.msg-info{display:block;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.25);color:var(--accent)}
+.hint{font-size:12px;color:var(--dim);margin-top:12px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a class="back-btn" href="/manager.html?from=mihomo" id="backBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+    <span>返回管理后台</span>
+  </a>
+  <span class="logo">NAUJTRATS</span>
+</div>
+<div class="container">
+  <div class="msg" id="globalMsg"></div>
+  <div class="card">
+    <div class="card-title">代理状态</div>
+    <div class="stat-grid" id="overviewBox"><div class="nodata">加载中...</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">节点管理</div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-g="GEMINI" onclick="switchGroup('GEMINI')">GEMINI</button>
+      <button class="tab" data-g="OPENAI" onclick="switchGroup('OPENAI')">OPENAI</button>
+      <button class="tab" data-g="PROXY" onclick="switchGroup('PROXY')">PROXY</button>
+    </div>
+    <div class="ginfo" id="groupInfo"></div>
+    <div id="nodeList"><div class="nodata">加载中...</div></div>
+    <div class="actions">
+      <button class="big-btn" id="sweepBtn" onclick="runSweep()">全量扫描（重建最优选择）</button>
+      <button class="big-btn danger" onclick="runQuick()">快速巡检当前节点</button>
+      <button class="big-btn" onclick="loadOverview()">刷新状态</button>
+    </div>
+    <div class="hint">切换 = 立即将该组出口切到此节点；测试 = 探测该节点对应服务（Gemini / OpenAI 官方端点）的真实可用性与延迟。</div>
+  </div>
+  <div class="card">
+    <div class="card-title" style="justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:8px">巡检日志</span>
+      <button class="mini-btn test" onclick="loadLog()">刷新</button>
+    </div>
+    <pre class="log" id="logBox">加载中...</pre>
+  </div>
+</div>
+<script>
+(function(){var t=localStorage.getItem('theme');if(t==='light')document.body.classList.add('light-mode');var d=localStorage.getItem('dark');if(d==='false')document.body.classList.add('light-mode');})();
+var API='/oneapichat/api/mihomo_proxy.php';
+var currentGroup='GEMINI';
+function getToken(){return localStorage.getItem('authToken');}
+function $msg(id,text,cls){var el=document.getElementById(id);el.textContent=text;el.className='msg '+(cls||'msg-info');}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function api(params,method,body){
+  var url=API+'?'+params+'&token='+encodeURIComponent(getToken());
+  var opt={method:method||'GET'};
+  if(body){opt.method='POST';opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body);}
+  return fetch(url,opt).then(function(r){return r.json().catch(function(){return {error:'响应解析失败'};});});
+}
+function auth(){
+  var token=getToken();
+  if(!token){location.href='/';return false;}
+  fetch('/oneapichat/api/auth.php?action=get_profile&token='+encodeURIComponent(token))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d.success){location.href='/';return;}
+      if(d.role!=='root'){document.querySelector('.container').innerHTML='<div class="card"><div class="nodata">此页面仅管理员可访问</div></div>';return;}
+      loadOverview();loadLog();loadGroup(currentGroup);
+      // 若默认组加载失败自动重试一次
+      setTimeout(function(){ if(document.getElementById('nodeList').innerHTML.indexOf('加载中')>-1){ loadGroup(currentGroup); } }, 2200);
+    }).catch(function(){location.href='/';});
+  return true;
+}
+function loadOverview(){
+  var box=document.getElementById('overviewBox');
+  api('action=overview').then(function(d){
+    if(!d.success){box.innerHTML='<div class="nodata">'+esc(d.error||'加载失败')+'</div>';return;}
+    var html='<div class="stat"><div class="k">mihomo 状态</div><div class="v"><span class="dot '+(d.mihomo?'ok':'bad')+'"></span>'+(d.mihomo?'运行中':'不可达')+'</div></div>';
+    html+='<div class="stat"><div class="k">版本</div><div class="v" style="font-size:12px">'+esc((d.version||'').slice(0,40))+'</div></div>';
+    ['GEMINI','OPENAI','PROXY'].forEach(function(g){
+      var gi=d.groups[g];
+      html+='<div class="stat"><div class="k">'+g+' · '+(gi?esc(gi.type):'?')+'</div><div class="v">'+(gi&&gi.now?'<span class="dot ok"></span>'+esc(gi.now):'<span class="dot bad"></span>未加载')+'</div></div>';
+    });
+    box.innerHTML=html;
+  }).catch(function(){box.innerHTML='<div class="nodata">网络错误</div>';});
+}
+function switchGroup(g){
+  currentGroup=g;
+  document.querySelectorAll('.tab').forEach(function(tb){tb.classList.toggle('active',tb.getAttribute('data-g')===g);});
+  loadGroup(g);
+}
+function loadGroup(g){
+  var list=document.getElementById('nodeList'),info=document.getElementById('groupInfo');
+  list.innerHTML='<div class="nodata">加载中...</div>';info.textContent='';
+  api('action=group&name='+encodeURIComponent(g)).then(function(d){
+    if(!d.success){list.innerHTML='<div class="nodata">'+esc(d.error||'加载失败')+'</div>';return;}
+    info.innerHTML='<span>类型：'+esc(d.type)+'</span><span>当前：'+esc(d.now)+'</span><span>节点数：'+d.nodes.length+'</span>';
+    if(!d.nodes.length){list.innerHTML='<div class="nodata">无节点</div>';return;}
+    var rows=d.nodes.map(function(n){
+      var isCur=n.name===d.now;
+      var dcls=n.delay==null?'na':(n.delay<500?'fast':(n.delay<1500?'mid':'slow'));
+      var dval=n.delay==null?'—':n.delay+'ms';
+      return '<div class="node-row" data-node="'+esc(n.name)+'">'+
+        '<div class="n-main"><span class="name">'+esc(n.name)+'</span><span class="n-type">'+esc(n.type||'')+'</span></div>'+
+        '<span class="cur" style="'+(isCur?'display:inline-block':'')+'">当前</span>'+
+        '<span class="delay '+dcls+'" title="延迟">'+dval+'</span>'+
+        '<span class="alive '+(n.alive?'on':'off')+'" title="'+(n.alive?'在线':'不可达')+'"></span>'+
+        '<span class="res"></span>'+
+        '<button class="mini-btn test" data-act="test">测试</button>'+
+        '<button class="mini-btn sw" data-act="sw"'+(isCur?' disabled':'')+'>切换</button>'+
+        '</div>';
+    }).join('');
+    list.innerHTML=rows;
+    list.onclick=function(e){
+      var btn=e.target;
+      while(btn&&btn.tagName!=='BUTTON')btn=btn.parentNode;
+      if(!btn)return;
+      var row=btn.closest?btn.closest('.node-row'):null;
+      if(!row)return;
+      var node=row.getAttribute('data-node');
+      var act=btn.getAttribute('data-act');
+      if(act==='test')testNode(row,btn);
+      else if(act==='sw')selNode(node,btn);
+    };
+  }).catch(function(){list.innerHTML='<div class="nodata">网络错误</div>';});
+}
+function testNode(row,btn){
+  var res=row.querySelector('.res');
+  if(!res)return;
+  var node=row.getAttribute('data-node');
+  res.textContent='测试中...';res.className='res run';btn.disabled=true;
+  api('action=probe&node='+encodeURIComponent(node)+'&group='+encodeURIComponent(currentGroup)).then(function(d){
+    btn.disabled=false;
+    if(!d.success){res.textContent=d.error||'失败';res.className='res bad';return;}
+    var ms=d.ms?(' · '+d.ms.toFixed(1)+'s'):'';
+    res.textContent=d.detail.label+ms;
+    res.className='res '+(d.detail.ok?'ok':'bad');
+  }).catch(function(){btn.disabled=false;res.textContent='网络错误';res.className='res bad';});
+}
+function selNode(node,btn){
+  if(!confirm('确定将 '+currentGroup+' 切换至 '+node+' ？'))return;
+  btn.disabled=true;btn.textContent='切换中...';
+  api('action=select','POST',{group:currentGroup,node:node}).then(function(d){
+    btn.disabled=false;btn.textContent='切换';
+    if(d.success){$msg('globalMsg','已切换 '+currentGroup+' → '+node);loadGroup(currentGroup);loadOverview();}
+    else $msg('globalMsg',d.error||'切换失败','msg-error');
+  }).catch(function(){btn.disabled=false;btn.textContent='切换';$msg('globalMsg','网络错误','msg-error');});
+}
+function runSweep(){
+  if(!confirm('全量扫描将逐个测试约 46 个节点（约 2-3 分钟），期间流量可能在节点间跳动。继续？'))return;
+  var btn=document.getElementById('sweepBtn');btn.disabled=true;btn.textContent='扫描中...（约2-3分钟）';
+  $msg('globalMsg','全量扫描已触发，请稍候刷新查看结果...');
+  fetch('/oneapichat/api/mihomo_proxy.php?action=sweep&group='+encodeURIComponent(currentGroup)+'&token='+encodeURIComponent(getToken()),{method:'POST'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;btn.textContent='全量扫描（重建最优选择）';
+      if(d.success)$msg('globalMsg','扫描完成：已选 '+d.best);
+      else $msg('globalMsg',d.error||'扫描失败','msg-error');
+      loadGroup(currentGroup);loadOverview();
+    }).catch(function(){btn.disabled=false;btn.textContent='全量扫描（重建最优选择）';$msg('globalMsg','网络错误','msg-error');});
+}
+function runQuick(){
+  $msg('globalMsg','已触发快速巡检，请在日志区查看结果...');
+  fetch('/oneapichat/api/mihomo_proxy.php?action=quick&group='+encodeURIComponent(currentGroup)+'&token='+encodeURIComponent(getToken()),{method:'POST'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.success)$msg('globalMsg',d.message||'巡检完成');
+      else $msg('globalMsg',d.error||'巡检失败','msg-error');
+      setTimeout(loadLog,2500);
+    }).catch(function(){$msg('globalMsg','网络错误','msg-error');});
+}
+function loadLog(){
+  api('action=log&lines=60&group='+encodeURIComponent(currentGroup)).then(function(d){
+    document.getElementById('logBox').textContent=d.log||'(暂无日志)';
+  }).catch(function(){document.getElementById('logBox').textContent='加载失败';});
+}
+auth();
+</script>
+</body>
+</html>

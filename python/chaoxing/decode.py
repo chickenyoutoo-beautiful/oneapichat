@@ -97,11 +97,22 @@ def decode_course_card(_text: str):
     if _temp:
         _temp = _temp[0]
     else:
+        # 部分课程的父章节/纯内容章节会明确返回 mArg = "" 和“暂无内容”。
+        # 这是成功读取到的空任务卡，不是解析或网络失败；若返回 {}，上层会把
+        # 这类章节连续重试三次并错误暂停整门课程。
+        if re.search(r'mArg\s*=\s*["\']\s*["\']\s*;', _text) and '暂无内容' in _text:
+            return [], {
+                "fetch_ok": True,
+                "empty_card": True,
+                "attachment_count": 0,
+            }
         return [],{}
     _cards = json.loads("{" + _temp + "}")
    
     if _cards:
         _job_info = {}
+        # 成功解析 mArg/defaults 才能把空任务列表解释为“全部通过”。
+        _job_info["fetch_ok"] = True
         _job_info["ktoken"] = _cards["defaults"]["ktoken"]
         _job_info["mtEnc"] = _cards["defaults"]["mtEnc"]
         _job_info["reportTimeInterval"] = _cards["defaults"]["reportTimeInterval"]   # 60
@@ -111,6 +122,7 @@ def decode_course_card(_text: str):
         _job_info["qnenc"] = _cards["defaults"]["qnenc"]
         _job_info['knowledgeid'] = _cards["defaults"]["knowledgeid"]
         _cards = _cards["attachments"]
+        _job_info["attachment_count"] = len(_cards)
         _job_list = []
         for _card in _cards:
             # 已经通过的任务
@@ -142,14 +154,19 @@ def decode_course_card(_text: str):
                 _job["jobid"] = _card["jobid"]
                 _job["name"] = _card["property"]["name"]
                 _job["otherinfo"] = _card["otherInfo"]
-                try:
-                    _job["mid"] = _card["mid"]
-                except KeyError:
-                    logger.warning("出现转码失败视频，已跳过...")
-                    continue
+                # mid 缺失通常只是转码元数据不完整，仍保留任务让上层尝试并复核；
+                # 直接 continue 会让未通过视频从剩余任务列表消失，造成假完成。
+                _job["mid"] = _card.get("mid", "")
                 _job["objectid"] = _card["objectId"]
                 _job["aid"] = _card["aid"]
-                # _job["doublespeed"] = _card["property"]["doublespeed"]
+                # 新版任务卡要求这些校验字段跟随每次进度上报；遗漏时接口可能
+                # 返回 HTTP 200，但只记录部分播放时长，任务始终保持未完成。
+                _job["playTime"] = _card.get("playTime", 0)
+                _job["attDuration"] = _card.get("attDuration", "")
+                _job["attDurationEnc"] = _card.get("attDurationEnc", "")
+                _job["videoFaceCaptureEnc"] = _card.get("videoFaceCaptureEnc", "")
+                _job["rt"] = _card.get("property", {}).get("rt", "")
+                _job["doublespeed"] = _card.get("property", {}).get("doublespeed")
                 _job_list.append(_job)
                 continue
             if _card["type"] == "document":
@@ -177,8 +194,19 @@ def decode_course_card(_text: str):
                 continue
        
             if _card["type"] == "vote":
-                # 调查问卷 同上
+                # 调查问卷暂不自动提交，但必须保留为未完成，不能静默漏掉。
+                _job_list.append({
+                    "type": "vote",
+                    "jobid": _card.get("jobid", ""),
+                    "name": _card.get("property", {}).get("title", "调查问卷"),
+                })
                 continue
+            # 未识别的新任务类型也保留，交由上层报告并阻止假完成。
+            _job_list.append({
+                "type": f"unsupported:{_card.get('type', 'unknown')}",
+                "jobid": _card.get("jobid", ""),
+                "name": _card.get("property", {}).get("name", "未知任务"),
+            })
         return _job_list, _job_info
     
 
@@ -237,5 +265,3 @@ def decode_questions_info(html_content) -> dict:
     # 处理答题信息
     form_data['answerwqbid'] = ",".join([q['id'] for q in form_data['questions']])+","
     return form_data
-
-

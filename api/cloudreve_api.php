@@ -21,13 +21,40 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once __DIR__ . '/cloudreve_lib.php';
+require_once __DIR__ . '/engine_bridge.php';
+
+function oneapichatCloudreveRequestToken(): string {
+    $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $authorization, $matches)) return trim($matches[1]);
+    return (string)($_GET['auth_token'] ?? '');
+}
+
+function oneapichatCloudreveInternalBridge(): bool {
+    $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    $isLoopback = $remote === '127.0.0.1' || $remote === '::1';
+    $secret = oneapichatEngineBridgeSecret();
+    $supplied = (string)($_SERVER['HTTP_X_ONEAPICHAT_INTERNAL'] ?? '');
+    return $isLoopback
+        && empty($_SERVER['HTTP_X_FORWARDED_FOR'])
+        && $secret !== ''
+        && $supplied !== ''
+        && hash_equals($secret, $supplied);
+}
 
 $action = $_GET['action'] ?? '';
-$rawToken = $_GET['auth_token'] ?? '';
+$rawToken = oneapichatCloudreveRequestToken();
+if ($rawToken === '' && isset($_COOKIE['auth_token'])) $rawToken = (string)$_COOKIE['auth_token'];
 $token = preg_replace('/[^a-f0-9]/', '', $rawToken);
 $userId = verifyAuthToken($token) ?: '';
-$isMcpCall = ($rawToken === 'cr_shared');
-if (!$userId && !$isMcpCall && $action !== 'ping' && $action !== 'login' && $action !== 'check_login') {
+// Server-side file import is an internal-only bridge. A legacy public magic token
+// allowed arbitrary remote callers to select a user and server file path.
+$isInternalImport = $action === 'import_file' && oneapichatCloudreveInternalBridge();
+if ($action === 'import_file' && !$isInternalImport) {
+    http_response_code(403);
+    echo json_encode(cr_error('内部导入接口仅允许本机引擎调用'));
+    exit;
+}
+if (!$userId && !$isInternalImport && $action !== 'ping' && $action !== 'login' && $action !== 'check_login') {
     echo json_encode(['success' => false, 'data' => null, 'error' => '未认证，请先登录']);
     exit;
 }
@@ -188,9 +215,9 @@ switch ($action) {
 
     // ── 自动同步 OneAPIChat → Cloudreve (真实邮箱+密码，不存在则注册) ──
     case 'auto_login':
-        $oaToken = $_GET['oneapichat_token'] ?? '';
-        if (!$oaToken) { echo json_encode(cr_error('需要 oneapichat_token 参数')); break; }
-        $oaUserId = verifyAuthToken($oaToken);
+        // Authentication was already resolved from Authorization or the same-site cookie.
+        // Never accept a second reusable OneAPIChat token in a query parameter.
+        $oaUserId = $userId;
         if (!$oaUserId) { echo json_encode(cr_error('OneAPIChat 认证失败，请重新登录')); break; }
 
         $usersFile = ONECHAT_ROOT . '/users/users.json';
@@ -695,17 +722,23 @@ switch ($action) {
         ]));
         break;
 
-    // ★ 2026-08-03 云盘全面结合: 自动导入入口（upload.php/netdisk_api.php/引擎/bridge 共用）
-    //   参数: file_path(必), category=uploads|downloads|generated(默认uploads), cloudreve_name(可选), user_id(仅 cr_shared 内部调用)
+    // ★ 2026-08-03 云盘全面结合: 自动导入入口（仅受签名的 loopback 引擎桥接可用）
+    //   参数: file_path(必), category=uploads|downloads|generated(默认uploads), cloudreve_name(可选), user_id
     case 'import_file':
+        if (!$isInternalImport) {
+            http_response_code(403);
+            echo json_encode(cr_error('内部导入接口仅允许本机引擎调用'));
+            break;
+        }
         $filePath = $_GET['file_path'] ?? '';
         $category = $_GET['category'] ?? 'uploads';
         $crName = $_GET['cloudreve_name'] ?? '';
         if (!$filePath) { echo json_encode(cr_error('需要 file_path 参数（服务器上的文件路径）')); break; }
-        if (!$userId && $isMcpCall) {
-            // 内部 bridge 调用（auth_token=cr_shared）: 允许指定 oneapichat 用户上下文
+        if (!$userId) {
+            // Signed internal bridge may choose the already-authenticated engine user context.
             $userId = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['user_id'] ?? '');
         }
+        if (!$userId) { echo json_encode(cr_error('缺少有效用户上下文')); break; }
         $impResult = cr_importFile($userId, $filePath, $category, $crName);
         if (empty($impResult['success'])) {
             echo json_encode(cr_error($impResult['error'] ?? '导入失败'));

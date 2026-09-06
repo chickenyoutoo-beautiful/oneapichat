@@ -4,8 +4,47 @@
 // ==== 消息渲染 ====
 // ==================== 消息渲染 ====================
 function showWelcome() {
-let container = $.chatMessagesContainer;
+    let container = $.chatMessagesContainer;
     if (!container) return;
+
+    var _isAgent = (typeof isAgentToolsActive === 'function' && isAgentToolsActive());
+    if (_isAgent) {
+        // ★ OneAPIChat Agent Workspace：项目专属欢迎标识与工作区入口
+        var _wm = window.WorkspaceManager;
+        var curWs = _wm ? _wm.getCurrentWorkspace() : { name: 'oneapichat', path: '/var/www/html/oneapichat' };
+        var curMode = (typeof getAgentMode === 'function') ? getAgentMode() : 'agent';
+        var modeLabels = { 'plan': 'Plan 模式', 'agent': 'Agent 模式', 'yolo': 'YOLO 模式' };
+
+        var html = '<div class="dsh-welcome-hero oac-agent-hero" data-agent-welcome="true">' +
+            '<div class="oac-hero-eyebrow">ONEAPICHAT · AGENT WORKSPACE</div>' +
+            '<div class="dsh-hero-brand">' +
+                '<div class="dsh-whale-icon oac-orbit-mark" aria-hidden="true">' +
+                    '<svg viewBox="0 0 42 42"><path class="oac-orbit-ring" d="M8.5 25.5c-3.3-7.4 1.4-15.9 9.7-17.4 7.9-1.4 15.2 4.5 15.3 12.4.1 7.2-5.8 13.1-13 13.1-2.2 0-4.3-.6-6.1-1.6L7 35l2.5-7.1c-.4-.8-.7-1.6-1-2.4Z"/><path class="oac-orbit-path" d="M14 23.5c3.2-5.9 10.7-8.4 17-5.2"/><circle cx="14" cy="23.5" r="2.3"/><circle cx="31" cy="18.3" r="2.3"/></svg>' +
+                '</div>' +
+                '<div class="oac-hero-copy">' +
+                    '<div class="dsh-hero-title-row"><span class="dsh-hero-title">让想法在工作区里发生</span></div>' +
+                    '<div class="oac-hero-subtitle">选择目录与执行模式，开始一次可落地的协作</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="dsh-hero-capsules">' +
+                '<button type="button" class="dsh-hero-capsule" onclick="window.WorkspaceManager && window.WorkspaceManager.toggleDropdown(event)">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' +
+                    '<span id="dshHeroWsName">' + curWs.name + '</span>' +
+                    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>' +
+                '</button>' +
+                '<button type="button" class="dsh-hero-capsule" onclick="window._toggleAgentModeMenu && window._toggleAgentModeMenu(event)">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>' +
+                    '<span id="dshHeroModeName">' + (modeLabels[curMode] || 'Agent 模式') + '</span>' +
+                    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>' +
+                '</button>' +
+            '</div>' +
+        '</div>';
+        container.innerHTML = html;
+        container.classList.add('agent-welcome-active');
+        return;
+    }
+
+    container.classList.remove('agent-welcome-active');
     var letters = 'Hi, Nice to meet you!'.split('');
     var html = '<div class="welcome-container"><div class="brand">';
     for (var i = 0; i < letters.length; i++) {
@@ -47,24 +86,134 @@ window.regenLastAssistant = async function(text) {
 
 function autoLinkURLs(markdownText) {
     // ★ 图片 URL → ![](url) 渲染为图片; 其他 URL → [label](url) 文本链接
-    return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, url, after) => {
+    // 保护规则：任何包含多词、描述性文本、标题、来源（如 [Wikimedia Commons...] 或 [新闻报道]）的
+    // 常规超链接坚决保留为可点击超链接，绝不强转为图片！只有纯图片占位 [图片](url) 且非网页 URL 才转换。
+    markdownText = String(markdownText || '').replace(/(^|[^!])\[([^\]\n]{1,160})\]\((https?:\/\/[^)\s]+)\)/g, function(match, before, label, url) {
+        var trimmedLabel = label.trim();
+        var isPureImagePlaceholder = /^(?:图片|原图|image|photo)$/i.test(trimmedLabel);
+        var isWebPage = /\/(wiki|item|detail|article|post|view|index)\//i.test(url) || /\.(html?|php|jsp|asp)(\?|$)/i.test(url);
+        var imagePath = false;
+        try { imagePath = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)(\?|$)/i.test(new URL(url).pathname); } catch(e) {}
+        var imageUrl = /^http:\/\//i.test(url) ? url.replace(/^http:\/\//i, 'https://') : url;
+        if (isPureImagePlaceholder && imagePath && !isWebPage) {
+            return before + '![' + label + '](' + imageUrl + ')';
+        }
+        return match;
+    });
+    return markdownText.replace(/(^|\s)(https?:\/\/[^\s<>]+)($|\s)/g, (match, before, rawUrl, after) => {
+        // Markdown 加粗结尾、中文标点等不是 URL 的组成部分，避免链接误吞 "**、。"。
+        var suffix = '';
+        var url = rawUrl;
+        var suffixMatch = url.match(/(\*\*|__|[，。；：！？、）】》]+)$/u);
+        if (suffixMatch) {
+            suffix = suffixMatch[0];
+            url = url.slice(0, -suffix.length);
+        }
         if (/!\[.*?\]\(/.test(match) || /\[.*?\]\(/.test(match)) return match;
         try {
             var u = new URL(url);
-            // ★ 图片扩展名 → 渲染为图片
-            if (/\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)(\?|$)/i.test(u.pathname)) {
-                return before + `![image](${url})` + after;
+            var isWebPage = /\/(wiki|item|detail|article|post|view|index)\//i.test(u.pathname) || /\.(html?|php|jsp|asp)(\?|$)/i.test(u.pathname);
+            // ★ 必须是真实图片直链且非百科/文章网页，才渲染为图片
+            if (!isWebPage && /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)(\?|$)/i.test(u.pathname)) {
+                var imageUrl = /^http:\/\//i.test(url) ? url.replace(/^http:\/\//i, 'https://') : url;
+                return before + `![image](${imageUrl})` + suffix + after;
             }
             let label = u.hostname;
             if (u.pathname && u.pathname !== '/') {
                 label += u.pathname.slice(0, 20) + (u.pathname.length > 20 ? '...' : '');
             }
-            return before + `[${label}](${url})` + after;
+            return before + `[${label}](${url})` + suffix + after;
         } catch {
             return match;
         }
     });
 }
+
+// ★ 外部图片容错卡片与防盗链降级中枢
+function _imageSourcePage(img, src) {
+    if (!img) return '';
+    var explicit = img.getAttribute('data-source-url') || '';
+    if (explicit) return explicit;
+    var scope = img.closest ? img.closest('p, li, blockquote, .markdown-body') : null;
+    if (scope && scope.querySelectorAll) {
+        var links = scope.querySelectorAll('a[href]');
+        for (var i = 0; i < links.length; i++) {
+            var href = links[i].href || links[i].getAttribute('href') || '';
+            if (!href || href === src || /images\.weserv\.nl/i.test(href)) continue;
+            if (/\/(wiki|item|detail|article|post|view|index)\//i.test(href) || /wiki\./i.test(href)) return href;
+        }
+    }
+    return '';
+}
+
+function _knownImageSourcePage(src) {
+    try {
+        var u = new URL(src, location.href);
+        // BWIKI patchwiki 直链经常失效/变更哈希；跳到对应 Wiki 首页至少稳定可访问，
+        // 绝不能再让按钮指向已确认 404 的伪直链。
+        if (/patchwiki\.biligame\.com$/i.test(u.hostname)) {
+            var parts = u.pathname.split('/').filter(Boolean);
+            var project = parts[1] || '';
+            return project ? 'https://wiki.biligame.com/' + encodeURIComponent(project) + '/首页' : 'https://wiki.biligame.com/';
+        }
+        if (/upload\.wikimedia\.org$/i.test(u.hostname)) {
+            var filename = decodeURIComponent(u.pathname.split('/').pop() || '').replace(/^\d+px-/, '');
+            return filename ? 'https://commons.wikimedia.org/wiki/File:' + encodeURIComponent(filename) : 'https://commons.wikimedia.org/';
+        }
+    } catch(e) {}
+    return '';
+}
+
+function attachImageFallbacks(root) {
+    if (!root || !root.querySelectorAll) return;
+    var imgs = root.querySelectorAll ? root.querySelectorAll('.markdown-body img:not([data-img-fallback-bound])') : [];
+    if (root.tagName === 'IMG' && !root.hasAttribute('data-img-fallback-bound')) imgs = [root];
+    imgs.forEach(function(img) {
+        img.setAttribute('data-img-fallback-bound', '1');
+        if (!img.getAttribute('referrerpolicy')) img.setAttribute('referrerpolicy', 'no-referrer');
+        if (!img.getAttribute('loading')) img.setAttribute('loading', 'lazy');
+        var originalSrc = img.currentSrc || img.getAttribute('src') || '';
+        var sourcePage = _imageSourcePage(img, originalSrc) || _knownImageSourcePage(originalSrc);
+        if (sourcePage) img.setAttribute('data-source-url', sourcePage);
+        img.addEventListener('error', function() {
+            var src = this.currentSrc || this.getAttribute('src') || originalSrc;
+            if (!src) return;
+            // 第一次失败先尝试可靠的公共图片代理；代理失败后才展示来源页卡片。
+            if (!this.dataset.proxyRetried && !/images\.weserv\.nl/i.test(src)) {
+                this.dataset.proxyRetried = '1';
+                this.setAttribute('src', 'https://images.weserv.nl/?url=' + encodeURIComponent(src));
+                return;
+            }
+            if (this.dataset.fallbackApplied) return;
+            this.dataset.fallbackApplied = '1';
+            var alt = (this.getAttribute('alt') || '').trim();
+            if (!alt || alt === 'image' || alt === '图片') {
+                try { alt = decodeURIComponent(new URL(originalSrc || src, location.href).pathname.split('/').pop() || '查看图片来源'); }
+                catch(e) { alt = '查看图片来源'; }
+            }
+            var target = this.getAttribute('data-source-url') || sourcePage || _knownImageSourcePage(originalSrc || src);
+            var card;
+            if (target) {
+                card = document.createElement('a');
+                card.href = target;
+                card.target = '_blank';
+                card.rel = 'noopener noreferrer';
+                card.title = '图片直链不可用，点击打开可访问的来源页面：' + target;
+            } else {
+                card = document.createElement('div');
+                card.title = '图片直链不可用，且未找到可靠来源页';
+            }
+            card.className = 'oac-external-image-card';
+            card.innerHTML = '<span class="oac-img-icon">🖼️</span>' +
+                '<span class="oac-img-info">' +
+                    '<span class="oac-img-title">' + (escapeHtml(alt) || '外部图片') + '</span>' +
+                    '<span class="oac-img-action">' + (target ? '图片直链已失效 · 点击打开来源页面 ↗' : '图片直链已失效 · 暂无可靠来源页面') + '</span>' +
+                '</span>';
+            if (this.parentNode) this.parentNode.replaceChild(card, this);
+        });
+    });
+}
+window.attachImageFallbacks = attachImageFallbacks;
 
 // ★ 图片快速操作辅助函数 — 供气泡操作栏和灯箱调用
 
@@ -102,24 +251,70 @@ async function _copyImageToClipboard(url) {
     }
 }
 
-/** 以图生图 — 设参考图 + 聚焦输入框 */
-function _useAsReference(meta) {
+/** 以图生图 — 下载参考图 → 加入 pendingFiles → 发送时自动附加 */
+async function _useAsReference(meta) {
     if (!meta || !meta.url) return;
-    // 存储参考图到全局变量
-    window._i2iReferenceImage = meta.url;
-    // 聚焦输入框并提示
-    var input = document.getElementById('userInput') || document.querySelector('textarea[placeholder]');
-    if (input) {
-        input.focus();
-        input.placeholder = '🎨 描述你想要的变换（以图生图）...';
-        if (typeof input.scrollIntoView === 'function') {
-            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    try {
+        if (typeof showToast === 'function') showToast('⏳ 正在加载参考图...');
+        // ★ 下载参考图并转为 base64,加入 pendingFiles
+        var _refUrl = meta.url;
+        var _isDataUrl = _refUrl.startsWith('data:');
+        var _content, _name = '参考图.png', _size = 0;
+
+        if (_isDataUrl) {
+            _content = _refUrl;
+            _size = Math.round(atob(_refUrl.split(',')[1]).length * 0.75);
+        } else {
+            // HTTP(S) URL → 下载
+            var _fetchFn = window.proxyFetch || fetch;
+            var _resp = await _fetchFn(_refUrl);
+            if (!_resp.ok) throw new Error('下载失败: ' + _resp.status);
+            var _blob = await _resp.blob();
+            _size = _blob.size;
+            _name = _refUrl.split('/').pop().split('?')[0] || '参考图.png';
+            _content = await new Promise(function(resolve, reject) {
+                var fr = new FileReader();
+                fr.onload = function() { resolve(fr.result); };
+                fr.onerror = reject;
+                fr.readAsDataURL(_blob);
+            });
         }
+
+        // ★ 加入 pendingFiles (与手动上传的图片同等待遇)
+        var _fileObj = {
+            name: _name,
+            content: _content,
+            serverUrl: _isDataUrl ? '' : _refUrl,
+            isImage: true,
+            type: _content.match(/^data:(image\/[\w+]+);/)?.[1] || 'image/png',
+            size: _size,
+            _isReferenceImage: true  // 标记为参考图
+        };
+        if (!window.pendingFiles) window.pendingFiles = [];
+        // 清除旧的参考图(只保留一张)
+        window.pendingFiles = window.pendingFiles.filter(function(f) { return !f._isReferenceImage; });
+        window.pendingFiles.push(_fileObj);
+
+        // ★ 更新 UI 显示
+        if (typeof updateFilePreviewUI === 'function') updateFilePreviewUI();
+
+        // 聚焦输入框并提示
+        var input = document.getElementById('userInput') || document.querySelector('textarea[placeholder]');
+        if (input) {
+            input.focus();
+            input.placeholder = '🎨 参考图已附加，描述你想要的变换后发送...';
+            if (typeof input.scrollIntoView === 'function') {
+                input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+        if (typeof showToast === 'function') showToast('🎨 参考图已附加到输入区，输入描述后发送即可');
+    } catch(e) {
+        console.error('[useAsReference] 失败:', e);
+        if (typeof showToast === 'function') showToast('❌ 加载参考图失败: ' + e.message);
     }
-    if (typeof showToast === 'function') showToast('🎨 已设为参考图，输入描述后发送即可');
 }
 
-/** 重新生成 — 用原参数重新调用 generate_image */
+/** 创建变体 — 调用图生图 API (generateImageI2I) */
 async function _regenerateImage(meta) {
     if (!meta || !meta.prompt) {
         if (typeof showToast === 'function') showToast('❌ 缺少提示词信息，无法重新生成');
@@ -127,16 +322,18 @@ async function _regenerateImage(meta) {
     }
     try {
         if (typeof showToast === 'function') showToast('🔄 正在生成变体...');
-        // ★ 如果有修改指令，拼接到提示词中
+        // ★ 拼接修改指令到提示词
         var _finalPrompt = meta.prompt;
         if (meta.instructions) {
             _finalPrompt = meta.prompt + '\n\n【修改要求】' + meta.instructions;
         }
-        var result = await window.generateImage(_finalPrompt, {
+        // ★ 使用图生图 API (传入参考图 URL)
+        var _opts = {
             model: meta.model,
             aspect_ratio: meta.aspect_ratio,
             n: 1
-        });
+        };
+        var result = await window.generateImageI2I(_finalPrompt, meta.url, _opts);
         if (result) {
             var url = typeof result === 'string' ? result : (Array.isArray(result) ? result[0] : null);
             if (url) {
@@ -164,6 +361,129 @@ async function _regenerateImage(meta) {
     }
 }
 
+// ★ 统一生成图片容器就地渲染函数 (供 appendMessage 及工具调用实时注入复用)
+window.renderGeneratedImagesIntoBubble = function(bubble, images) {
+    if (!bubble) return;
+    var allImages = Array.isArray(images) ? images : (images ? [images] : []);
+    if (typeof dedupeImageList === 'function') allImages = dedupeImageList(allImages);
+    if (!allImages.length) return;
+
+    var imgContainer = bubble.querySelector(':scope > .gen-image-container');
+    if (!imgContainer) {
+        imgContainer = document.createElement('div');
+        imgContainer.className = 'gen-image-container';
+        bubble.appendChild(imgContainer);
+    }
+    // 清理可能遗留的占位符
+    var ph = bubble.querySelector('#image-placeholder');
+    if (ph) ph.remove();
+
+    allImages.forEach(function(imgData, idx) {
+        var meta = getImageMeta(imgData);
+        var cleanUrl = cleanImageUrl(meta.url);
+        if (!cleanUrl) return;
+
+        // DOM 级去重：若容器中已存在相同 src 的图片，则不重复插入
+        var existingImgs = imgContainer.querySelectorAll('img.gen-image');
+        for (var e = 0; e < existingImgs.length; e++) {
+            if (existingImgs[e].src === cleanUrl || cleanImageUrl(existingImgs[e].src) === cleanUrl) {
+                return;
+            }
+        }
+
+        var wrapper = document.createElement('div');
+        wrapper.className = 'gen-image-wrapper';
+        var img = document.createElement('img');
+        img.src = cleanUrl;
+        img.alt = '生成图片 ' + (idx + 1);
+        var maxW = allImages.length > 1 ? '160px' : '320px';
+        img.className = 'gen-image';
+        img.style.maxWidth = maxW;
+        img.setAttribute('loading', 'lazy');
+        // ★ 点击放大预览 — 传入当前聊天所有图片，当前图在全部图片中的索引
+        img.addEventListener('click', function() {
+            var _allChatImgs = collectChatImages(currentChatId);
+            var _meta = getImageMeta(imgData);
+            var _globalIdx = _allChatImgs.findIndex(function(item) {
+                return getImageUrl(item) === _meta.url;
+            });
+            if (_globalIdx === -1) _globalIdx = idx;
+            showImageLightbox(_allChatImgs, _globalIdx);
+        });
+        img.onerror = function() {
+            var retryCount = parseInt(this.dataset.retryCount || '0', 10);
+            if (retryCount < 2 && cleanUrl && cleanUrl.indexOf('data:') !== 0) {
+                this.dataset.retryCount = String(retryCount + 1);
+                var retryUrl = cleanUrl + (cleanUrl.indexOf('?') === -1 ? '?' : '&') +
+                    '_img_retry=' + Date.now();
+                var self = this;
+                setTimeout(function() { self.src = retryUrl; }, 800 * (retryCount + 1));
+                return;
+            }
+            this.style.display = 'none';
+            if (wrapper.querySelector('.gen-image-error')) return;
+            var fallback = document.createElement('div');
+            fallback.style.cssText = 'padding:10px;border-radius:8px;background:#fef3c7;border:1px solid #f59e0b;margin:4px 0;color:#92400e;font-size:0.75rem;text-align:center;';
+            fallback.className = 'gen-image-error';
+            fallback.textContent = '\u26a0\ufe0f \u56fe\u7247\u52a0\u8f7d\u5931\u8d25\uff0c\u70b9\u51fb\u91cd\u8bd5';
+            fallback.style.cursor = 'pointer';
+            fallback.onclick = function() {
+                fallback.remove();
+                img.style.display = '';
+                img.dataset.retryCount = '0';
+                img.src = cleanUrl + (cleanUrl.indexOf('?') === -1 ? '?' : '&') + '_img_retry=' + Date.now();
+            };
+            wrapper.appendChild(fallback);
+        };
+        wrapper.appendChild(img);
+        // 悬停显示放大图标与操作栏
+        var actionBar = document.createElement('div');
+        actionBar.className = 'img-action-bar';
+        // 下载按钮
+        var dlBtn = document.createElement('button');
+        dlBtn.className = 'img-action-btn';
+        dlBtn.title = '\u4e0b\u8f7d\u56fe\u7247';
+        dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+        dlBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _downloadImage(meta.url, 'generated_' + (idx + 1) + '.png');
+        });
+        actionBar.appendChild(dlBtn);
+        // 复制按钮
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'img-action-btn';
+        copyBtn.title = '\u590d\u5236\u5230\u526a\u8d34\u677f';
+        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        copyBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _copyImageToClipboard(meta.url);
+        });
+        actionBar.appendChild(copyBtn);
+        // 以图生图按钮
+        var i2iBtn = document.createElement('button');
+        i2iBtn.className = 'img-action-btn';
+        i2iBtn.title = '\u4ee5\u56fe\u751f\u56fe';
+        i2iBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+        i2iBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _useAsReference(meta);
+        });
+        actionBar.appendChild(i2iBtn);
+        // 重新生成按钮
+        var regenBtn = document.createElement('button');
+        regenBtn.className = 'img-action-btn';
+        regenBtn.title = '\u91cd\u65b0\u751f\u6210';
+        regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+        regenBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _regenerateImage(meta);
+        });
+        actionBar.appendChild(regenBtn);
+        wrapper.appendChild(actionBar);
+        imgContainer.appendChild(wrapper);
+    });
+};
+
 // ★ 收集当前聊天所有生成图片
 function collectChatImages(chatId) {
     var imgs = [];
@@ -172,11 +492,9 @@ function collectChatImages(chatId) {
         if (msg.generatedImages && msg.generatedImages.length > 0) {
             msg.generatedImages.forEach(function(img) { imgs.push(img); });
         }
-        if (msg.generatedImage && (!msg.generatedImages || msg.generatedImages.indexOf(msg.generatedImage) === -1)) {
-            imgs.push(msg.generatedImage);
-        }
+        if (msg.generatedImage) imgs.push(msg.generatedImage);
     });
-    return imgs;
+    return typeof dedupeImageList === 'function' ? dedupeImageList(imgs) : imgs;
 }
 
 // ★ 画布模式 — Codex 风格：大图 + 缩略图条 + 指令修改
@@ -184,14 +502,24 @@ function showImageLightbox(images, startIdx) {
     var existing = document.querySelector('.img-lightbox');
     if (existing) existing.dispatchEvent(new Event('lightbox:close'));
 
-    var idx = startIdx || 0;
-    var scale = 1, minScale = 1, maxScale = 5;
-    var isDragging = false, dragStartX = 0, dragStartY = 0, offsetX = 0, offsetY = 0;
+    var _requestedImage = images && images[startIdx || 0];
+    var _requestedKey = typeof getImageIdentityKey === 'function' ? getImageIdentityKey(_requestedImage) : getImageUrl(_requestedImage);
+    images = typeof dedupeImageList === 'function' ? dedupeImageList(images) : (images || []);
+    if (!images.length) return;
+    var idx = images.findIndex(function(item) {
+        return (typeof getImageIdentityKey === 'function' ? getImageIdentityKey(item) : getImageUrl(item)) === _requestedKey;
+    });
+    if (idx < 0) idx = 0;
+    var scale = 1, minScale = 1, maxScale = 8;
+    var renderedScale = 1, offsetX = 0, offsetY = 0, renderedOffsetX = 0, renderedOffsetY = 0;
+    var isDragging = false, dragStartX = 0, dragStartY = 0, dragOriginX = 0, dragOriginY = 0;
+    var dragPointerId = null, transformRaf = 0;
     var previousActive = document.activeElement;
     var previousOverflow = document.body.style.overflow;
     var closed = false;
     var filmstripMax = 8;
     var panelExpanded = true;
+    var isSvgPreview = images.length === 1 && images[0] && typeof images[0] === 'object' && images[0].__svgMarkup;
 
     // ════ 主容器 — 柔和渐变背景 ════
     var overlay = document.createElement('div');
@@ -200,7 +528,8 @@ function showImageLightbox(images, startIdx) {
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', '图片画布');
     overlay.tabIndex = -1;
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,#1e2030 0%,#1a1c2e 40%,#15172a 100%);z-index:9999;display:flex;flex-direction:column;';
+    // 颜色完全交给主题 CSS 变量，画布随亮暗模式和 DSH/经典/极简等主题同步。
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;';
 
     // ════ 顶部栏 — 极简 ════
     var topBar = document.createElement('div');
@@ -239,8 +568,18 @@ function showImageLightbox(images, startIdx) {
     var img = document.createElement('img');
     img.className = 'canvas-img';
     img.alt = '预览图片';
-    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;cursor:grab;transition:transform 0.15s ease;box-shadow:0 20px 60px rgba(0,0,0,0.4);';
+    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;cursor:default;will-change:transform;transform:translate3d(0,0,0) scale(1);box-shadow:0 20px 60px rgba(0,0,0,0.4);';
+    img.draggable = false;
+    img.addEventListener('dragstart', function(e) { e.preventDefault(); });
     imgArea.appendChild(img);
+    var svgPreview = null;
+    if (isSvgPreview) {
+        img.style.display = 'none';
+        svgPreview = document.createElement('div');
+        svgPreview.className = 'canvas-svg-preview';
+        svgPreview.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;';
+        imgArea.appendChild(svgPreview);
+    }
 
     var nextBtn = document.createElement('button');
     nextBtn.type = 'button';
@@ -251,6 +590,100 @@ function showImageLightbox(images, startIdx) {
     imgArea.appendChild(nextBtn);
     mainArea.appendChild(imgArea);
 
+    // ★ 右侧信息面板 — 提示词/模型/比例/时间/备注
+    var infoPanel = document.createElement('div');
+    infoPanel.className = 'canvas-info-panel';
+
+    var infoSection = function(title, content, opts) {
+        opts = opts || {};
+        var sec = document.createElement('div');
+        sec.className = 'canvas-info-section' + (opts.cls ? ' ' + opts.cls : '');
+        var label = document.createElement('div');
+        label.className = 'canvas-info-label';
+        label.textContent = title;
+        sec.appendChild(label);
+        var val = document.createElement(opts.editable ? 'textarea' : 'div');
+        val.className = opts.editable ? 'canvas-info-textarea' : 'canvas-info-value';
+        if (opts.editable) {
+            val.rows = 3;
+            val.placeholder = '添加备注...';
+        }
+        if (typeof content === 'string') val.textContent = content;
+        else if (content) val.appendChild(content);
+        sec.appendChild(val);
+        return { section: sec, valueEl: val };
+    };
+
+    // 提示词
+    var promptSection = infoSection('提示词', '');
+    promptSection.section.classList.add('prompt-section');
+    infoPanel.appendChild(promptSection.section);
+
+    // 模型 + 比例 (同一行)
+    var metaRow = document.createElement('div');
+    metaRow.className = 'canvas-meta-row';
+    var modelSection = infoSection('模型', '');
+    var ratioSection = infoSection('比例', '');
+    metaRow.appendChild(modelSection.section);
+    metaRow.appendChild(ratioSection.section);
+    infoPanel.appendChild(metaRow);
+
+    // 时间
+    var timeSection = infoSection('生成时间', '');
+    infoPanel.appendChild(timeSection.section);
+
+    // 备注 (可编辑)
+    var notesSection = infoSection('备注', '', { editable: true, cls: 'notes-section' });
+    infoPanel.appendChild(notesSection.section);
+
+    // ★ 保存备注按钮
+    var saveNotesBtn = document.createElement('button');
+    saveNotesBtn.type = 'button';
+    saveNotesBtn.className = 'canvas-save-notes-btn';
+    saveNotesBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>保存备注</span>';
+    saveNotesBtn.addEventListener('click', function() {
+        var _curMeta = getImageMeta(images[idx]);
+        var _notes = notesSection.valueEl.value.trim();
+        // 更新数据模型中的 notes
+        if (typeof images[idx] === 'object') {
+            images[idx].notes = _notes;
+            // 同步到 chats 消息中
+            if (currentChatId && chats[currentChatId]) {
+                chats[currentChatId].messages.forEach(function(msg) {
+                    if (msg.generatedImages) {
+                        msg.generatedImages.forEach(function(gi) {
+                            if (typeof gi === 'object' && gi.url === _curMeta.url) {
+                                gi.notes = _notes;
+                            }
+                        });
+                    }
+                });
+                slimSaveChats();
+            }
+        }
+        saveNotesBtn.classList.add('saved');
+        saveNotesBtn.querySelector('span').textContent = '已保存';
+        setTimeout(function() {
+            saveNotesBtn.classList.remove('saved');
+            saveNotesBtn.querySelector('span').textContent = '保存备注';
+        }, 1500);
+    });
+    infoPanel.appendChild(saveNotesBtn);
+
+    // ★ 面板折叠按钮 (移动端)
+    var panelToggle = document.createElement('button');
+    panelToggle.type = 'button';
+    panelToggle.className = 'canvas-panel-toggle';
+    panelToggle.setAttribute('aria-label', '切换信息面板');
+    panelToggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="9 18 15 12 9 6"/></svg>';
+    panelToggle.addEventListener('click', function() {
+        panelExpanded = !panelExpanded;
+        infoPanel.classList.toggle('collapsed', !panelExpanded);
+        panelToggle.classList.toggle('expanded', panelExpanded);
+    });
+    topBar.appendChild(panelToggle);
+
+    mainArea.appendChild(infoPanel);
     overlay.appendChild(mainArea);
 
     // ★ 修改指令浮层 — 默认隐藏，点击按钮后弹出
@@ -306,9 +739,9 @@ function showImageLightbox(images, startIdx) {
 
 
 
-    // ════ 底部 — 浮动操作栏 + 缩略图条 ════
+    // ════ 图片内悬浮控制坞 — 不再占据画布下半区 ════
     var bottomArea = document.createElement('div');
-    bottomArea.className = 'canvas-bottom-area';
+    bottomArea.className = 'canvas-bottom-area canvas-overlay-dock';
 
     // 浮动操作胶囊
     var actions = document.createElement('div');
@@ -364,7 +797,9 @@ function showImageLightbox(images, startIdx) {
     filmstripTrack.className = 'canvas-filmstrip-track';
     filmstrip.appendChild(filmstripTrack);
     bottomArea.appendChild(filmstrip);
-    overlay.appendChild(bottomArea);
+    if (isSvgPreview) filmstrip.style.display = 'none';
+    // 挂载到图片承载区内部，以 absolute 悬浮，不参与主画布高度计算。
+    imgArea.appendChild(bottomArea);
 
     function renderFilmstrip() {
         filmstripTrack.innerHTML = '';
@@ -389,28 +824,141 @@ function showImageLightbox(images, startIdx) {
         }
     }
 
-    // 缩放/拖拽
-    img.addEventListener('wheel', function(e) {
-        e.preventDefault(); e.stopPropagation();
-        scale = Math.max(minScale, Math.min(maxScale, Math.round((scale + (e.deltaY > 0 ? -0.1 : 0.1)) * 10) / 10));
-        applyTransform();
-    }, { passive: false });
-    img.addEventListener('mousedown', function(e) {
-        if (scale <= 1) return;
-        e.preventDefault(); isDragging = true;
-        dragStartX = e.clientX - offsetX; dragStartY = e.clientY - offsetY;
-        img.style.cursor = 'grabbing';
-    });
-    function handleMouseMove(e) { if (!isDragging) return; offsetX = e.clientX - dragStartX; offsetY = e.clientY - dragStartY; applyTransform(); }
-    function handleMouseUp() { isDragging = false; if (scale > 1) img.style.cursor = 'grabbing'; }
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    // ════ 丝滑缩放与拖拽：连续缩放、鼠标位置锚定、Pointer Capture、边界约束 ════
+    function getTransformTarget() { return isSvgPreview ? svgPreview : img; }
 
-    function applyTransform() {
-        img.style.transform = 'translate(' + offsetX + 'px,' + offsetY + 'px) scale(' + scale + ')';
-        if (scale > 1) { img.style.maxWidth = 'none'; img.style.maxHeight = 'none'; }
-        else { img.style.maxWidth = '100%'; img.style.maxHeight = '100%'; }
+    function clampPan() {
+        var target = getTransformTarget();
+        if (!target || scale <= 1.001) { offsetX = 0; offsetY = 0; return; }
+        var baseW = target.offsetWidth || imgArea.clientWidth;
+        var baseH = target.offsetHeight || imgArea.clientHeight;
+        var maxX = Math.max(0, (baseW * scale - imgArea.clientWidth) / 2);
+        var maxY = Math.max(0, (baseH * scale - imgArea.clientHeight) / 2);
+        offsetX = Math.max(-maxX, Math.min(maxX, offsetX));
+        offsetY = Math.max(-maxY, Math.min(maxY, offsetY));
     }
+
+    function updateZoomLabel() {
+        var imageLabel = (idx + 1) + ' / ' + images.length + (images.length > 1 ? ' 张图片' : '');
+        counter.textContent = imageLabel + (scale > 1.005 ? '  ·  ' + Math.round(scale * 100) + '%' : '');
+    }
+
+    function renderTransformFrame() {
+        transformRaf = 0;
+        var target = getTransformTarget();
+        if (!target) return;
+        var easing = isDragging ? 1 : 0.24;
+        renderedScale += (scale - renderedScale) * easing;
+        renderedOffsetX += (offsetX - renderedOffsetX) * easing;
+        renderedOffsetY += (offsetY - renderedOffsetY) * easing;
+        if (Math.abs(scale - renderedScale) < 0.001) renderedScale = scale;
+        if (Math.abs(offsetX - renderedOffsetX) < 0.15) renderedOffsetX = offsetX;
+        if (Math.abs(offsetY - renderedOffsetY) < 0.15) renderedOffsetY = offsetY;
+        target.style.transform = 'translate3d(' + renderedOffsetX.toFixed(2) + 'px,' + renderedOffsetY.toFixed(2) + 'px,0) scale(' + renderedScale.toFixed(4) + ')';
+        target.style.transformOrigin = 'center center';
+        imgArea.classList.toggle('is-zoomed', renderedScale > 1.005);
+        imgArea.classList.toggle('is-dragging', isDragging);
+        target.style.cursor = isDragging ? 'grabbing' : (renderedScale > 1.005 ? 'grab' : 'zoom-in');
+        updateZoomLabel();
+        if (renderedScale !== scale || renderedOffsetX !== offsetX || renderedOffsetY !== offsetY) {
+            transformRaf = requestAnimationFrame(renderTransformFrame);
+        }
+    }
+
+    function applyTransform(immediate) {
+        clampPan();
+        if (immediate) {
+            renderedScale = scale;
+            renderedOffsetX = offsetX;
+            renderedOffsetY = offsetY;
+        }
+        if (!transformRaf) transformRaf = requestAnimationFrame(renderTransformFrame);
+    }
+
+    function zoomAt(clientX, clientY, nextScale, immediate) {
+        var rect = imgArea.getBoundingClientRect();
+        var px = clientX - (rect.left + rect.width / 2);
+        var py = clientY - (rect.top + rect.height / 2);
+        var oldScale = scale;
+        nextScale = Math.max(minScale, Math.min(maxScale, nextScale));
+        if (Math.abs(nextScale - oldScale) < 0.0001) return;
+        var ratio = nextScale / oldScale;
+        offsetX = px - (px - offsetX) * ratio;
+        offsetY = py - (py - offsetY) * ratio;
+        scale = nextScale;
+        if (scale <= 1.001) { scale = 1; offsetX = 0; offsetY = 0; }
+        applyTransform(!!immediate);
+    }
+
+    function resetTransform(immediate) {
+        scale = 1; offsetX = 0; offsetY = 0;
+        applyTransform(!!immediate);
+    }
+
+    imgArea.addEventListener('wheel', function(e) {
+        if (e.target.closest && e.target.closest('.canvas-overlay-dock, .canvas-nav-btn')) return;
+        e.preventDefault(); e.stopPropagation();
+        var delta = Math.max(-120, Math.min(120, e.deltaY));
+        var factor = Math.exp(-delta * 0.0022);
+        zoomAt(e.clientX, e.clientY, scale * factor, false);
+    }, { passive: false });
+
+    imgArea.addEventListener('pointerdown', function(e) {
+        if (e.button !== 0 || scale <= 1.005) return;
+        if (e.target.closest && e.target.closest('.canvas-overlay-dock, .canvas-nav-btn')) return;
+        e.preventDefault();
+        isDragging = true;
+        dragPointerId = e.pointerId;
+        dragStartX = e.clientX; dragStartY = e.clientY;
+        dragOriginX = offsetX; dragOriginY = offsetY;
+        try { imgArea.setPointerCapture(e.pointerId); } catch(_captureErr) {}
+        applyTransform(true);
+    });
+    imgArea.addEventListener('pointermove', function(e) {
+        if (!isDragging || e.pointerId !== dragPointerId) return;
+        e.preventDefault();
+        offsetX = dragOriginX + (e.clientX - dragStartX);
+        offsetY = dragOriginY + (e.clientY - dragStartY);
+        applyTransform(true);
+    });
+    function endPointerDrag(e) {
+        if (!isDragging || (e && e.pointerId !== dragPointerId)) return;
+        isDragging = false;
+        if (e) { try { imgArea.releasePointerCapture(e.pointerId); } catch(_releaseErr) {} }
+        dragPointerId = null;
+        applyTransform(true);
+    }
+    imgArea.addEventListener('pointerup', endPointerDrag);
+    imgArea.addEventListener('pointercancel', endPointerDrag);
+    imgArea.addEventListener('lostpointercapture', function() { if (isDragging) endPointerDrag(); });
+
+    imgArea.addEventListener('dblclick', function(e) {
+        if (e.target.closest && e.target.closest('.canvas-overlay-dock, .canvas-nav-btn')) return;
+        e.preventDefault();
+        if (scale > 1.05) resetTransform(false);
+        else zoomAt(e.clientX, e.clientY, 2, false);
+    });
+
+    // ★ 未放大时保留单指横滑切图；放大后 Pointer Events 接管拖拽。
+    var touchStartX = 0, touchStartY = 0, touchMoved = false;
+    imgArea.addEventListener('touchstart', function(e) {
+        if (scale > 1.005 || e.touches.length !== 1) return;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchMoved = false;
+    }, { passive: true });
+    imgArea.addEventListener('touchmove', function(e) {
+        if (scale > 1.005 || e.touches.length !== 1) return;
+        var dx = Math.abs(e.touches[0].clientX - touchStartX);
+        var dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if (dx > 10 && dx > dy) touchMoved = true;
+    }, { passive: true });
+    imgArea.addEventListener('touchend', function(e) {
+        if (scale > 1.005 || !touchMoved || images.length < 2) return;
+        var endX = e.changedTouches[0].clientX;
+        var diff = endX - touchStartX;
+        if (Math.abs(diff) > 50) switchTo(diff < 0 ? idx + 1 : idx - 1);
+    }, { passive: true });
 
     function switchTo(ni) {
         idx = (ni + images.length) % images.length;
@@ -418,16 +966,43 @@ function showImageLightbox(images, startIdx) {
     }
 
     function updateView() {
-        scale = 1; offsetX = 0; offsetY = 0;
+        scale = 1; renderedScale = 1; offsetX = 0; offsetY = 0; renderedOffsetX = 0; renderedOffsetY = 0;
         var m = getImageMeta(images[idx]);
-        img.src = cleanImageUrl(m.url);
+        if (isSvgPreview) {
+            svgPreview.innerHTML = images[idx].__svgMarkup || '';
+            var svgNode = svgPreview.querySelector('svg');
+            if (svgNode) {
+                svgNode.style.display = 'block';
+                svgNode.style.maxWidth = '100%';
+                svgNode.style.maxHeight = '100%';
+                svgNode.style.width = 'auto';
+                svgNode.style.height = 'auto';
+            }
+            img.style.display = 'none';
+        } else {
+            img.style.display = '';
+            img.src = cleanImageUrl(m.url);
+        }
         img.alt = (idx + 1) + ' / ' + images.length;
         counter.textContent = (idx + 1) + ' / ' + images.length + (images.length > 1 ? ' 张图片' : '');
         download.href = cleanImageUrl(m.url);
-        download.download = 'image_' + (idx + 1) + '.png';
+        download.download = isSvgPreview ? 'mermaid-diagram.svg' : 'image_' + (idx + 1) + '.png';
         // 清除浮层内容
         editPromptDisplay.textContent = '';
         editTextarea.value = '';
+        // ★ 填充信息面板数据
+        if (promptSection && promptSection.valueEl) promptSection.valueEl.textContent = m.prompt || '(无提示词)';
+        if (modelSection && modelSection.valueEl) modelSection.valueEl.textContent = m.model || '—';
+        if (ratioSection && ratioSection.valueEl) ratioSection.valueEl.textContent = m.aspect_ratio || '1:1';
+        if (timeSection && timeSection.valueEl) {
+            if (m.timestamp) {
+                var _d = new Date(m.timestamp);
+                timeSection.valueEl.textContent = _d.toLocaleDateString('zh-CN') + ' ' + _d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            } else {
+                timeSection.valueEl.textContent = '—';
+            }
+        }
+        if (notesSection && notesSection.valueEl) notesSection.valueEl.value = m.notes || '';
         applyTransform();
         renderFilmstrip();
     }
@@ -435,8 +1010,7 @@ function showImageLightbox(images, startIdx) {
     function closeLightbox() {
         if (closed) return;
         closed = true;
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
+        if (transformRaf) { cancelAnimationFrame(transformRaf); transformRaf = 0; }
         document.removeEventListener('keydown', keyHandler);
         document.body.style.overflow = previousOverflow;
         overlay.remove();
@@ -450,9 +1024,9 @@ function showImageLightbox(images, startIdx) {
         if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); return; }
         if (e.key === 'ArrowLeft') { switchTo(idx - 1); }
         if (e.key === 'ArrowRight') { switchTo(idx + 1); }
-        if (e.key === '+' || e.key === '=') { scale = Math.min(maxScale, Math.round((scale + 0.2) * 10) / 10); applyTransform(); }
-        if (e.key === '-') { scale = Math.max(minScale, Math.round((scale - 0.2) * 10) / 10); applyTransform(); }
-        if (e.key === '0') { scale = 1; offsetX = 0; offsetY = 0; applyTransform(); }
+        if (e.key === '+' || e.key === '=') { var _zr = imgArea.getBoundingClientRect(); zoomAt(_zr.left + _zr.width / 2, _zr.top + _zr.height / 2, scale * 1.2, false); }
+        if (e.key === '-') { var _zr2 = imgArea.getBoundingClientRect(); zoomAt(_zr2.left + _zr2.width / 2, _zr2.top + _zr2.height / 2, scale / 1.2, false); }
+        if (e.key === '0') resetTransform(false);
     }
     document.addEventListener('keydown', keyHandler);
 
@@ -491,7 +1065,16 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     };
     var iconHtml = typeIcons[toolName] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>';
 
-    var summary = toolName + ': ' + JSON.stringify(args).substring(0, 60);
+    var summary = '';
+    if (args && typeof args === 'object') {
+        if (args.command) summary = args.command;
+        else if (args.file_path || args.path) summary = args.file_path || args.path;
+        else if (args.query || args.keywords || args.q) summary = args.query || args.keywords || args.q;
+        else if (args.url) summary = args.url;
+        else summary = JSON.stringify(args).substring(0, 70);
+    } else {
+        summary = String(args || '').substring(0, 70);
+    }
 
     var resultText = '';
     if (result) {
@@ -519,11 +1102,11 @@ function createToolCallCard(toolName, args, result, durationMs, execDetails) {
     var statusText = isError ? '失败' : '成功';
 
     var html = '<button type="button" class="tool-call-card-header" aria-expanded="false">' +
-        '<span class="tool-call-card-icon" style="color:' + statusColor + ';">' + iconHtml + '</span>' +
-        '<span style="font-weight:600;font-size:12px;flex-shrink:0;">' + escapeHtml(toolName) + '</span>' +
-        '<span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">' + escapeHtml(summary) + '</span>' +
-        (durationStr ? '<span style="font-size:10px;color:#9ca3af;flex-shrink:0;">' + durationStr + '</span>' : '') +
-        '<span style="font-size:10px;color:' + statusColor + ';flex-shrink:0;font-weight:500;">' + statusText + '</span>' +
+        '<span class="tool-call-card-icon" style="color:' + statusColor + ';display:flex;align-items:center;">' + iconHtml + '</span>' +
+        '<span style="font-weight:700;font-size:12px;flex-shrink:0;color:#60a5fa;"># ' + escapeHtml(toolName) + '</span>' +
+        (summary ? '<span style="font-size:11px;opacity:0.85;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">· ' + escapeHtml(summary) + '</span>' : '<span style="flex:1;"></span>') +
+        (durationStr ? '<span style="font-size:10px;opacity:0.6;flex-shrink:0;">' + durationStr + '</span>' : '') +
+        '<span style="font-size:10px;color:' + statusColor + ';flex-shrink:0;font-weight:600;padding:1px 6px;border-radius:4px;background:rgba(' + (isError ? '239,68,68' : '16,185,129') + ',0.15);">' + statusText + '</span>' +
         '<span class="tool-call-card-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>' +
     '</button>' +
     '<div class="tool-call-card-body">';
@@ -737,17 +1320,23 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     var container = window._appendTarget || $.chatMessagesContainer;
     if (!container) return null;
 
-    // ★ 欢迎页淡出过渡
-    if (container.children.length === 1 && container.children[0].classList.contains('welcome-container')) {
-        var welcome = container.children[0];
-        welcome.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    // ★ 欢迎页淡出过渡：普通欢迎页与 Agent Workspace Hero 共用同一退出路径。
+    // 先移除 Agent 空态标记，避免首条消息插入后容器仍按欢迎页布局居中。
+    var welcome = container.querySelector(':scope > .welcome-container, :scope > .dsh-welcome-hero[data-agent-welcome="true"]');
+    if (welcome) {
+        container.classList.remove('agent-welcome-active');
+        welcome.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
         welcome.style.opacity = '0';
-        welcome.style.transform = 'scale(0.95)';
-        setTimeout(function() { welcome.remove(); }, 300);
+        welcome.style.transform = 'translateY(-6px) scale(0.98)';
+        setTimeout(function() { welcome.remove(); }, 220);
     }
 
     var row = document.createElement('div');
     row.className = `message-row ${role}`;
+    if (msgIndex >= 0 && currentChatId && chats[currentChatId] && chats[currentChatId].messages) {
+        var _rowMessage = chats[currentChatId].messages[msgIndex];
+        if (_rowMessage && _rowMessage.id) row.dataset.messageId = String(_rowMessage.id);
+    }
 
     var avatar = document.createElement('div');
     avatar.className = `avatar ${role}`;
@@ -755,10 +1344,11 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         avatar.textContent = '我';
     } else {
         var avatarImg = document.createElement('img');
-        avatarImg.className = 'avatar-remi-gif';
-        avatarImg.src = './src/remi/idle.gif';
-        avatarImg.alt = '蕾米';
+        avatarImg.className = 'avatar-remi-gif remi-character-asset mood-idle';
+        avatarImg.src = './src/remi-official/02.gif';
+        avatarImg.alt = '蕾米埃尔';
         avatarImg.title = '蕾米 · 待机中';
+        avatarImg.draggable = false;
         avatar.appendChild(avatarImg);
         // ★ 默认隐藏: 仅最新助手消息由 model-status.js 放行显示 (消除首帧全显闪烁, 布局零跳动)
         avatar.classList.add('remi-avatar-hide');
@@ -777,7 +1367,7 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         // 默认折叠,如果推理内容较短(<200字)则展开
         var reasoningLen = (reasoning || '').length;
         details.open = reasoningLen < 200;
-        var summaryText = '🤔 推理过程';
+        var summaryText = '推理过程';
         details.innerHTML = `<summary>${summaryText}</summary><div class="reasoning-content">${compressNewlines(reasoning, 2)}</div>`;
         bubble.appendChild(details);
     }
@@ -853,8 +1443,6 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
         contentDiv.innerHTML = escapeHtml((typeof text === 'string' ? text.replace(/\[object Object\]/g, '') : '') || '').replace(/\n/g, '<br>');
     } else {
         var display = compressNewlines(typeof text === 'string' ? text.replace(/\[object Object\]/g, '') : '', 2);
-        // 将 Markdown 图片语法 ![]() 转为可点击链接(避免加载失效图片)
-        display = display.replace(/!\[(.*?)\]\((.*?)\)/g, '[图片 $1]($2)');
         if (window.marked) {
             display = autoLinkURLs(display);
             // ★ 使用保护渲染: _protectMath → marked → _restoreMath (含 KaTeX)
@@ -967,97 +1555,19 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     }
     bubble.appendChild(contentDiv);
 
-    // ★ 如果消息仍在生成中(partial),显示加载动画
+    // Partial/resumed assistants use the same CSS typing state as newly-created bubbles.
+    // A separate msg-loading-indicator DOM node used to render a second, heavier row of
+    // three dots after refresh while ResumeStream also restored the typing class.
     if (partial && role === 'assistant') {
-        var loadingEl = document.createElement('div');
-        loadingEl.className = 'msg-loading-indicator';
-        loadingEl.innerHTML = '<span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>';
-        bubble.appendChild(loadingEl);
+        bubble.classList.add('typing');
     }
 
     // 如果有生成的图片,显示在内容下方
     var allImages = generatedImages || (generatedImage ? [generatedImage] : []);
+    if (generatedImage) allImages = allImages.concat([generatedImage]);
+    if (typeof dedupeImageList === 'function') allImages = dedupeImageList(allImages);
     if (allImages.length > 0) {
-        var imgContainer = document.createElement('div');
-        imgContainer.className = 'gen-image-container';
-        allImages.forEach(function(imgData, idx) {
-            var wrapper = document.createElement('div');
-            wrapper.className = 'gen-image-wrapper';
-            var img = document.createElement('img');
-            var meta = getImageMeta(imgData);
-            var cleanUrl = cleanImageUrl(meta.url);
-            img.src = cleanUrl;
-            img.alt = '生成图片 ' + (idx + 1);
-            var maxW = allImages.length > 1 ? '160px' : '320px';
-            img.className = 'gen-image';
-            img.style.maxWidth = maxW;
-            img.setAttribute('loading', 'lazy');
-            // ★ 点击放大预览 — 传入当前聊天所有图片，当前图在全部图片中的索引
-            img.addEventListener('click', function() {
-                var _allChatImgs = collectChatImages(currentChatId);
-                var _meta = getImageMeta(imgData);
-                var _globalIdx = _allChatImgs.findIndex(function(item) {
-                    return getImageUrl(item) === _meta.url;
-                });
-                if (_globalIdx === -1) _globalIdx = idx;
-                showImageLightbox(_allChatImgs, _globalIdx);
-            });
-            img.onerror = function() {
-                this.style.display = 'none';
-                var fallback = document.createElement('div');
-                fallback.style.cssText = 'padding:10px;border-radius:8px;background:#fef3c7;border:1px solid #f59e0b;margin:4px 0;color:#92400e;font-size:0.75rem;text-align:center;';
-                fallback.className = 'gen-image-error';
-                fallback.textContent = '\u26a0\ufe0f \u56fe\u7247\u52a0\u8f7d\u5931\u8d25';
-                wrapper.appendChild(fallback);
-            };
-            wrapper.appendChild(img);
-            // 悬停显示放大图标
-            var actionBar = document.createElement('div');
-            actionBar.className = 'img-action-bar';
-            // \u4e0b\u8f7d\u6309\u94ae
-            var dlBtn = document.createElement('button');
-            dlBtn.className = 'img-action-btn';
-            dlBtn.title = '\u4e0b\u8f7d\u56fe\u7247';
-            dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-            dlBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                _downloadImage(meta.url, 'generated_' + (idx + 1) + '.png');
-            });
-            actionBar.appendChild(dlBtn);
-            // \u590d\u5236\u6309\u94ae
-            var copyBtn = document.createElement('button');
-            copyBtn.className = 'img-action-btn';
-            copyBtn.title = '\u590d\u5236\u5230\u526a\u8d34\u677f';
-            copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-            copyBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                _copyImageToClipboard(meta.url);
-            });
-            actionBar.appendChild(copyBtn);
-            // \u4ee5\u56fe\u751f\u56fe\u6309\u94ae
-            var i2iBtn = document.createElement('button');
-            i2iBtn.className = 'img-action-btn';
-            i2iBtn.title = '\u4ee5\u56fe\u751f\u56fe';
-            i2iBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
-            i2iBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                _useAsReference(meta);
-            });
-            actionBar.appendChild(i2iBtn);
-            // \u91cd\u65b0\u751f\u6210\u6309\u94ae
-            var regenBtn = document.createElement('button');
-            regenBtn.className = 'img-action-btn';
-            regenBtn.title = '\u91cd\u65b0\u751f\u6210';
-            regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
-            regenBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                _regenerateImage(meta);
-            });
-            actionBar.appendChild(regenBtn);
-            wrapper.appendChild(actionBar);
-            imgContainer.appendChild(wrapper);
-        });
-        bubble.appendChild(imgContainer);
+        window.renderGeneratedImagesIntoBubble(bubble, allImages);
     }
 
     // ★ 推入标记: 消息在模型生成中途被推入时显示一个小角标
@@ -1072,9 +1582,9 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
 
     wrapper.appendChild(bubble);
 
-    // 操作按钮 — 放在气泡内部,自然对齐气泡右边缘
+    // 操作按钮 — 采用紧随消息内容的幽灵工具条
     var actions = document.createElement('div');
-    actions.className = 'msg-actions';
+    actions.className = 'msg-actions ' + (role === 'user' ? 'user-actions' : 'assistant-actions');
 
     // 复制按钮(构建逻辑抽到 _buildCopyButton, 供流结束就地收尾复用)
     actions.appendChild(_buildCopyButton(bubble, text));
@@ -1082,59 +1592,50 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     if (role === 'user') {
         // 编辑按钮 — 所有用户消息都显示
         var editBtn = document.createElement('div');
-            editBtn.className = 'msg-action-btn edit-btn';
-            editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
-            editBtn.onclick = (e) => {
-                e.stopPropagation();
-                var msgs = chats[currentChatId].messages;
-                var idx = msgs.findIndex(m => m.role === 'user' && m.text === text && JSON.stringify(m.files) === JSON.stringify(files));
-                if (idx === -1) return;
-                var sys = msgs.filter(m => m.role === 'system' && !m.temporary && !m.timestamp);
-                var timestamp = msgs.find(m => m.timestamp);
-                var others = msgs.slice(0, idx).filter(m => m.role !== 'system' || m.temporary || m.timestamp);
-                chats[currentChatId].messages = [...sys, ...others, ...(timestamp ? [timestamp] : [])];
+        editBtn.className = 'msg-action-btn edit-btn';
+        editBtn.setAttribute('title', '编辑此条消息并重新发送');
+        editBtn.setAttribute('aria-label', '编辑');
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/><path d="M15 5l4 4"/></svg>';
+        editBtn.onclick = (e) => {
+            e.stopPropagation();
+            var msgs = chats[currentChatId].messages;
+            var idx = msgs.findIndex(m => m.role === 'user' && m.text === text && JSON.stringify(m.files) === JSON.stringify(files));
+            if (idx === -1) return;
+            var sys = msgs.filter(m => m.role === 'system' && !m.temporary && !m.timestamp);
+            var timestamp = msgs.find(m => m.timestamp);
+            var others = msgs.slice(0, idx).filter(m => m.role !== 'system' || m.temporary || m.timestamp);
+            var remaining = [...sys, ...others, ...(timestamp ? [timestamp] : [])];
+            if (typeof window.truncateChatMessages === 'function') {
+                window.truncateChatMessages(currentChatId, remaining);
+            } else {
+                chats[currentChatId].messages = remaining;
                 saveChatsDebounced();
                 loadChat(currentChatId);
-                if ($.userInput) {
-                    $.userInput.value = text || '';
-                    window.autoResize($.userInput);
-                }
-                pendingFiles = files ? files.map(f => ({ ...f })) : [];
-                updateFilePreviewUI();
-            };
-            actions.appendChild(editBtn);
-        } else {
-            // ★ 生成中隐藏操作按钮，避免和思考动画重叠
-            if (partial) { /* 不渲染操作按钮 */ }
-            else {
-                var _asstBtns = _buildAssistantActionButtons(bubble, text, msgIndex);
-                if (_asstBtns) actions.appendChild(_asstBtns);
             }
+            if ($.userInput) {
+                $.userInput.value = text || '';
+                window.autoResize($.userInput);
+            }
+            pendingFiles = files ? files.map(f => ({ ...f })) : [];
+            updateFilePreviewUI();
+        };
+        actions.appendChild(editBtn);
+    } else {
+        // ★ 生成中隐藏操作按钮，避免和思考动画重叠
+        if (partial) { /* 不渲染操作按钮 */ }
+        else {
+            var _asstBtns = _buildAssistantActionButtons(bubble, text, msgIndex);
+            if (_asstBtns) actions.appendChild(_asstBtns);
+        }
     }
 
     if (actions.children.length) wrapper.appendChild(actions);
 
-    // 底部统计(改用SVG图标) — 构建逻辑在 _buildMsgFooterHtml(供流结束就地收尾复用)
-    // ★ 防止历史脏数据: time > 1天(86400000ms)视为绝对时间戳,不显示
-    var _validTime = (time > 0 && time < 86400000);
-    if (role === 'assistant' && (usage || _validTime)) {
-        var footer = document.createElement('div');
-        footer.className = 'message-footer';
-        footer.innerHTML = _buildMsgFooterHtml(usage, time);
-        bubble.appendChild(footer);
-    }
-
+    // ★ 底部统计已移至独立使用统计模块，气泡内不再渲染单次耗时与 token 统计
     row.appendChild(avatar);
     row.appendChild(wrapper);
     // ★ 淡入动画(历史加载大量消息时用 _suppressRowAnim 抑制, 避免数百次过渡卡顿)
     container.appendChild(row);
-    // ★ 页脚只保留最后一个助手气泡的统计 (此时行已挂入容器, 修剪才有效)
-    if (role === 'assistant' && (usage || _validTime)) {
-        var _foots = container.querySelectorAll('.bubble.assistant .message-footer');
-        if (_foots.length > 1) {
-            for (var _fi = 0; _fi < _foots.length - 1; _fi++) _foots[_fi].remove();
-        }
-    }
     if (!window._suppressRowAnim) {
         row.style.opacity = '0';
         row.style.transform = 'translateY(10px)';
@@ -1146,24 +1647,35 @@ function appendMessage(role, text, files = null, reasoning = null, usage = null,
     }
 
     // 不在这里滚动,streaming 时会自然跟随
+    attachImageFallbacks(row);
 
     return bubble;
 }
 
 // ==================== 消息操作按钮/页脚构建(appendMessage 与流结束就地收尾共用) ====================
 
-// ★ 复制按钮
+// ★ 复制按钮 (带优雅 Check 对勾与 Tooltip 反馈)
 function _buildCopyButton(bubble, text) {
     var copyBtn = document.createElement('div');
     copyBtn.className = 'msg-action-btn copy-msg-btn';
-    copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    copyBtn.setAttribute('title', '复制内容');
+    copyBtn.setAttribute('aria-label', '复制内容');
+    var copySvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    var checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    copyBtn.innerHTML = copySvg;
     copyBtn.onclick = (e) => {
         e.stopPropagation();
         // ★ 动态读取气泡当前文本,而非闭包里初始的 text 变量
         var _bubbleText = bubble.querySelector('.markdown-body')?.textContent || bubble.textContent || text;
         copyMessageContent(_bubbleText);
-        copyBtn.style.background = '#bbf7d0';
-        setTimeout(() => copyBtn.style.background = '', 300);
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = checkSvg;
+        copyBtn.setAttribute('title', '已复制');
+        setTimeout(() => {
+            copyBtn.classList.remove('copied');
+            copyBtn.innerHTML = copySvg;
+            copyBtn.setAttribute('title', '复制内容');
+        }, 1500);
     };
     return copyBtn;
 }
@@ -1174,7 +1686,6 @@ function _buildAssistantActionButtons(bubble, text, msgIndex) {
     var _msgsArr = chats[currentChatId]?.messages || [];
     var _isLastAsst = false;
     if (msgIndex >= 0 && _msgsArr[msgIndex] && _msgsArr[msgIndex].role === 'assistant') {
-        // 检查此消息之后是否还有其他 assistant 消息(排除partial)
         var _hasAsstAfter = false;
         for (var _ai = msgIndex + 1; _ai < _msgsArr.length; _ai++) {
             if (_msgsArr[_ai].role === 'assistant' && !_msgsArr[_ai].partial) {
@@ -1182,38 +1693,49 @@ function _buildAssistantActionButtons(bubble, text, msgIndex) {
             }
         }
         _isLastAsst = !_hasAsstAfter;
+    } else {
+        // msgIndex 缺省时默认视作最新助手消息
+        _isLastAsst = true;
     }
-    if (_isLastAsst) {
-        // ★ 最后一条: 重新生成按钮
-        var regenBtn = document.createElement('div');
-        regenBtn.className = 'msg-action-btn regenerate-btn';
-        regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
-        regenBtn.title = '重新生成回复';
-        regenBtn.onclick = async (e) => {
-            e.stopPropagation();
-            var msgs = chats[currentChatId].messages;
-            // ★ 用msgIndex定位(比content字符串匹配可靠)
-            var idx = msgIndex;
-            if (idx < 0 || idx >= msgs.length || msgs[idx].role !== 'assistant') {
-                idx = msgs.findIndex(m => m.role === 'assistant' && m.content === text);
-            }
-            if (idx === -1) return;
-            var sys = msgs.filter(m => m.role === 'system' && !m.temporary && !m.timestamp);
-            var timestamp = msgs.find(m => m.timestamp);
-            var others = msgs.slice(0, idx).filter(m => m.role !== 'system' || m.temporary || m.timestamp);
-            chats[currentChatId].messages = [...sys, ...others, ...(timestamp ? [timestamp] : [])];
+
+    // ★ 重新生成按钮 (所有助手回复均支持重新生成，精准定位到该轮之前)
+    var regenBtn = document.createElement('div');
+    regenBtn.className = 'msg-action-btn regenerate-btn';
+    regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+    regenBtn.setAttribute('title', '重新生成回复');
+    regenBtn.setAttribute('aria-label', '重新生成回复');
+    regenBtn.onclick = async (e) => {
+        e.stopPropagation();
+        var msgs = chats[currentChatId].messages;
+        var idx = msgIndex;
+        if (idx < 0 || idx >= msgs.length || msgs[idx].role !== 'assistant') {
+            idx = msgs.findIndex(m => m.role === 'assistant' && (m.content === text || (text && m.content && m.content.indexOf(text.substring(0, 30)) === 0)));
+        }
+        if (idx === -1) idx = msgs.length - 1;
+        if (idx < 0) return;
+        var sys = msgs.filter(m => m.role === 'system' && !m.temporary && !m.timestamp);
+        var timestamp = msgs.find(m => m.timestamp);
+        var others = msgs.slice(0, idx).filter(m => m.role !== 'system' || m.temporary || m.timestamp);
+        var lastUser = msgs.slice(0, idx).filter(m => m.role === 'user').pop();
+        var remaining = [...sys, ...others, ...(timestamp ? [timestamp] : [])];
+        if (typeof window.truncateChatMessages === 'function') {
+            window.truncateChatMessages(currentChatId, remaining);
+        } else {
+            chats[currentChatId].messages = remaining;
             saveChatsDebounced();
             loadChat(currentChatId);
-            var lastUser = msgs.slice(0, idx).filter(m => m.role === 'user').pop();
-            if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
-        };
-        frag.appendChild(regenBtn);
+        }
+        if (lastUser) await sendMessage(true, lastUser.text, lastUser.files);
+    };
+    frag.appendChild(regenBtn);
 
-        // ★ "继续生成"按钮 — 让模型展开详述
+    if (_isLastAsst) {
+        // ★ 最新一条额外附带 "继续生成" 按钮
         var continueBtn = document.createElement('div');
         continueBtn.className = 'msg-action-btn continue-btn';
         continueBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/><line x1="12" y1="15" x2="12" y2="21"/></svg>';
-        continueBtn.title = '继续展开详述';
+        continueBtn.setAttribute('title', '继续展开详述');
+        continueBtn.setAttribute('aria-label', '继续展开详述');
         continueBtn.onclick = async (e) => {
             e.stopPropagation();
             if (typeof window.sendMessage === 'function') {
@@ -1222,76 +1744,56 @@ function _buildAssistantActionButtons(bubble, text, msgIndex) {
         };
         frag.appendChild(continueBtn);
     } else {
-        // ★ 旧回复: 还原按钮 — 回到此位置，忽略之后的内容
+        // ★ 历史回复附带 "还原/分支到此处" 按钮
         var restoreBtn = document.createElement('div');
         restoreBtn.className = 'msg-action-btn restore-btn';
         restoreBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/><line x1="9" y1="12" x2="21" y2="12"/><path d="M3 12a9 9 0 0 1 9-9"/></svg>';
-        restoreBtn.title = '还原到此处（忽略后续对话）';
+        restoreBtn.setAttribute('title', '从此回复回退重试（丢弃后续）');
+        restoreBtn.setAttribute('aria-label', '从此回复回退重试');
         restoreBtn.onclick = async (e) => {
             e.stopPropagation();
             if (!confirm('还原对话到此位置？\n\n此操作将删除该回复之后的所有对话内容，不可撤销。')) return;
             var msgs = chats[currentChatId].messages;
-            var idx = msgs.findIndex(m => m.role === 'assistant' && m.content === text);
+            var idx = msgIndex;
+            if (idx < 0 || idx >= msgs.length) {
+                idx = msgs.findIndex(m => m.role === 'assistant' && m.content === text);
+            }
             if (idx === -1) return;
-            // 保留此消息及之前的所有消息（包括 system）
-            chats[currentChatId].messages = msgs.slice(0, idx + 1);
-            saveChatsDebounced();
-            loadChat(currentChatId);
+            var remaining = msgs.slice(0, idx + 1);
+            if (typeof window.truncateChatMessages === 'function') {
+                window.truncateChatMessages(currentChatId, remaining);
+            } else {
+                chats[currentChatId].messages = remaining;
+                saveChatsDebounced();
+                loadChat(currentChatId);
+            }
         };
         frag.appendChild(restoreBtn);
     }
     return frag.children.length ? frag : null;
 }
 
-// ★ 构建消息页脚 HTML(耗时/token/缓存命中) — appendMessage 与 finalizeBubbleUI 共用
+// ★ 构建消息页脚 HTML: 统计已解耦移至独立使用统计模块，气泡内保留空返回
 function _buildMsgFooterHtml(usage, time) {
-    var _validTime = (time > 0 && time < 86400000);
-    if (!_validTime && !usage) return '';
-    let foot = '';
-    if (_validTime) {
-        foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg> ' + (time / 1000).toFixed(1) + 's';
-    }
-    if (usage) {
-        var ct = Number(usage.completion_tokens) || 0; var pt = Number(usage.prompt_tokens) || 0; var tokens = Number(usage.total_tokens) || (ct + pt) || 0;
-        // ★ 兜底: 从其他命名字段提取 token 数
-        if (!tokens && (usage.input_tokens !== undefined || usage.output_tokens !== undefined)) {
-            tokens = (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
-        }
-        if (!tokens && usage.inputTokenCount) tokens = Number(usage.inputTokenCount) + (Number(usage.outputTokenCount) || 0) || 0;
-        if (tokens > 0) {
-            if (foot.length > 0) foot += ' <span class="msg-foot-sep"></span> ';
-            foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="9.5,2 4,9 7.5,9 6.5,14 12,7 8.5,7"/></svg> ' + tokens;
-        }
-        // ★ 统一提取缓存命中信息,兼容多模型格式 (DeepSeek/OpenAI/Anthropic/Gemini/Grok)
-        var cacheHit = null, cacheMiss = null;
-        cacheHit = window._extractCacheHit ? window._extractCacheHit(usage) : 0;
-        if (cacheHit > 0) {
-            cacheMiss = (window._extractPromptTokens ? window._extractPromptTokens(usage) : 0) || pt || ct;
-            cacheMiss = cacheMiss - cacheHit;
-            if (cacheMiss < 0) cacheMiss = 0;
-        }
-        // ★ 缓存命中信息: 页脚只出现在最后一个气泡, 这里恢复展示 (兼容 4 种模型格式)
-        if (cacheHit !== null && cacheHit > 0) {
-            var cacheTotal = cacheHit + cacheMiss;
-            if (foot.length > 0) foot += ' <span class="msg-foot-sep"></span> ';
-            foot += '<svg class="msg-foot-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5 6h6M5 9h4M5 12h6"/></svg> ';
-            foot += cacheTotal > 0 ? ((cacheHit / cacheTotal) * 100).toFixed(1) + '%缓存命中(' + cacheHit + '/' + cacheTotal + ')' : '缓存未启用';
-        }
-    }
-    return foot;
+    return '';
 }
 
-// ★ 流结束就地收尾: 给已存在的气泡补操作按钮 + 页脚
+// ★ 流结束就地收尾: 给已存在的气泡补操作按钮
 //   (替代 finally 里的 loadChat 全量重建 — 免重建后页面不再跳变)
 window.finalizeBubbleUI = function(bubble, text, msgIndex, usage, time) {
     if (!bubble) return;
+    var _remiLoader = bubble.querySelector('.remi-typing-indicator');
+    if (_remiLoader) _remiLoader.remove();
+    bubble.classList.remove('typing', 'gen-active', 'streaming');
+    // 明确投递完成事件，避免仅依靠 MutationObserver 时序导致蕾米停留在奋笔疾书。
+    if (typeof window.remiReact === 'function') window.remiReact('turn/completed', { source: 'finalizeBubbleUI' });
     var wrapper = bubble.closest('.message-content-wrapper');
     if (!wrapper) return;
     // 操作按钮: 已存在则只补 assistant 专属按钮(重新生成/继续/还原)
     var actions = wrapper.querySelector('.msg-actions');
     if (!actions) {
         actions = document.createElement('div');
-        actions.className = 'msg-actions';
+        actions.className = 'msg-actions assistant-actions';
         actions.appendChild(_buildCopyButton(bubble, text));
         wrapper.appendChild(actions);
     }
@@ -1299,30 +1801,104 @@ window.finalizeBubbleUI = function(bubble, text, msgIndex, usage, time) {
         var asstBtns = _buildAssistantActionButtons(bubble, text, msgIndex);
         if (asstBtns) actions.appendChild(asstBtns);
     }
-    // 页脚(耗时/token/缓存命中) — 只在最后一个气泡显示
-    if (!bubble.querySelector('.message-footer')) {
-        // ★ 先清掉其他气泡的页脚, 只留当前(最新输出)的统计
-        var container2 = bubble.closest('.chat-messages-container') || bubble.closest('.message-row')?.parentElement;
-        if (container2) {
-            container2.querySelectorAll('.bubble.assistant .message-footer').forEach(function(_f) {
-                if (_f.closest('.bubble') !== bubble) _f.remove();
+    // 确保移除气泡内任何历史 message-footer 元素
+    var oldFooter = bubble.querySelector('.message-footer');
+    if (oldFooter) oldFooter.remove();
+    attachImageFallbacks(bubble);
+
+    // ★ 异步记录到独立使用统计看板
+    if (usage && typeof window.recordUsageStats === 'function') {
+        try {
+            var _curEffort = localStorage.getItem('thinkingIntensity') || '';
+            var _curM = (typeof currentModel !== 'undefined' ? currentModel : '');
+            if (!_curEffort && _curM) {
+                var _mMatch = _curM.match(/-(off|minimal|low|medium|high|xhigh|max)$/i);
+                if (_mMatch) _curEffort = _mMatch[1].toLowerCase();
+            }
+            window.recordUsageStats({
+                usage: usage,
+                durationMs: time,
+                textLength: (text || '').length,
+                chatId: (typeof currentChatId !== 'undefined' ? currentChatId : ''),
+                model: _curM,
+                provider: (typeof baseUrlProvider !== 'undefined' ? baseUrlProvider : 'custom'),
+                effort: _curEffort || '未记录'
             });
-        }
-        var footHtml = _buildMsgFooterHtml(usage, time);
-        if (footHtml) {
-            var footer = document.createElement('div');
-            footer.className = 'message-footer';
-            footer.innerHTML = footHtml;
-            bubble.appendChild(footer);
+        } catch (e) {
+            console.warn('[UsageStats] recordUsageStats in finalizeBubbleUI warning:', e);
         }
     }
 };
 
+// ★ HTML 代码实时预览弹窗 (Sandbox iframe)
+window.showHtmlPreviewModal = function(rawCode) {
+    if (!rawCode) return;
+    var overlay = document.createElement('div');
+    overlay.className = 'html-preview-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.65);backdrop-filter:blur(6px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;animation:fadeIn 0.2s ease;';
+
+    var card = document.createElement('div');
+    card.className = 'html-preview-card';
+    card.style.cssText = 'background:var(--bg-primary,#ffffff);border:1px solid rgba(255,255,255,0.15);box-shadow:0 20px 40px rgba(0,0,0,0.3);border-radius:14px;width:92%;max-width:960px;height:84vh;display:flex;flex-direction:column;overflow:hidden;';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'padding:10px 16px;background:var(--bg-secondary,#f8fafc);border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;user-select:none;';
+    header.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;color:#334155;">' +
+        '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:#10b981;color:#fff;border-radius:4px;font-size:11px;">▶</span>' +
+        '<span>HTML 实时运行预览 (安全沙箱)</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<button class="html-preview-newtab" style="padding:4px 10px;font-size:12px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;color:#334155;transition:background 0.2s;">新标签打开</button>' +
+        '<button class="html-preview-close" style="padding:4px 8px;font-size:16px;background:transparent;border:none;cursor:pointer;color:#64748b;line-height:1;border-radius:4px;">✕</button>' +
+        '</div>';
+
+    var iframe = document.createElement('iframe');
+    iframe.style.cssText = 'flex:1;width:100%;border:none;background:#ffffff;';
+    iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-same-origin');
+    
+    // 注入 HTML 内容
+    iframe.srcdoc = rawCode;
+
+    card.appendChild(header);
+    card.appendChild(iframe);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    var closeBtn = header.querySelector('.html-preview-close');
+    closeBtn.onclick = function() { overlay.remove(); };
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+    var newtabBtn = header.querySelector('.html-preview-newtab');
+    newtabBtn.onclick = function() {
+        try {
+            var blob = new Blob([rawCode], { type: 'text/html;charset=utf-8' });
+            var blobUrl = URL.createObjectURL(blob);
+            var w = window.open(blobUrl, '_blank');
+            if (!w) {
+                var win = window.open('', '_blank');
+                if (win) { win.document.write(rawCode); win.document.close(); }
+            }
+        } catch(err) {
+            var win2 = window.open('', '_blank');
+            if (win2) { win2.document.write(rawCode); win2.document.close(); }
+        }
+    };
+
+    var escHandler = function(e) {
+        if (e.key === 'Escape') {
+            overlay.remove();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+};
+
 function attachCodeCopyButtons(container) {
+    if (!container) return;
     container.querySelectorAll('pre').forEach(pre => {
         if (pre.querySelector('.code-actions')) return;
-        var code = pre.innerText.trim();
-        var isHtml = /^(<!DOCTYPE|<html|<HTML|<svg[\s>])/.test(code) || (code.indexOf('<') >= 0 && code.indexOf('>') >= 0 && (code.indexOf('style') >= 0 || code.indexOf('script') >= 0 || code.indexOf('div') >= 0 || code.indexOf('body') >= 0 || code.indexOf('h1') >= 0 || code.indexOf('p>') >= 0));
+        var code = (pre.querySelector('code') ? pre.querySelector('code').textContent : pre.innerText).trim();
+        var isHtml = /^(<!DOCTYPE|<html|<HTML|<svg[\s>])/i.test(code) || (code.indexOf('<') >= 0 && code.indexOf('>') >= 0 && (code.indexOf('style') >= 0 || code.indexOf('script') >= 0 || code.indexOf('div') >= 0 || code.indexOf('body') >= 0 || code.indexOf('h1') >= 0 || code.indexOf('p>') >= 0));
 
         var actions = document.createElement('div');
         actions.className = 'code-actions';
@@ -1330,24 +1906,50 @@ function attachCodeCopyButtons(container) {
         if (isHtml) {
             var runBtn = document.createElement('div');
             runBtn.className = 'code-run-btn';
+            runBtn.setAttribute('title', '运行/预览此HTML');
+            runBtn.setAttribute('aria-label', '运行/预览此HTML');
             runBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>';
-            runBtn.title = '\u8fd0\u884c\u6b64HTML';
             runBtn.onclick = function(e) {
                 e.stopPropagation();
-                try { var win = window.open('', '_blank'); win.document.write(code); win.document.close(); }
-                catch(err) { alert('\u65e0\u6cd5\u6253\u5f00\u65b0\u7a97\u53e3'); }
+                if (typeof window.showHtmlPreviewModal === 'function') {
+                    window.showHtmlPreviewModal(code);
+                } else {
+                    try { var win = window.open('', '_blank'); win.document.write(code); win.document.close(); }
+                    catch(err) { alert('无法打开新窗口'); }
+                }
             };
             actions.appendChild(runBtn);
         }
 
         var copyBtn = document.createElement('div');
         copyBtn.className = 'code-copy-btn';
-        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        copyBtn.setAttribute('title', '复制代码');
+        copyBtn.setAttribute('aria-label', '复制代码');
+        var copySvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        var checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        copyBtn.innerHTML = copySvg;
         copyBtn.onclick = function(e) {
             e.stopPropagation();
-            navigator.clipboard.writeText(code);
-            copyBtn.style.background = '#bbf7d0';
-            setTimeout(function() { copyBtn.style.background = ''; }, 300);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(code).catch(() => {});
+            } else {
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = code;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                } catch(e) {}
+            }
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = checkSvg;
+            copyBtn.setAttribute('title', '已复制');
+            setTimeout(function() {
+                copyBtn.classList.remove('copied');
+                copyBtn.innerHTML = copySvg;
+                copyBtn.setAttribute('title', '复制代码');
+            }, 1500);
         };
         actions.appendChild(copyBtn);
 
@@ -1363,6 +1965,7 @@ function applySyntaxHighlighting(container) {
             try {
                 var _lang = (block.className || '').match(/language-(\S+)/);
                 if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) return;
+                if (block.children && block.children.length) block.textContent = block.textContent || '';
                 hljs.highlightElement(block);
             } catch(e) {}
         });

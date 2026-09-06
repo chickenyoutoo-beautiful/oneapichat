@@ -7,6 +7,22 @@
       "created": "2026-06-01T22:08:00",
       "updated": "2026-06-15T12:00:00",
       "url": "/oneapichat/workspace/projects/aisniper-os/index.html"
+    },
+    {
+      "name": "stardust-echo",
+      "title": "星屑回声 Stardust Echo",
+      "description": "原创网页Galgame：夏日天文社、失落记忆与时间回环主题，双女主、多分支、四结局，支持存读档、自动播放、回看、章节选择与结局画廊。",
+      "created": "2026-08-09T14:00:00",
+      "updated": "2026-08-09T15:30:00",
+      "url": "/oneapichat/workspace/projects/stardust-echo/index.html"
+    },
+    {
+      "name": "decision-wheel",
+      "title": "决策轮盘 Decision Wheel",
+      "description": "极简毛玻璃质感的个人决策轮盘 - Canvas绘制彩色轮盘、流畅旋转动画、撒花庆祝效果、本地存储、预设模板、选项管理",
+      "created": "2026-08-23T00:00:00",
+      "updated": "2026-08-23T00:00:00",
+      "url": "/oneapichat/workspace/projects/decision-wheel/index.html"
     }
   ]
 }

@@ -32,14 +32,9 @@ function bindSearchEvents() {
             el.addEventListener('change', function() { saveConfig(); });
         }
     });
-    // ★ 搜索 API Key 变更时自动保存(密码框 input 事件)
-    ['searchApiKey', 'searchApiKeyBrave', 'searchApiKeyGoogle', 'searchApiKeyTavily'].forEach(function(id) {
-        var el = getEl(id);
-        if (el) {
-            el.addEventListener('change', function() { saveConfig(); });
-            el.addEventListener('input', function() { saveConfig(); });
-        }
-    });
+    // 搜索 Key 只保留当前引擎一处输入，避免“通用 Key / 独立 Key”互相覆盖。
+    getEl('searchApiKey')?.addEventListener('change', function() { saveConfig(); });
+    getEl('searchTestBtn')?.addEventListener('click', testCurrentSearchProvider);
     // 工具调用模式切换时显示/隐藏提示和AI判断选项
     getEl("searchToolCallToggle")?.addEventListener("change", function() {
         updateToolModeBtn();
@@ -47,33 +42,81 @@ function bindSearchEvents() {
 }
 
 // ★ 搜索引擎提供商切换 (参照主模型 onProviderChange)
-const SEARCH_PROVIDER_KEY_MAP = { brave: 'searchApiKeyBrave', google: 'searchApiKeyGoogle', tavily: 'searchApiKeyTavily', minimax: 'searchApiKeyMiniMax' };
+const SEARCH_PROVIDER_KEY_MAP = { brave: 'searchApiKeyBrave', tavily: 'searchApiKeyTavily', deepseek: 'searchApiKeyDeepSeek', minimax: 'searchApiKeyMiniMax' };
+const RETIRED_SEARCH_PROVIDERS = { google: 'tavily', duckduckgo: 'tavily' };
 
 window.onSearchProviderChange = async function() {
-    var provider = getVal('searchProvider') || 'duckduckgo';
-    // 1. 保存当前 Key 到旧引擎
+    var provider = getVal('searchProvider') || 'tavily';
+    if (RETIRED_SEARCH_PROVIDERS[provider]) {
+        provider = RETIRED_SEARCH_PROVIDERS[provider];
+        setVal('searchProvider', provider);
+    }
+    var oldProvider = localStorage.getItem('searchProvider') || 'tavily';
     var curKey = getVal('searchApiKey') || '';
-    var oldProvider = localStorage.getItem('searchProvider') || 'duckduckgo';
-    if (oldProvider && oldProvider !== provider && curKey) {
+
+    // 切换前先把输入框中的 Key 保存到旧引擎专属槽位。
+    if (oldProvider && oldProvider !== provider) {
         var oldKeyId = SEARCH_PROVIDER_KEY_MAP[oldProvider];
         if (oldKeyId) localStorage.setItem(oldKeyId, await encrypt(curKey));
     }
-    // 2. 切换到新引擎的 Key (优先独立 Key,其次通用 Key)
+
     var newKeyId = SEARCH_PROVIDER_KEY_MAP[provider];
-    var savedProviderKey = newKeyId ? localStorage.getItem(newKeyId) : null;
-    if (newKeyId && savedProviderKey) {
-        var dk = await decrypt(savedProviderKey);
-        setVal('searchApiKey', (dk && dk !== 'not-needed') ? dk : '');
-    } else if (provider === 'duckduckgo') {
-        // DuckDuckGo 无需 Key,清空
-        setVal('searchApiKey', '');
-    } else {
-        // 没有独立 Key,保留当前值(可能是之前手动输入的通用 Key)
-    }
-    // 3. 持久化
+    var savedProviderKey = newKeyId ? localStorage.getItem(newKeyId) : '';
+    var nextKey = savedProviderKey ? await decrypt(savedProviderKey) : '';
+    setVal('searchApiKey', (nextKey && nextKey !== 'not-needed') ? nextKey : '');
+
     localStorage.setItem('searchProvider', provider);
-    saveConfig();
+    updateSearchProviderUI(provider);
+    await saveConfig();
 };
+
+function updateSearchProviderUI(provider) {
+    provider = provider || getVal('searchProvider') || 'tavily';
+    var meta = {
+        brave: { name: 'Brave Search', desc: '独立搜索索引，支持网页、新闻和图片搜索（需 Brave Search API Token）。', placeholder: '粘贴 Brave Search API Key', key: true },
+        tavily: { name: 'Tavily', desc: '面向 AI 的高质量摘要与全文提取，搜索效果与问答结合极佳。', placeholder: '粘贴 Tavily API Key', key: true },
+        deepseek: { name: 'DeepSeek 联网搜索', desc: '使用 Responses API 的原生 web_search 工具；模型会自动检索并整合结果。', placeholder: '粘贴 DeepSeek API Key', key: true },
+        minimax: { name: 'MiniMax', desc: '复用当前聊天设置中的 MiniMax Key 作为备用搜索通道。', placeholder: '复用聊天 Key，无需填写', key: false }
+    }[provider] || { name: provider, desc: '', placeholder: '当前引擎 API Key', key: true };
+    var keyInput = getEl('searchApiKey');
+    if (keyInput) {
+        keyInput.placeholder = meta.placeholder;
+        keyInput.disabled = !meta.key;
+        keyInput.closest('.search-key-field')?.classList.toggle('is-disabled', !meta.key);
+    }
+    var nameEl = getEl('searchProviderName');
+    var descEl = getEl('searchProviderDesc');
+    if (nameEl) nameEl.textContent = meta.name;
+    if (descEl) descEl.textContent = meta.desc;
+    var status = getEl('searchTestStatus');
+    if (status) { status.textContent = ''; status.className = 'search-test-status'; }
+}
+
+async function testCurrentSearchProvider() {
+    var btn = getEl('searchTestBtn');
+    var status = getEl('searchTestStatus');
+    var provider = getVal('searchProvider') || 'tavily';
+    if (provider === 'brave' && !getVal('searchApiKey')) {
+        status.textContent = '请先填写 Brave Search API Key';
+        status.className = 'search-test-status is-error';
+        return;
+    }
+    if (btn) btn.disabled = true;
+    status.textContent = '正在测试连接…';
+    status.className = 'search-test-status is-loading';
+    try {
+        await saveConfig();
+        var results = await performWebSearch('OneAPIChat connectivity test', null, 'web');
+        if (!results || !results.length) throw new Error('接口已连接，但当前查询没有结果');
+        status.textContent = '已连接 · ' + results.length + ' 条结果';
+        status.className = 'search-test-status is-success';
+    } catch (e) {
+        status.textContent = '测试失败：' + (e && e.message ? e.message : '未知错误');
+        status.className = 'search-test-status is-error';
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
 
 async function loadSearchConfig() {
     setChecked('searchToggle', localStorage.getItem('enableSearch') === 'true');
@@ -85,6 +128,7 @@ async function loadSearchConfig() {
     // ★ 与 main.js 默认行为一致：未设置/'1' 都视为启用
     setChecked('resumeStreamToggle', localStorage.getItem('__enableResumeStream') !== '0');
     setChecked('proxyToggle', localStorage.getItem('proxyEnabled') !== '0');  // 默认开启
+    setVal('proxyUrl', localStorage.getItem('proxyUrl') || '');
     setChecked('toolCardToggle', localStorage.getItem('toolCards') !== '0');
     setChecked('anthropicFormatToggle', localStorage.getItem('useAnthropicFormat') === '1');
     var _proxyDetails = document.getElementById('proxyConfigDetails');
@@ -95,9 +139,12 @@ async function loadSearchConfig() {
     }
     setVal('aiSearchJudgeModel', localStorage.getItem('aiSearchJudgeModel') || 'deepseek-chat');
     setVal('aiSearchJudgePrompt', localStorage.getItem('aiSearchJudgePrompt') || DEFAULT_CONFIG.aiSearchJudgePrompt);
-    setVal('searchProvider', localStorage.getItem('searchProvider') || 'duckduckgo');
+    var storedProvider = localStorage.getItem('searchProvider') || 'tavily';
+    // Google 与 DuckDuckGo 已下架；旧配置自动迁移到 Tavily，避免界面卡在不可用引擎。
+    var provider = RETIRED_SEARCH_PROVIDERS[storedProvider] || storedProvider;
+    if (provider !== storedProvider) localStorage.setItem('searchProvider', provider);
+    setVal('searchProvider', provider);
     // 优先使用当前引擎的独立Key,否则用通用Key
-    var provider = localStorage.getItem('searchProvider') || 'duckduckgo';
     var providerKey = SEARCH_PROVIDER_KEY_MAP[provider];
     var savedProviderKey = providerKey ? localStorage.getItem(providerKey) : null;
     var savedGeneralKey = localStorage.getItem('searchApiKey');
@@ -108,10 +155,7 @@ async function loadSearchConfig() {
     } else {
         setVal('searchApiKey', '');
     }
-    // 加载各引擎独立Key
-    setVal('searchApiKeyBrave', await decrypt(localStorage.getItem('searchApiKeyBrave') || ''));
-    setVal('searchApiKeyGoogle', await decrypt(localStorage.getItem('searchApiKeyGoogle') || ''));
-    setVal('searchApiKeyTavily', await decrypt(localStorage.getItem('searchApiKeyTavily') || ''));
+    updateSearchProviderUI(provider);
     setVal('searchRegion', localStorage.getItem('searchRegion') || '');
     setVal('searchTimeout', localStorage.getItem('searchTimeout') || '30');
     setVal('maxSearchResults', localStorage.getItem('maxSearchResults') || '3');
@@ -889,14 +933,20 @@ window.deleteMcpServer = function(id) {
     if (typeof window.updateToolsActiveCount === 'function') window.updateToolsActiveCount();
 };
 
-// 测试 MCP 服务器连接
-window.testMcpServer = async function(id) {
+// 测试 MCP 服务器连接。每个服务器只接受最后一次测试的结果，避免页面自动重连
+// 与用户手动点击同时发生时，较慢的旧请求覆盖较新的状态。
+window._mcpTestSeq = window._mcpTestSeq || {};
+window.testMcpServer = async function(id, options) {
+    options = options || {};
     var servers = window.loadMcpServers();
     var srv = null;
     for (var i = 0; i < servers.length; i++) {
         if (servers[i].id === id) { srv = servers[i]; break; }
     }
-    if (!srv) return;
+    if (!srv) return false;
+
+    var seq = (window._mcpTestSeq[id] || 0) + 1;
+    window._mcpTestSeq[id] = seq;
 
     // 更新状态为连接中
     srv.status = 'connecting';
@@ -917,11 +967,23 @@ window.testMcpServer = async function(id) {
             }),
         });
 
+        var responseText = await resp.text();
+        var data = null;
+        try { data = responseText ? JSON.parse(responseText) : {}; } catch (_parseErr) {}
         if (!resp.ok) {
-            throw new Error('HTTP ' + resp.status);
+            var detail = data && (data.error || data.message);
+            if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+            throw new Error('HTTP ' + resp.status + (detail ? ': ' + detail : ''));
         }
+        if (!data) throw new Error('服务器返回的不是有效 JSON');
 
-        var data = await resp.json();
+        // 本次结果已经被更新的测试取代，不再落库或弹提示。
+        if (window._mcpTestSeq[id] !== seq) return false;
+
+        // 测试期间用户可能修改了名称/URL/Headers，只回写连接状态字段。
+        var latest = window.loadMcpServers().find(function(item) { return item.id === id; });
+        if (!latest) return false;
+        srv = latest;
         if (data.success) {
             srv.status = 'connected';
             srv.tools_count = data.tools_count || 0;
@@ -935,22 +997,30 @@ window.testMcpServer = async function(id) {
                 window.registerMcpTools(id, srv.name, data.tools);
             }
 
-            if (typeof showToast === 'function') showToast('已连接: ' + srv.name + ' (' + srv.tools_count + ' 个工具)', 'success');
+            if (!options.silent && typeof showToast === 'function') showToast('已连接: ' + srv.name + ' (' + srv.tools_count + ' 个工具)', 'success');
+            window.renderMcpServerPanel();
+            if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+            return true;
         } else {
             srv.status = 'error';
             srv.last_error = data.error || '未知错误';
             window.saveMcpServer(srv);
-            if (typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
+            if (!options.silent && typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
         }
     } catch(e) {
+        if (window._mcpTestSeq[id] !== seq) return false;
+        var latestAfterError = window.loadMcpServers().find(function(item) { return item.id === id; });
+        if (!latestAfterError) return false;
+        srv = latestAfterError;
         srv.status = 'error';
         srv.last_error = e.message || '网络错误';
         window.saveMcpServer(srv);
-        if (typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
+        if (!options.silent && typeof showToast === 'function') showToast('连接失败: ' + srv.last_error, 'error');
     }
 
     window.renderMcpServerPanel();
     if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+    return false;
 };
 
 // 添加并测试新的 MCP 服务器
@@ -1112,12 +1182,8 @@ window.testAllMcpServers = async function() {
     }
     var ok = 0, fail = 0;
     for (var i = 0; i < servers.length; i++) {
-        try {
-            await window.testMcpServer(servers[i].id);
-            ok++;
-        } catch(e) {
-            fail++;
-        }
+        if (await window.testMcpServer(servers[i].id, { silent: true })) ok++;
+        else fail++;
     }
     if (typeof showToast === 'function') {
         showToast('测试完成: ' + ok + ' 成功, ' + fail + ' 失败', fail > 0 ? 'warning' : 'success');
@@ -1132,48 +1198,49 @@ window.updateMcpServersCount = function() {
     countEl.textContent = servers.length > 0 ? '(' + connected + '/' + servers.length + ' 已连接)' : '';
 };
 
+// 页面加载时立即从已保存的 last_tools 快速恢复注册到 toolRegistry (无需等待网络)
+window.hydrateMcpTools = function() {
+    try {
+        var servers = window.loadMcpServers();
+        if (!servers || !servers.length) return;
+        servers.forEach(function(srv) {
+            if (srv && srv.last_tools && srv.last_tools.length > 0 && typeof window.registerMcpTools === 'function') {
+                window.registerMcpTools(srv.id, srv.name, srv.last_tools);
+            }
+        });
+    } catch(e) {
+        console.warn('[MCP] hydrateMcpTools error:', e);
+    }
+};
+
 // 初始化 MCP 服务器 (页面加载时自动重连已保存的服务器)
 window.initMcpServers = async function() {
+    // 1. 立即从本地缓存快速注册已有的工具 (零等待可用)
+    window.hydrateMcpTools();
     window.renderMcpServerPanel();
+    window.updateMcpServersCount();
+
+    // 2. 并发自动测试并刷新所有已配置有效 URL 的服务器
     var servers = window.loadMcpServers();
-    for (var i = 0; i < servers.length; i++) {
-        if (servers[i].status === 'connected' || servers[i].status === 'error') {
-            // 静默重连已连接的服务器
-            try {
-                var resp = await window.proxyFetch('api/mcp_client.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'test',
-                        transport: servers[i].transport,
-                        url: servers[i].url,
-                        headers: servers[i].headers || {},
-                    }),
-                });
-                if (resp.ok) {
-                    var data = await resp.json();
-                    if (data.success) {
-                        servers[i].status = 'connected';
-                        servers[i].tools_count = data.tools_count || 0;
-                        servers[i].last_tools = data.tools || [];
-                        servers[i].last_error = '';
-                        window.saveMcpServer(servers[i]);
-                        if (typeof window.registerMcpTools === 'function') {
-                            window.registerMcpTools(servers[i].id, servers[i].name, data.tools || []);
-                        }
-                    } else {
-                        servers[i].status = 'disconnected';
-                        window.saveMcpServer(servers[i]);
-                    }
-                }
-            } catch(e) {
-                servers[i].status = 'disconnected';
-                window.saveMcpServer(servers[i]);
-            }
+    if (!servers || !servers.length) return;
+
+    var tasks = servers.map(function(srv) {
+        // 只要配置了有效 URL 且未被手动断开(disconnected)，均自动静默探测更新
+        if (srv && srv.url && srv.status !== 'disconnected') {
+            return window.testMcpServer(srv.id, { silent: true }).catch(function(e) {
+                console.warn('[MCP] 自动连接服务器失败 (' + srv.name + '):', e);
+                return false;
+            });
         }
-    }
+        return Promise.resolve(false);
+    });
+
+    await Promise.allSettled(tasks);
+
     window.renderMcpServerPanel();
+    window.updateMcpServersCount();
     if (typeof window.renderToolPanel === 'function') window.renderToolPanel();
+    if (typeof window.updateToolsActiveCount === 'function') window.updateToolsActiveCount();
 };
 
 // ==================== END MCP 服务器管理 ====================
@@ -1191,6 +1258,7 @@ window.getMcpToolsForChat = function() {
 
     var allNames = toolRegistry.getAllToolNames();
     allNames.forEach(function(name) {
+        if (name.startsWith('mmx_')) return;
         var meta = toolRegistry.get(name);
         if (!meta || !meta.mcpServerId || !connectedIds.has(meta.mcpServerId)) return;
         // 检查工具是否启用
@@ -1264,14 +1332,18 @@ async function saveConfig(showFeedback = false) {
         if (_provider === 'custom') localStorage.setItem('baseUrlCustom', getVal('baseUrl') || '');
         localStorage.setItem('baseUrlProvider', _provider);
         var _curModel = getVal('modelSelect') || '';
-        if (_curModel) localStorage.setItem('model_' + _provider, _curModel);
+        // ★ 防空保护：只有在选中的模型非空且非占位符时才更新持久化记录，防止初始化空状态冲掉用户设置
+        if (_curModel && !/^(加载中|请输入|获取失败|loading)/i.test(_curModel)) {
+            localStorage.setItem('model_' + _provider, _curModel);
+            localStorage.setItem('model', _curModel);
+        }
         localStorage.setItem('baseUrl', getVal('baseUrl') || '');
         localStorage.setItem('systemPrompt', getVal('systemPrompt') || '');
-        localStorage.setItem('model', getVal('modelSelect') || '');
         localStorage.setItem('visionModel', getVal('visionModel') || '');
     localStorage.setItem('visionApiUrl', getVal('visionApiUrl') || DEFAULT_CONFIG.visionApiUrl || '');
     localStorage.setItem('visionApiKey', await encrypt(getVal('visionApiKey') || ''));
-    localStorage.setItem('visionProvider', getEl('visionProvider')?.value || 'minimax');
+    // ★ 默认不再硬编码 minimax: 空值让 analyze_image 自动检测服务器已配置的直连 API (xAI/OpenAI/自定义)
+    localStorage.setItem('visionProvider', getEl('visionProvider')?.value || '');
     localStorage.setItem('visionApiKeyOpenAI', await encrypt(getVal('visionApiKeyOpenAI') || ''));
     localStorage.setItem('visionApiUrlOpenAI', getVal('visionApiUrlOpenAI') || 'https://api.openai.com/v1');
     localStorage.setItem('visionApiKeyXAI', await encrypt(getVal('visionApiKeyXAI') || ''));
@@ -1304,6 +1376,8 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('customParams', getVal('customParams') || '');
     localStorage.setItem('customEnabled', getChecked('customParamsToggle'));
     localStorage.setItem('lineHeight', getVal('lineHeight') || '1.1');
+    localStorage.setItem('chatThemeStyle', getVal('chatThemeStyle') || 'dsh');
+    if (typeof applyChatTheme === 'function') applyChatTheme(getVal('chatThemeStyle') || 'dsh');
     localStorage.setItem('paragraphMargin', getVal('paragraphMargin') || '0');
     localStorage.setItem('markdownGFM', getChecked('markdownGFM'));
     localStorage.setItem('markdownBreaks', getChecked('markdownBreaks'));
@@ -1315,12 +1389,12 @@ async function saveConfig(showFeedback = false) {
     localStorage.setItem('aiSearchJudgeModel', getVal('aiSearchJudgeModel') || 'deepseek-chat');
     localStorage.setItem('aiSearchJudgePrompt', getVal('aiSearchJudgePrompt') || DEFAULT_CONFIG.aiSearchJudgePrompt);
     localStorage.setItem('searchModel', getVal('searchModel') || '');
-    localStorage.setItem('searchProvider', getVal('searchProvider') || 'duckduckgo');
+    var _searchProvider = getVal('searchProvider') || 'tavily';
+    localStorage.setItem('searchProvider', _searchProvider);
     var _sak = getVal('searchApiKey') || '';
     localStorage.setItem('searchApiKey', await encrypt(_sak));
-    localStorage.setItem('searchApiKeyBrave', await encrypt(getVal('searchApiKeyBrave') || ''));
-    localStorage.setItem('searchApiKeyGoogle', await encrypt(getVal('searchApiKeyGoogle') || ''));
-    localStorage.setItem('searchApiKeyTavily', await encrypt(getVal('searchApiKeyTavily') || ''));
+    var _searchProviderKeyId = SEARCH_PROVIDER_KEY_MAP[_searchProvider];
+    if (_searchProviderKeyId) localStorage.setItem(_searchProviderKeyId, await encrypt(_sak));
     localStorage.setItem('searchRegion', getVal('searchRegion') || '');
     localStorage.setItem('searchTimeout', getVal('searchTimeout') || '30');
     localStorage.setItem('maxSearchResults', getVal('maxSearchResults') || '3');
@@ -1366,8 +1440,9 @@ async function saveConfig(showFeedback = false) {
         configSnapshot = null;
         configPanelWasOpen = false;
     }
-    // ★ 保存后延迟刷新模型列表(避免和保存 toast 冲突),去重重复调用
-    if (getVal('baseUrl') && getVal('apiKey')) {
+    // 只有配置栏底部的总“保存”按钮（saveConfig(true)）才刷新模型列表。
+    // 开关、输入框和其它自动保存只持久化配置，不能打断聊天或重建 modelSelect。
+    if (showFeedback && getVal('baseUrl') && getVal('apiKey')) {
         if (window.__fetchModelsTimer) clearTimeout(window.__fetchModelsTimer);
         window.__fetchModelsTimer = setTimeout(function() { fetchModels(true).catch(function(){}); }, 1500);
     }
@@ -1379,7 +1454,7 @@ async function saveConfig(showFeedback = false) {
     }
 }
 
-// ★ 代理设置 — 本地 Mihomo 集成
+// ★ 代理设置 — 留空自动使用本机 Mihomo，连接失败才回退 GCP；填写地址用于手动覆盖。
 window.toggleProxy = function() {
     var enabled = getChecked('proxyToggle');
     localStorage.setItem('proxyEnabled', enabled ? '1' : '0');
@@ -1392,37 +1467,96 @@ window.toggleProxy = function() {
 };
 
 // ★ 更新代理状态显示
+function _configuredRemoteProxy() {
+    var raw = (getVal('proxyUrl') || localStorage.getItem('proxyUrl') || '').trim();
+    if (!raw) return null;
+    try {
+        var parsed = new URL(raw);
+        if (!/^(https?:|socks4:|socks5h?:)$/.test(parsed.protocol)) return { raw: raw, invalid: true };
+        var host = parsed.hostname + (parsed.port ? ':' + parsed.port : '');
+        return {
+            raw: raw,
+            host: host,
+            isGcp: /(^|[.-])(gcp|google|compute)([.-]|$)/i.test(parsed.hostname)
+        };
+    } catch (e) {
+        return { raw: raw, invalid: true };
+    }
+}
+
 window._updateProxyStatus = async function() {
     var statusEl = document.getElementById('proxyStatus');
     var listEl = document.getElementById('proxyNodeList');
     if (!statusEl || !listEl) return;
+
+    var remoteProxy = _configuredRemoteProxy();
+    if (remoteProxy) {
+        if (remoteProxy.invalid) {
+            statusEl.innerHTML = _icon('warning','proxy-status-icon') + ' 远程代理地址格式无效';
+            statusEl.style.background = '#f59e0b20';
+            statusEl.style.color = '#92400e';
+            listEl.innerHTML = '<div style="color:#9ca3af;">请使用 http://、https://、socks4://、socks5:// 或 socks5h:// 地址</div>';
+            return;
+        }
+        var routeName = remoteProxy.isGcp ? 'GCP 远程代理' : '远程代理';
+        statusEl.innerHTML = '<span style="color:#10b981;display:inline-flex;vertical-align:middle;">' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
+            '</span> ' + routeName + '已启用 — <b>' + remoteProxy.host + '</b>';
+        statusEl.style.background = '#10b98120';
+        statusEl.style.color = '#065f46';
+        listEl.innerHTML = '<div style="color:#6b7280;">这是手动覆盖节点；清空后恢复“本机 Mihomo 优先、GCP 灾备”的自动路由。</div>';
+        return;
+    }
 
     try {
         var resp = await fetch('/oneapichat/api/mihomo_status.php?t=' + Date.now());
         var data = await resp.json();
 
         if (data.ok && data.mihomo_running) {
-            statusEl.innerHTML = '<span style="color:#10b981;display:inline-flex;vertical-align:middle;">' + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' + '</span> Mihomo 运行中 — 当前节点: <b>' + (data.current_node || '?') + '</b> (' + (data.node_delay || '?') + 'ms)';
-            statusEl.style.background = '#10b98120';
+            var _delayBadge = data.node_delay ? ' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:#10b98130;color:#059669;font-weight:600;">' + data.node_delay + 'ms</span>' : '';
+            statusEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+                '<span><span style="color:#10b981;display:inline-flex;vertical-align:middle;margin-right:4px;">' +
+                '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
+                '</span> <b>代理已连接</b>' + _delayBadge + '</span>' +
+                '<span style="font-size:10px;color:#6b7280;">' + (function(){var g=data.groups||{};var n=function(x){return x&&x.now?x.now:'-';};return 'GEMINI:'+n(g.GEMINI)+' OPENAI:'+n(g.OPENAI)+' PROXY:'+n(g.PROXY);})() + '</span>' +
+                '</div>';
+            statusEl.style.background = '#10b98115';
+            statusEl.style.border = '1px solid #10b98130';
             statusEl.style.color = '#065f46';
 
-            if (data.nodes && data.nodes.length > 0) {
-                listEl.innerHTML = data.nodes.map(function(n) {
-                    var color = n.alive ? (n.delay < 1000 ? '#10b981' : '#f59e0b') : '#ef4444';
-                    return '<div style="padding:2px 0;"><span style="color:' + color + ';display:inline-flex;vertical-align:middle;"><svg width="8" height="8" viewBox="0 0 8 8" fill="' + color + '"><circle cx="4" cy="4" r="4"/></svg></span> ' + n.name + ' — <span style="color:' + color + '">' + (n.delay > 0 ? n.delay + 'ms' : '超时') + '</span></div>';
-                }).join('');
+            // 渲染可用节点与延迟列表
+            var _nodeListHtml = '';
+            if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+                _nodeListHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;">' +
+                    data.nodes.slice(0, 6).map(function(n) {
+                        var _dColor = n.delay < 250 ? '#10b981' : (n.delay < 600 ? '#f59e0b' : '#ef4444');
+                        var _isCur = n.name === data.current_node;
+                        return '<div style="padding:3px 6px;border-radius:4px;background:' + (_isCur ? 'rgba(99,102,241,0.12)' : 'rgba(0,0,0,0.03)') + ';border:' + (_isCur ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent') + ';font-size:10px;display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span style="truncate;max-width:70px;' + (_isCur ? 'font-weight:700;color:#4f46e5;' : '') + '">' + escapeHtml(n.name) + '</span>' +
+                            '<span style="color:' + _dColor + ';font-weight:600;font-size:9px;">' + (n.alive ? n.delay + 'ms' : '超时') + '</span>' +
+                            '</div>';
+                    }).join('') +
+                    '</div>';
             }
+            listEl.innerHTML = '<div style="font-size:11px;color:#6b7280;">mihomo 智能路由 · GEMINI 出口' + _nodeListHtml + '</div>';
+        } else if (data.ok && data.gcp_relay_running) {
+            statusEl.innerHTML = _icon('warning','proxy-status-icon') + ' 本机 Mihomo 不可用 — <b>当前使用 GCP 灾备</b> (' + (data.gcp_relay_delay || '?') + 'ms)';
+            statusEl.style.background = '#f59e0b20';
+            statusEl.style.border = '1px solid #f59e0b30';
+            statusEl.style.color = '#92400e';
+            listEl.innerHTML = '<div style="color:#6b7280;font-size:11px;">功能可用 (备用链路 ZeroTier ➔ GCP)；请检查本机 Mihomo 进程。</div>';
         } else {
-            statusEl.innerHTML = _icon('x','proxy-status-icon') + ' Mihomo 未运行 — 请检查服务';
+            statusEl.innerHTML = _icon('x','proxy-status-icon') + ' Mihomo 与 GCP 灾备均不可用';
             statusEl.style.background = '#ef444420';
+            statusEl.style.border = '1px solid #ef444430';
             statusEl.style.color = '#991b1b';
-            listEl.innerHTML = '<div style="color:#9ca3af;">尝试启动: sudo systemctl start mihomo</div>';
+            listEl.innerHTML = '<div style="color:#9ca3af;font-size:11px;">服务端中继当前不可达，请检查网络或填写自定义代理。</div>';
         }
     } catch (e) {
-        statusEl.innerHTML = _icon('warning','proxy-status-icon') + ' 无法连接状态接口';
+        statusEl.innerHTML = _icon('warning','proxy-status-icon') + ' 无法连接代理状态接口';
         statusEl.style.background = '#f59e0b20';
         statusEl.style.color = '#92400e';
-        listEl.innerHTML = '<div style="color:#9ca3af;">错误: ' + e.message + '</div>';
+        listEl.innerHTML = '<div style="color:#9ca3af;font-size:11px;">错误: ' + e.message + '</div>';
     }
 };
 
@@ -1463,7 +1597,7 @@ window.getProxyUrl = function() {
 };
 
 // ★ 代理 fetch — 通过 PHP 代理中继转发请求
-// ★ 本地集成模式: proxy.php 自动走 Mihomo (127.0.0.1:1081), 无需前端配置代理
+// ★ 留空时 proxy.php 自动走本机 Mihomo，传输失败才回退 GCP；显式地址用于手动覆盖。
 window.proxyFetch = async function(targetUrl, options = {}) {
     // ★ 解析相对URL为绝对URL（proxy.php只接受http/https开头的URL）
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
@@ -1474,19 +1608,34 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         }
     }
     var _isLocal = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || targetUrl.includes('localmodels');
-    // ★ 同源请求不需要走proxy.php中继
+    // ★ 同源请求通常不需要 proxy.php，但受保护的 fetch.php 仍需要主站 Bearer。
+    //    不能只依赖 auth_token Cookie：www/naujtrats 子域或隐私设置下 Cookie 可能缺失，
+    //    这正是 web_fetch 连续 401 的根因。
     if (_isLocal || targetUrl.startsWith(window.location.origin)) {
-        return fetch(targetUrl, options);
+        var _localOptions = Object.assign({}, options || {});
+        var _localHeaders = options && options.headers ? options.headers : {};
+        if (typeof getSessionAuthHeaders === 'function') {
+            _localOptions.headers = getSessionAuthHeaders(_localHeaders);
+        } else {
+            var _localToken = (typeof getAuthToken === 'function' ? getAuthToken() : '') || localStorage.getItem('authToken') || '';
+            _localOptions.headers = Object.assign({}, _localHeaders, _localToken ? { Authorization: 'Bearer ' + _localToken } : {});
+        }
+        if (!_localOptions.credentials) _localOptions.credentials = 'same-origin';
+        return fetch(targetUrl, _localOptions);
     }
 
-    // ★ 本地集成模式: proxy.php 自动走 Mihomo (127.0.0.1:1081)
+    // ★ 服务端集成模式: proxy.php 自动走 Mihomo → GCP 灾备
     var proxyUrl = '';
     var enabled = window.isProxyEnabled();
 
-    // ★ 统一 429/5xx 重试(指数退避,最多3次) — 适用于直连和中继两条路径
+    // ★ 统一 429/5xx 重试(指数退避,最多5次) — 适用于直连和中继两条路径
     async function _fetchWithRetry(_fetchPromise, _label) {
-        var _maxRetries = 3;
-        var _retryable = [422, 429, 502, 503, 504];  // 参数错误/速率限制/临时服务端错误
+        var _maxRetries = 5;
+        // 生图 POST 不对网关 5xx 做通用重放：上游可能已经生成，只是回包超时，
+        // 盲目重放会重复生成/计费。生图模块自身只会对明确的 EOF 做一次定向重试。
+        var _isImagePost = /\/images\/(?:generations|edits)\/?(?:\?|$)/i.test(targetUrl) &&
+            String(options.method || 'GET').toUpperCase() === 'POST';
+        var _retryable = _isImagePost ? [429] : [422, 429, 502, 503, 504];
         for (var _retry = 0; _retry <= _maxRetries; _retry++) {
             var _resp;
             try { _resp = await _fetchPromise; } catch(_e) {
@@ -1516,22 +1665,27 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         }
     }
 
-    // ★ 代理开启: 全部走 proxy.php 中继 (proxy.php 自动走本地 Mihomo)
+    // ★ 代理开启: 全部走 proxy.php 中继 (proxy.php 自动走 Mihomo → GCP 灾备)
     // ★ 代理关闭: 尝试直连, 失败时 fallback 到中继
     var _host = '';
     try { _host = new URL(targetUrl).host; } catch(e) {}
 
     if (enabled) {
-        // ★ 代理已开启 — 全部走中继, 不尝试直连
-        proxyUrl = '__relay_only__';
+        // 代理已开启：优先使用用户手动覆盖的代理；留空自动走 Mihomo → GCP 灾备。
+        proxyUrl = (window.getProxyUrl && window.getProxyUrl().trim()) || '__relay_only__';
     } else {
-        // ★ 代理关闭 — 尝试直连
+        // Browsers may only use a true direct fetch for same-origin URLs. A disabled
+        // outbound network proxy does not disable the same-origin PHP relay: trying
+        // arbitrary provider origins here makes behavior depend on their CORS headers
+        // and can leak authorization headers into a failed preflight.
+        var _isCrossOrigin = true;
+        try { _isCrossOrigin = new URL(targetUrl, window.location.href).origin !== window.location.origin; } catch(e) {}
         var _isGoogleAPI = _host && (_host.indexOf('generativelanguage.googleapis.com') >= 0 || _host.indexOf('googleapis.com') >= 0);
         var _isLongCatAPI = _host && _host.indexOf('api.longcat.chat') >= 0;
-        if (_isGoogleAPI || _isLongCatAPI) {
+        if (_isCrossOrigin || _isGoogleAPI || _isLongCatAPI) {
             proxyUrl = '__relay_only__';
         } else {
-            console.log('[Proxy] →', targetUrl.substring(0, 80), '(direct)');
+            console.log('[Proxy] 直连请求:', { targetUrlLength: String(targetUrl || '').length });
             try {
                 var _directResp = await _fetchWithRetry(fetch(targetUrl, options), 'direct');
                 if (_directResp.status === 503 || _directResp.status === 502) {
@@ -1545,7 +1699,7 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         }
     }
 
-    console.log('[Proxy] →', targetUrl.substring(0, 80), enabled ? '(via ' + proxyUrl + ')' : '(relay only)');
+    console.log('[Proxy] 中继请求:', { targetUrlLength: String(targetUrl || '').length, proxyEnabled: !!enabled });
 
     var headers = {};
     if (options.headers) {
@@ -1559,10 +1713,39 @@ window.proxyFetch = async function(targetUrl, options = {}) {
     }
 
     var body = null;
+    var multipart = null;
     if (options.body) {
-        if (typeof options.body === 'string') {
+        if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
+            // FormData 不能直接 JSON.stringify（会变成 {} / []），需显式序列化后由 PHP
+            // 重建 multipart/form-data。不要手动传 Content-Type，cURL 必须生成真实 boundary。
+            multipart = [];
+            for (var _formEntry of options.body.entries()) {
+                var _formName = _formEntry[0];
+                var _formValue = _formEntry[1];
+                if (typeof Blob !== 'undefined' && _formValue instanceof Blob) {
+                    var _formBytes = new Uint8Array(await _formValue.arrayBuffer());
+                    var _formBinary = '';
+                    var _formChunk = 0x8000;
+                    for (var _formOffset = 0; _formOffset < _formBytes.length; _formOffset += _formChunk) {
+                        _formBinary += String.fromCharCode.apply(null, _formBytes.subarray(_formOffset, _formOffset + _formChunk));
+                    }
+                    multipart.push({
+                        name: _formName,
+                        kind: 'file',
+                        filename: _formValue.name || 'upload.bin',
+                        contentType: _formValue.type || 'application/octet-stream',
+                        dataBase64: btoa(_formBinary)
+                    });
+                } else {
+                    multipart.push({ name: _formName, kind: 'field', value: String(_formValue) });
+                }
+            }
+            Object.keys(headers).forEach(function(_headerName) {
+                if (_headerName.toLowerCase() === 'content-type') delete headers[_headerName];
+            });
+        } else if (typeof options.body === 'string') {
             // ★ 尝试把 JSON 字符串解析回对象, 避免 proxy.php json_decode 后 \n 变成真正换行符
-            //    如果解析失败则保持原字符串 (如 form-data 等非 JSON body)
+            //    如果解析失败则保持原字符串。
             try { body = JSON.parse(options.body); } catch(e) { body = options.body; }
         } else {
             body = options.body;
@@ -1574,15 +1757,22 @@ window.proxyFetch = async function(targetUrl, options = {}) {
         method: options.method || (body ? 'POST' : 'GET'),
         headers: headers,
         body: body,
+        multipart: multipart,
         proxy: proxyUrl,
         stream: options.stream || (body && body.stream) || false,
-        // ★ 智能路由: 代理开启时标记 tryDirect, 后端对非封锁域名直连优先 (失败回退 Mihomo)
-        tryDirect: enabled
+        // 显式远程代理无需先直连；自动模式由服务端按直连/Mihomo/GCP分流。
+        tryDirect: enabled && proxyUrl === '__relay_only__'
     };
+
+    var relayRequestHeaders = { 'Content-Type': 'application/json' };
+    // OneAPIChat 实际使用 authToken；兼容旧键与跨子域 cookie。
+    var relayAuthToken = (typeof getAuthToken === 'function' ? getAuthToken() : '') ||
+        localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
+    if (relayAuthToken) relayRequestHeaders['Authorization'] = 'Bearer ' + relayAuthToken;
 
     return _fetchWithRetry(fetch(SERVER_API_BASE + '/proxy.php', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: relayRequestHeaders,
         body: JSON.stringify(relayBody),
         signal: options.signal
     }), 'relay');
@@ -1602,12 +1792,23 @@ window.updateDisplayParam = (type, val) => {
         var span = getEl('lineHeightValue');
         if (span) span.innerText = parseFloat(val).toFixed(2);
         document.documentElement.style.setProperty('--chat-line-height', val);
+        document.body.style.setProperty('--chat-line-height', val);
+        var chat = document.getElementById('chatMessagesContainer');
+        if (chat) chat.style.setProperty('--chat-line-height', val);
+        if (chat) chat.querySelectorAll('.message-row.assistant .markdown-body, .message-row.assistant .markdown-body p, .message-row.assistant .markdown-body li, .message-row.assistant .markdown-body blockquote, .message-row.assistant .md-stable, .message-row.assistant .md-tail').forEach(function(node) {
+            node.style.setProperty('line-height', val, 'important');
+        });
         localStorage.setItem('lineHeight', val);
     } else if (type === 'paragraphMargin') {
         var span = getEl('paragraphMarginValue');
         if (span) span.innerText = parseFloat(val).toFixed(2);
         document.documentElement.style.setProperty('--chat-paragraph-margin', val + 'rem');
         localStorage.setItem('paragraphMargin', val);
+    } else if (type === 'bubbleGap') {
+        var span = getEl('bubbleGapValue');
+        if (span) span.innerText = parseFloat(val).toFixed(2);
+        document.documentElement.style.setProperty('--chat-bubble-gap', val + 'rem');
+        localStorage.setItem('bubbleGap', val);
     }
     window._scheduleConfigSync();
 };
@@ -1651,21 +1852,58 @@ window.fetchModels = async function (silent) {
     }
     var key = getVal('apiKey');
     var url = getVal('baseUrl');
-    var selects = ['modelSelect', 'titleModel', 'searchModel', 'aiSearchJudgeModel']
+    var selects = ['modelSelect', 'titleModel', 'searchModel', 'aiSearchJudgeModel'];
 
-    selects.forEach(id => {
-        var el = getEl(id);
-        if (el) el.innerHTML = '<option>加载中...</option>';
-    });
+    // ★ 请求代次隔离：切换提供商会启动新的 /models 请求，旧提供商的迟到响应必须被丢弃，绝不能污染当前列表。
+    var _provider = getEl('baseUrlProvider')?.value || 'custom';
+    var _requestProvider = _provider;
+    var _requestBaseUrl = String(url || '');
+    var _requestSeq = (window.__fetchModelsSeq || 0) + 1;
+    window.__fetchModelsSeq = _requestSeq;
+    if (window.__fetchModelsController) {
+        try { window.__fetchModelsController.abort(); } catch(e) {}
+    }
+    function _fetchModelsIsStale() {
+        return window.__fetchModelsSeq !== _requestSeq ||
+            (getEl('baseUrlProvider')?.value || 'custom') !== _requestProvider ||
+            String(getVal('baseUrl') || '') !== _requestBaseUrl;
+    }
+    var _storedBeforeFetch = localStorage.getItem('model_' + _provider) || localStorage.getItem('model') || '';
+
+    // ★ 智能秒级预加载：如果有本地 ModelsCatalog 目录，立即预渲染并精准选中已存模型，绝不显示空白或把 DOM 弄丢
+    if (window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+        var preHtml = window.ModelsCatalog.renderModelOptionsHtml([], _provider, _storedBeforeFetch);
+        selects.forEach(id => {
+            var el = getEl(id);
+            if (el && preHtml) el.innerHTML = preHtml;
+        });
+    } else {
+        selects.forEach(id => {
+            var el = getEl(id);
+            if (el) el.innerHTML = '<option>加载中...</option>';
+        });
+    }
 
     // ★ llama.cpp 本地模型通常不需要 API Key,允许空 key 获取模型列表
     var _provider = getEl('baseUrlProvider')?.value || 'custom';
     var _isLocalModel = _provider === 'llamacpp';
     if (!key && !_isLocalModel) {
-        selects.forEach(id => {
-            var el = getEl(id);
-            if (el) el.innerHTML = '<option>请输入API Key</option>';
-        });
+        var _storedModelNoKey = localStorage.getItem('model_' + _provider) || localStorage.getItem('model') || '';
+        if (window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+            var noKeyHtml = window.ModelsCatalog.renderModelOptionsHtml([], _provider, _storedModelNoKey);
+            selects.forEach(id => {
+                var el = getEl(id);
+                if (el && noKeyHtml) {
+                    el.innerHTML = noKeyHtml;
+                    if (_storedModelNoKey) el.value = _storedModelNoKey;
+                }
+            });
+        } else {
+            selects.forEach(id => {
+                var el = getEl(id);
+                if (el) el.innerHTML = '<option>请输入API Key</option>';
+            });
+        }
         return;
     }
 
@@ -1684,30 +1922,22 @@ window.fetchModels = async function (silent) {
         // ★ 非原生 Anthropic URL (如 api.deepseek.com/anthropic) 没有 /models, 用 OpenAI 端点
         // ★ 部分提供商 (如 LongCat) 的 /models 端点与 chat 端点不在同一路径前缀
         var _modelsUrl = _provCfgModels.modelsUrl || (url.replace(/\/anthropic\/?$/, '') + '/models');
-        // ★ 代理场景下 Mihomo 冷启动/节点切换可能较慢, 给足 15s 超时 + 1次重试
-        var _isProxy = window.isProxyEnabled && window.isProxyEnabled();
-        var _timeoutMs = _isProxy ? 15000 : 8000;
-        var res = await (async function() {
-            for (var _attempt = 0; _attempt < 2; _attempt++) {
-                var _ctrl = new AbortController();
-                var _tid = setTimeout(() => _ctrl.abort(), _timeoutMs);
-                try {
-                    var _res = await window.proxyFetch(_modelsUrl, { headers: _headers, signal: _ctrl.signal });
-                    clearTimeout(_tid);
-                    return _res;
-                } catch(_fetchErr) {
-                    clearTimeout(_tid);
-                    // ★ 超时/中止且还有重试次数 → 静默重试 (Mihomo 冷启动常见)
-                    if (_attempt === 0 && (_fetchErr.name === 'AbortError' || String(_fetchErr.message || '').includes('abort'))) {
-                        console.warn('[fetchModels] 第' + (_attempt+1) + '次超时, 重试中...');
-                        continue;
-                    }
-                    throw _fetchErr;
-                }
-            }
-        })();
+        // ★ 极速模型发现与探测：超时收紧至 6s（直连国内通常 <200ms，代理节点通常 <1s），超时直接快速回退本地 Catalog，不再无谓死等 30 秒
+        var _timeoutMs = 6000;
+        var _ctrl = new AbortController();
+        window.__fetchModelsController = _ctrl;
+        var _tid = setTimeout(() => _ctrl.abort(), _timeoutMs);
+        var res;
+        try {
+            res = await window.proxyFetch(_modelsUrl, { headers: _headers, signal: _ctrl.signal });
+        } finally {
+            clearTimeout(_tid);
+        }
+        // 旧提供商请求的响应即使成功，也绝不允许触碰当前 DOM/localStorage。
+        if (_fetchModelsIsStale()) return;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         var data = await res.json();
+        if (_fetchModelsIsStale()) return;
         var models = data.data || [];
         // ★ 过滤不可通过 REST /chat/completions 调用的模型
         var _badSuffixes = ['live-preview', '-preview', 'bidi', 'realtime', 'generateVideo', 'imagen',
@@ -1736,29 +1966,71 @@ window.fetchModels = async function (silent) {
             var cleanId = (m.id || '').replace(/^(models|publishers)\//, '');
             return { id: cleanId, label: m.id || cleanId, ...m };
         });
-        var modelOptions = models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+
+        if (_fetchModelsIsStale()) return;
+        var _p = _requestProvider;
+        // 权威读取：严格使用发起请求时厂商的专属 model_{provider}，绝不在响应阶段重新读取“当前提供商”。
+        var _selModel = localStorage.getItem('model_' + _p) || (models.length ? models[0].id : '');
+
+        // ★ 使用 Pi 库风格的 ModelsCatalog 渲染结构化、带能力标签和分组的 <optgroup> 模型列表
+        var modelOptions = '';
+        if (window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+            modelOptions = window.ModelsCatalog.renderModelOptionsHtml(models, _p, _selModel);
+        } else {
+            modelOptions = models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+        }
 
         var mainSelect = getEl('modelSelect');
         if (mainSelect) {
             mainSelect.innerHTML = modelOptions;
-            var _p = getEl('baseUrlProvider')?.value || 'custom';
-            var _storedModel = localStorage.getItem('model_' + _p) || localStorage.getItem('model') || '';
-            var _selModel = (_storedModel && models.some(function(m) { return m.id === _storedModel; })) ? _storedModel : (models.length ? models[0].id : '');
-            mainSelect.value = _selModel;
-            // ★ 同步实际选中的模型到 localStorage (含 model 通用键 + model_{provider} 独立键),确保刷新/切换后不丢失
-            localStorage.setItem('model', _selModel);
-            localStorage.setItem('model_' + _p, _selModel);
+            if (_selModel && !/^(加载中|请输入|获取失败|loading)/i.test(_selModel)) {
+                var _matchedOpt2 = false;
+                for (var _oi2 = 0; _oi2 < mainSelect.options.length; _oi2++) {
+                    if (mainSelect.options[_oi2].value.toLowerCase() === _selModel.toLowerCase()) {
+                        mainSelect.selectedIndex = _oi2;
+                        _matchedOpt2 = true;
+                        break;
+                    }
+                }
+                if (!_matchedOpt2) {
+                    // 动态 /models 成功后清单即为权威：旧的 model_{provider} 不在真实清单中时自动迁移，禁止追加幽灵模型。
+                    if (models && models.length > 0 && mainSelect.options.length > 0) {
+                        mainSelect.selectedIndex = 0;
+                        localStorage.setItem('_modelSelectionSavedAt', String(Date.now()));
+                    } else if (_p === 'custom' || _p === 'llamacpp') {
+                        var _opt2 = document.createElement('option');
+                        _opt2.value = _selModel;
+                        _opt2.textContent = _selModel;
+                        _opt2.selected = true;
+                        mainSelect.appendChild(_opt2);
+                    } else if (mainSelect.options.length > 0) {
+                        mainSelect.selectedIndex = 0;
+                    }
+                }
+            }
+            // ★ 终极防空白：仅当完全没有选中项时，才默认选第一项
+            if (!mainSelect.value && mainSelect.options.length > 0) {
+                mainSelect.selectedIndex = 0;
+            }
+            // ★ 关键锁定：只有当选中的模型有效且确实属于当前厂商时才持久化，绝不盲目覆写
+            if (mainSelect.value && !/^(加载中|请输入|获取失败|loading)/i.test(mainSelect.value)) {
+                localStorage.setItem('model', mainSelect.value);
+                localStorage.setItem('model_' + _p, mainSelect.value);
+            }
             // ★ 更新后立即失焦,防止 select 展开触发视觉变化
             mainSelect.blur();
-            // 避免重复绑定 change 事件
+            // 绑定 change 事件
             if (!mainSelect._modelChangeBound) {
                 mainSelect._modelChangeBound = true;
                 mainSelect.addEventListener('change', function() {
                     var val = this.value;
-                    localStorage.setItem('model', val);
-                    var _p2 = getEl('baseUrlProvider')?.value || 'custom';
-                    localStorage.setItem('model_' + _p2, val);
-                    saveConfigToServer();
+                    if (val && !/^(加载中|请输入|获取失败|loading)/i.test(val)) {
+                        localStorage.setItem('model', val);
+                        var _p2 = getEl('baseUrlProvider')?.value || 'custom';
+                        localStorage.setItem('model_' + _p2, val);
+                        localStorage.setItem('_modelSelectionSavedAt', String(Date.now()));
+                        saveConfigToServer();
+                    }
                 });
             }
         }
@@ -1831,11 +2103,27 @@ window.fetchModels = async function (silent) {
                         }
         }
     } catch (e) {
+        // superseded/切换提供商导致的 Abort 属于正常取消，绝不回退渲染，更不能污染新厂商列表。
+        if (_fetchModelsIsStale()) return;
+        // ★ 无论拉取如何失败（401/403/超时/网络异常），都用内置 ModelsCatalog 渲染默认列表，防止下拉框永远卡在“加载中...”
+        var _pFallback = _requestProvider;
+        var _storedModelFallback = localStorage.getItem('model_' + _pFallback) || localStorage.getItem('model') || '';
+        if (window.ModelsCatalog && typeof window.ModelsCatalog.renderModelOptionsHtml === 'function') {
+            var fallbackHtml = window.ModelsCatalog.renderModelOptionsHtml([], _pFallback, _storedModelFallback);
+            selects.forEach(id => {
+                var el = getEl(id);
+                if (el && fallbackHtml && (el.innerHTML.includes('加载中') || el.options.length <= 1)) {
+                    el.innerHTML = fallbackHtml;
+                    if (_storedModelFallback) el.value = _storedModelFallback;
+                }
+            });
+        }
         if (silent) throw e;
         var _e = e.message || '';
         // 超时不弹 toast（静默失败）
         if (e.name === 'AbortError' || _e.includes('timeout') || _e.includes('abort')) return;
-        if (_e.includes('401') || _e.includes('403')) showToast('API Key 无效 (401)', 'error');
+        if (_e.includes('403')) showToast('API 额度已用尽或无权访问 (403)', 'error');
+        else if (_e.includes('401')) showToast('API Key 无效或未授权 (401)', 'error');
         else if (_e.includes('404')) showToast('URL 不正确 (404)', 'error');
         else if (_e.includes('Failed to fetch') || _e.includes('NetworkError')) return;  // 网络不通也静默
         else showToast('模型列表加载失败', 'error');
@@ -1856,7 +2144,8 @@ window.refreshModels = async function (e) {
         setTimeout(function() { showToast('模型列表已刷新', 'success'); }, 100);
     } catch (e) {
         var _em = (e && e.message) ? e.message : '';
-        if (_em.includes('401') || _em.includes('403')) showToast('API Key 无效 (401)', 'error');
+        if (_em.includes('403')) showToast('API 额度已用尽或无权限 (403)', 'error');
+        else if (_em.includes('401')) showToast('API Key 无效 (401)', 'error');
         else if (_em.includes('404')) showToast('URL 不正确 (404)', 'error');
         else if (_em.includes('timeout') || _em.includes('Failed to fetch')) showToast('无法连接', 'error');
         else showToast('刷新失败', 'error');
@@ -1878,6 +2167,12 @@ window.refreshModels = async function (e) {
 // ═══════════════════════════════════════════════════════
 
 window._apiKeysServerBase = (typeof SERVER_API_BASE !== 'undefined') ? SERVER_API_BASE : '/oneapichat/api';
+function _apiKeyAuthHeaders(extra) {
+    var headers = Object.assign({}, extra || {});
+    var token = localStorage.getItem('authToken') || '';
+    if (token && !headers.Authorization) headers.Authorization = 'Bearer ' + token;
+    return headers;
+}
 
 window.loadApiKeys = function() {
     var token = localStorage.getItem('authToken');
@@ -1891,7 +2186,7 @@ window.loadApiKeys = function() {
         return;
     }
 
-    fetch(window._apiKeysServerBase + '/api_keys.php?action=list&auth_token=' + encodeURIComponent(token))
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=list', { headers: _apiKeyAuthHeaders() })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.success) {
@@ -1923,17 +2218,17 @@ window.loadApiKeys = function() {
         });
 };
 
-window.showCreateApiKeyDialog = function() {
+window.showCreateApiKeyDialog = async function() {
     var token = localStorage.getItem('authToken');
     if (!token) { showToast('请先登录', 'error'); return; }
 
-    var name = prompt('请输入 API 密钥名称（用于识别用途，如 "ChatBox" 或 "My App"）:', '');
+    var name = await window.requestTextInput('创建 API 密钥', '用于识别用途，如 ChatBox 或 My App', '');
     if (name === null) return;
     if (!name.trim()) { showToast('名称不能为空', 'error'); return; }
 
-    fetch(window._apiKeysServerBase + '/api_keys.php?action=create&auth_token=' + encodeURIComponent(token), {
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: _apiKeyAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name: name.trim() })
     })
     .then(function(r) { return r.json(); })
@@ -2058,9 +2353,9 @@ window.revokeApiKey = function(keyId) {
     if (!token) return;
     if (!confirm('确定要撤销此 API 密钥吗？使用该密钥的所有应用将立即无法连接。')) return;
 
-    fetch(window._apiKeysServerBase + '/api_keys.php?action=revoke&auth_token=' + encodeURIComponent(token), {
+    fetch(window._apiKeysServerBase + '/api_keys.php?action=revoke', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: _apiKeyAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ key_id: keyId })
     })
     .then(function(r) { return r.json(); })

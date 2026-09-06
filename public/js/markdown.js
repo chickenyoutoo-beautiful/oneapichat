@@ -237,14 +237,14 @@ function _scanSegmentMarkers(seg) {
 // ★ 尾部渲染: 未闭合围栏 → 实时代码块预览; 否则流式安全渲染(隐藏未闭合公式)
 //   超长尾部截断显示(完整文本仍在 st.text, 流结束收敛时全量渲染)
 function _renderStreamTail(tail, st) {
-    if (!tail) return '';
+    if (!tail || !tail.trim()) return '';
     if (st.fence) {
         var langAttr = st.fenceLang ? ' class="language-' + escapeHtml(st.fenceLang) + '"' : '';
         return '<pre class="stream-fence"><code' + langAttr + '>' + escapeHtml(tail) + '</code></pre>';
     }
     if (tail.length > 4000) tail = tail.slice(0, 4000);
     var shown = _hideIncompleteMath(tail);
-    if (!shown) return '';
+    if (!shown || !shown.trim()) return '';
     return _renderMarkdownWithMath_cached(shown, st);
 }
 
@@ -262,7 +262,22 @@ function _appendStableChunk(stableEl, text, st) {
     return stableEl.lastElementChild;
 }
 
-// ★ 稳定块后处理: 代码高亮(排除 mermaid) + 图片懒加载/失败隐藏
+// ★ 内嵌图片增强：只负责协议升级和加载属性。失败处理统一交给
+// rendering.js/attachImageFallbacks，避免两个 error listener 竞态：旧 listener 会先把
+// 图片替换成仍然 404 的原始直链，导致可靠来源页与代理重试完全失效。
+function _enhanceInlineImage(_img) {
+    if (!_img) return;
+    var _src = _img.getAttribute('src') || '';
+    if (/^http:\/\//i.test(_src)) {
+        _src = _src.replace(/^http:\/\//i, 'https://');
+        _img.setAttribute('src', _src);
+    }
+    if (!_img.getAttribute('loading')) _img.setAttribute('loading', 'lazy');
+    if (!_img.getAttribute('decoding')) _img.setAttribute('decoding', 'async');
+    if (!_img.getAttribute('referrerpolicy')) _img.setAttribute('referrerpolicy', 'no-referrer');
+}
+
+// ★ 稳定块后处理: 代码高亮(排除 mermaid) + 代码块按钮注入 + 图片懒加载/失败回退
 function _postProcessChunk(root) {
     if (!root) return;
     if (typeof hljs !== 'undefined') {
@@ -272,18 +287,36 @@ function _postProcessChunk(root) {
                 try {
                     var _lang = (_blocks[_bi].className || '').match(/language-(\S+)/);
                     if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
+                    // highlight.js 会对 code 内已有未转义 HTML 发安全警告；先强制还原为纯文本节点。
+                    if (_blocks[_bi].children && _blocks[_bi].children.length) _blocks[_bi].textContent = _blocks[_bi].textContent || '';
                     hljs.highlightElement(_blocks[_bi]);
                 } catch(e) {}
             }
         } catch(e) { /* 高亮失败不影响渲染 */ }
     }
-    root.querySelectorAll('img').forEach(function(_img) {
-        if (!_img.getAttribute('loading')) _img.setAttribute('loading', 'lazy');
-        if (!_img.getAttribute('decoding')) _img.setAttribute('decoding', 'async');
-        if (!_img._hasOnerror) {
-            _img._hasOnerror = true;
-            _img.addEventListener('error', function() { this.style.display = 'none'; });
+    if (typeof attachCodeCopyButtons === 'function') {
+        attachCodeCopyButtons(root);
+    }
+    root.querySelectorAll('img').forEach(_enhanceInlineImage);
+    if (typeof window.attachImageFallbacks === 'function') window.attachImageFallbacks(root);
+    _enhanceDownloadLinks(root);
+}
+
+// 将 engine_push/shared 文件链接升级为清晰的下载按钮，而不是裸网址。
+function _enhanceDownloadLinks(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('a[href*="/uploads/shared/"]').forEach(function(link) {
+        if (link.classList.contains('oac-download-link')) return;
+        link.classList.add('oac-download-link');
+        link.setAttribute('download', '');
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+        var label = (link.textContent || '').trim();
+        if (!label || /^https?:\/\//i.test(label)) {
+            try { label = decodeURIComponent(new URL(link.href, location.href).pathname.split('/').pop() || '下载文件'); }
+            catch(e) { label = '下载文件'; }
         }
+        link.textContent = '下载 ' + label;
     });
 }
 
@@ -392,6 +425,82 @@ function _hideIncompleteMath(text) {
     return text;
 }
 
+// ★ 表格自修复: 模型常把「价格|涨跌额|涨跌幅|区间」用转义竖线塞进单个单元格(其余列留空)。
+//   marked 会把 \| 渲染为字面 |，导致一列挤 4 个值、后 3 列空白。这里在渲染后把这种复合格
+//   重新分配到后续空格子，恢复正确表格列。以「是否有字面 | 且其后有空列」为守卫，绝不误伤正常行。
+function _mdEscapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function _mdStripTags(html) {
+    return String(html).replace(/<[^>]*>/g, '');
+}
+function _mdDecodeEntities(s) {
+    return String(s)
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+}
+// 把复合格文本拆成「值片段」: 先按 | 拆；若某段仍粘连了「低 ~ 高」区间，再从段内切出。
+function _mdSplitCellSegments(text) {
+    var raw = String(text).split('|');
+    var segs = [];
+    for (var i = 0; i < raw.length; i++) {
+        var seg = raw[i].trim();
+        if (!seg) continue;
+        var rangeM = seg.match(/(?:\$\s*)?\d[\d,]*\.?\d*\s*~\s*(?:\$\s*)?\d[\d,]*\.?\d*/);
+        if (rangeM && rangeM.index > 0) {
+            var before = seg.slice(0, rangeM.index).trim();
+            if (before) segs.push(before);
+            segs.push(rangeM[0].trim());
+        } else {
+            segs.push(seg);
+        }
+    }
+    return segs;
+}
+// 修复单个 tbody 行: 若某格文本含字面 | 的多个值、且其后紧跟足够数量空格子，则把值重新分布到空格子。
+function _mdRepairRow(trHtml) {
+    var cells = [], m;
+    var cellRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g;
+    while ((m = cellRe.exec(trHtml))) cells.push(m[1]);
+    if (cells.length < 2) return trHtml;
+    for (var i = 0; i < cells.length; i++) {
+        var text = _mdDecodeEntities(_mdStripTags(cells[i]));
+        if (text.indexOf('|') !== -1) {
+            var parts = _mdSplitCellSegments(text);
+            if (parts.length >= 2) {
+                var emptiesAfter = 0;
+                for (var k = i + 1; k < cells.length; k++) {
+                    if (_mdDecodeEntities(_mdStripTags(cells[k])).trim() === '') emptiesAfter++;
+                    else break;
+                }
+                var overflow = parts.length - 1;
+                if (emptiesAfter >= overflow) {
+                    var newCells = cells.slice();
+                    newCells[i] = _mdEscapeHtml(parts[0]);
+                    for (var t = 1; t <= overflow; t++) newCells[i + t] = _mdEscapeHtml(parts[t]);
+                    return '<tr>' + newCells.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+                }
+            }
+        }
+    }
+    return trHtml;
+}
+function _mdRepairSingleTable(tableHtml) {
+    var tbodyM = tableHtml.match(/<tbody>([\s\S]*?)<\/tbody>/);
+    if (!tbodyM) return tableHtml;
+    var newTbody = tbodyM[1].replace(/<tr>[\s\S]*?<\/tr>/g, function (tr) { return _mdRepairRow(tr); });
+    return tableHtml.replace(tbodyM[1], newTbody);
+}
+function _repairMarkdownTables(html) {
+    if (!html || html.indexOf('<table') === -1) return html;
+    return html.replace(/<table[^>]*>[\s\S]*?<\/table>/g, function (th) {
+        // 1) 复合格修复(模型把多值用 \| 挤进单格) → 重排到后续空格子
+        var repaired = _mdRepairSingleTable(th);
+        // 2) 包裹成可横滚容器: 窄表 width:100% 撑满消除右侧留白, 宽表可横向滚动
+        return '<div class="md-table-wrap">' + repaired + '</div>';
+    });
+}
+
 // ★ 流式期间: 实时 KaTeX 渲染 + 公式缓存, 避免重复渲染已闭合的公式
 // 缓存 key = formula_text → rendered HTML, 只有新公式或变化才调用 katex
 function _renderMarkdownWithMath_cached(text, st) {
@@ -439,6 +548,8 @@ function _renderMarkdownWithMath_cached(text, st) {
     });
 
     var html = window.marked.parse(protected_);
+    // ★ 表格自修复(模型把多值用 \| 挤进单格): 渲染后重新分配到空格子
+    if (typeof _repairMarkdownTables === 'function') html = _repairMarkdownTables(html);
 
     // ★ 按 ID 长度降序排列，防止 MATHB0 错误匹配 MATHB10 (前缀碰撞)
     formulas.sort(function(a, b) { return b.id.length - a.id.length; });
@@ -646,7 +757,11 @@ const MarkdownRenderer = {
         // 否则 hljs 对不支持的语言报 WARN
         try { this.renderMermaid(container); } catch(e) {}
         try { this.highlightCode(container); } catch(e) {}
+        try {
+            if (typeof attachCodeCopyButtons === 'function') attachCodeCopyButtons(container);
+        } catch(e) {}
         try { this.optimizeImages(container); } catch(e) {}
+        try { _enhanceDownloadLinks(container); } catch(e) {}
     },
 
     /** 渲染 Mermaid 图表(支持流式实时渲染) */
@@ -687,7 +802,7 @@ const MarkdownRenderer = {
                     div.style.minHeight = '';
                     console.log('[Mermaid] render success, type:', result.type);
                 } else {
-                    console.warn('[Mermaid] render failed:', result.message || result.error, 'code preview:', code.substring(0, 60));
+                    console.warn('[Mermaid] render failed:', { errorType: result && result.error ? 'render_error' : 'invalid_result', codeLength: code.length, messageLength: String((result && (result.message || result.error)) || '').length });
                 }
             }).catch(function(e) {
                 console.error('[Mermaid] render exception:', e.message || e);
@@ -713,6 +828,7 @@ const MarkdownRenderer = {
             try {
                 var _lang = (_blocks[_i].className || '').match(/language-(\S+)/);
                 if (_lang && _lang[1] && typeof hljs.getLanguage === 'function' && !hljs.getLanguage(_lang[1])) continue;
+                if (_blocks[_i].children && _blocks[_i].children.length) _blocks[_i].textContent = _blocks[_i].textContent || '';
                 hljs.highlightElement(_blocks[_i]);
             } catch (e) {}
         }
@@ -720,10 +836,7 @@ const MarkdownRenderer = {
 
     /** 图片优化:懒加载 + 异步解码 */
     optimizeImages(container) {
-        container.querySelectorAll('img').forEach(img => {
-            img.loading = 'lazy';
-            img.decoding = 'async';
-        });
+        container.querySelectorAll('img').forEach(_enhanceInlineImage);
     },
 
     /** 强制立即渲染(跳过防抖) */

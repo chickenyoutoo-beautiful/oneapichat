@@ -5,9 +5,10 @@
  * 目标：主页注册/登录时 → Cloudreve 存在同邮箱+同密码+同用户名的账号
  * 
  * 策略：
+ *   0. 必须先校验 OneAPIChat 用户名/邮箱与密码，禁止匿名改写云盘账号
  *   1. 尝试登录 → 成功 = 账号已同步
  *   2. 登录失败 → 尝试注册 → 成功 = 账号已创建
- *   3. 注册失败(40032 邮箱已存在) → DB删旧 → 重新注册(Cloudreve 会生成正确hash)
+ *   3. 注册失败(40032 邮箱已存在) → 仅用已经验证的主项目密码同步
  *   4. 密码<6位 → 生成兼容密码注册
  */
 
@@ -16,6 +17,8 @@ header('Access-Control-Allow-Origin: https://naujtrats.xyz');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
+
+require_once __DIR__ . '/cloudreve_lib.php';
 
 $input = json_decode(file_get_contents('php://input'), true) ?: [];
 $username = trim($input['username'] ?? '');
@@ -26,19 +29,34 @@ if (!$username || !$password) {
     echo json_encode(['success' => false, 'error' => '缺少用户名或密码']);
     exit;
 }
-// ★ v6 修复: email 缺省时从 users.json 取该用户注册的真实邮箱，
-//   不再用 {username}@naujtrats.xyz —— 那会创建与主页账号不一致的幽灵 Cloudreve 账号
-if (!$email) {
-    $usersFile = __DIR__ . '/../users/users.json';
-    $users = json_decode(@file_get_contents($usersFile), true) ?: [];
-    foreach ($users as $u) {
-        if (($u['username'] ?? '') === $username && !empty($u['email'])) {
-            $email = $u['email'];
-            break;
-        }
+
+// CORS 不是认证。同步前必须重新验证主项目密码，并以服务端记录覆盖客户端
+// 提交的 email/username，避免凭据持有者借此修改其他 Cloudreve 账号。
+$usersFile = __DIR__ . '/../users/users.json';
+$users = json_decode(@file_get_contents($usersFile), true) ?: [];
+$verifiedUserId = '';
+$verifiedUser = null;
+foreach ($users as $uid => $u) {
+    $matchesLogin = (($u['username'] ?? '') === $username)
+        || ($email !== '' && strcasecmp((string)($u['email'] ?? ''), $email) === 0);
+    if ($matchesLogin && !empty($u['password_hash']) && password_verify($password, $u['password_hash'])) {
+        $verifiedUserId = (string)$uid;
+        $verifiedUser = $u;
+        break;
     }
 }
-$email = $email ?: "{$username}@naujtrats.xyz"; // 最后兜底（无邮箱的账号）
+if (!$verifiedUser) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => '主项目身份验证失败，已拒绝云盘同步']);
+    exit;
+}
+$username = (string)($verifiedUser['username'] ?? $username);
+$email = trim((string)($verifiedUser['email'] ?? ''));
+if ($email === '') {
+    http_response_code(409);
+    echo json_encode(['success' => false, 'error' => '主项目账号未绑定邮箱，无法同步到 Cloudreve']);
+    exit;
+}
 
 function cr_http(string $method, string $path, array $data = []): ?array {
     $ch = curl_init("http://127.0.0.1:5212/api/v4" . $path);
@@ -110,21 +128,17 @@ if ($r3['http'] === 200 && ($r3['data']['code'] ?? -1) === 0) {
 $rc3 = $r3['data']['code'] ?? -1;
 $rm3 = $r3['data']['msg'] ?? '';
 
-// 步骤4: 邮箱已存在 → 删旧建新(Cloudreve 用正确 hash)
+// 步骤4: 邮箱已存在 → 只允许使用上方已经验证的主项目密码同步
 if ($rc3 === 40032) {
-    $db = '/opt/cloudreve/data/cloudreve.db';
-    if (file_exists($db)) {
-        $e_sql = str_replace("'", "''", $email);  // SQL 转义: 单引号→两个单引号
-        $db_esc = escapeshellarg($db);
-        shell_exec("sqlite3 {$db_esc} \"DELETE FROM users WHERE email='{$e_sql}'\" 2>/dev/null");
-        $rr = cr_http('POST', '/user', ['email' => $email, 'password' => $password, 'nick' => $username]);
-        if ($rr['http'] === 200 && ($rr['data']['code'] ?? -1) === 0) {
+    if (cr_syncVerifiedMainPassword($email, $password)) {
+        $rl = cr_http('POST', '/session/token', ['email' => $email, 'password' => $password]);
+        if ($rl['http'] === 200 && ($rl['data']['code'] ?? -1) === 0) {
             $token = save_token($email, $password, $username);
-            echo json_encode(['success' => true, 'login_token' => $token, 'email' => $email, 'status' => 'reset', 'message' => 'Cloudreve 密码已重置为与主页一致']);
+            echo json_encode(['success' => true, 'login_token' => $token, 'email' => $email, 'status' => 'updated_in_place', 'message' => 'Cloudreve 账号已原地同步']);
             exit;
         }
     }
-    echo json_encode(['success' => false, 'error' => "该邮箱已在 Cloudreve 注册但无法重置密码，请联系管理员"]);
+    echo json_encode(['success' => false, 'error' => "该邮箱已在 Cloudreve 注册但原地同步失败，请联系管理员"]);
     exit;
 }
 

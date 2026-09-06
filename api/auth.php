@@ -30,7 +30,7 @@ if (in_array($origin, $allowedOrigins, true)) {
     header('Access-Control-Allow-Origin: *');
 }
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Auth-Token');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, Auth-Token');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -69,10 +69,12 @@ function writeJson(string $path, array $data): bool {
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     if ($json === false) return false;
     if (@file_put_contents($tmpPath, $json, LOCK_EX) === false) return false;
+    @chmod($tmpPath, 0660);
     if (!@rename($tmpPath, $path)) {
         @unlink($tmpPath);
         return false;
     }
+    @chmod($path, 0660);
     return true;
 }
 
@@ -130,6 +132,65 @@ function cleanExpiredSessions(array &$sessions): void {
 
 require_once __DIR__ . '/auth_helpers.php';
 // ★ verifyAuthToken → auth_helpers.php (共享实现)
+
+/**
+ * 主项目身份校验成功后的 Cloudreve 密码同步。
+ * 只有这里和已重新校验主密码的 cloudreve_sync.php 可以改已有云盘密码。
+ * 失败不得阻断主项目登录，后续云盘面板会给出明确的重新同步提示。
+ */
+function syncVerifiedCloudrevePassword(string $email, string $password): bool {
+    if ($email === '' || strlen($password) < 6) return false;
+    try {
+        require_once __DIR__ . '/cloudreve_lib.php';
+        // 先用 Cloudreve 官方登录接口核验；匹配时不做无意义的数据库写入。
+        $login = cr_post($GLOBALS['apiBase'] . '/session/token', [
+            'email' => $email,
+            'password' => $password,
+        ]);
+        if (($login['code'] ?? -1) === 0) return true;
+        return cr_syncVerifiedMainPassword($email, $password);
+    } catch (Throwable $e) {
+        error_log('[auth.php] Cloudreve verified sync failed: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/** 缓存主账号刚刚验证过的明文凭据，同时保留既有 Cloudreve user_id 映射。 */
+function cacheVerifiedCloudreveCredentials(string $userId, string $email, string $password, string $username): void {
+    if ($userId === '' || $password === '') return;
+    try {
+        require_once __DIR__ . '/cloudreve_lib.php';
+        $path = '/tmp/cloudreve_login_' . md5($userId) . '.json';
+        $existing = json_read_file($path) ?: [];
+        cr_writeCredentialFile($path, array_merge($existing, [
+            'email' => $email,
+            'password' => $password,
+            'nickname' => $username,
+            'created_at' => $existing['created_at'] ?? time(),
+            'updated_at' => time(),
+            'oneapichat_user' => $userId,
+            'source' => 'main_auth',
+        ]));
+    } catch (Throwable $e) {
+        error_log('[auth.php] Cloudreve credential cache failed: ' . $e->getMessage());
+    }
+}
+
+/** 主账号资料成功保存后的 Cloudreve 联动；返回结果供前端显示部分失败。 */
+function syncVerifiedCloudreveProfile(
+    string $userId,
+    array $oldProfile,
+    array $newProfile,
+    ?string $newPassword = null
+): array {
+    try {
+        require_once __DIR__ . '/cloudreve_lib.php';
+        return cr_syncVerifiedMainProfile($userId, $oldProfile, $newProfile, $newPassword);
+    } catch (Throwable $e) {
+        error_log('[auth.php] Cloudreve profile sync failed: ' . $e->getMessage());
+        return ['success' => false, 'synced' => false, 'fields' => [], 'error' => $e->getMessage()];
+    }
+}
 
 // ---- 请求处理 ----
 $method = $_SERVER['REQUEST_METHOD'];
@@ -233,7 +294,13 @@ switch ($method) {
             if ($sent) {
                 jsonSuccess(['message' => '重置链接已发送到 ' . $email]);
             } else {
-                jsonSuccess(['message' => '重置链接: ' . $resetLink]);
+                // 邮件失败时必须撤销本次 token；绝不能把重置链接返回给请求者，
+                // 否则任何知道邮箱的人都能绕过邮箱所有权验证重置账号。
+                unset($users[$userId]['reset_token'], $users[$userId]['reset_token_time']);
+                writeJson($usersFile, $users);
+                error_log('[auth.php] send_reset mail failed for user_id=' . $userId);
+                http_response_code(502);
+                jsonError(502, '重置邮件发送失败，请稍后重试或联系管理员');
             }
         } elseif ($action === 'reset_password') {
             $resetToken = trim($input['token'] ?? '');
@@ -249,10 +316,27 @@ switch ($method) {
                 }
             }
             if (!$userId) jsonError(400, '无效或已过期的重置链接');
+            $oldProfile = [
+                'username' => (string)($users[$userId]['username'] ?? ''),
+                'email' => $users[$userId]['email'] ?? null,
+            ];
             $users[$userId]['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
             unset($users[$userId]['reset_token'], $users[$userId]['reset_token_time']);
-            writeJson($usersFile, $users);
-            jsonSuccess(['message' => '密码已重置，请重新登录']);
+            if (!writeJson($usersFile, $users)) jsonError(500, '密码保存失败');
+            $cloudSync = syncVerifiedCloudreveProfile($userId, $oldProfile, $oldProfile, $newPassword);
+            cacheVerifiedCloudreveCredentials(
+                $userId,
+                (string)($oldProfile['email'] ?? ''),
+                $newPassword,
+                (string)($oldProfile['username'] ?? '')
+            );
+            jsonSuccess([
+                'message' => ($cloudSync['synced'] ?? false)
+                    ? '密码已重置，云盘密码已同步，请重新登录'
+                    : '主账号密码已重置，但云盘密码同步失败，请登录后重试',
+                'cloudreve_synced' => (bool)($cloudSync['synced'] ?? false),
+                'cloudreve_sync' => $cloudSync,
+            ]);
         } elseif ($action === 'register') {
             // jsonError(403, '注册暂未开放,请使用已有账号登录');
             $username = cleanUsername($input['username'] ?? '');
@@ -324,24 +408,13 @@ switch ($method) {
             }
 
             $token = generateToken();
-            $sessions = readJson($sessionsFile);
-            $sessions[$token] = [
-                'user_id' => $userId,
-                'created_at' => time()
-            ];
-            writeJson($sessionsFile, $sessions);
+            recordSessionToken($token, $userId);
 
-            // ★ 云盘同步: 缓存明文邮箱+密码（按 userId 隔离），供 cr_ensureAccount 自动登录/注册云盘
-            $crSyncFile = '/tmp/cloudreve_login_' . md5($userId) . '.json';
-            @file_put_contents($crSyncFile, json_encode([
-                'email' => $email ?: ($users[$userId]['email'] ?? ''),
-                'password' => $password,
-                'user_id' => '',
-                'nickname' => $username,
-                'created_at' => time(),
-                'oneapichat_user' => $userId,
-                'source' => 'main_auth',
-            ]), LOCK_EX);
+            // ★ 云盘同步: 缓存明文邮箱+密码，且保留既有 Cloudreve user_id 映射。
+            cacheVerifiedCloudreveCredentials($userId, (string)$email, $password, $username);
+
+            // 邮箱已通过验证码验证，可安全同步同邮箱 Cloudreve 账号密码。
+            syncVerifiedCloudrevePassword((string)$email, (string)$password);
 
             jsonSuccess([
                 'token' => $token,
@@ -388,24 +461,32 @@ switch ($method) {
             }
 
             $token = generateToken();
-            $sessions = readJson($sessionsFile);
-            $sessions[$token] = [
-                'user_id' => $userId,
-                'created_at' => time()
-            ];
-            writeJson($sessionsFile, $sessions);
+            recordSessionToken($token, $userId);
 
-            // ★ 云盘同步: 缓存明文邮箱+密码（按 userId 隔离），供 cr_ensureAccount 自动登录云盘
-            $crSyncFile = '/tmp/cloudreve_login_' . md5($userId) . '.json';
-            @file_put_contents($crSyncFile, json_encode([
-                'email' => $users[$userId]['email'] ?? '',
-                'password' => $password,
-                'user_id' => '',
-                'nickname' => $users[$userId]['username'] ?? $username,
-                'created_at' => time(),
-                'oneapichat_user' => $userId,
-                'source' => 'main_auth',
-            ]), LOCK_EX);
+            // 先用旧缓存定位既有云盘账号，再写入新凭据；这样此前失败的邮箱/昵称同步
+            // 会在下一次主账号登录时自动修复，而不是因新邮箱查不到旧账号而失联。
+            $oldCloudCredentials = readJson('/tmp/cloudreve_login_' . md5($userId) . '.json');
+            $currentProfile = [
+                'username' => (string)($users[$userId]['username'] ?? $username),
+                'email' => $users[$userId]['email'] ?? null,
+            ];
+            $cloudLoginSync = syncVerifiedCloudreveProfile($userId, [
+                'username' => (string)($oldCloudCredentials['nickname'] ?? $currentProfile['username']),
+                'email' => $oldCloudCredentials['email'] ?? $currentProfile['email'],
+            ], $currentProfile, $password);
+
+            // ★ 云盘同步: 每次登录刷新凭据，但不得抹掉已绑定云盘账号的 user_id。
+            cacheVerifiedCloudreveCredentials(
+                $userId,
+                (string)($users[$userId]['email'] ?? ''),
+                $password,
+                (string)($users[$userId]['username'] ?? $username)
+            );
+
+            // 密码刚通过 OneAPIChat 校验，只在此可信路径同步 Cloudreve。
+            if (!($cloudLoginSync['synced'] ?? false)) {
+                syncVerifiedCloudrevePassword((string)($users[$userId]['email'] ?? ''), (string)$password);
+            }
 
             // 从数据库读取真实 role
             $role = $users[$userId]['role'] ?? 'user';
@@ -419,10 +500,20 @@ switch ($method) {
         } elseif ($action === 'logout') {
             $token = $input['token'] ?? '';
             if (!empty($token)) {
-                $sessions = readJson($sessionsFile);
-                unset($sessions[$token]);
-                writeJson($sessionsFile, $sessions);
+                revokeSessionToken($token);
             }
+            // ★ 清除 session + cookie（防止 reload 后 cross_domain_token 恢复登录态）
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                $_SESSION = [];
+                if (ini_get('session.use_cookies')) {
+                    $p = session_get_cookie_params();
+                    setcookie(session_name(), '', time() - 42000,
+                        $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+                }
+                session_destroy();
+            }
+            // 清除 auth_token cookie
+            setcookie('auth_token', '', time() - 3600, '/', '.naujtrats.xyz', true, true);
             jsonSuccess(['message' => '已退出登录']);
 
         } elseif ($action === 'update_profile') {
@@ -433,6 +524,12 @@ switch ($method) {
 
             $users = readJson($usersFile);
             if (!isset($users[$userId])) jsonError(404, '用户不存在');
+
+            $oldProfile = [
+                'username' => (string)($users[$userId]['username'] ?? ''),
+                'email' => $users[$userId]['email'] ?? null,
+            ];
+            $newPassword = null;
 
             if (!empty($input['username'])) {
                 $newUsername = cleanUsername($input['username']);
@@ -457,7 +554,8 @@ switch ($method) {
                 if (strlen($input['new_password']) < 6) {
                     jsonError(400, '新密码长度至少 6 位');
                 }
-                $users[$userId]['password_hash'] = password_hash($input['new_password'], PASSWORD_DEFAULT);
+                $newPassword = (string)$input['new_password'];
+                $users[$userId]['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
             }
 
             $users[$userId]['updated_at'] = date('c');
@@ -465,7 +563,28 @@ switch ($method) {
                 jsonError(500, '保存失败');
             }
 
-            jsonSuccess(['username' => $users[$userId]['username'], 'message' => '更新成功']);
+            $newProfile = [
+                'username' => (string)($users[$userId]['username'] ?? ''),
+                'email' => $users[$userId]['email'] ?? null,
+            ];
+            $cloudSync = syncVerifiedCloudreveProfile($userId, $oldProfile, $newProfile, $newPassword);
+            if ($newPassword !== null) {
+                cacheVerifiedCloudreveCredentials(
+                    $userId,
+                    (string)($newProfile['email'] ?? ''),
+                    $newPassword,
+                    (string)$newProfile['username']
+                );
+            }
+
+            jsonSuccess([
+                'username' => $users[$userId]['username'],
+                'message' => ($cloudSync['synced'] ?? false)
+                    ? '更新成功，云盘账号已同步'
+                    : '主账号已更新，但云盘账号同步失败，请稍后重试',
+                'cloudreve_synced' => (bool)($cloudSync['synced'] ?? false),
+                'cloudreve_sync' => $cloudSync,
+            ]);
 
         } elseif ($action === 'send_verify_code') {
             $token = $input['token'] ?? '';
@@ -545,11 +664,24 @@ switch ($method) {
             }
 
             $newEmail = $userData['pending_email'] ?? '';
+            $oldProfile = [
+                'username' => (string)($userData['username'] ?? ''),
+                'email' => $userData['email'] ?? null,
+            ];
             $users[$userId]['email'] = $newEmail;
             unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email'], $users[$userId]['verify_attempts']);
-            writeJson($usersFile, $users);
+            if (!writeJson($usersFile, $users)) jsonError(500, '邮箱保存失败');
+            $newProfile = ['username' => $oldProfile['username'], 'email' => $newEmail];
+            $cloudSync = syncVerifiedCloudreveProfile($userId, $oldProfile, $newProfile);
 
-            jsonSuccess(['email' => $newEmail, 'message' => '邮箱绑定成功']);
+            jsonSuccess([
+                'email' => $newEmail,
+                'message' => ($cloudSync['synced'] ?? false)
+                    ? '邮箱绑定成功，云盘邮箱已同步'
+                    : '主账号邮箱已绑定，但云盘邮箱同步失败，请稍后重试',
+                'cloudreve_synced' => (bool)($cloudSync['synced'] ?? false),
+                'cloudreve_sync' => $cloudSync,
+            ]);
         } elseif ($action === 'unbind_email') {
             $token = $input['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
@@ -557,10 +689,24 @@ switch ($method) {
             if (!$userId) jsonError(401, '登录已过期');
             $users = readJson($usersFile);
             if (!isset($users[$userId])) jsonError(404, '用户不存在');
+            $oldProfile = [
+                'username' => (string)($users[$userId]['username'] ?? ''),
+                'email' => $users[$userId]['email'] ?? null,
+            ];
             $users[$userId]['email'] = null;
             unset($users[$userId]['verify_code'], $users[$userId]['verify_code_time'], $users[$userId]['pending_email']);
-            writeJson($usersFile, $users);
-            jsonSuccess(['message' => '邮箱已解绑']);
+            if (!writeJson($usersFile, $users)) jsonError(500, '邮箱解绑保存失败');
+            $cloudSync = syncVerifiedCloudreveProfile(
+                $userId,
+                $oldProfile,
+                ['username' => $oldProfile['username'], 'email' => null]
+            );
+            jsonSuccess([
+                'message' => '邮箱已解绑；Cloudreve 登录必须保留邮箱，因此云盘原邮箱未删除',
+                'cloudreve_synced' => (bool)($cloudSync['synced'] ?? false),
+                'cloudreve_email_retained' => true,
+                'cloudreve_sync' => $cloudSync,
+            ]);
         } elseif ($action === 'delete_account') {
             $token = $input['token'] ?? '';
             if (empty($token)) jsonError(401, '未登录');
@@ -572,9 +718,8 @@ switch ($method) {
             writeJson($usersFile, $users);
             $sessions = readJson($sessionsFile);
             foreach ($sessions as $t => $info) {
-                if (($info['user_id'] ?? '') === $userId) unset($sessions[$t]);
+                if (($info['user_id'] ?? '') === $userId) revokeSessionToken($t);
             }
-            writeJson($sessionsFile, $sessions);
             jsonSuccess(['message' => '账号已注销']);
 
         } else {
@@ -584,8 +729,11 @@ switch ($method) {
 
     case 'GET':
         if ($action === 'verify') {
-            $token = $_GET['token'] ?? '';
-            $userId = verifyAuthToken($token);
+            $token = extractSessionToken(true);
+            if (empty($token)) {
+                $token = $_GET['token'] ?? $_POST['token'] ?? '';
+            }
+            $userId = !empty($token) ? verifyAuthToken($token) : null;
             if (!$userId) {
                 echo json_encode(['valid' => false]);
                 exit;
@@ -606,7 +754,10 @@ switch ($method) {
             ]);
             exit;
         } elseif ($action === 'get_profile') {
-            $token = $_GET['token'] ?? '';
+            $token = extractSessionToken(true);
+            if (empty($token)) {
+                $token = $_GET['token'] ?? $_POST['token'] ?? '';
+            }
             if (empty($token)) jsonError(401, '未登录');
             $userId = verifyAuthToken($token);
             if (!$userId) jsonError(401, '登录已过期');

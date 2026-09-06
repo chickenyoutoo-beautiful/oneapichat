@@ -147,11 +147,39 @@ function injectCachedImageAnalyses(chatId, apiMessages) {
         if (!cache || !cache.length) return;
         // 检查最近几条消息是否已经有图片分析上下文(避免重复注入)
         var recentContent = apiMessages.slice(-3).map(function(m) { return m.content || ''; }).join(' ');
-        var pattern = /【图片\d+分析结果】|以下是对用户上传图片的自动分析结果|图片分析缓存/g;
+        var pattern = /【图片分析缓存\(历史\)/g;
         if (pattern.test(recentContent)) return;
-        // 注入缓存
-        var analysisText = '\n\n【图片分析缓存(历史)】以下是对用户之前上传图片的描述,如需引用请直接使用,无需重新分析:\n\n' +
-            cache.map(function(a, idx) { return '【图片' + (idx + 1) + '】\n' + a; }).join('\n\n---\n\n');
+
+        // ★ 获取本次新上传的图片清单（用于区分“历史图片”和“本次新图”，保留联想又不误导复用）
+        var _newImageNames = [];
+        try {
+            if (window._currentMessageImagesByChat && window._currentMessageImagesByChat[chatId]) {
+                _newImageNames = window._currentMessageImagesByChat[chatId].map(function(im) { return im && im.name; }).filter(Boolean);
+            }
+            if (_newImageNames.length === 0 && typeof currentMessageHasImage === 'function' && currentMessageHasImage(chatId)) {
+                var _msgsN = chats[chatId].messages;
+                for (var _miN = _msgsN.length - 1; _miN >= 0; _miN--) {
+                    if (_msgsN[_miN].role === 'user' && _msgsN[_miN].files) {
+                        _newImageNames = _msgsN[_miN].files.filter(function(f) { return f.isImage || (f.type && f.type.indexOf('image/') === 0); })
+                            .map(function(f) { return f.name; }).filter(Boolean);
+                        break;
+                    }
+                }
+            }
+        } catch(e) {}
+
+        // ★ 智能注入：历史缓存始终保留供“联系思考”，但明确标注边界。
+        //   本次有新图时，明确列出新图清单并要求独立分析，避免模型把新图误判为历史旧图。
+        var analysisText;
+        if (_newImageNames.length > 0) {
+            analysisText = '\n\n【图片分析缓存(历史)】以下是你之前分析过的图片描述，仅供联系上下文/联想参考，不代表本次上传。\n'
+                + '\n本次用户新上传了 ' + _newImageNames.length + ' 张**新图片**（' + _newImageNames.join('、')
+                + '），它们是新的、尚未分析的内容，必须基于视觉输入独立分析，不要与上方历史图片混为同一张，也不要直接复用历史描述。\n\n'
+                + cache.map(function(a, idx) { return '【历史图片' + (idx + 1) + '】\n' + a; }).join('\n\n---\n\n');
+        } else {
+            analysisText = '\n\n【图片分析缓存(历史)】以下是你之前分析过的图片描述，如需引用可直接使用（本次未上传新图）:\n\n'
+                + cache.map(function(a, idx) { return '【历史图片' + (idx + 1) + '】\n' + a; }).join('\n\n---\n\n');
+        }
         var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
         if (sysIdx !== -1) {
             apiMessages[sysIdx].content += analysisText;
@@ -161,6 +189,80 @@ function injectCachedImageAnalyses(chatId, apiMessages) {
     } catch(e) {
         console.warn('[injectCachedImageAnalyses] 失败:', e.message);
     }
+}
+
+// Provider APIs require each assistant.tool_calls turn to be followed immediately
+// by matching tool messages. Refresh/recovery can leave a partial or reordered
+// history, so normalize the wire copy instead of sending a malformed transcript.
+function normalizeToolMessagePairs(messages, source) {
+    if (!Array.isArray(messages)) return [];
+    var normalized = [];
+    var repaired = 0;
+    for (var i = 0; i < messages.length;) {
+        var msg = messages[i];
+        if (!msg || !msg.role) { i++; continue; }
+        if (msg.role !== 'assistant' || !Array.isArray(msg.tool_calls) || !msg.tool_calls.length) {
+            // A tool message without an immediately preceding assistant tool turn is
+            // never valid OpenAI history; drop it from this request copy.
+            if (msg.role !== 'tool') normalized.push(msg);
+            i++;
+            continue;
+        }
+
+        var calls = [];
+        var callIds = {};
+        for (var c = 0; c < msg.tool_calls.length; c++) {
+            var call = msg.tool_calls[c];
+            var id = call && String(call.id || '').trim();
+            if (!id || callIds[id]) continue;
+            callIds[id] = true;
+            if (call.function && typeof call.function.arguments !== 'string') {
+                call.function.arguments = JSON.stringify(call.function.arguments || {});
+            }
+            calls.push(call);
+        }
+
+        var j = i + 1;
+        var results = {};
+        while (j < messages.length && messages[j] && messages[j].role === 'tool') {
+            var result = messages[j];
+            var resultId = String(result.tool_call_id || '').trim();
+            if (resultId && !results[resultId]) results[resultId] = result;
+            j++;
+        }
+        var validCalls = calls.filter(function(call) { return !!results[String(call.id)]; });
+        if (validCalls.length !== calls.length) repaired += calls.length - validCalls.length;
+        if (validCalls.length) {
+            msg.tool_calls = validCalls;
+            normalized.push(msg);
+            // Emit results in the same order as assistant.tool_calls, regardless of
+            // persistence/network reorder. Extra or duplicate tool messages are dropped.
+            validCalls.forEach(function(call) { normalized.push(results[String(call.id)]); });
+        } else {
+            delete msg.tool_calls;
+            normalized.push(msg);
+            if (calls.length) repaired += calls.length;
+        }
+        i = j;
+    }
+    // ★ 防御: API (尤其 Gemini) 严格禁止请求以 assistant (model) 轮次结尾
+    // 如果尾部由于 tool 丢失变成了悬空 assistant，或者末尾没有对应的 tool/user
+    while (normalized.length > 0 && normalized[normalized.length - 1].role === 'assistant') {
+        var _lastNorm = normalized[normalized.length - 1];
+        var _lnContent = String(_lastNorm.content || '').trim();
+        // 如果内容为空或者只有占位，直接移除该残缺尾部
+        if (!_lnContent || _lnContent === '(empty)') {
+            normalized.pop();
+            repaired++;
+        } else {
+            // 如果末尾 assistant 有实质内容，但请求直接发给 Gemini 必报 400
+            // 自动追加一条继续指令，确保合法轮次交替
+            normalized.push({ role: 'user', content: '请基于上述内容继续。' });
+            break;
+        }
+    }
+    if (repaired && source) console.info('[ToolPairing] normalized ' + repaired + ' incomplete tool calls before ' + source);
+    return normalized;
 }
 
 function buildApiMessages(chatId) {
@@ -198,18 +300,25 @@ function buildApiMessages(chatId) {
             }
         }
         var merged = sysMsgs.length > 0 ? sysMsgs.join('\n\n') : (getVal('systemPrompt') || DEFAULT_CONFIG.system);
-        // ★ 追加工作空间信息
-        var _wsInfo = '\n\n## 🗂 工作空间\n' +
-            '你必须使用 server_file_write 工具保存所有生成的项目文件到工作空间。\n' +
-            '- 完整项目: 写入到 /var/www/html/oneapichat/workspace/projects/<项目名>/\n' +
-            '- 脚本: /var/www/html/oneapichat/workspace/scripts/<文件名>\n' +
-            '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
-            '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
-            '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
-            '文件写入成功后,server_file_write 工具会自动返回在线访问链接,你直接使用该链接即可,不要自己拼接URL。\n' +
-            '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
-            '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
-            '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
+        // ★ 动态构建工作区上下文 (参考 DSH Workspace 规范)
+        function _buildWsContext() {
+            var curWs = (window.WorkspaceManager && typeof window.WorkspaceManager.getCurrentWorkspace === 'function')
+                ? window.WorkspaceManager.getCurrentWorkspace()
+                : { name: 'oneapichat', path: '/var/www/html/oneapichat' };
+            return '\n\n## 📁 工作区与执行环境 (Workspace Context)\n' +
+                '- **当前工作区**: `' + curWs.name + '`\n' +
+                '- **工作区根目录 (CWD)**: `' + curWs.path + '`\n' +
+                '- **相对路径基准**: 所有文件工具 (read/write/edit/grep/glob) 与终端执行 (server_exec/bash) 的相对路径默认基于当前工作区根目录。\n' +
+                '- **项目与生成物存放规范**:\n' +
+                '  - 完整项目/Web应用: 写入到 `' + curWs.path + '/projects/<项目名>/` 或工作区根目录；\n' +
+                '  - 脚本与工具: `' + curWs.path + '/scripts/<文件名>`；\n' +
+                '  - 数据文件: `' + curWs.path + '/data/<文件名>`；\n' +
+                '  - 报告与文档: `' + curWs.path + '/reports/<文件名>`；\n' +
+                '  - 临时文件: `' + curWs.path + '/tmp/<文件名>` 或 `/tmp/`；\n' +
+                '- 文件写入成功后，`server_file_write` / `write` 工具会自动返回在线访问链接，直接使用返回链接即可。\n' +
+                '- 修改已有文件时，务必先使用 `read` / `server_file_read` 观察，再使用 `edit` / `server_file_edit` 进行局部精确修改。';
+        }
+        var _wsInfo = _buildWsContext();
         apiMessagesUnfiltered.push({ role: 'system', content: merged + _wsInfo });
     } else {
         for (const msg of chats[chatId].messages) {
@@ -220,19 +329,25 @@ function buildApiMessages(chatId) {
 
         if (apiMessagesUnfiltered.length === 0) {
             var defaultSystemContent = getVal('systemPrompt') || DEFAULT_CONFIG.system;
-            // ★ 追加工作空间信息
-            var _wsInfo = '\n\n## 🗂 工作空间\n' +
-                '你必须使用 server_file_write 工具保存所有生成的项目文件到工作空间。\n' +
-                '- 完整项目: 写入到 /var/www/html/oneapichat/workspace/projects/<项目名>/\n' +
-                '- 脚本: /var/www/html/oneapichat/workspace/scripts/<文件名>\n' +
-                '- 数据: /var/www/html/oneapichat/workspace/data/<文件名>\n' +
-                '- 报告: /var/www/html/oneapichat/workspace/reports/<文件名>\n' +
-                '- 临时文件: /var/www/html/oneapichat/workspace/tmp/<文件名>\n' +
-                '文件写入成功后,server_file_write 工具会自动返回在线访问链接,你在回复中直接使用该链接即可,不要自己拼接URL。\n' +
-                '对于 HTML 项目,务必写入 index.html 文件,确保目录名和文件名准确。\n' +
-                '如果要查看已有项目,使用 server_file_read 读取 /var/www/html/oneapichat/workspace/projects.json 索引。\n' +
-                '你始终记得你生成过哪些项目,不要重复生成。如果用户问"我之前的项目在哪",根据 projects.json 索引给出链接。';
-            defaultSystemContent += _wsInfo;
+            // ★ 动态追加工作区信息
+            function _buildWsContext2() {
+                var curWs = (window.WorkspaceManager && typeof window.WorkspaceManager.getCurrentWorkspace === 'function')
+                    ? window.WorkspaceManager.getCurrentWorkspace()
+                    : { name: 'oneapichat', path: '/var/www/html/oneapichat' };
+                return '\n\n## 📁 工作区与执行环境 (Workspace Context)\n' +
+                    '- **当前工作区**: `' + curWs.name + '`\n' +
+                    '- **工作区根目录 (CWD)**: `' + curWs.path + '`\n' +
+                    '- **相对路径基准**: 所有文件工具 (read/write/edit/grep/glob) 与终端执行 (server_exec/bash) 的相对路径默认基于当前工作区根目录。\n' +
+                    '- **项目与生成物存放规范**:\n' +
+                    '  - 完整项目/Web应用: 写入到 `' + curWs.path + '/projects/<项目名>/` 或工作区根目录；\n' +
+                    '  - 脚本与工具: `' + curWs.path + '/scripts/<文件名>`；\n' +
+                    '  - 数据文件: `' + curWs.path + '/data/<文件名>`；\n' +
+                    '  - 报告与文档: `' + curWs.path + '/reports/<文件名>`；\n' +
+                    '  - 临时文件: `' + curWs.path + '/tmp/<文件名>` 或 `/tmp/`；\n' +
+                    '- 文件写入成功后，`server_file_write` / `write` 工具会自动返回在线访问链接，直接使用返回链接即可。\n' +
+                    '- 修改已有文件时，务必先使用 `read` / `server_file_read` 观察，再使用 `edit` / `server_file_edit` 进行局部精确修改。';
+            }
+            defaultSystemContent += _buildWsContext2();
             apiMessagesUnfiltered.push({ role: 'system', content: defaultSystemContent });
             if (!chats[chatId].messages.some(m => m.role === 'system' && !m.temporary)) {
                 chats[chatId].messages.unshift({ role: 'system', content: defaultSystemContent });
@@ -280,6 +395,7 @@ function buildApiMessages(chatId) {
 
     if (!chats[chatId] || !chats[chatId].messages) return [];  // ★ 防御：chat 未初始化时返回空
     var msgs = chats[chatId].messages;
+    var _globalSeenAssistantTcIds = Object.create(null);
     for (let i = 0; i < msgs.length; i++) {
         var msg = msgs[i];
         // ★ 跳过内部消息(不发送给 API,仅用于内部逻辑)
@@ -298,22 +414,24 @@ function buildApiMessages(chatId) {
             apiMessagesUnfiltered.push({ role: 'user', content: buildUserContent(_userText, files) });
             window._forceVisionFormat = prev;
         } else if (msg.role === 'assistant' && !msg.partial) {
-            var _assistantMsg = { role: 'assistant', content: cleanObjectObject(msg.content) || '(empty)' };
-            // ★ 保留 tool_calls 历史 — 否则模型会忘记之前调用过工具，产生幻觉
+            // 空内容且无 tool_calls 的 assistant 消息不发送给 API，防止模型产生空轮次或 400
+            var _cleanedContent = cleanObjectObject(msg.content);
+            if (!_cleanedContent && (!msg.tool_calls || !msg.tool_calls.length)) continue;
+            var _assistantMsg = { role: 'assistant', content: _cleanedContent || (msg.tool_calls && msg.tool_calls.length ? null : '') };
+            // ★ 保留 tool_calls 历史 — 全局去重，避免多轮累加导致跨 assistant 消息出现重复的 tool_call_id
             if (msg.tool_calls && msg.tool_calls.length > 0) {
-                // ★ 去重: 按 id 去重 tool_calls（引擎可能发送重复条目）
-                var _seenIds = {};
                 var _uniqueCalls = [];
                 for (var _uci = 0; _uci < msg.tool_calls.length; _uci++) {
-                    var _tcId = msg.tool_calls[_uci].id;
-                    if (_tcId && !_seenIds[_tcId]) {
-                        _seenIds[_tcId] = true;
-                        _uniqueCalls.push(msg.tool_calls[_uci]);
-                    } else if (_tcId) {
-                        console.warn('[buildApiMessages] 去重 assistant tool_call id:', _tcId);
+                    var _tcItem = msg.tool_calls[_uci];
+                    var _tcId = _tcItem && _tcItem.id ? String(_tcItem.id).trim() : '';
+                    if (_tcId && !_globalSeenAssistantTcIds[_tcId]) {
+                        _globalSeenAssistantTcIds[_tcId] = i;
+                        _uniqueCalls.push(_tcItem);
                     }
                 }
-                _assistantMsg.tool_calls = _uniqueCalls;
+                if (_uniqueCalls.length > 0) {
+                    _assistantMsg.tool_calls = _uniqueCalls;
+                }
             }
             // ★ thinking模式: reasoning内容必须传回API(空字符串也不行,需保留原值)
             // DeepSeek要求: 若对话中任何assistant有过reasoning,后续所有assistant都需带回
@@ -415,15 +533,24 @@ function buildApiMessages(chatId) {
     }
     // 第三遍: 清理 assistant tool_calls 中无对应 tool 结果的
     var _removedTcCount = 0;
+    var _sourceHealed = false;
+    var _isLivePendingRound = !!(typeof isTypingMap !== 'undefined' && isTypingMap[chatId]);
     for (var _tfi2 = 0; _tfi2 < apiMessagesUnfiltered.length; _tfi2++) {
         var _tmsg2 = apiMessagesUnfiltered[_tfi2];
-        // ★ v2.6: 跳过最后一轮 assistant（工具结果尚未到达），防止竞态过滤
-        if (_tfi2 === _lastAssistantIdx) continue;
+        // 只有当前会话处于正在执行中的最后一轮 assistant，才跳过过滤（工具结果还在返回路上）
+        if (_isLivePendingRound && _tfi2 === _lastAssistantIdx) continue;
         if (_tmsg2.role === 'assistant' && _tmsg2.tool_calls && _tmsg2.tool_calls.length > 0) {
+            // 收集紧随该 assistant 之后的所有连续 tool 结果 ID（严格邻接）
+            var _adjacentToolResultIds = Object.create(null);
+            for (var _aj = _tfi2 + 1; _aj < apiMessagesUnfiltered.length; _aj++) {
+                var _ajMsg = apiMessagesUnfiltered[_aj];
+                if (!_ajMsg || _ajMsg.role !== 'tool') break;
+                if (_ajMsg.tool_call_id) _adjacentToolResultIds[_ajMsg.tool_call_id] = true;
+            }
             var _validCalls = [];
             for (var _tci = 0; _tci < _tmsg2.tool_calls.length; _tci++) {
                 var _tcId = _tmsg2.tool_calls[_tci].id;
-                if (_tcId && _toolResultIds[_tcId]) {
+                if (_tcId && _adjacentToolResultIds[_tcId]) {
                     _validCalls.push(_tmsg2.tool_calls[_tci]);
                 } else {
                     _removedTcCount++;
@@ -441,6 +568,7 @@ function buildApiMessages(chatId) {
                 if (_srcMsg && _srcMsg.tool_calls) {
                     if (_validCalls.length > 0) _srcMsg.tool_calls = JSON.parse(JSON.stringify(_validCalls));
                     else delete _srcMsg.tool_calls;
+                    _sourceHealed = true;
                 }
             }
         }
@@ -576,24 +704,26 @@ function buildApiMessages(chatId) {
                 if (!_tid) continue;
                 if (_tcRole === 'assistant') {
                     if (_tcDiagAssistant[_tid] !== undefined) {
-                        console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id in assistant:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagAssistant[_tid] + '])');
+                        console.info('[buildApiMessages] duplicate tool_call_id in assistant:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagAssistant[_tid] + '])');
                     } else {
                         _tcDiagAssistant[_tid] = _di;
                     }
                 } else if (_tcRole === 'tool') {
                     if (_tcDiagTool[_tid] !== undefined) {
-                        console.warn('[buildApiMessages] ⚠️ DUPLICATE tool_call_id in tool:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagTool[_tid] + '])');
+                        console.info('[buildApiMessages] duplicate tool_call_id in tool:', _tid, 'at msg[' + _di + '] (first at msg[' + _tcDiagTool[_tid] + '])');
                     } else {
                         _tcDiagTool[_tid] = _di;
                     }
                 }
             }
         }
-        var _cp = '';
-        if (typeof _dm.content === 'string') {
-            _cp = _dm.content.length > 60 ? _dm.content.substring(0, 60) + '...' : _dm.content;
-        }
-        console.log('[buildApiMessages] msg[' + _di + '] role=' + _dm.role + ' tc_ids=' + JSON.stringify(_tcIds) + ' content=' + _cp);
+        var _contentLength = typeof _dm.content === 'string' ? _dm.content.length : 0;
+        console.log('[buildApiMessages] msg[' + _di + '] role=' + _dm.role + ' tool_calls=' + _tcIds.length + ' content_length=' + _contentLength);
+    }
+    // 最终 wire copy 强制满足 provider 的 assistant/tool 邻接协议。
+    apiMessages = normalizeToolMessagePairs(apiMessages, 'buildApiMessages');
+    if (_sourceHealed && typeof saveChatsDebounced === 'function') {
+        saveChatsDebounced();
     }
     return apiMessages;
 }

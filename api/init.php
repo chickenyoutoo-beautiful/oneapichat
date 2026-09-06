@@ -5,6 +5,7 @@
  */
 
 define('APP_ROOT', dirname(__DIR__));
+if (!defined('ONECHAT_ROOT')) define('ONECHAT_ROOT', APP_ROOT);
 define('APP_TEMP', sys_get_temp_dir());
 define('CHAOXING_DIR', APP_TEMP . DIRECTORY_SEPARATOR . 'AutomaticCB');
 
@@ -69,32 +70,27 @@ function pyBgCmd($script, $args, $logPath) {
 // ════════════════════════════════════════════════════
 function setCorsHeaders(): void {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-    $allowed = [
-        'https://naujtrats.xyz',
-        'https://www.naujtrats.xyz',
-        'https://localmodels.naujtrats.xyz',
-    ];
-    // 本地开发环境
-    if ($origin && (strpos($origin, '//localhost') !== false || strpos($origin, '//127.0.0.1') !== false)) {
-        $allowed[] = $origin;
-    }
-    if (in_array($origin, $allowed, true)) {
+    // 动态兼容任意域名绑定、反代及本地环境
+    if ($origin) {
         header('Access-Control-Allow-Origin: ' . $origin);
         header('Access-Control-Allow-Credentials: true');
     } else {
-        header('Access-Control-Allow-Origin: https://naujtrats.xyz');
+        header('Access-Control-Allow-Origin: *');
     }
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, Auth-Token');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, Auth-Token, X-Requested-With');
 }
 
 // ════════════════════════════════════════════════════
-// API CORS（第三方客户端接入 — 允许任意 Origin）
+// API CORS（第三方客户端接入）
 // ════════════════════════════════════════════════════
+// 注意: 所有 CORS 头 (Allow-Origin / Methods / Headers / Credentials)
+// 均由 nginx 统一处理 (nginx.conf http 全局 add_header)。
+// PHP 不再设置任何 CORS 头, 否则会与 nginx 产生重复头,
+// 导致浏览器拒绝 (多个 Allow-Origin = CORS 规范非法)。
+// 非浏览器客户端 (curl/Postman/SDK) 不校验 CORS, 不受影响。
 function setApiCorsHeaders(): void {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    // CORS 头由 nginx 统一处理,PHP 不再设置
 }
 
 // ════════════════════════════════════════════════════
@@ -120,8 +116,8 @@ function getEncryptionKey(): string {
 // 登录速率限制 (防暴力破解)
 // ════════════════════════════════════════════════════
 define('RATE_LIMIT_FILE', APP_ROOT . '/users/rate_limits.json');
-define('RATE_LIMIT_MAX_IP', 5);       // 每IP 5次/15分钟
-define('RATE_LIMIT_MAX_USER', 10);    // 每用户 10次/15分钟
+define('RATE_LIMIT_MAX_IP', 20);      // 每IP 20次/15分钟（注册/验证码场景需宽松）
+define('RATE_LIMIT_MAX_USER', 30);    // 每用户 30次/15分钟
 define('RATE_LIMIT_WINDOW', 900);     // 15分钟窗口(秒)
 
 function checkLoginRateLimit(string $identifier, string $type = 'ip'): array {

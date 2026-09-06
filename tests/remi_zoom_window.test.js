@@ -306,8 +306,9 @@ function ev(x, y) {
 (function testHtmlStructure() {
     assert.ok(htmlSrc.includes('class="remi-zoom-resize"'), 'index.html 应包含缩放手柄节点');
     assert.ok(htmlSrc.includes('title="拖动调整大小"'), '手柄应有调整大小提示');
-    const imgTag = htmlSrc.match(/<img id="remi-zoom-img"[^>]*>/);
-    assert.ok(imgTag && imgTag[0].includes('draggable="false"'), '图片应 draggable=false 防拖拽干扰');
+    const avatarTag = htmlSrc.match(/<img id="remi-zoom-img"[^>]*>/);
+    assert.ok(avatarTag && avatarTag[0].includes('remi-character-asset'), '小窗应使用高还原蕾米角色素材');
+    assert.ok(avatarTag && avatarTag[0].includes('draggable="false"'), '蕾米素材应禁用原生拖拽');
     console.log('✓ testHtmlStructure');
 })();
 
