@@ -1342,6 +1342,19 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         if (agentPrompt.indexOf('plan_update') === -1) {
             agentPrompt += '\n\n## 计划管理\n复杂任务(≥3步)先用 plan_update(action="create") 创建计划面板，执行中更新状态，完成后 plan_update(action="complete")。简单任务无需计划。';
         }
+        var _curMode = typeof getAgentMode === 'function' ? getAgentMode() : 'agent';
+        if (_curMode === 'yolo') {
+            agentPrompt += '\n\n## 🛡️ YOLO 最高自主权限授权（最高优先级执行准则）\n' +
+                '1. **完全自主执行**: 当前已开启 YOLO 自动执行模式，用户已完全授权所有终端命令、读写文件、网络与系统操作。\n' +
+                '2. **绝对禁止中途向用户索取权限或询问是否继续**: 严禁询问用户“是否同意执行”、“请确认是否继续”、“需要您的授权”，所有工具和命令直接调用执行直至任务彻底完成！\n' +
+                '3. **绝对禁止调用 ask_agent 或 autonomous_mode**: 当前已经是最高 YOLO 权限，绝对不要再调用 ask_agent、autonomous_mode 请求授权，这会导致循环中断！\n' +
+                '4. **遇到报错自动排查修复**: 任何命令报错或文件缺失，必须分析错误日志自行修改重试或寻找替代方案，直到彻底解决，严禁轻易放弃或把半成品抛给用户！\n' +
+                '5. **终态汇报**: 只有当整个任务彻底完成并验证通过，或者出现真正无法逾越的环境物理阻碍时，才向用户输出最终完整的成果报告。';
+        } else {
+            agentPrompt += '\n\n## ⚡ Agent 自主执行准则\n' +
+                '1. 充分利用已有工具主动探索和执行，不要每做一步就停下来询问用户；\n' +
+                '2. 遇到临时错误时自主分析原因重试或调整参数，确保任务有实际产出。';
+        }
         // 追加工具指令 + 记忆
         var sysContent = agentPrompt + memoryInject;
         var sysIdx = apiMessages.findIndex(function(m) { return m.role === 'system'; });
@@ -1687,7 +1700,7 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         // ask_agent: 仅在普通模式且当前对话无临时授权时注册
         // Agent模式/yolo模式/当前对话已有临时授权时无需此工具
         var _hasTempForThisChat = !!(window._tempAgentGranted && window._tempAgentChatId === chatId);
-        if (!agentModeActive && !_hasTempForThisChat) {
+        if (!agentModeActive && !_hasTempForThisChat && !(typeof isYoloMode === 'function' && isYoloMode())) {
             tools.push(ASK_AGENT_TOOL);
         }
 
@@ -2190,10 +2203,13 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
     // ★ 死循环检测: 会话级 LoopGuard(跨轮共享, 400/402 重试与工具轮递归共用同一实例)
     // 小参数模型易陷入工具复读/文本复读死循环烧 token, 详见 loop-guard.js
     window.__loopGuardMap = window.__loopGuardMap || {};
+    var _isAgentActive = (typeof isAgentToolsActive === 'function' && isAgentToolsActive()) || (typeof isYoloMode === 'function' && isYoloMode());
+    var _isYolo = typeof isYoloMode === 'function' && isYoloMode();
     var _guardCfg = {
         enabled: localStorage.getItem('loopGuardEnabled') !== 'false',
-        maxRepeat: parseInt(localStorage.getItem('loopGuardMaxRepeat')) || 3,
-        maxToolOnlyRounds: parseInt(localStorage.getItem('loopGuardMaxToolOnlyRounds')) || 6
+        maxRepeat: _isYolo ? 10 : (_isAgentActive ? 6 : (parseInt(localStorage.getItem('loopGuardMaxRepeat')) || 3)),
+        maxToolOnlyRounds: _isYolo ? 50 : (_isAgentActive ? 25 : (parseInt(localStorage.getItem('loopGuardMaxToolOnlyRounds')) || 12)),
+        maxSoftTriggers: _isYolo ? 10 : (_isAgentActive ? 5 : 2)
     };
     window.__loopGuardMap[chatId] = new window.LoopGuard(_guardCfg);
     var _guard = window.__loopGuardMap[chatId];
