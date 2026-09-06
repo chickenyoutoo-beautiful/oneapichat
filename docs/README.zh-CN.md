@@ -1,243 +1,242 @@
 # OneAPIChat
 
-**自托管 AI 聊天平台 — 多模型 · Agent 模式 · SSE 流式 · 考试自动化**
+**全栈多模型 AI 创作与自动化平台 — All-in-One Docker、60+ MCP 工具链、Agent 编排系统、超星学习通全自动化、Cloudreve 云盘与模型代理网关**
 
 🚀 **在线演示**: [naujtrats.xyz/oneapichat](https://naujtrats.xyz/oneapichat)
 
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v4.1.0-green)](https://github.com/chickenyoutoo-beautiful/oneapichat/releases)
+[![Docker](https://img.shields.io/badge/Docker-All--in--One-blue?logo=docker)](https://github.com/chickenyoutoo-beautiful/oneapichat/releases/tag/v4.1.0)
+
 ---
 
-🌐 **多语言**: [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
+🌐 **多语言**: [English](../README.md) | [中文](./README.zh-CN.md)
 
 ---
 
-一个现代化的自托管 AI 聊天界面，对接任意 OpenAI 兼容 API。支持自主 Agent 模式（动态工具注册）、实时 SSE 流式响应、联网搜索、超星考试自动化、多用户管理，界面简洁且响应式适配移动端。
+OneAPIChat 是一个现代化的自托管多模型 AI 创作与自动化平台。它不仅提供了高度灵活的 AI 对话与深度思考体验，更通过 All-in-One Docker 容器化方案将 **自主 Agent（动态工具生态）**、**可恢复流式通信 (SSE)**、**超星学习通刷课/考试全自动化**、**Cloudreve v4 个人云盘** 和 **CLIProxyAPI (CPA) 代理网关** 深度熔接为统一整体。
 
-| 🧠 **多模型** | 🤖 **Agent 模式** | 🔍 **联网搜索** | 📡 **SSE 流式** | 📝 **考试模块** |
-|---------------|-------------------|-----------------|------------------|-------------------|
-| MiniMax、DeepSeek、OpenAI + 任意兼容 API | 自主 Agent + 动态工具注册 | Brave、Google、Tavily | 逐 Token 实时输出 | 超星考试可选性开考 |
+| 🧠 **多模型与思考** | 🤖 **Agent 智能体** | 🐳 **全栈容器化** | 📚 **超星全自动化** | ☁️ **Cloudreve 云盘** |
+|---|---|---|---|---|
+| Gemini 3.8/3.7、GPT-5/o3、Claude、DeepSeek、xAI (7档思考切换) | Plan / Agent / YOLO 三模式 + 三级正交权限 | All-in-One 镜像 + 317MB 离线可移植包 | 视频多倍速、AI搜题、考试辅助、Cookie属主接管 | 单点登录 (SSO)、嵌入式文件管理、断点续传 |
 
 ---
 
 ## 目录
 
-- [功能概览](#-功能概览)
-- [快速开始](#-快速开始)
-- [部署方式](#-部署方式)
-  - [一键脚本](#一键脚本)
-  - [Docker](#docker)
-  - [手动部署](#手动部署)
-- [配置说明](#%EF%B8%8F-配置说明)
-- [项目结构](#-项目结构)
-- [刷课模块（超星自动化）](#-刷课模块超星自动化)
-- [许可协议](#-许可协议)
+- [📸 核心功能全景](#-核心功能全景)
+- [☁️ 部署与使用方式](#%EF%B8%8F-部署与使用方式)
+  - [方式一：Docker Compose 全栈部署 (推荐)](#方式一docker-compose-全栈部署-推荐)
+  - [方式二：无网络/全新机器离线一键移植包](#方式二无网络全新机器离线一键移植包)
+  - [方式三：外部反代与域名绑定 (Nginx)](#方式三外部反代与域名绑定-nginx)
+  - [方式四：源码本地开发运行](#方式四源码本地开发运行)
+- [🔒 权限与各级自愈机制](#-权限与各级自愈机制)
+- [📦 数据持久化目录](#-数据持久化目录)
+- [🌐 开放 API 接入 (OpenAI 兼容)](#-开放-api-接入-openai-兼容)
+- [📱 移动端与桌面客户端](#-移动端与桌面客户端)
+- [📄 许可协议](#-许可协议)
 
 ---
 
-## 📸 功能概览
+## 📸 核心功能全景
 
-### 🤖 多模型支持
-兼容 OpenAI API 格式，可对接任意模型 endpoint。内置 **MiniMax**、**DeepSeek**、**OpenAI**、**Anthropic** 等模型配置，每个模型可独立设置 API Base URL 和 Key。支持模型路由与自动切换。
+### 🤖 1. 全生态多模型与 7 档精细思考切换
+- **全主流协议打通**：原生支持 Google Gemini 3.8/3.7 系列、OpenAI o1/o3/GPT-5 系列、Anthropic Claude、DeepSeek、xAI 及任意标准 OpenAI 兼容 API。
+- **7 档深度思考控制**：在输入框右下角直选 `Default` / `Off` / `Minimal` / `Low` / `Medium` / `High` / `XHigh` / `Max`，底层根据模型提供商（Gemini thinking_config vs OpenAI reasoning_effort）自动适配，彻底杜绝 400 报错。
+- **多模态与多媒体**：支持超大图高精度 OCR 识别、图生图编辑（`/images/edits`），以及本地 MP4 视频关键帧时间戳密集采样与视觉理解。
 
-### 🧠 Agent 模式
-启用 Agent 模式后，AI 可自主执行任务——派发子 Agent、联网搜索、执行代码、操作文件。**v3.0 新增动态工具注册**——工具面板由 JS 自动渲染，新增工具无需编辑 HTML。新增考试自动化工具（列表、开考、查看、停止）、课程总览、登录状态检测等。包含持久化 Agent 状态、通知系统和 Cron 定时调度。
+### 🎯 2. 经典 Agent 三模式与三级正交权限
+- **运行模式**：
+  - **Plan 模式**：模型先拟定执行计划，每一步均需用户审批确认后执行（蓝色胶囊）。
+  - **Agent 模式**：自主规划并执行常用工具，遇到高危系统操作时弹出审批（绿色胶囊）。
+  - **YOLO 模式**：全自动全速免审批执行，适合流水线与自动化编排（红色胶囊）。
+- **工作区权限**：
+  - **🛡️ Read only (只读)**：仅允许查看文件与检索信息。
+  - **✏️ Workspace write (工作区写入)**：允许向当前工作区读写文件与产出交付物。
+  - **⚡ Full access (全盘访问)**：完全放开底层文件系统与运维权限。
 
-### 🔍 智能联网搜索
-AI 自动判断是否需要联网获取实时信息。支持 **Brave Search**、**Google Custom Search**、**Tavily** 多个搜索引擎，结果自动整理与摘要。
+### 🔧 3. 60+ 生产级工具生态
+- **联网搜索与采集**：自然语言逐轮意图分流，智能决定联网搜索或纯 AI 回复，搜索结果去重与优雅降级卡片。
+- **办公文档一键生成**：一句话生成精美排版的 PPT 幻灯片、Word 文档 (.docx)、Excel 统计表 (.xlsx) 与 PDF 交付物。
+- **系统与服务器运维**：Shell 命令执行、Docker 容器诊断与管理 (`server_docker`)、代码沙箱执行。
+- **浏览器自动化**：基于 Playwright CDP 的网页无头导航、元素点击与全页快照捕获。
 
-### 📝 超星考试自动化
-v3.0 新增：完整考试生命周期管理。**可选性开考**——勾选要开考的考试，不再一键全部开考。**自动暂停刷课**避免风控。**起止时间显示**。**独立日志系统**——考试与刷课日志完全分离。考试结束后自动恢复刷课。
+### 📚 4. 超星学习通自动化系统
+- **课程自动化**：课程列表拉取、多倍速视频学习、章节自动切换、防作弊检测打卡。
+- **AI 智能搜题**：言溪题库 + DeepSeek 智能语义回退，答题精准度大幅提升。
+- **考试全生命周期**：可选性开考指定科目，开考自动暂停刷课防风控，考试结束自动恢复。
+- **权限自愈与防死锁**：Cookie 写入采用 `tempfile.mkstemp` + `os.replace` 原子替换与属主接管，彻底杜绝跨用户互锁。
 
-### 📡 SSE 实时流式
-基于 Server-Sent Events 的逐 Token 流式输出，延迟极低。页面刷新后可恢复对话进度。
+### ☁️ 5. Cloudreve v4 个人云盘集成
+- **单点登录 (SSO)**：主站登录后一键跳转进入云盘，持久化缓存自动自愈，容器重启后免重新登录。
+- **嵌入式文件管理器**：在聊天侧边栏直接唤起云盘文件列表，支持递归目录检索、大文件分片上传与外链分享。
 
-### 👥 多用户多终端
-用户隔离，API Key 加密存储。支持聊天记录 JSON 导入/导出，每用户独立配置。桌面端和移动端完美适配。
+### 🔄 6. 跨设备实时流式镜像与多端同步
+- **服务端唯一生产者**：服务端原子写入磁盘快照，杜绝弱网吞消息与闪退。
+- **Observer 实时流镜像**：另一台设备打开同一会话时，毫秒级同步模型打字机与工具执行时间线。
+- **空白草稿免回源防 404**：本地新建草稿未落盘前不发起服务端无谓请求，404 状态立即熔断重试。
 
-### 🎨 精致界面
-深色/浅色模式一键切换，Markdown 渲染 + KaTeX 数学公式 + 代码语法高亮，支持文件上传。
+### 🎨 7. 主题工坊 (Theme Studio)
+- **多套现代外观**：DSH 极简紫灰、经典玻璃轻卡片、极简冷白等。
+- **阅读轨道排版**：760px 黄金居中阅读廊道，行距与气泡间距即时滑块可调。
+- **全景使用统计**：精准还原历史会话的真实 Token 用量、多模型分布占比与按天趋势柱状图。
 
 ---
 
-## 🚀 快速开始
+## ☁️ 部署与使用方式
 
-### 环境要求
-- **PHP 8.0+**（代理层）
-- **Python 3.10+**（后端引擎）
-- 任意 OpenAI 兼容 API Key
+### 方式一：Docker Compose 全栈部署 (推荐)
 
----
-
-## ☁️ 部署方式
-
-### 一键脚本（Linux / macOS）
+一键启动 Web 主站、FastAPI 引擎、超星刷课、Cloudreve 云盘、CPA 代理网关与 Nginx：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/deploy.sh | bash
-```
+# 1. 克隆代码库
+git clone https://github.com/chickenyoutoo-beautiful/oneapichat.git
+cd oneapichat/deploy
 
-自动检测操作系统（Ubuntu、Debian、CentOS、macOS）和安装方式（Docker 或原生）。
+# 2. 配置环境变量
+cp .env.example .env
+# 可按需配置域名绑定与映射端口（默认 8080）
+nano .env
 
-### Docker（任意平台）
-
-```bash
-# 快速启动
-docker run -d -p 8080:8080 --name oneapichat \
-  ghcr.io/chickenyoutoo-beautiful/oneapichat:latest
-
-# 或使用 docker-compose
-curl -fsSL https://raw.githubusercontent.com/chickenyoutoo-beautiful/oneapichat/main/docker-compose.yml -o docker-compose.yml
+# 3. 启动容器
 docker compose up -d
 ```
 
-同时支持 `linux/amd64` 和 `linux/arm64`，树莓派、群晖 NAS、威联通等设备均可运行。
+启动完成后即可直接访问：
+- **OneAPIChat 主站**：`http://<服务器IP或域名>:8080/`
+- **超星刷课平台**：`http://<服务器IP或域名>:8080/oneapichat/chaoxing.html`
+- **Cloudreve 云盘**：`http://<服务器IP或域名>:8080/cloudreve/`（或直连 `:5212`）
+- **CPA 代理管理面板**：`http://<服务器IP或域名>:8080/cpa/`（或直连 `:8317/management.html`）
+- **CPA OpenAI 兼容端点**：`http://<服务器IP或域名>:8080/v0/v1/chat/completions`
 
-#### Agent 一键部署 Docker 应用（含 Yatori）
+---
 
-如果 Agent 之前只会调用 `sudo docker ...`，在长期非交互进程中很容易因为 sudo 无 TTY/无凭据而失败。现在 `server_docker` 使用 Docker CLI 直连 daemon，并提供结构化预检、网络/权限诊断和受限的一键部署动作：
+### 方式二：无网络/全新机器离线一键移植包
 
-```text
-server_docker(action="doctor")
-server_docker(action="yatori_deploy", deploy_dir="~/yatori")
-server_docker(action="logs", name="yatori-console", tail=200)
+在没有构建网络环境或全新海外/国内服务器上，直接使用自包含便携包：
+
+1. 从 [GitHub Releases](https://github.com/chickenyoutoo-beautiful/oneapichat/releases/tag/v4.1.0) 下载 `oneapichat-bundle-v4.1.0.tar.gz`（约 317MB）。
+   *(或在已有环境运行 `./deploy/export.sh` 现场生成)*
+2. 解压并一键导入启动：
+   ```bash
+   tar -xzf oneapichat-bundle-v4.1.0.tar.gz
+   cd oneapichat-bundle-*
+   ./import.sh
+   ```
+
+---
+
+### 方式三：外部反代与域名绑定 (Nginx)
+
+若宿主机已有 Nginx 并需要配置域名与 HTTPS 证书，反代配置如下：
+
+```nginx
+server {
+    listen 80;
+    server_name chat.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name chat.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/chat.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chat.yourdomain.com/privkey.pem;
+
+    client_max_body_size 4096M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 必须开启：支持 SSE 流式打字与 WebSocket 长连接
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 7200s;
+        proxy_send_timeout 7200s;
+    }
+}
 ```
 
-`yatori_deploy` 会在目标目录创建 `config/`、`logs/` 和默认 `config.json`，拉取 `yatoridev/yatori-go-console:latest`，再以 `--restart unless-stopped` 启动 `yatori-console`。默认不会覆盖已有同名容器；确认要重建时显式传 `replace=true`。
+---
 
-若 `doctor` 报 `DOCKER_PERMISSION`，请让运行 Agent 的用户加入 Docker 组并重新登录；若报 `DOCKER_NETWORK`，请在宿主机先执行 `docker pull yatoridev/yatori-go-console:latest` 或配置 Docker registry mirror。工具不会执行任意 Docker 参数拼接，部署目录也限制在用户 Home、临时目录或项目目录内。
-
-### 手动部署
+### 方式四：源码本地开发运行
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/chickenyoutoo-beautiful/oneapichat.git
-cd oneapichat
+git clone https://github.com/chickenyoutoo-beautiful/oneapichat.git /var/www/html/oneapichat
+cd /var/www/html/oneapichat
 
-# 2. 安装 Python 依赖
-pip install fastapi uvicorn aiofiles python-multipart
+# 1. 安装 Python 依赖
+pip install -r python/requirements.txt
 
-# 3. 启动后端引擎
-python3 engine_server.py &
+# 2. 复制配置模板
+cp config.ini.template config.ini
 
-# 4. 启动 PHP 服务器
-php -S localhost:8080
-```
+# 3. 启动后台引擎
+python3 python/engine_server.py &
 
-浏览器打开 [http://localhost:8080](http://localhost:8080) 即可使用。
-
----
-
-## ⚙️ 配置说明
-
-### 添加 API Key
-1. 打开界面中的设置面板
-2. 填入 API Key 和 Base URL
-3. 选择要使用的模型
-
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `ENGINE_PORT` | `8766` | 后端引擎端口 |
-| `ENGINE_HOST` | `0.0.0.0` | 引擎监听地址 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
-
-### 支持模型
-- **MiniMax** — `MiniMax/xxx`
-- **DeepSeek** — `DeepSeek/xxx`
-- **OpenAI** — `gpt-4o`、`gpt-4o-mini` 等
-- **Anthropic** — 通过自定义 endpoint 接入 `claude-3-5-sonnet`
-- 任意 **OpenAI 兼容 API** — 设置自定义 Base URL 即可
-
----
-
-## 📁 项目结构
-
-```
-.
-├── index.html              # 主聊天界面（单页应用）
-├── login.html              # 登录页
-├── profile.html            # 用户设置页
-├── main.js                 # 核心前端逻辑
-├── css/
-│   ├── style.css           # 自定义样式
-│   └── tailwind-index.min.css
-├── js/
-│   ├── models.js           # 模型配置
-│   └── translations.js     # 国际化字符串
-├── engine_server.py        # Python 后端（FastAPI）
-├── engine_api.php          # PHP 代理层
-├── engine_watchdog.sh      # 自动重启守护脚本
-├── auth.php                # 用户认证
-├── config.php              # API Key 与 endpoint 配置
-├── chat.php                # 聊天记录查看
-├── deploy.sh               # 跨平台部署脚本
-├── Dockerfile              # Docker 镜像
-├── docker-compose.yml      # Docker Compose 配置
-├── nginx.conf              # Nginx 配置
-├── docs/                   # 文档目录
-├── LICENSE                 # AGPL-3.0
-└── NOTICE                  # 许可说明
+# 4. 配置并启动 Nginx / PHP-FPM
 ```
 
 ---
 
-## 📖 刷课模块（超星自动化）
+## 🔒 权限与各级自愈机制
 
-*这是一个可选的附加功能——平台完全无需此模块即可正常使用。*
+为了彻底根除 Linux 权限死锁与 Permission Denied：
+1. **启动自愈**：`entrypoint.sh` 启动时递归将持久化目录所有权赋予 `www-data:www-data`，全量目录设置 SGID (`2775`) 与 `umask 0002`，保障子进程创建的文件自动具有组读写权限。
+2. **后台看门狗**：`perms-healer.sh` 由 Supervisor 以 root 身份常驻，每 60 秒轮询保障超星数据库与 Cookies 的读写权限。
+3. **原子替换属主接管**：Cookies 文件改写使用 `tempfile.mkstemp` + `os.replace`，无缝突破原有用户权限限制并接管所有权。
 
-OneAPIChat 附带了一个**超星（学习通）自动化**的 Web 界面，作为独立模块集成。
+---
 
-### 刷课功能
-- 查看课程完成进度
-- 启动/停止自动刷课任务
-- 配置播放倍速
-- 可选题库配置
-- 每用户独立统计与追踪
+## 📦 数据持久化目录
 
-### 考试功能 — v3.0 新增
-- **可选性开考** — 勾选要开考的考试，不再一键全部开考
-- **起止时间显示** — 每个考试显示开始和截止时间
-- **自动暂停刷课** — 开考前自动暂停刷课避免风控
-- **自动恢复刷课** — 考试结束后自动恢复
-- **独立日志** — 考试与刷课日志完全分离
-- **工具引擎集成** — 5 个考试工具注册供 AI Agent 调用
-- **登录状态检测** — AI 先检查登录再操作，不重复问密码
+在宿主机挂载的 `./data` 结构如下：
+- `data/users/`：用户账户、Token 与设置
+- `data/chat_data/`：会话历史与单会话归档
+- `data/uploads/`：聊天附件与 AI 生图文件
+- `data/chaoxing_records/`：超星刷课 SQLite 数据库
+- `data/automatic_cb/`：超星运行时任务与日志
+- `data/cloudreve/`：Cloudreve 云盘数据库 (`cloudreve.db`) 与配置
+- `data/cloudreve_uploads/`：云盘文件存储
+- `data/cpa_auths/`：CPA 代理网关凭据与配置
+- `data/logs/`：Nginx、PHP、FastAPI 引擎与代理日志
 
-部署后访问 `/chaoxing.html` 即可使用。
+---
 
-如需通过 GitHub Actions 云端运行，详见 `.github/workflows/` 下的 Action 配置。
+## 🌐 开放 API 接入 (OpenAI 兼容)
+
+```bash
+# 对话端点
+curl https://your-domain/oneapichat/api/v1/chat/completions \
+  -H "Authorization: Bearer oac-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "你好，请介绍一下你自己"}]
+  }'
+```
+
+详见 [API.md](../API.md)。
+
+---
+
+## 📱 移动端与桌面客户端
+
+- **Android 原生客户端**：基于 Capacitor 深度定制，支持状态栏融入与手势返回，安装包见 Releases。
+- **桌面客户端**：基于 Electron 构建，支持 Windows、Linux 与 macOS。
+- **Web PWA**：支持浏览器“添加到主屏幕”，秒变独立全屏应用体验。
 
 ---
 
 ## 📄 许可协议
 
-| 组件 | 许可 | 说明 |
-|------|------|------|
-| **OneAPIChat（主项目）** | **AGPL-3.0** | [LICENSE](./LICENSE) |
-| **刷课模块**（超星自动化） | **GPL-3.0** | [LICENSES/GPL-3.0.txt](./LICENSES/GPL-3.0.txt) — 继承自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) |
-| **One-API**（接口管理依赖） | **MIT** | [songquanpeng/one-api](https://github.com/songquanpeng/one-api) |
-
-详见 [`NOTICE`](./NOTICE)。
-
----
-
-## 🙏 致谢
-
-- [songquanpeng/one-api](https://github.com/songquanpeng/one-api) — API 管理网关
-- [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing) — 超星刷课引擎（GPL-3.0）
-- [KaTeX](https://katex.org/) — 数学公式渲染
-- [Mermaid](https://mermaid.js.org/) — 图表渲染
-- 所有开源贡献者
-
-## 🎤 语音合成 (TTS)
-
-项目通过 MiniMax CLI (`mmx-cli`) 调用 Token Plan 的语音合成服务。
-
-### 配置步骤
-1. 部署脚本已自动安装 `mmx-cli`
-2. 部署后手动登录：
-   ```bash
-   mmx auth login --api-key <你的Token Plan Key> --region cn
-   ```
-3. 在配置面板 → 语音合成中选择 MiniMax 提供商即可
-
+本项目基于 [GPL-3.0 License](../LICENSE) 开源。
