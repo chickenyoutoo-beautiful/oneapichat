@@ -27,6 +27,7 @@ try:
     parser = argparse.ArgumentParser()
     parser.add_argument('--user-id', default='')
     parser.add_argument('--config', default='')
+    parser.add_argument('--force-login', action='store_true', help='强制重新登录，不复用旧 Cookie')
     args = parser.parse_args()
 
     actual_config_path = resolve_user_config(user_id=args.user_id, explicit_path=args.config)
@@ -56,13 +57,14 @@ try:
     account = Account(username, password)
     chaoxing = Chaoxing(account=account)
 
-    # ★ 先尝试用已有 Cookie 获取课程（避免重复登录触发验证码）
-    courses = chaoxing.get_course_list()
-    if courses is not None and len(courses) > 0:
-        print(json.dumps({"courses": courses}), flush=True)
-        sys.exit(0)
+    # 非强制登录时，优先尝试用已有 Cookie 获取课程（避免重复登录触发验证码）
+    if not args.force_login:
+        courses = chaoxing.get_course_list()
+        if courses is not None and len(courses) > 0:
+            print(json.dumps({"courses": courses}), flush=True)
+            sys.exit(0)
 
-    # Cookie 失效，重新登录
+    # 强制登录或 Cookie 失效，重新登录
     result = chaoxing.login()
     if not result["status"]:
         _fail(result.get("msg", "登录失败"))

@@ -1140,15 +1140,30 @@ if (_dd) document.documentElement.classList.add('dark');
             if (!user || !pass) { showToast('请输入账号和密码', 'error'); return; }
             const btn = $('loginBtn'); btn.disabled = true; btn.textContent = '验证中...';
             try {
-                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=login&username='+encodeURIComponent(user)+'&password='+encodeURIComponent(pass)+'&auth_token=' + encodeURIComponent(_getAuthToken()));
+                const token = _getAuthToken();
+                const r = await fetch('/oneapichat/api/chaoxing_api.php?action=login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Auth-Token': token
+                    },
+                    body: JSON.stringify({
+                        username: user,
+                        password: pass,
+                        auth_token: token
+                    })
+                });
                 const d = await r.json();
                 if (d.success) {
                     showToast('登录成功: ' + user, 'success');
                     examData = [];
                     loadExamList();
                     hideLogin();
-                    loadAccount();
-                    loadCourses();
+                    $('loginPass').value = '';
+                    _lastCourseRefresh = 0;
+                    updateSelected();
+                    await loadAccount();
+                    await loadCourses(true);
                 } else {
                     showToast(d.error || '登录失败', 'error');
                 }
@@ -1170,22 +1185,23 @@ if (_dd) document.documentElement.classList.add('dark');
             }
             // 绕过冷却：把冷却时间戳清零
             _lastCourseRefresh = 0;
-            loadCourses();
+            loadCourses(true);
         }
 
         // Courses
         var _loadingCourses = false;
-        async function loadCourses() {
-            // 防抖：如果上次 5s 内成功刷新过，跳过本次（减少后端压力）
+        async function loadCourses(force) {
+            // 防抖：如果上次 5s 内成功刷新过且非强制，跳过本次（减少后端压力）
             var now = Date.now();
-            if (now - _lastCourseRefresh < COURSE_REFRESH_COOLDOWN) return;
+            if (!force && (now - _lastCourseRefresh < COURSE_REFRESH_COOLDOWN)) return;
             if (_loadingCourses) return;
             _loadingCourses = true;
             try {
                 const list = $('courseList');
                 list.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">加载中...</div>';
                 try {
-                    const r = await fetch('/oneapichat/api/chaoxing_api.php?action=courses&auth_token=' + encodeURIComponent(_getAuthToken()));
+                    const url = '/oneapichat/api/chaoxing_api.php?action=courses&auth_token=' + encodeURIComponent(_getAuthToken()) + (force ? '&force=true' : '');
+                    const r = await fetch(url);
                     const d = await r.json();
                     if (d.error) { list.innerHTML = '<div class="p-6 text-center text-red-400 text-sm">'+d.error+'</div>'; return; }
                     const courses = d.courses || [];
@@ -2395,22 +2411,5 @@ function setStatus(text, cls) {
       刷课引擎: <a href="https://github.com/Samueli924/chaoxing" style="color:#666;" target="_blank">Samueli924/chaoxing</a> (GPL-3.0) &nbsp;|&nbsp; 考试引擎: <a href="https://github.com/guowang23333/CxKitty-" style="color:#666;" target="_blank">CxKitty</a> (GPL-3.0)
     </div>
 
-
-<!-- 浮动书签 -->
-<div id="_bookmark_floating" style="position:fixed;bottom:20px;left:20px;z-index:99999;background:#1e293b;border:1px solid #6366f1;border-radius:10px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.4);font-size:11px;max-width:260px;color:#e2e8f0">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-    <span style="font-size:16px">📌</span>
-    <span style="font-weight:600">自动答题书签</span>
-  </div>
-  <div style="color:#94a3b8;margin-bottom:8px;line-height:1.4">把下面的按钮<strong style="color:#f59e0b">拖到书签栏</strong>，考试时点它自动答题</div>
-  <div style="text-align:center">
-    <a href="javascript:(function(){var s=document.createElement('script');s.src='https://115.29.211.17/oneapichat/auto_answer_bookmark.js';document.body.appendChild(s)})();"
-       style="display:inline-block;padding:6px 16px;background:#6366f1;color:#fff;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;cursor:grab"
-       draggable="true">🤖 拖我到书签栏</a>
-  </div>
-  <div style="text-align:right;margin-top:4px">
-    <span onclick="this.parentElement.parentElement.style.display='none'" style="font-size:10px;color:#64748b;cursor:pointer">关闭</span>
-  </div>
-</div>
 </body>
 </html>

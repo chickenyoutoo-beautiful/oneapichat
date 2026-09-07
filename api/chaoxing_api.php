@@ -808,15 +808,32 @@ switch ($action) {
 
 
     case 'login':
-        $user = $_POST['username'] ?? $_GET['username'] ?? '';
-        $pass = $_POST['password'] ?? $_GET['password'] ?? '';
-        $user = str_replace(["\r", "\n"], '', $user);
-        $pass = str_replace(["\r", "\n"], '', $pass);
+        $rawJson = @json_decode(file_get_contents('php://input'), true);
+        $user = $rawJson['username'] ?? $_POST['username'] ?? $_GET['username'] ?? '';
+        $pass = $rawJson['password'] ?? $_POST['password'] ?? $_GET['password'] ?? '';
+        $user = trim(str_replace(["\r", "\n"], '', $user));
+        $pass = trim(str_replace(["\r", "\n"], '', $pass));
         if (!$user || !$pass) { echo json_encode(['error' => '请输入账号密码']); exit; }
 
         // 使用独立 config
         $config_path = ensureUserConfig($userId);
         $ini = file_get_contents($config_path);
+
+        // ★ 切换账号或重新登录时，彻底清空旧账号 Cookie 与残留缓存，避免串号
+        $cookie_paths = [
+            APP_ROOT . '/users/chaoxing/cookies_' . $userId . '.pkl',
+            APP_TEMP . '/AutomaticCB/cookies.txt',
+            APP_ROOT . '/users/chaoxing/qr_cookie_' . $userId . '.txt'
+        ];
+        foreach ($cookie_paths as $cp) {
+            if (file_exists($cp)) @unlink($cp);
+        }
+
+        // 清理旧课程缓存与旧选课列表（新账号课程ID不同，旧列表残留会导致任务数量为0瞬间结束）
+        $cache_file = userCoursesCachePath($userId);
+        @unlink($cache_file);
+        $ini = preg_replace('/^course_list\s*=\s*.*/m', 'course_list = ', $ini);
+
         // ★ 使用占位符避免密码中的 $ \ 等特殊字符被 preg_replace 当作正则元字符
         $ini = preg_replace('/^username\s*=\s*.*/m', 'username = @@@USER@@@', $ini);
         $ini = preg_replace('/^password\s*=\s*.*/m', 'password = @@@PASS@@@', $ini);
@@ -827,20 +844,15 @@ switch ($action) {
         }
         saveUserConfig($userId, $ini);
 
-        $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));
-if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无法连接超星服务器，请检查网络或稍后重试']); exit; }
-// 清理缓存
-        $cache_file = userCoursesCachePath($userId);
-        @unlink($cache_file);
-
-        // ★ 先检查网络连通性（超星是否可达）
+        // ★ 检查超星网络连通性
         $net_test = @file_get_contents('https://passport2.chaoxing.com', false, stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true], 'ssl' => ['verify_peer' => true]]));
         if ($net_test === false) {
             echo json_encode(['success' => false, 'error' => '无法连接超星服务器，请检查网络或稍后重试']);
             exit;
         }
 
-        $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
+        // ★ 显式带上 --force-login，真实向超星发起鉴权，绝不复用旧 Cookie！
+        $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . ' --config ' . escapeshellarg($config_path) . " --force-login 2>&1");
         exec($cmd, $out, $code);
         $json_line = '';
         foreach (array_reverse($out) as $line) {
@@ -848,6 +860,10 @@ if ($net_test === false) { echo json_encode(['success' => false, 'error' => '无
             if (strpos(trim($line), '{"error"') === 0) { $json_line = $line; break; }
         }
         if ($json_line && strpos($json_line, '"courses"') !== false) {
+            // 顺手写入课程缓存，供前端立即消费
+            if (strpos($json_line, '"courses":[]') === false) {
+                file_put_contents($cache_file, $json_line);
+            }
             echo json_encode(['success' => true, 'username' => $user, 'synced' => true]);
         } elseif ($json_line) {
             $err_data = json_decode($json_line, true);
