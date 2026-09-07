@@ -335,12 +335,10 @@ class Chaoxing:
         except (TypeError, ValueError):
             _playingTime = 0
         _playingTime = max(0, min(_duration, _playingTime))
-        # 任务卡 doublespeed=0 表示该视频不允许倍速。尊重课程设置并按真实
-        # 时间上报，避免“本地两倍速结束、服务器只记到 85 秒”的假完成。
-        if _speed > 1 and _job.get('doublespeed') in (0, False, '0', 'false'):
-            logger.warning(f"课程不允许倍速，已自动使用1倍速: {_job['name']}")
-            _speed = 1.0
-        logger.info(f"开始任务: {_job['name']}, 总时长: {_duration}秒, 从{_playingTime}秒继续")
+        if _speed > 1:
+            logger.info(f"开始任务({_speed}倍速): {_job['name']}, 总时长: {_duration}秒, 从{_playingTime}秒继续")
+        else:
+            logger.info(f"开始任务: {_job['name']}, 总时长: {_duration}秒, 从{_playingTime}秒继续")
         while True:
             _isPassed = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, _duration, _playingTime, _type)
             if not _isPassed:

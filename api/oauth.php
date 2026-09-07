@@ -11,8 +11,8 @@
  *   GET  /oneapichat/oauth/authorize               → 授权端点（直接放行）
  */
 
-require_once __DIR__ . '/api/init.php';
-require_once __DIR__ . '/api/auth_helpers.php';
+require_once __DIR__ . '/init.php';
+require_once __DIR__ . '/auth_helpers.php';
 
 setApiCorsHeaders();
 header('Content-Type: application/json; charset=utf-8');

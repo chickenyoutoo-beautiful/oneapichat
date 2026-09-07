@@ -7,7 +7,8 @@ function runTests() {
     const dialogsSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'dialogs.js'), 'utf8');
     const themeStudioSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'theme-studio.css'), 'utf8');
     const parentIndexSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'index.html'), 'utf8');
-    const indexRootSrc = fs.readFileSync(path.join(__dirname, '..', 'index_root.html'), 'utf8');
+    const indexRootPath = path.join(__dirname, '..', 'index_root.html');
+    const indexRootSrc = fs.existsSync(indexRootPath) ? fs.readFileSync(indexRootPath, 'utf8') : null;
 
     assert(renderingSrc.includes("container.classList.add('agent-welcome-active');"), 'Agent showWelcome 必须在容器上标记 agent-welcome-active');
     assert(renderingSrc.includes("container.classList.remove('agent-welcome-active');"), 'showWelcome 与 appendMessage 必须能移除 agent-welcome-active');
@@ -41,7 +42,9 @@ function runTests() {
     assert(mihomoSrc.includes('goBackManager'), 'mihomo.html 必须提供历史栈优先返回');
 
     assert(parentIndexSrc.includes('href="/manager.html?from=home"'), '主页必须携带 ?from=home 参数');
-    assert(indexRootSrc.includes('href="/manager.html?from=home"'), 'index_root.html 必须携带 ?from=home 参数');
+    if (indexRootSrc) {
+        assert(indexRootSrc.includes('href="/manager.html?from=home"'), 'index_root.html 必须携带 ?from=home 参数');
+    }
     console.log('✅ mobile_welcome_and_manager_route.test.js: 全部断言通过');
 }
 

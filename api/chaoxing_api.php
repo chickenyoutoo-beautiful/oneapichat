@@ -236,10 +236,20 @@ function readIniValue($path, $section, $key, $default = '') {
     return $ini[$section][$key] ?? $default;
 }
 
-// 认证检查：Bearer / 同站 Cookie 优先，query/form 仅保留旧客户端兼容。
+// 认证检查：Bearer / 同站 Cookie 优先，Header / body / query / form 兼容支持。
+$parsedBody = null;
 $authToken = extractSessionToken(true);
+if ($authToken === '') {
+    $rawInput = @file_get_contents('php://input');
+    if ($rawInput) {
+        $parsedBody = @json_decode($rawInput, true);
+        if (is_array($parsedBody) && !empty($parsedBody['auth_token'])) {
+            $authToken = trim((string)$parsedBody['auth_token']);
+        }
+    }
+}
 $userId = $authToken !== '' ? verifyAuthToken($authToken) : null;
-$action = $_GET['action'] ?? '';
+$action = $_GET['action'] ?? ($parsedBody['action'] ?? '');
 if ($action === 'search_answer') {
     // 搜题接口不需要认证，放行
 } elseif (!$userId) {
