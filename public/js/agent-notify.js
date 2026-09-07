@@ -769,21 +769,17 @@ window.connectSSEChannel = function() {
             // 未知 ID 说明另一设备刚创建/归档了会话；先合并轻量索引再同步正文。
             if (!window.chats || !window.chats[cid]) _syncChatIndexFromServer();
 
-            // 如果当前处于空会话（草稿/新会话），自动跟随切换到更新的活跃会话
-            var _curChat = (typeof chats !== 'undefined' && currentChatId) ? chats[currentChatId] : null;
-            var _isCurEmpty = !_curChat || !_curChat.messages || _curChat.messages.length === 0 ||
-                (_curChat.messages.length === 1 && _curChat.title === '新对话' && !_curChat.messages[0].text);
-            if (_isCurEmpty && cid !== currentChatId && typeof loadChat === 'function') {
-                currentChatId = cid;
-                try { localStorage.setItem('lastChatId', cid); } catch(_e) {}
+            // ★ 修复：严禁后台事件静默篡改 currentChatId 导致当前正在浏览的空草稿被夺舍！
+            // 仅对用户当前正在浏览的会话进行回源重绘；其他会话只更新侧边栏索引。
+            if (cid === currentChatId) {
+                if (_chatSyncDebounceTimers[cid]) clearTimeout(_chatSyncDebounceTimers[cid]);
+                _chatSyncDebounceTimers[cid] = setTimeout(function() {
+                    delete _chatSyncDebounceTimers[cid];
+                    _resyncChatFromRemote(cid, 0, _eventTraceId);
+                }, 300);
+            } else {
+                if (typeof renderChatHistory === 'function') renderChatHistory();
             }
-
-            // ★ 300ms 防抖避免多端密集事件导致并发风暴; 用健壮封装(带重试)而非静默丢弃。
-            if (_chatSyncDebounceTimers[cid]) clearTimeout(_chatSyncDebounceTimers[cid]);
-            _chatSyncDebounceTimers[cid] = setTimeout(function() {
-                delete _chatSyncDebounceTimers[cid];
-                _resyncChatFromRemote(cid, 0, _eventTraceId);
-            }, 300);
         } catch(_sce) {}
     });
 
@@ -855,29 +851,24 @@ window.connectSSEChannel = function() {
                 window._remoteTypingMap = window._remoteTypingMap || {};
                 window._remoteTypingMap[cid] = { startedAt: Date.now(), model: ev.model || '', streamId: ev.stream_id || '' };
 
-                // 如果当前处于空会话（草稿/新会话），自动跟随切换到正在交互的会话
-                var _curChat = (typeof chats !== 'undefined' && currentChatId) ? chats[currentChatId] : null;
-                var _isCurEmpty = !_curChat || !_curChat.messages || _curChat.messages.length === 0 ||
-                    (_curChat.messages.length === 1 && _curChat.title === '新对话' && !_curChat.messages[0].text);
-                if (_isCurEmpty && cid !== currentChatId && typeof loadChat === 'function') {
-                    currentChatId = cid;
-                    try { localStorage.setItem('lastChatId', cid); } catch(_e) {}
-                }
-
-                // 立即同步用户刚发送的消息并实时接入流式镜像
-                // ★ 毫秒级流式直连：无需等待 _syncChatFromServer 网络往返，立即启动 Observer 实时流
-                if (currentChatId === cid && ev.stream_id && window.ResumeStream && typeof window.ResumeStream.resume === 'function') {
-                    var _isProducerGenerating = !!(window._justProducedStreamMap && window._justProducedStreamMap[cid] && (Date.now() - window._justProducedStreamMap[cid] < 4500));
-                    var _isAlreadyResuming = !!(typeof isTypingMap !== 'undefined' && isTypingMap[cid] && !_isProducerGenerating);
-                    if (!_isAlreadyResuming && !_isProducerGenerating) {
-                        console.log('[SSE] Connecting live observer stream immediately:', ev.stream_id, 'for chat:', cid);
-                        window.ResumeStream.resume(cid, ev.stream_id, ev.msg_id, true).catch(function(err) {
-                            console.info('[SSE] Observer live stream ended or detached:', err && err.message || err);
-                        });
+                // ★ 修复：严禁后台事件静默将 currentChatId 篡改为远程 cid！
+                // 仅当用户当前真正打开的就是 cid 时，才启动 Observer 实时流与回源补齐
+                if (currentChatId === cid) {
+                    if (ev.stream_id && window.ResumeStream && typeof window.ResumeStream.resume === 'function') {
+                        var _isProducerGenerating = !!(window._justProducedStreamMap && window._justProducedStreamMap[cid] && (Date.now() - window._justProducedStreamMap[cid] < 4500));
+                        var _isAlreadyResuming = !!(typeof isTypingMap !== 'undefined' && isTypingMap[cid] && !_isProducerGenerating);
+                        if (!_isAlreadyResuming && !_isProducerGenerating) {
+                            console.log('[SSE] Connecting live observer stream immediately:', ev.stream_id, 'for chat:', cid);
+                            window.ResumeStream.resume(cid, ev.stream_id, ev.msg_id, true).catch(function(err) {
+                                console.info('[SSE] Observer live stream ended or detached:', err && err.message || err);
+                            });
+                        }
                     }
+                    // 后台并发补齐用户消息历史 (流式期间不调用 loadChat，避免抹除正在跳动的加载气泡)
+                    _resyncChatFromRemote(cid, 0, _eventTraceId);
+                } else if (typeof renderChatHistory === 'function') {
+                    renderChatHistory();
                 }
-                // 后台并发补齐用户消息历史 (流式期间不调用 loadChat，避免抹除正在跳动的加载气泡)
-                _resyncChatFromRemote(cid, 0, _eventTraceId);
             }
         } catch(_sce) {}
     });

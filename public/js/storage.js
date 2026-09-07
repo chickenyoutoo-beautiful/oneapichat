@@ -1124,20 +1124,26 @@ async function restoreUserData() {
             else createNewChat();
         }
     }
-    // ★ 恢复刷新前输入框中的文本
+    // ★ 恢复刷新前输入框中的文本 (严格校验同一会话、同一用户、且 60 秒内，防止跨会话/跨设备污染)
     try {
-        var _savedText = localStorage.getItem('_savedInputText');
-        if (_savedText) {
-            var _input = getEl('chatInput');
-            if (_input) {
-                _input.value = _savedText;
-                // 自动聚焦并移动光标到末尾
-                _input.focus();
-                _input.selectionStart = _input.selectionEnd = _savedText.length;
-                // 触发输入事件,让UI更新发送按钮状态
-                _input.dispatchEvent(new Event('input', { bubbles: true }));
+        var _rawSavedText = localStorage.getItem('_savedInputText');
+        localStorage.removeItem('_savedInputText');
+        if (_rawSavedText) {
+            var _savedObj = null;
+            try { _savedObj = JSON.parse(_rawSavedText); } catch(e) {}
+            if (_savedObj && _savedObj.text && _savedObj.chatId === currentChatId) {
+                var _curUid = localStorage.getItem('authUserId') || '';
+                var _isRecent = (Date.now() - (_savedObj.time || 0)) < 60000;
+                if (_isRecent && (!_savedObj.userId || _savedObj.userId === _curUid)) {
+                    var _input = getEl('chatInput') || (window.$ && window.$.userInput);
+                    if (_input && !_input.value.trim()) {
+                        _input.value = _savedObj.text;
+                        _input.focus();
+                        _input.selectionStart = _input.selectionEnd = _savedObj.text.length;
+                        _input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
             }
-            localStorage.removeItem('_savedInputText');
         }
     } catch(e) {}
 

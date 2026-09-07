@@ -31,11 +31,19 @@ window._saveQueue = function(explicitMode, explicitChatId) {
             window._messageQueue = [];
             return;
         }
+        var currentUid = localStorage.getItem('authUserId') || '';
         var data = validItems.map(function(item) {
             var safeFiles = (item.files || []).map(function(f) {
                 return { name: f.name, isImage: !!f.isImage, type: f.type, size: f.size };
             });
-            return { id: item.id, text: item.text, files: safeFiles, chatId: item.chatId || (explicitChatId || window.currentChatId || '') };
+            return {
+                id: item.id,
+                text: item.text,
+                files: safeFiles,
+                chatId: item.chatId || (explicitChatId || window.currentChatId || ''),
+                userId: currentUid,
+                savedAt: Date.now()
+            };
         });
         localStorage.setItem(_key, JSON.stringify(data));
     } catch(e) {
@@ -54,8 +62,16 @@ window._loadQueue = function(explicitMode, explicitChatId) {
             localStorage.removeItem(_key);
             return false;
         }
+        var now = Date.now();
+        var currentUid = localStorage.getItem('authUserId') || '';
+        var targetCid = explicitChatId !== undefined ? explicitChatId : (window.currentChatId || '');
+        // ★ 安全防护：TTL 最大 30 秒，且严格校验 userId 与 chatId，超时/跨用户/跨会话一律清理丢弃，绝不自动重放！
         var validData = data.filter(function(item) {
-            return item && (item.text || (item.files && item.files.length));
+            if (!item || (!item.text && (!item.files || !item.files.length))) return false;
+            if (item.savedAt && (now - item.savedAt > 30000)) return false;
+            if (item.userId && currentUid && item.userId !== currentUid) return false;
+            if (item.chatId && targetCid && item.chatId !== targetCid) return false;
+            return true;
         });
         if (validData.length === 0) {
             localStorage.removeItem(_key);
@@ -349,7 +365,7 @@ window.injectUserMessage = function() {
 /** 排干队列 — 逐一发送排队消息 */
 window._drainQueue = async function() {
     if (window._isQueueProcessing) return;
-    if (window._messageQueue.length === 0) {
+    if (!window._messageQueue || window._messageQueue.length === 0) {
         window._isQueueProcessing = false;
         window._clearPersistedQueue();
         window._updateQueueUI();
@@ -358,25 +374,28 @@ window._drainQueue = async function() {
     // ★ 并行对话: 仅当当前会话正在生成时才等待(不阻塞其他会话)
     if (isTypingMap[currentChatId]) return;
 
+    var item = window._messageQueue[0];
+    if (!item) {
+        window._messageQueue.shift();
+        return;
+    }
+
+    // ★ 严防串会话与脏数据：队列项必须属于当前激活的会话！
+    // 如果队列项的 chatId 与 currentChatId 不一致，绝不能跨会话强行发进当前会话！
+    if (item.chatId && item.chatId !== currentChatId) {
+        console.warn('[Queue] 队列项所属会话 (' + item.chatId + ') 与当前会话 (' + currentChatId + ') 不匹配，丢弃防污染');
+        window._messageQueue.shift();
+        window._saveQueue();
+        window._updateQueueUI();
+        return;
+    }
+
     window._isQueueProcessing = true;
-    var item = window._messageQueue.shift();
+    window._messageQueue.shift();
     if (window._messageQueue.length === 0) {
         window._clearPersistedQueue();
     } else {
         window._saveQueue();
-    }
-
-    if (item.chatId && item.chatId !== currentChatId && chats[item.chatId]) {
-        var _prevChatId = currentChatId;
-        currentChatId = item.chatId;
-        try {
-            await window.sendMessage(true, item.text, []);
-        } finally {
-            currentChatId = _prevChatId;
-        }
-        window._isQueueMessage = false;
-        window._isQueueProcessing = false;
-        return;
     }
 
     // ★ 分批图片队列: 保留完整文件数据 (content/serverUrl)
@@ -400,7 +419,7 @@ window._drainQueue = async function() {
     window._updateQueueUI();
 
     setTimeout(function() {
-        if (window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
+        if (window._messageQueue && window._messageQueue.length > 0 && !isTypingMap[currentChatId]) {
             window._drainQueue();
         }
     }, 500);

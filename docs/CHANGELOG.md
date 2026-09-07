@@ -1,3 +1,103 @@
+## 2026-09-06 · 多轮工具调用气泡多重裂变与前置正文截断破碎彻底收敛
+
+- **问题现象**：
+  在聊天中触发 `web_search` 或连续工具调用时，界面会依次弹出 3~4 个助手回复气泡，每一个气泡都带 `# web_search` 徽章，且每个气泡中都包含一段重复或说到一半被切断的内容；最终回答被拆得支离破碎，视觉上表现为“模型不断输出被工具打断，产生多个残缺重复气泡”。
+- **根因分析**：
+  1. **实验性链式输出（Chain Mode）意外开启或同轮助手消息分裂**：
+     - 用户配置或实验性开关启用了 `chainMode`（或历史遗留数据带有 `_chainRound` 标记），在每次工具返回结果后，代码执行 `chats[chatId].messages.push(_nextToolRound)` 产生了多条独立 assistant 消息；
+  2. **前端渲染层（`loadChat`）缺乏同轮融合收敛**：
+     - `public/js/dialogs.js` 遍历消息时，无条件将每一条 assistant 消息分别调用 `appendMessage` 渲染成独立气泡；
+     - 导致第一轮工具一个气泡，第二轮工具一个气泡，第三轮工具一个气泡，最终回答又是一个气泡，且前面的气泡都停留在工具调用前截断的状态；
+- **修复与加固**：
+  1. **UI 渲染层权威同轮收敛聚合 (`public/js/dialogs.js`)**：
+     - 在 `loadChat` 的 `displayMsgs` 构建流中，增加智能同轮连续 assistant 消息聚合算法：
+     - 当连续多条 assistant 消息属于同一轮提问迭代时，自动深度融合为一个权威回复；合并所有的 `tool_calls`（完整保留所有步骤与徽章），文本内容与推理过程无缝延续融合，状态/耗时/按钮更新为最新，彻底杜绝界面裂变成多个重复残缺气泡；
+  2. **链式输出实验性开关收敛并默认彻底关闭 (`public/js/main.js`, `public/index.html`)**：
+     - 废弃容易引起用户界面困惑的链式气泡裂变模式，默认强制收敛为单一优雅的完整气泡；
+  3. **自动化回归测试覆盖 (`tests/bubble_fission_convergence.test.js`)**：
+     - 模拟真实生产数据中的 4 轮截断碎片消息，验证经融合引擎处理后收敛为 1 轮完整回复、保留全部工具步骤，断言全绿通过。
+- **涉及文件**：`public/js/dialogs.js`、`public/js/main.js`、`public/index.html`、`tests/bubble_fission_convergence.test.js`、`docs/CHANGELOG.md`、`CLAUDE.md`。
+
+## 2026-09-06 · WebSearch 工具调用前置输出抢跑与工具结果打断根治
+
+- **问题现象**：
+  使用联网搜索（`web_search`）时，工具还没执行完、搜索结果还没拿到，模型就已经开始在气泡中预先输出回答文字（例如“正在为您查询…”、“根据搜索…”甚至猜测性内容）；当搜索工具执行完成返回真实结果后，模型进入下一轮继续输出，导致前面的预先输出被工具状态或后续结果生硬打断、气泡内容拼接突兀或前后矛盾。
+- **根因分析**：
+  1. **Schema 描述缺乏调用纪律约束**：
+     - `web_search` 工具的 Schema 定义中仅说明了功能，未对模型的输出时机做硬性约束；
+     - 部分大语言模型（如 Gemini、GPT-4o、DeepSeek、MiniMax 等）在生成 `tool_calls` 的同一个 chunk 或同一个轮次中，习惯性在 `content` 字段同时吐出寒暄预热文字（Preamble），而没有静默等待工具调用完成；
+  2. **System Prompt 缺少工具调用原子性规范**：
+     - 系统提示词未明确指示在需要工具检索时保持正文静默，导致模型在未获取外部真实事实前就凭记忆“抢跑”输出；
+  3. **工具执行与流式气泡渲染的交错竞态**：
+     - 模型抢跑输出后，工具执行结束插入 DSH 状态徽章或工具结果，若模型在下一轮从头生成新文本，容易产生气泡文字被截断、被冲掉或被打断的视觉破碎感。
+- **修复与加固**：
+  1. **强化 `web_search` 工具 Schema 调用纪律 (`public/js/tools.js`)**：
+     - 在 `SEARCH_TOOL_DEFINITION` 的 `description` 中明确注入强约束：调用 `web_search` 工具时禁止在正文中预先输出任何回答、猜测或寒暄解释（如“我为您搜索”、“正在为您查询”等），必须直接且仅发起工具调用；等待工具执行返回完整搜索结果后，在下一轮中综合工具结果给出最终回答；
+  2. **全局系统提示词注入原子调用准则 (`public/js/main.js`)**：
+     - 在启用搜索或工具时，向系统提示词注入《联网搜索与工具调用规范》；严格指引模型在调用外部检索工具时保持正文静默，杜绝半成品输出；
+  3. **防复读与多轮平滑衔接已生效测试验收**：
+     - 结合已有的 `mergeAssistantStreamText` 平滑衔接逻辑，通过 `tests/web_search_preamble_continuation.test.js` 与 `tests/tool_output_visibility.test.js` 全套断言测试。
+- **涉及文件**：`public/js/tools.js`、`public/js/main.js`、`public/index.html`、`docs/CHANGELOG.md`、`CLAUDE.md`。
+
+## 2026-09-06 · 工具输出结果回传断流与模型重复调用死循环根治
+
+- **问题现象**：
+  在聊天或 Agent 模式下调用工具（如 `web_search`、`server_exec` 等）时，工具执行成功并输出了结果，但大模型好像“根本看不到工具的输出结果”，在下一轮继续不断发起完全相同的工具调用，反复循环执行同一工具，直到触发死循环检测或被用户强制停止。
+- **根因分析**：
+  1. **无正文 Assistant 消息被空内容过滤器无差别丢弃**：
+     - 大模型在发起工具调用时（Function Calling / Tools），流式输出中 95% 以上只包含 `tool_calls` 结构体，其回答正文 `content` 规范为空（`null` 或 `""`）；
+     - `public/js/api-messages.js` 的安全过滤器在校验消息时，盲目执行 `if (_m.content === undefined || _m.content === null) continue;` 与 `if (typeof _m.content === 'string' && _m.content.length === 0) continue;`；
+     - 导致包含 `tool_calls` 的 assistant 消息被当场误杀抛弃，根本未能进入发送给大模型的 `apiMessages` 序列；
+  2. **工具输出消息（`role: 'tool'`）连带被当作孤儿剔除**：
+     - 随后的 `normalizeToolMessagePairs` 接收到的消息序列中，`role: 'tool'` 消息前方失去了刚刚被误杀的 assistant 轮次；
+     - 依据 OpenAI 邻接校验规范，前方没有紧邻 `assistant.tool_calls` 的孤立 tool 消息被安全机制直接抹除；
+     - 结果导致下一轮发给大模型 API 的请求上下文里**既没有上轮调用的 assistant tool_calls，也没有工具的执行结果**，只剩下最开头的用户问题；大模型再次看到未回答的用户问题，自然再次发起同一工具调用，陷入死循环；
+  3. **空输出工具结果被误判为空字符串丢弃**：
+     - 当某些系统命令或操作类工具执行成功但输出为空（如创建文件、设置状态等返回 `""`）时，`main.js` 写入的 `contentStr` 为 `""`，同样被过滤器当成空消息跳过，连带导致 tool_call 配对失效；
+  4. **ID 去重方向不一致导致配对错位**：
+     - `assistant.tool_calls` 采用从前往后扫描保留首次出现，而旧版 tool 消息去重采用从后往前扫描保留末次出现，一旦历史中出现同名 ID，两者错位直接导致配对失败。
+- **修复与加固**：
+  1. **豁免带 tool_calls 的 assistant 消息与规范化 (`public/js/api-messages.js`)**：
+     - 识别 `_hasToolCalls = (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0)`；
+     - 带有 `tool_calls` 的 assistant 消息绝不因为 `content` 为空或 null 而被跳过，统一规范保留 `content: null`（完全对齐 OpenAI / Gemini / DeepSeek 官方 Function Calling 规范）；
+     - 非 user 校验放行 `_hasToolCalls && content === null`，避免被强制序列化为空字符串；
+  2. **工具输出消息兜底保障与去重对齐 (`public/js/api-messages.js`, `public/js/main.js`)**：
+     - 对 `role: 'tool'` 消息执行兜底防御，若内容为空或空白字符串，强制兜底为 `'(empty)'`，绝不作为空消息跳过，并确保转换为 string；
+     - tool 消息去重统一改为从前往后扫描，与 assistant 方向完全一致；
+     - 在严格邻接匹配未命中时引入宽松包含匹配兜底，消除网关转接产生的 ID 微小差异；
+     - `main.js` 中工具执行完成处与发送前格式校验处同步补齐 `role: 'tool'` 空内容兜底为 `'(empty)'`；
+  3. **自动化回归测试覆盖 (`tests/tool_output_visibility.test.js`)**：
+     - 建立纯工具调用（content 为空/null）、空输出工具（输出为 `""`）、多轮连续工具调用 3 大测试场景；
+     - 验证 `apiMessages` 输出全链路，全部断言通过。
+- **涉及文件**：`public/js/api-messages.js`、`public/js/main.js`、`tests/tool_output_visibility.test.js`、`docs/CHANGELOG.md`、`CLAUDE.md`。
+
+## 2026-09-06 · 管理后台与 Mihomo 节点管理返回死循环与来源丢失根治
+
+- **问题现象**：
+  在 OneAPIChat 项目中，从聊天页（`/oneapichat/`）右上角进入管理面板（`/manager.html?from=chat`），点击系统工具中的「Mihomo 节点管理」进入节点管理页（`/oneapichat/public/mihomo.html`）；点击顶部「返回管理后台」返回后，管理面板顶栏原本的「← 返回聊天」按钮错误地变成了「← 返回节点」，导致用户点击返回时只能回到节点管理，陷入死循环，再也无法从管理面板返回聊天页面。
+- **根因分析**：
+  1. **层级概念倒置与参数错误**：
+     - `manager.html` 是顶层控制台，其 URL 查询参数 `from`（如 `from=chat`、`from=home`）的含义是“进入管理后台之前的来源应用”，用来确定管理后台返回时的外部出口；
+     - 早期代码在 `public/mihomo.html` 中硬编码了返回链接 `href="/manager.html?from=mihomo"`，错误地把自身子工具的名字传给了管理后台；
+     - 与此同时，`manager.html` 中错误地编写了 `else if (fromParam === 'mihomo') { fallback = '/oneapichat/public/mihomo.html'; label = '← 返回节点'; }`，导致子工具反客为主将主管理面板的返回目标劫持成了节点管理；
+  2. **原始来源丢失与缺乏历史栈优先**：
+     - 用户从 `/manager.html?from=chat` 进入 `/oneapichat/public/mihomo.html` 时，原始的 `from=chat` 来源未透传给子页面；
+     - `mihomo.html` 点击返回时未利用浏览器的历史栈回退（`history.back()`），而是硬性发起整页导航，覆盖了管理后台原来的来源上下文。
+- **修复与加固**：
+  1. **彻底根除 `manager.html` 劫持分支与子工具过滤**：
+     - 彻底删除 `fromParam === 'mihomo'` 及 `label = '← 返回节点'` 的错误逻辑；
+     - 引入 `sessionStorage` 状态保持机制，在进入管理后台时持久化记录 `manager_from`（`chat` 或 `home`）；若后续发生无参数或非预期参数导航，自动从 `sessionStorage` 自愈恢复原始来源；
+     - 在通过 `document.referrer` 兜底解析来源时，明确排除 `/public/mihomo` 等管理后台内部子工具，防止来源被子页面污染；
+     - 在管理后台渲染时，动态为 Mihomo 工具卡片注入当前的 `?from=` 参数，使子页面能顺畅继承父级来源；
+  2. **Mihomo 节点管理返回安全闭环 (`public/mihomo.html`)**：
+     - 彻底移除硬编码的 `href="/manager.html?from=mihomo"`；
+     - 实现 `initMihomoBack()` 与 `goBackManager(event)`：在用户点击返回管理后台时，若历史栈存在同域管理后台，优先调用 `history.back()`，无损返回并完美保留管理后台所有的初始状态；
+     - 若处于无历史栈或新标签页环境，自动读取 `from` 参数与 `sessionStorage`，兜底平滑跳转至携带正确来源的 `/manager.html?from=...`；
+  3. **自动化测试覆盖 (`tests/manager_mihomo_return_flow.test.js`)**：
+     - 新增 4 大核心业务场景端到端模拟测试（聊天进入→mihomo返回、主页进入、历史栈回退、极端旧缓存自愈）；
+     - 同步加固 `tests/mobile_welcome_and_manager_route.test.js` 断言，验证全绿通过。
+- **涉及文件**：`/var/www/html/manager.html`、`public/mihomo.html`、`tests/manager_mihomo_return_flow.test.js`、`tests/mobile_welcome_and_manager_route.test.js`、`CLAUDE.md`、`docs/CHANGELOG.md`。
+
 ## 2026-09-06 · Cloudreve 云盘重启后同步登录失效与公网 504 超时根治
 
 - **问题现象**：

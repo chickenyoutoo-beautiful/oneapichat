@@ -47,7 +47,12 @@ function pyCmd($script, $args = '') {
         return 'cd /d "' . CHAOXING_DIR . '" 2>nul & '
             . pythonBin() . ' "' . $scriptPath . '" ' . $args;
     }
-    return 'cd ' . escapeshellarg(CHAOXING_DIR) . ' && PYTHONPATH='
+    if (!is_dir(CHAOXING_DIR)) {
+        @mkdir(CHAOXING_DIR, 02775, true);
+        @chgrp(CHAOXING_DIR, 'www-data');
+        @chmod(CHAOXING_DIR, 02775);
+    }
+    return '(cd ' . escapeshellarg(CHAOXING_DIR) . ' 2>/dev/null || cd ' . escapeshellarg(APP_ROOT) . ') && PYTHONPATH='
         . escapeshellarg(pythonPathStr()) . ' '
         . pythonBin() . ' ' . escapeshellarg($scriptPath) . ' ' . $args;
 }
@@ -58,8 +63,13 @@ function pyBgCmd($script, $args, $logPath) {
         return 'start /B "" ' . pythonBin() . ' "' . $scriptPath . '" ' . $args
             . ' > "' . $logPath . '" 2>&1';
     }
+    if (!is_dir(CHAOXING_DIR)) {
+        @mkdir(CHAOXING_DIR, 02775, true);
+        @chgrp(CHAOXING_DIR, 'www-data');
+        @chmod(CHAOXING_DIR, 02775);
+    }
     $args = preg_replace('/^(-[a-z])([\'"])/', '$1 $2', $args);
-    return 'cd ' . escapeshellarg(CHAOXING_DIR) . ' && PYTHONPATH='
+    return '(cd ' . escapeshellarg(CHAOXING_DIR) . ' 2>/dev/null || cd ' . escapeshellarg(APP_ROOT) . ') && PYTHONPATH='
         . escapeshellarg(pythonPathStr()) . ' '
         . pythonBin() . ' ' . escapeshellarg($scriptPath) . ' ' . $args
         . ' > ' . escapeshellarg($logPath) . ' 2>&1 & echo $!';

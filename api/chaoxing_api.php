@@ -44,20 +44,33 @@ function isValidChaoxingConfig($path) {
 
 function atomicWritePrivateFile($path, $contents) {
     $dir = dirname($path);
-    if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) return false;
-    @chmod($dir, 0770);
+    if (!is_dir($dir)) {
+        if (!@mkdir($dir, 02775, true) && !is_dir($dir)) return false;
+    }
+    @chgrp($dir, 'www-data');
+    @chmod($dir, 02775);
+
     $tmp = @tempnam($dir, '.sync-');
-    if ($tmp === false) return false;
+    if ($tmp === false) {
+        $tmp = @tempnam(sys_get_temp_dir(), '.sync-cx-');
+        if ($tmp === false) return false;
+    }
     if (@file_put_contents($tmp, $contents, LOCK_EX) === false) {
         @unlink($tmp);
         return false;
     }
-    @chmod($tmp, 0660);
+    @chgrp($tmp, 'www-data');
+    @chmod($tmp, 0664);
+
     if (!@rename($tmp, $path)) {
+        if (!@copy($tmp, $path)) {
+            @unlink($tmp);
+            return false;
+        }
         @unlink($tmp);
-        return false;
     }
-    @chmod($path, 0660);
+    @chgrp($path, 'www-data');
+    @chmod($path, 0664);
     return true;
 }
 
@@ -73,7 +86,8 @@ function saveUserConfig($userId, $contents) {
     }
     $runtime = userConfigPath($userId);
     if (!atomicWritePrivateFile($runtime, $contents)) {
-        throw new RuntimeException('学习通运行配置同步失败');
+        error_log("[Chaoxing] 运行镜像同步失败: $runtime，降级使用持久配置: $durable");
+        return $durable;
     }
     return $runtime;
 }
@@ -184,7 +198,8 @@ function ensureUserConfig($userId) {
         if ($contents === false) throw new RuntimeException('无法读取学习通持久配置');
         if (!isValidChaoxingConfig($path) || @hash_file('sha256', $path) !== hash('sha256', $contents)) {
             if (!atomicWritePrivateFile($path, $contents)) {
-                throw new RuntimeException('无法恢复学习通运行配置');
+                error_log("[Chaoxing] 写入运行镜像失败: $path，降级使用持久配置: $durable");
+                return $durable;
             }
         }
         return $path;
@@ -236,13 +251,14 @@ $script_dir = CHAOXING_DIR;
 
 switch ($action) {
     case 'courses':
+        $config_path = ensureUserConfig($userId);
         $cache_file = userCoursesCachePath($userId);
         $cache_ttl = 300;
         $force = ($_GET['force'] ?? '') === 'true';
         if (!$force && file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
             $json = file_get_contents($cache_file);
         } else {
-            $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . " 2>&1");
+            $cmd = pyCmd('python/chaoxing/api_get_courses.py', '--user-id ' . escapeshellarg($userId) . ' --config ' . escapeshellarg($config_path) . " 2>&1");
             exec($cmd, $output, $exit_code);
             $json = '';
             foreach (array_reverse($output) as $line) {
@@ -275,7 +291,7 @@ switch ($action) {
             $db_works = [];
             // 读取用户配置，提取学习通账号（手机号）作为唯一标识
             $phone = '';
-            $phone_config_path = userConfigPath($userId);
+            $phone_config_path = ($config_path && file_exists($config_path)) ? $config_path : userConfigPath($userId);
             if ($phone_config_path && file_exists($phone_config_path)) {
                 $ini_phone = parse_ini_file($phone_config_path, true);
                 $phone = $ini_phone['common']['username'] ?? '';
@@ -293,10 +309,10 @@ switch ($action) {
                 }
             }
             // 从用户自己的配置文件中读取 course_list
-            $config_path = userConfigPath($userId);
+            $active_config_path = ($config_path && file_exists($config_path)) ? $config_path : userConfigPath($userId);
             $course_list_str = '';
-            if (file_exists($config_path)) {
-                $ini = parse_ini_file($config_path, true);
+            if (file_exists($active_config_path)) {
+                $ini = parse_ini_file($active_config_path, true);
                 $course_list_str = $ini['common']['course_list'] ?? '';
             } else {
                 // 如果用户 config 还不存在，读取 shared（兼容旧数据）

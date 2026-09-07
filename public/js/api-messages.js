@@ -230,14 +230,27 @@ function normalizeToolMessagePairs(messages, source) {
             if (resultId && !results[resultId]) results[resultId] = result;
             j++;
         }
-        var validCalls = calls.filter(function(call) { return !!results[String(call.id)]; });
+        var validCalls = calls.filter(function(call) {
+            var cid = String(call.id || '').trim();
+            if (results[cid]) return true;
+            // 兜底模糊匹配：解决因模型/代理前缀稍有差异导致无法配对
+            var rKeys = Object.keys(results);
+            for (var rk = 0; rk < rKeys.length; rk++) {
+                if (cid.indexOf(rKeys[rk]) >= 0 || rKeys[rk].indexOf(cid) >= 0) {
+                    results[cid] = results[rKeys[rk]];
+                    results[cid].tool_call_id = cid;
+                    return true;
+                }
+            }
+            return false;
+        });
         if (validCalls.length !== calls.length) repaired += calls.length - validCalls.length;
         if (validCalls.length) {
             msg.tool_calls = validCalls;
             normalized.push(msg);
             // Emit results in the same order as assistant.tool_calls, regardless of
             // persistence/network reorder. Extra or duplicate tool messages are dropped.
-            validCalls.forEach(function(call) { normalized.push(results[String(call.id)]); });
+            validCalls.forEach(function(call) { normalized.push(results[String(call.id).trim()]); });
         } else {
             delete msg.tool_calls;
             normalized.push(msg);
@@ -417,7 +430,7 @@ function buildApiMessages(chatId) {
             // 空内容且无 tool_calls 的 assistant 消息不发送给 API，防止模型产生空轮次或 400
             var _cleanedContent = cleanObjectObject(msg.content);
             if (!_cleanedContent && (!msg.tool_calls || !msg.tool_calls.length)) continue;
-            var _assistantMsg = { role: 'assistant', content: _cleanedContent || (msg.tool_calls && msg.tool_calls.length ? null : '') };
+            var _assistantMsg = { role: 'assistant', content: _cleanedContent || (msg.tool_calls && msg.tool_calls.length ? null : ''), _srcIndex: i };
             // ★ 保留 tool_calls 历史 — 全局去重，避免多轮累加导致跨 assistant 消息出现重复的 tool_call_id
             if (msg.tool_calls && msg.tool_calls.length > 0) {
                 var _uniqueCalls = [];
@@ -550,7 +563,17 @@ function buildApiMessages(chatId) {
             var _validCalls = [];
             for (var _tci = 0; _tci < _tmsg2.tool_calls.length; _tci++) {
                 var _tcId = _tmsg2.tool_calls[_tci].id;
-                if (_tcId && _adjacentToolResultIds[_tcId]) {
+                var _matchedKey = _tcId && _adjacentToolResultIds[_tcId] ? _tcId : null;
+                if (!_matchedKey && _tcId) {
+                    var _adjKeys = Object.keys(_adjacentToolResultIds);
+                    for (var _ak = 0; _ak < _adjKeys.length; _ak++) {
+                        if (_tcId.indexOf(_adjKeys[_ak]) >= 0 || _adjKeys[_ak].indexOf(_tcId) >= 0) {
+                            _matchedKey = _adjKeys[_ak];
+                            break;
+                        }
+                    }
+                }
+                if (_matchedKey) {
                     _validCalls.push(_tmsg2.tool_calls[_tci]);
                 } else {
                     _removedTcCount++;
@@ -609,30 +632,31 @@ function buildApiMessages(chatId) {
     }
 
     // ★ 去重 tool_call_id: 删除旧轮次的重复 tool 结果(DeepSeek 拒绝 duplicate tool_call_id)
+    // 采用从前往后扫描，保留首次出现，与 assistant.tool_calls 保持一致方向
     var _seenTcIds = {};
     var _dupRemoved = 0;
     var _dupTcIds = {};  // ★ 记录被去重的 tool_call_id，用于源清理
-    for (var _dfi = apiMessagesUnfiltered.length - 1; _dfi >= 0; _dfi--) {
+    for (var _dfi = 0; _dfi < apiMessagesUnfiltered.length; _dfi++) {
         var _dm = apiMessagesUnfiltered[_dfi];
         if (_dm.role === 'tool' && _dm.tool_call_id) {
-            if (_seenTcIds[_dm.tool_call_id]) {
-                _dupTcIds[_dm.tool_call_id] = true;
-                apiMessagesUnfiltered.splice(_dfi, 1);
+            var _dmTid = String(_dm.tool_call_id).trim();
+            if (_seenTcIds[_dmTid]) {
+                _dupTcIds[_dmTid] = true;
+                _dm._removeOrphan = true;
                 _dupRemoved++;
             } else {
-                _seenTcIds[_dm.tool_call_id] = true;
+                _seenTcIds[_dmTid] = true;
             }
         }
     }
     if (_dupRemoved > 0) {
+        apiMessagesUnfiltered = apiMessagesUnfiltered.filter(function(m) { return !m._removeOrphan; });
         console.log('[buildApiMessages] 去重 ' + _dupRemoved + ' 条重复 tool_call_id');
         // ★ 同步清理源消息中的重复 tool 消息，防止下轮重新出现
         for (var _si = msgs.length - 1; _si >= 0; _si--) {
             if (msgs[_si].role === 'tool' && _dupTcIds[msgs[_si].tool_call_id]) {
-                // 只删除旧的那条（保留最后一个），通过从后往前扫描实现
-                // 先记录已清理的ID，再次遇到则跳过（保留该条）
                 if (_dupTcIds[msgs[_si].tool_call_id] === true) {
-                    _dupTcIds[msgs[_si].tool_call_id] = 'kept';  // 标记：下次遇到删除
+                    _dupTcIds[msgs[_si].tool_call_id] = 'kept';
                 } else if (_dupTcIds[msgs[_si].tool_call_id] === 'kept') {
                     console.log('[buildApiMessages] 从源删除重复 tool 消息:', msgs[_si].tool_call_id);
                     msgs.splice(_si, 1);
@@ -650,23 +674,52 @@ function buildApiMessages(chatId) {
     }
 
     // ★ 最终安全过滤: 确保所有消息的 content 格式正确
-    var filtered = {};
     var apiMessages = [];
     for (var _fi = 0; _fi < apiMessagesUnfiltered.length; _fi++) {
         var _m = apiMessagesUnfiltered[_fi];
         if (!_m || !_m.role) { console.log('[buildApiMessages] 跳过无效消息', _fi, _m); continue; }
         if (_m._removeOrphan) { continue; }  // ★ 跳过孤 tool 消息（已标记删除）
-        if (_m.content === undefined || _m.content === null) { console.log('[buildApiMessages] 跳过空content', _fi, _m.role); continue; }
-        // content 可能是字符串或数组 (多模态 — 仅 user 消息支持数组)
-        if (typeof _m.content === 'string' && _m.content.length === 0) { console.log('[buildApiMessages] 跳过空字符串', _fi, _m.role); continue; }
-        // ★ 非 user 消息的 content 必须是字符串，强制转换避免 API 400 错误
+
+        var _hasToolCalls = (_m.role === 'assistant' && Array.isArray(_m.tool_calls) && _m.tool_calls.length > 0);
+        var _isToolMsg = (_m.role === 'tool');
+
+        // ★ 核心修复：带有 tool_calls 的 assistant 消息允许 content 为 null 或空，绝不能跳过！
+        if (_hasToolCalls) {
+            // 如果 content 为空/未定义，标准化为 null（符合 OpenAI/各大厂商 Function Calling 规范）
+            if (_m.content === undefined || _m.content === null || (typeof _m.content === 'string' && _m.content.trim().length === 0)) {
+                _m.content = null;
+            }
+        } else if (_isToolMsg) {
+            // ★ 核心修复：工具执行结果绝不能被当作空消息跳过！空输出兜底为 '(empty)'，且必须为 string
+            if (_m.content === undefined || _m.content === null || (typeof _m.content === 'string' && _m.content.trim().length === 0)) {
+                _m.content = '(empty)';
+            } else if (typeof _m.content !== 'string') {
+                _m.content = JSON.stringify(_m.content);
+            }
+        } else {
+            // 普通文本消息：空内容安全跳过
+            if (_m.content === undefined || _m.content === null) {
+                console.log('[buildApiMessages] 跳过空content', _fi, _m.role);
+                continue;
+            }
+            if (typeof _m.content === 'string' && _m.content.trim().length === 0) {
+                console.log('[buildApiMessages] 跳过空字符串', _fi, _m.role);
+                continue;
+            }
+        }
+
+        // ★ 非 user 消息的 content 格式校验：
+        // 带 tool_calls 且 content 为 null 的 assistant 消息保持 null；其余非 user 消息必须是字符串
         if (_m.role !== 'user' && typeof _m.content !== 'string') {
-            if (Array.isArray(_m.content)) {
+            if (_hasToolCalls && _m.content === null) {
+                // 规范保留 null
+            } else if (Array.isArray(_m.content)) {
                 _m.content = _m.content.map(function(p) { return p.text || p.content || JSON.stringify(p); }).filter(Boolean).join(' ');
             } else {
                 _m.content = String(_m.content || '');
             }
         }
+
         // ★ 保底机制: 单条消息内容设上限。历史中一旦被污染(如 grep 返回了 900 多万字符),
         //   发送前也必须截断, 不能反复把超长内容塞进上下文。
         if (typeof _m.content === 'string' && _m.content.length > 100000) {

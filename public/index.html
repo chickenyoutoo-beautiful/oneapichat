@@ -67,9 +67,9 @@
     <script defer src="./js/markdown.js?v=1788408606"></script>
     <script defer src="./js/agent.js?v=1788514521"></script>
     <script defer src="./js/workspace.js?v=1787945484"></script>
-    <script defer src="./js/storage.js?v=1788441881"></script>
+    <script defer src="./js/storage.js?v=1788700415"></script>
     <script defer src="./js/config.js?v=1788075256"></script>
-    <script defer src="./js/dialogs.js?v=1788621973"></script>
+    <script defer src="./js/dialogs.js?v=1788710859"></script>
     <script defer src="./js/cloudreve.js?v=1788623203"></script>
     <script defer src="./js/amap.js?v=1786782757"></script>
     <script defer src="./js/netdisk.js?v=1786892594"></script>
@@ -85,19 +85,19 @@
     <script defer src="./js/update-check.js?v=1787634245"></script>
     <script defer src="./js/skills.js?v=1788075419"></script>
     <script defer src="./js/tools-exec.js?v=1788498400"></script>
-    <script defer src="./js/init.js?v=1788408651"></script>
-    <script defer src="./js/agent-notify.js?v=1788622194"></script>
+    <script defer src="./js/init.js?v=1788700377"></script>
+    <script defer src="./js/agent-notify.js?v=1788700313"></script>
     <script defer src="./js/models.js?v=1788436763"></script>
-    <script defer src="./js/tools.js?v=1788407980"></script>
+    <script defer src="./js/tools.js?v=1788705541"></script>
     <script defer src="./js/upload.js?v=1788407999"></script>
-    <script defer src="./js/queue.js?v=1786899314"></script>
+    <script defer src="./js/queue.js?v=1788700167"></script>
     <script defer src="./js/commands.js?v=1788408198"></script>
     <script defer src="./js/resume-stream.js?v=1788545190"></script>
-    <script defer src="./js/api-messages.js?v=1788514225"></script>
+    <script defer src="./js/api-messages.js?v=1788703982"></script>
     <script defer src="./js/loop-guard.js?v=1787900715"></script>
     <script defer src="./js/stream-handler.js?v=1788496847"></script>
     <script defer src="./js/usage-stats.js?v=1788545685"></script>
-    <script defer src="./js/main.js?v=1788694496"></script>
+    <script defer src="./js/main.js?v=1788710814"></script>
 
     <!-- ═══ CSS 样式 ═══ -->
     <link rel="stylesheet" href="./lib/katex/katex.min.css?v=1779378327">
@@ -943,10 +943,6 @@ window.VISION_API_KEY = '';
             <div class="config-toggle-row">
                 <span class="config-label"><svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4 18a2 2 0 002 1h12a2 2 0 002-1l-6-9V3"/><path d="M7.5 14h9"/></svg> 可恢复流式传输 <span style="font-size:10px;color:#999">(实验性)</span></span>
                 <label class="switch small"><input type="checkbox" id="resumeStreamToggle" checked onchange="localStorage.setItem('__enableResumeStream', this.checked?'1':'0');window._scheduleConfigSync()"><span class="slider"></span></label>
-            </div>
-            <div class="config-toggle-row">
-                <span class="config-label"><svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> 链式输出 <span style="font-size:10px;color:#999">(实验性)</span></span>
-                <label class="switch small"><input type="checkbox" id="chainModeToggle" onchange="window.toggleChainMode()"><span class="slider"></span></label>
             </div>
             </div>
         </details>

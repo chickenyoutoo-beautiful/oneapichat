@@ -1170,8 +1170,8 @@ window.loadChat = async function (id) {
     // ★ 会话切换：先保存旧会话队列与计划状态
     var _oldChatId = currentChatId;
     if (_oldChatId && _oldChatId !== id) {
-        if (window._messageQueue && !window._agentModeSwitching) {
-            window._saveQueue();  // 普通切换：保存旧队列
+        if (window._messageQueue && !window._agentModeSwitching && typeof window._saveQueue === 'function') {
+            window._saveQueue(undefined, _oldChatId);  // 明确保存到旧会话
         }
         if (typeof window.savePlanState === 'function') {
             window.savePlanState(_oldChatId);
@@ -1328,9 +1328,8 @@ window.loadChat = async function (id) {
         if (typeof window._updateQueueUI === 'function') {
             window._updateQueueUI();
         }
-        if (_restored && !isTypingMap[currentChatId]) {
-            setTimeout(function() { window._drainQueue(); }, 500);
-        }
+        // ★ 核心修复：切换会话时绝不自动排干发送旧队列，杜绝跨会话误发与旧设备冷启动自发消息！
+        // 队列状态已同步到 UI 待发送栏，由用户在当前会话中明确感知并决定。
         // ★ setAgentMode 触发的切换：清除标记
         if (window._agentModeSwitching) {
             window._agentModeSwitching = false;
@@ -1424,12 +1423,69 @@ window.loadChat = async function (id) {
     }
 
     // ★ 过滤显示:system 消息、内部消息和工具结果不显示给用户
-    var displayMsgs = chats[id].messages.filter(function(m) {
+    var rawDisplayMsgs = chats[id].messages.filter(function(m) {
         if (m._internal) return false;
         if (m._toolResult) return false;  // ★ 工具结果不渲染到UI
         if (m.role === 'tool') return false;  // ★ 角色为 tool 的消息不渲染
         return m.role !== 'system';
     });
+
+    // ★ 核心修复：折叠/聚合同一轮多轮工具调用产生的连续 assistant 消息
+    // 防止一次提问经历多次 web_search 后在界面上裂变渲染出 3~4 个重复破碎的 AI 气泡！
+    var displayMsgs = [];
+    for (var di = 0; di < rawDisplayMsgs.length; di++) {
+        var curM = rawDisplayMsgs[di];
+        if (curM.role === 'assistant') {
+            // 检查前面紧邻的一条是否也是普通 assistant（属于同一轮问答迭代）
+            var prevM = displayMsgs.length > 0 ? displayMsgs[displayMsgs.length - 1] : null;
+            if (prevM && prevM.role === 'assistant') {
+                // 深度融合：合并 tool_calls、generatedImages，正文取最新或更完整的内容
+                var fused = Object.assign({}, prevM);
+                // 合并 tool_calls 并去重
+                var existingCalls = Array.isArray(fused.tool_calls) ? fused.tool_calls.slice() : [];
+                var newCalls = Array.isArray(curM.tool_calls) ? curM.tool_calls : [];
+                var callIds = {};
+                existingCalls.forEach(function(c) { if (c && c.id) callIds[c.id] = true; });
+                newCalls.forEach(function(c) {
+                    if (c && (!c.id || !callIds[c.id])) {
+                        existingCalls.push(c);
+                        if (c.id) callIds[c.id] = true;
+                    }
+                });
+                fused.tool_calls = existingCalls;
+
+                // 内容融合：若新消息已有完整正文且包含旧消息内容，直接使用新消息；否则按流式融合
+                var prevText = String(prevM.content || '').trim();
+                var curText = String(curM.content || '').trim();
+                if (curText && prevText) {
+                    if (curText.indexOf(prevText) === 0) {
+                        fused.content = curText;
+                    } else if (prevText.indexOf(curText) === 0) {
+                        fused.content = prevText;
+                    } else if (typeof window.mergeAssistantStreamText === 'function') {
+                        fused.content = window.mergeAssistantStreamText(prevText, curText);
+                    } else {
+                        fused.content = curText;
+                    }
+                } else {
+                    fused.content = curText || prevText;
+                }
+
+                // 推理过程
+                if (curM.reasoning || prevM.reasoning) {
+                    fused.reasoning = curM.reasoning || prevM.reasoning;
+                }
+                // 状态、用量、耗时取最新
+                fused.usage = curM.usage || prevM.usage;
+                fused.time = curM.time || prevM.time;
+                fused.partial = !!(curM.partial);
+
+                displayMsgs[displayMsgs.length - 1] = fused;
+                continue;
+            }
+        }
+        displayMsgs.push(curM);
+    }
     if (!displayMsgs.length) {
         showWelcome();
     } else {

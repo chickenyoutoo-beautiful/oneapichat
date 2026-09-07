@@ -5,22 +5,28 @@
 # 备份文件也排除（已有的规则 *.bak 已覆盖）
 # 多余文件
 # 调试/修改临时文件
+# 备份与历史归档目录
+.archive_backups/
+backup_*/
+backups/
+.fix_backup*/
 *.bak
 *.bak.*
 *.bak2
+*.bak-*
+*.1
+users.db
+users/*.broken*
 *.mp3
 *.mp4
 *.pyc
 .engine/
-.fix_backup*/
 .mmx_config.json
+config/.mmx_config.json
 .vs/
-3
 __pycache__/
 auth.php.debug
 auth.php.modified
-backup_*/
-backups/
 cache.json
 chaoxing_api.php.bak3
 chat_data/

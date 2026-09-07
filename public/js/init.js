@@ -1040,6 +1040,36 @@ function initializeApp() {
 
     async function init() {
         try {
+        // ★ 核心防御：页面初始化第一步彻底清理历史遗留的队列和过期运行态脏缓存，杜绝老设备冷启动自发消息与串会话！
+        (function _purgeStaleTransientStorage() {
+            try {
+                var toRemove = [];
+                for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if (!k) continue;
+                    // 1. 冷启动清理所有持久化队列 (队列仅对在线交互单次生命周期有效)
+                    if (k.indexOf('oc_queue_') === 0 || k.indexOf('queued_message_') === 0) {
+                        toRemove.push(k);
+                    }
+                    // 2. 清理遗留的 ws 流标记
+                    if (k.indexOf('_wsStream') === 0) {
+                        toRemove.push(k);
+                    }
+                    // 3. 清理已超时的流停止标记
+                    if (k.indexOf('_streamStopped_') === 0) {
+                        toRemove.push(k);
+                    }
+                }
+                toRemove.forEach(function(k) {
+                    try { localStorage.removeItem(k); } catch(e) {}
+                });
+                try { sessionStorage.removeItem('_messageQueue'); } catch(e) {}
+                if (toRemove.length > 0) {
+                    console.log('[Init] 已清理 ' + toRemove.length + ' 个历史脏缓存运行态键');
+                }
+            } catch(e) {}
+        })();
+
         _loaderProgress(15, '正在初始化界面...');
         cacheDOMElements();
         injectStyles();
@@ -1404,11 +1434,17 @@ function initializeApp() {
         } catch(e) {}
 
         window.addEventListener('beforeunload', function() {
-            // ★ 保存输入框文本,刷新后恢复
+            // ★ 保存输入框文本,刷新后恢复 (绑定当前会话 + 用户 + 时间戳，防止跨会话/跨用户污染)
             try {
-                var _inputEl = getEl('chatInput');
-                if (_inputEl && _inputEl.value.trim()) {
-                    localStorage.setItem('_savedInputText', _inputEl.value.trim());
+                var _inputEl = getEl('chatInput') || (window.$ && window.$.userInput);
+                if (_inputEl && _inputEl.value.trim() && currentChatId) {
+                    var _uid = localStorage.getItem('authUserId') || '';
+                    localStorage.setItem('_savedInputText', JSON.stringify({
+                        text: _inputEl.value.trim(),
+                        chatId: currentChatId,
+                        userId: _uid,
+                        time: Date.now()
+                    }));
                 }
             } catch(e) {}
             // ★ If _skipUnloadSave is set, skip all saves (login/register/logout transitioning)

@@ -31,7 +31,14 @@ function runTests() {
     const managerSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'manager.html'), 'utf8');
     assert(managerSrc.includes('initBackTarget'), 'manager.html 必须包含智能返回来源解析');
     assert(managerSrc.includes("fromParam === 'home'"), 'manager.html 必须支持 from=home 参数显式锁定返回主页');
+    assert(managerSrc.includes("fromParam === 'chat'"), 'manager.html 必须支持 from=chat 参数显式锁定返回聊天');
     assert(managerSrc.includes("fallback = '/'"), 'manager.html 默认返回必须是网站主页 /');
+    assert(!managerSrc.includes("fromParam === 'mihomo'"), 'manager.html 严禁将返回按钮劫持为返回节点');
+    assert(!managerSrc.includes("label = '← 返回节点'"), 'manager.html 严禁显示返回节点');
+
+    const mihomoSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'mihomo.html'), 'utf8');
+    assert(!mihomoSrc.includes('href="/manager.html?from=mihomo"'), 'mihomo.html 严禁硬编码携带 ?from=mihomo 返回参数');
+    assert(mihomoSrc.includes('goBackManager'), 'mihomo.html 必须提供历史栈优先返回');
 
     assert(parentIndexSrc.includes('href="/manager.html?from=home"'), '主页必须携带 ?from=home 参数');
     assert(indexRootSrc.includes('href="/manager.html?from=home"'), 'index_root.html 必须携带 ?from=home 参数');

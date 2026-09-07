@@ -521,24 +521,23 @@ function stopGenerationForChat(chatId) {
     }
 }
 
-// ★ 链式输出模式: 工具调用后保留旧消息,新内容追加为新气泡
-window._chainMode = localStorage.getItem('chainMode') === '1';  // 默认关闭
+// ★ 链式输出模式: 默认强制关闭，多轮工具调用统一收敛在同一个 AI 气泡内
+window._chainMode = false;
+localStorage.removeItem('chainMode');
 window.toggleChainMode = function() {
-    window._chainMode = !window._chainMode;
-    localStorage.setItem('chainMode', window._chainMode ? '1' : '0');
-    // 同步旧按钮（若存在）
+    window._chainMode = false;
+    localStorage.removeItem('chainMode');
     var btn = document.getElementById('chainModeBtn');
-    if (btn) btn.classList.toggle('active', window._chainMode);
-    // 同步配置面板开关
+    if (btn) btn.classList.remove('active');
     var _toggle = document.getElementById('chainModeToggle');
-    if (_toggle) _toggle.checked = window._chainMode;
+    if (_toggle) _toggle.checked = false;
 };
-// 初始化链式状态
+// 初始化链式状态（强制关闭）
 setTimeout(function() {
     var _cb = document.getElementById('chainModeBtn');
-    if (_cb && window._chainMode) _cb.classList.add('active');
+    if (_cb) _cb.classList.remove('active');
     var _toggle = document.getElementById('chainModeToggle');
-    if (_toggle) _toggle.checked = window._chainMode;
+    if (_toggle) _toggle.checked = false;
 }, 500);
 
 // ★ 链式输出思考步骤可视化（参考 desktop deepseek-chat）
@@ -1254,13 +1253,15 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
         }
     }
 
-    // ★ MiniMax: 工具提示注入到 system 消息（而非 user 消息，避免模型误以为是用户指令）
-    var __isMiniMaxModel = (getVal('modelSelect') || '').toLowerCase().includes('minimax');
-    if (__isMiniMaxModel && getChecked('searchToggle')) {
-        var toolHint = '你可以使用 web_search 搜索最新信息,使用 web_fetch 抓取网页详情。';
+    // ★ 工具提示注入到 system 消息（尤其联网搜索与工具调用规范）
+    var _hasSearchOrTools = (getChecked('searchToggle') || effectiveToolCall);
+    if (_hasSearchOrTools) {
+        var toolHint = '## 联网搜索与工具调用规范\n' +
+            '当需要调用 web_search 等工具获取外部信息时，请直接发起工具调用，不要在发起工具调用的同时输出冗余的前置寒暄或半成品正文（例如“好的，正在为您搜索…”）。\n' +
+            '等待工具返回结果后，再在后续轮次中综合工具结果给出条理清晰、完整的最终回答。';
         var _sysIdx2 = apiMessages.findIndex(function(m) { return m.role === 'system'; });
         if (_sysIdx2 >= 0 && typeof apiMessages[_sysIdx2].content === 'string') {
-            if (!apiMessages[_sysIdx2].content.includes('web_search')) {
+            if (!apiMessages[_sysIdx2].content.includes('联网搜索与工具调用规范')) {
                 apiMessages[_sysIdx2].content += '\n\n' + toolHint;
             }
         }
@@ -2591,6 +2592,8 @@ window.sendMessage = async function (skipUserAdd, userTextForRegen, userFilesFor
                     if (!_mFix.content && _mFix.content !== 0) {
                         if (_mFix.role === 'assistant' && Array.isArray(_mFix.tool_calls) && _mFix.tool_calls.length > 0) {
                             _mFix.content = null;
+                        } else if (_mFix.role === 'tool') {
+                            _mFix.content = '(empty)';
                         } else {
                             _mFix.content = '';
                         }
@@ -3677,9 +3680,9 @@ if (_parallelToolIndices.size >= 2) {
                         }
                     }
 
-                    // 确保content是字符串
+                    // 确保content是字符串且非空(避免空结果被过滤导致模型看不到工具输出)
                     var contentStr = typeof resultContent === 'string'
-                        ? resultContent
+                        ? (resultContent.trim() ? resultContent : '(empty)')
                         : (resultContent ? JSON.stringify(resultContent) : '(empty)');
 
                     // ★ 保底机制: 任何工具结果都不允许无上限进入上下文。
@@ -4935,7 +4938,10 @@ if (_parallelToolIndices.size >= 2) {
             }
         } else {
             window._hasInjectedMessage = false;  // 清除标记, 避免残留
-            setTimeout(function() { window._drainQueue(); }, 300);
+            // ★ 仅当当前会话与完成的流属于同一会话时才排干队列，防止切走后旧队列误发进新会话
+            if (currentChatId === chatId) {
+                setTimeout(function() { window._drainQueue(); }, 300);
+            }
         }
         // ★ 子代理完成自动回复: 如果之前因子代理忙而设置了这个标记,现在触发主代理回复
         //   (严格分隔: 只发送到设置标记时对应的聊天 _pendingAgentReplyChatId,

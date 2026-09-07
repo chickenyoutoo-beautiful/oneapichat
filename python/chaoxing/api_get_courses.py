@@ -21,26 +21,31 @@ logging.disable(logging.CRITICAL)
 try:
     from configparser import ConfigParser
     from chaoxing.base import Chaoxing, Account
+    from chaoxing.config import resolve_user_config
+    import shutil
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--user-id', default='')
+    parser.add_argument('--config', default='')
     args = parser.parse_args()
 
-    # 优先用用户级 config（/tmp/AutomaticCB/config_<hash>.ini）
-    # 如果不存在或为空则降级到共享 config.ini
-    if args.user_id:
-        user_config_path = os.path.join(tempfile.gettempdir(), 'AutomaticCB', f'config_{args.user_id}.ini')
-    else:
-        user_config_path = None
+    actual_config_path = resolve_user_config(user_id=args.user_id, explicit_path=args.config)
 
     config = ConfigParser()
-    if user_config_path and os.path.exists(user_config_path) and os.path.getsize(user_config_path) > 0:
-        config.read(user_config_path, encoding='utf8')
-    else:
-        config.read(os.path.join(script_dir, 'config.ini'), encoding='utf8')
+    if actual_config_path and os.path.isfile(actual_config_path) and os.path.getsize(actual_config_path) > 0:
+        config.read(actual_config_path, encoding='utf8')
+        # 尝试自愈运行时镜像（如果 /tmp/AutomaticCB 目录可写且目标不存在）
+        if args.user_id:
+            runtime_cfg = os.path.join(tempfile.gettempdir(), 'AutomaticCB', f'config_{args.user_id}.ini')
+            if not os.path.isfile(runtime_cfg) and os.path.abspath(actual_config_path) != os.path.abspath(runtime_cfg):
+                try:
+                    os.makedirs(os.path.dirname(runtime_cfg), exist_ok=True)
+                    shutil.copyfile(actual_config_path, runtime_cfg)
+                except Exception:
+                    pass
 
     if not config.has_section("common"):
-        _fail(f"配置文件缺失 [common] 节: {user_config_path or 'config.ini'} (文件可能为空或损坏)")
+        _fail(f"配置文件缺失 [common] 节: {actual_config_path or 'config.ini'} (文件可能为空或损坏)")
 
     username = config.get("common", "username", fallback="")
     password = config.get("common", "password", fallback="")

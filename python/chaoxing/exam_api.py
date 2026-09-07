@@ -21,10 +21,11 @@ logging.disable(logging.CRITICAL)  # Suppress debug logs for API mode
 def cmd_list(args):
     """列出指定用户的考试"""
     from chaoxing.exam_auto import ChaoxingExam
+    from chaoxing.config import resolve_user_config
 
-    # 读取用户配置
-    config_path = f"/tmp/AutomaticCB/config_{args.user_id}.ini"
-    if not os.path.exists(config_path):
+    # 读取用户配置（支持持久化与运行时自愈查找）
+    config_path = resolve_user_config(user_id=args.user_id)
+    if not config_path or not os.path.exists(config_path):
         print(json.dumps({"error": "用户配置不存在"}))
         return
 

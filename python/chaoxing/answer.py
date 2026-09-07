@@ -1,3 +1,4 @@
+import tempfile
 import configparser
 import requests
 from pathlib import Path
@@ -25,16 +26,35 @@ class CacheDAO:
     """
     def __init__(self, file: str = "cache.json"):
         # 题库缓存属于运行时数据，不能跟随当前工作目录写到项目根目录。
-        # Web 任务固定落在 /tmp/AutomaticCB，并按主账号隔离，避免 www-data
-        # 因源码目录权限不足而让整门课程异常退出。
-        runtime_dir = Path(os.environ.get("CHAOXING_RUNTIME_DIR", "/tmp/AutomaticCB"))
-        runtime_dir.mkdir(parents=True, exist_ok=True)
+        # 优先使用 /tmp/AutomaticCB，如不可写则降级到系统临时目录，避免权限异常
+        runtime_dirs = [
+            Path(os.environ.get("CHAOXING_RUNTIME_DIR", "/tmp/AutomaticCB")),
+            Path(tempfile.gettempdir()),
+        ]
+        target_dir = Path(tempfile.gettempdir())
+        for r_dir in runtime_dirs:
+            try:
+                r_dir.mkdir(parents=True, exist_ok=True)
+                test_f = r_dir / f".test_cx_write_{os.getpid()}"
+                test_f.touch(exist_ok=True)
+                test_f.unlink(missing_ok=True)
+                target_dir = r_dir
+                break
+            except Exception:
+                continue
+
         user_id = re.sub(r"[^A-Za-z0-9_.-]", "_", os.environ.get("CHAOXING_USER_ID", "default"))
         cache_name = f"cache_{user_id}.json" if file == "cache.json" else Path(file).name
-        self.cacheFile = runtime_dir / cache_name
+        self.cacheFile = target_dir / cache_name
         if not self.cacheFile.is_file():
-            self.cacheFile.write_text("{}", encoding="utf8")
-        self.fp = self.cacheFile.open("r+", encoding="utf8")
+            try:
+                self.cacheFile.write_text("{}", encoding="utf8")
+            except Exception:
+                pass
+        try:
+            self.fp = self.cacheFile.open("r+", encoding="utf8")
+        except Exception:
+            self.fp = None
 
     def close(self):
         if getattr(self, "fp", None) and not self.fp.closed:
@@ -44,6 +64,8 @@ class CacheDAO:
         self.close()
 
     def getCache(self, question: str):
+        if not getattr(self, "fp", None):
+            return None
         self.fp.seek(0)
         try:
             data = json.load(self.fp)
@@ -53,6 +75,8 @@ class CacheDAO:
             return data.get(question)
 
     def addCache(self, question: str, answer: str):
+        if not getattr(self, "fp", None):
+            return
         self.fp.seek(0)
         try:
             data: dict = json.load(self.fp)
